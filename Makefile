@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check version
+.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint version
 
 doctor: ## Check required local tools
 	@missing=0; \
@@ -62,6 +62,14 @@ test: ## Run Python tests
 	@$(PY) pytest
 
 check: lint test ## Run all required quality checks
+
+ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
+	@poetry install --no-interaction --no-ansi
+	@$(MAKE) check
+	@$(MAKE) ci-entrypoint
+
+ci-entrypoint: ## Verify the CLI entrypoint responds
+	@$(PY) qbit-ops --help
 
 version: ## Set the POC release version with VERSION=x.y.z
 	@test -n "$(VERSION)" || { \
