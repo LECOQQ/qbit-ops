@@ -43,6 +43,8 @@ make doctor
 
 ## Installation
 
+### Development install
+
 ```bash
 git clone https://github.com/LECOQQ/qbit-ops.git
 cd qbit-ops
@@ -50,6 +52,48 @@ make install
 ```
 
 This installs Poetry dependencies and local Git hooks.
+
+Run the CLI from the repository with:
+
+```bash
+poetry run qbit-ops --help
+```
+
+### Application install with pipx
+
+Use `pipx` when you want `qbit-ops` available as a regular command outside the
+repository.
+
+Install `pipx` on Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install pipx
+pipx ensurepath
+```
+
+Restart your shell if `pipx ensurepath` asks you to.
+
+Install `qbit-ops` from the repository:
+
+```bash
+git clone https://github.com/LECOQQ/qbit-ops.git
+cd qbit-ops
+pipx install .
+```
+
+Then run:
+
+```bash
+qbit-ops --help
+```
+
+Update an existing `pipx` installation from the repository:
+
+```bash
+cd qbit-ops
+pipx reinstall qbit-ops
+```
 
 ## Configuration
 
@@ -69,27 +113,58 @@ QBIT_PASSWORD=change-me
 
 Never commit `.env`; it contains local secrets and is ignored by Git.
 
+When `qbit-ops` is installed as an application, for example with `pipx`, prefer
+a user-level configuration file:
+
+```bash
+mkdir -p ~/.config/qbit-ops
+cp .env.example ~/.config/qbit-ops/.env
+```
+
+Then edit:
+
+```bash
+nano ~/.config/qbit-ops/.env
+```
+
+Configuration lookup order:
+
+- existing environment variables;
+- file pointed to by `QBIT_OPS_ENV_FILE`, when set;
+- `.env` in the current working directory;
+- `~/.config/qbit-ops/.env`.
+
 ## Quickstart
 
 Check connectivity:
 
 ```bash
-poetry run qbit-ops connection check
+qbit-ops connection check
 ```
 
 List trackers:
 
 ```bash
-poetry run qbit-ops trackers list
+qbit-ops trackers list
 ```
 
 Group dynamic tracker URLs without query parameters:
 
 ```bash
-poetry run qbit-ops trackers list --match without-query
+qbit-ops trackers list --match without-query
+```
+
+When working from a Poetry development environment, prefix commands with
+`poetry run`, for example:
+
+```bash
+poetry run qbit-ops connection check
 ```
 
 ## Commands
+
+The examples below use `poetry run` for development. If `qbit-ops` is installed
+with `pipx`, remove the `poetry run` prefix.
 
 Show the CLI help:
 
