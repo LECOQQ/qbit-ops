@@ -1,5 +1,8 @@
 # Changelog
 
+All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+
 ## 0.1.0 (2026-06-13)
 
 
@@ -19,8 +22,3 @@
 * added a changelog ([9f9464b](https://github.com/LECOQQ/qbit-ops/commit/9f9464ba37e1f27bfa61534f3908776d1dc64064))
 * **readme:** added status badges ([7584677](https://github.com/LECOQQ/qbit-ops/commit/758467731e22b11e4c4b811c2736b9c8faff04f6))
 * **version:** removed version file ([682fb30](https://github.com/LECOQQ/qbit-ops/commit/682fb30333a4fc98c1fa3232a124bba02d743cdd))
-
-## Changelog
-
-All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
