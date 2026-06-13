@@ -46,6 +46,8 @@ select = ["E", "F", "I", "B", "UP"]
 include = ["app", "tests", "tooling"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
