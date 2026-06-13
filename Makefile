@@ -50,12 +50,12 @@ run: ## Run the application
 	@$(PY) python -m app.main
 
 format: ## Format and fix Python files
-	@$(PY) ruff check --fix app tests tooling
-	@$(PY) black app tests tooling
+	@$(PY) ruff check --fix app tests
+	@$(PY) black app tests
 
 lint: ## Check Python style and types without modifying files
-	@$(PY) ruff check app tests tooling
-	@$(PY) black --check app tests tooling
+	@$(PY) ruff check app tests
+	@$(PY) black --check app tests
 	@$(PY) pyright
 
 test: ## Run Python tests
