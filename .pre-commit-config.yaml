@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: commitizen-check
+        name: Validate Conventional Commit message
+        entry: poetry run cz check --commit-msg-file
+        language: system
+        stages: [commit-msg]

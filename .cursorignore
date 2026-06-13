@@ -1,0 +1,25 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Version control and operating system files
+.git/
+.DS_Store
+
+# Logs
+*.log
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Python build artifacts
+dist/
+build/
+*.egg-info/

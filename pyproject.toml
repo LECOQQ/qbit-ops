@@ -1,0 +1,59 @@
+[tool.poetry]
+name = "qbit-ops"
+version = "0.0.1"
+description = "qBittorrent administration CLI for homelab operations."
+authors = []
+readme = "README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+python-dotenv = "*"
+qbittorrent-api = "*"
+typer = "*"
+
+[tool.poetry.scripts]
+qbit-ops = "app.main:app"
+
+[tool.poetry.group.dev.dependencies]
+black = "*"
+ruff = "*"
+pytest = "*"
+pytest-cov = "*"
+pyright = "*"
+commitizen = "*"
+pre-commit = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 80
+target-version = ["py312"]
+skip-string-normalization = false
+
+[tool.ruff]
+line-length = 80
+target-version = "py312"
+exclude = [".venv", "__pycache__"]
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+include = ["app", "tests", "tooling"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q --maxfail=1 --disable-warnings"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.0.1"
+tag_format = "v$version"
+version_files = ["app/__init__.py:__version__"]
