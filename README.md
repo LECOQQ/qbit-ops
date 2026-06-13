@@ -1,5 +1,10 @@
 # qbit-ops
 
+[![CI](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](CHANGELOG.md)
+
 `qbit-ops` is a small qBittorrent operations CLI for homelab usage.
 
 It helps run bulk tracker operations with safe defaults, explicit dry-runs and
