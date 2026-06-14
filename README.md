@@ -15,6 +15,7 @@ readable summaries.
 - Check qBittorrent connectivity from `.env`.
 - Diagnose qbit-ops configuration and qBittorrent API access.
 - List torrents with basic audit fields.
+- List torrent categories and filter torrents by category.
 - Inspect a torrent by hash with tracker details.
 - Export a full instance backup with torrents, trackers and metadata.
 - Compare two export files before applying bulk changes.
@@ -169,6 +170,18 @@ List torrents:
 qbit-ops torrents list
 ```
 
+List categories:
+
+```bash
+qbit-ops torrents categories
+```
+
+List torrents in a category:
+
+```bash
+qbit-ops torrents list --category sonarr
+```
+
 List torrents using a tracker:
 
 ```bash
@@ -281,6 +294,30 @@ List torrents as JSON:
 
 ```bash
 poetry run qbit-ops torrents list --output json
+```
+
+List categories:
+
+```bash
+poetry run qbit-ops torrents categories
+```
+
+List categories as JSON:
+
+```bash
+poetry run qbit-ops torrents categories --output json
+```
+
+List torrents in a category:
+
+```bash
+poetry run qbit-ops torrents list --category sonarr
+```
+
+List uncategorized torrents:
+
+```bash
+poetry run qbit-ops torrents list --category "(uncategorized)"
 ```
 
 List torrents using a tracker:
@@ -455,6 +492,8 @@ Use these commands to inspect the qBittorrent instance before changing it:
 poetry run qbit-ops connection check
 poetry run qbit-ops config doctor
 poetry run qbit-ops torrents list
+poetry run qbit-ops torrents categories
+poetry run qbit-ops torrents list --category sonarr
 poetry run qbit-ops torrents inspect --hash "TORRENT_HASH"
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
@@ -595,6 +634,7 @@ All audit commands accept `--output text|json`:
 - `connection check`
 - `config doctor`
 - `torrents list`
+- `torrents categories`
 - `torrents inspect`
 - `trackers list`
 - `trackers health`
@@ -710,9 +750,9 @@ printed after the summary.
 Exit code `2` is used when a command completes successfully but reports a
 non-error outcome that may still require attention:
 
-- `torrents inspect`, `torrents list --tracker`, `trackers inspect`,
-  `trackers add-if-present`, `trackers remove`, `trackers replace`: no torrent
-  matched the requested criteria;
+- `torrents inspect`, `torrents list --tracker`, `torrents list --category`,
+  `trackers inspect`, `trackers add-if-present`, `trackers remove`,
+  `trackers replace`: no torrent matched the requested criteria;
 - `backup diff`: the two exports differ.
 
 ## Development

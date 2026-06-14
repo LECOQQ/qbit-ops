@@ -4,7 +4,9 @@ from typing import Any
 
 from app.torrents import (
     inspect_torrent,
+    list_category_usage,
     list_torrents,
+    list_torrents_by_category,
     list_torrents_with_trackers,
     search_torrents_by_name,
 )
@@ -35,6 +37,7 @@ def test_list_torrents_returns_audit_fields() -> None:
         {
             "hash": "hash-a",
             "name": "Torrent A",
+            "category": "(uncategorized)",
             "state": "uploading",
             "size": 1024,
             "progress": 1.0,
@@ -64,6 +67,7 @@ def test_list_torrents_defaults_invalid_numeric_fields() -> None:
         {
             "hash": "hash-a",
             "name": "Torrent A",
+            "category": "(uncategorized)",
             "state": "pausedDL",
             "size": 0,
             "progress": 0.0,
@@ -237,6 +241,93 @@ def test_search_torrents_by_name_returns_empty_when_nothing_matches() -> None:
 
     assert report["summary"]["matched"] == 0
     assert report["matches"] == []
+
+
+def test_list_category_usage_counts_torrents_per_category() -> None:
+    """Ensure category listing aggregates torrent counts."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "hash-a", "name": "Torrent A", "category": "sonarr"},
+            {"hash": "hash-b", "name": "Torrent B", "category": "radarr"},
+            {"hash": "hash-c", "name": "Torrent C"},
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": [], "hash-c": []},
+    )
+
+    assert list_category_usage(client) == {
+        "(uncategorized)": 1,
+        "radarr": 1,
+        "sonarr": 1,
+    }
+
+
+def test_list_torrents_by_category_filters_case_insensitively() -> None:
+    """Ensure category filtering returns matching torrent audit fields."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "uploading",
+                "size": 1024,
+                "progress": 1,
+                "ratio": 2.0,
+            },
+            {
+                "hash": "hash-b",
+                "name": "Torrent B",
+                "category": "radarr",
+                "state": "pausedUP",
+                "size": 2048,
+                "progress": 0.5,
+                "ratio": 1.0,
+            },
+        ],
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce", "status": "2"},
+            ],
+            "hash-b": [],
+        },
+    )
+
+    report = list_torrents_by_category(client, "SONARR")
+
+    assert report == {
+        "category": "SONARR",
+        "scanned": 2,
+        "matched": 1,
+        "torrents": [
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "uploading",
+                "size": 1024,
+                "progress": 1.0,
+                "ratio": 2.0,
+                "tracker_count": 1,
+            }
+        ],
+    }
+
+
+def test_list_torrents_by_category_supports_uncategorized_label() -> None:
+    """Ensure uncategorized torrents can be filtered explicitly."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "hash-a", "name": "Torrent A", "category": "sonarr"},
+            {"hash": "hash-b", "name": "Torrent B"},
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": []},
+    )
+
+    report = list_torrents_by_category(client, "(uncategorized)")
+
+    assert report["matched"] == 1
+    assert report["torrents"][0]["hash"] == "hash-b"
+    assert report["torrents"][0]["category"] == "(uncategorized)"
 
 
 def test_list_torrents_with_trackers_returns_tracker_details() -> None:

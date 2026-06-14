@@ -18,7 +18,13 @@ from app.backup import (
     load_export_file,
 )
 from app.config import ConfigError, load_qbit_config
-from app.torrents import inspect_torrent, list_torrents, search_torrents_by_name
+from app.torrents import (
+    inspect_torrent,
+    list_category_usage,
+    list_torrents,
+    list_torrents_by_category,
+    search_torrents_by_name,
+)
 from app.trackers import (
     add_tracker_if_source_present,
     analyze_tracker_health,
@@ -166,6 +172,13 @@ def list_qbit_torrents(
             help="List torrents using a specific tracker.",
         ),
     ] = None,
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category",
+            help="List torrents in a specific category.",
+        ),
+    ] = None,
     match: Annotated[
         TrackerMatchModeOption,
         typer.Option(
@@ -182,6 +195,9 @@ def list_qbit_torrents(
     ] = OutputFormatOption.text,
 ) -> None:
     """List torrents with useful audit fields."""
+    if tracker is not None and category is not None:
+        _fail("Use either --tracker or --category, not both.")
+
     try:
         client = _create_qbit_client()
         if tracker is not None:
@@ -190,20 +206,23 @@ def list_qbit_torrents(
                 tracker=tracker,
                 match_mode=match.value,
             )
-        else:
-            torrents = list_torrents(client)
-            report = None
+            _print_torrents_for_tracker(report, output_format)
+            _exit_if_no_targeted_matches(report["matched_tracker"])
+            return
+
+        if category is not None:
+            report = list_torrents_by_category(client, category)
+            _print_torrents_for_category(report, output_format)
+            _exit_if_no_targeted_matches(report["matched"])
+            return
+
+        torrents = list_torrents(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
         _fail(str(error))
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
-
-    if report is not None:
-        _print_torrents_for_tracker(report, output_format)
-        _exit_if_no_targeted_matches(report["matched_tracker"])
-        return
 
     if output_format == OutputFormatOption.json:
         _print_json_output(
@@ -223,6 +242,48 @@ def list_qbit_torrents(
 
     typer.echo("Summary:")
     typer.echo(f"- torrents: {len(torrents)}")
+
+
+@torrents_app.command(name="categories")
+def list_qbit_categories(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
+    """List torrent categories and usage counts."""
+    try:
+        client = _create_qbit_client()
+        category_usage = list_category_usage(client)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(
+            {
+                "summary": {"categories": len(category_usage)},
+                "categories": category_usage,
+            }
+        )
+        return
+
+    if not category_usage:
+        typer.echo("No categories found.")
+        return
+
+    typer.echo("Categories:")
+    for category_name, torrent_count in category_usage.items():
+        typer.echo(f"- {category_name} ({torrent_count} torrent(s))")
+
+    typer.echo("Summary:")
+    typer.echo(f"- categories: {len(category_usage)}")
 
 
 @torrents_app.command(name="inspect")
@@ -844,11 +905,44 @@ def _print_torrent_audit_line(
     typer.echo(
         "- "
         f"{torrent['name']} ({torrent['hash']}) "
+        f"category={torrent.get('category', '(uncategorized)')} "
         f"state={torrent['state']} "
         f"progress={progress} "
         f"ratio={torrent['ratio']:.2f} "
         f"trackers={tracker_count}"
     )
+
+
+def _print_torrents_for_category(
+    report: dict[str, Any],
+    output_format: OutputFormatOption,
+) -> None:
+    """Print torrents filtered by category."""
+    if output_format == OutputFormatOption.json:
+        _print_json_output(
+            {
+                "category": report["category"],
+                "summary": {
+                    "scanned": report["scanned"],
+                    "matched": report["matched"],
+                },
+                "torrents": report["torrents"],
+            }
+        )
+        return
+
+    typer.echo(f"Category filter: {report['category']}")
+
+    if not report["torrents"]:
+        typer.echo("No matching torrents found.")
+    else:
+        typer.echo("Torrents:")
+        for torrent in report["torrents"]:
+            _print_torrent_audit_line(torrent)
+
+    typer.echo("Summary:")
+    typer.echo(f"- scanned: {report['scanned']}")
+    typer.echo(f"- matched: {report['matched']}")
 
 
 def _print_torrents_for_tracker(
