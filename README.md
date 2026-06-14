@@ -381,6 +381,15 @@ Summary:
 When `--verbose` is passed to a bulk modification command, impacted torrents are
 printed after the summary.
 
+## Exit Codes
+
+- `0`: command completed successfully.
+- `1`: configuration, connection, authentication or API error.
+- `2`: targeted command completed but matched no torrent.
+
+Exit code `2` is used by `trackers inspect`, `trackers add-if-present` and
+`trackers remove` when no torrent matches the requested tracker criteria.
+
 ## Development
 
 Format and validate the project:
