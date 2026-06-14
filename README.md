@@ -18,6 +18,7 @@ readable summaries.
 - Export the active tracker state as JSON.
 - Add a tracker only when another tracker is already present.
 - Remove a tracker in bulk.
+- Replace a tracker in bulk without creating duplicate target trackers.
 - Match trackers exactly or without query parameters.
 - Ignore disabled qBittorrent pseudo-trackers such as DHT, PeX and LSD.
 - Keep `--dry-run` enabled by default for modifying commands.
@@ -246,11 +247,28 @@ poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce"
 ```
 
+Replace a tracker in bulk:
+
+```bash
+poetry run qbit-ops trackers replace \
+  --source "https://tracker-a.example/announce" \
+  --target "https://tracker-b.example/announce"
+```
+
 Apply the remove operation:
 
 ```bash
 poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce" \
+  --no-dry-run
+```
+
+Apply the replace operation:
+
+```bash
+poetry run qbit-ops trackers replace \
+  --source "https://tracker-a.example/announce" \
+  --target "https://tracker-b.example/announce" \
   --no-dry-run
 ```
 
@@ -325,6 +343,17 @@ poetry run qbit-ops trackers remove \
   --verbose
 ```
 
+Replace dynamic variants with query parameters ignored:
+
+```bash
+poetry run qbit-ops trackers replace \
+  --source "http://connect.maxp2p.org:8080/passkey/announce" \
+  --target "https://tracker-b.example/announce" \
+  --match without-query \
+  --dry-run \
+  --verbose
+```
+
 ### Remove a tracker in bulk
 
 Use this when a tracker should be removed from every torrent using it.
@@ -343,6 +372,32 @@ Apply:
 ```bash
 poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce" \
+  --no-dry-run
+```
+
+### Replace a tracker in bulk
+
+Use this when a tracker should be migrated to another tracker.
+
+If the target tracker is already present on a torrent, `qbit-ops` removes the
+source tracker instead of adding a duplicate target.
+
+Dry-run:
+
+```bash
+poetry run qbit-ops trackers replace \
+  --source "https://tracker-a.example/announce" \
+  --target "https://tracker-b.example/announce" \
+  --dry-run \
+  --verbose
+```
+
+Apply:
+
+```bash
+poetry run qbit-ops trackers replace \
+  --source "https://tracker-a.example/announce" \
+  --target "https://tracker-b.example/announce" \
   --no-dry-run
 ```
 
@@ -378,6 +433,19 @@ Summary:
 - dry_run: true/false
 ```
 
+Tracker replacement uses a dedicated summary:
+
+```text
+Summary:
+- scanned: X
+- matched_source: X
+- already_had_target: X
+- modified: X
+- replaced_urls: X
+- removed_urls: X
+- dry_run: true/false
+```
+
 When `--verbose` is passed to a bulk modification command, impacted torrents are
 printed after the summary.
 
@@ -388,7 +456,8 @@ printed after the summary.
 - `2`: targeted command completed but matched no torrent.
 
 Exit code `2` is used by `trackers inspect`, `trackers add-if-present` and
-`trackers remove` when no torrent matches the requested tracker criteria.
+`trackers remove` or `trackers replace` when no torrent matches the requested
+tracker criteria.
 
 ## Development
 
