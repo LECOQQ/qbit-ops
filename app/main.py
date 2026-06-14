@@ -19,6 +19,8 @@ from app.backup import (
 )
 from app.config import ConfigError, load_qbit_config
 from app.torrents import (
+    TorrentBulkAction,
+    apply_bulk_torrent_action,
     inspect_torrent,
     list_category_usage,
     list_torrents,
@@ -351,6 +353,177 @@ def inspect_qbit_torrent(
         return
 
     _print_torrent_details(report)
+
+
+@torrents_app.command()
+def pause(
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category",
+            help="Pause torrents in a specific category.",
+        ),
+    ] = None,
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help="Pause torrents using a specific tracker.",
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Pause torrents matching a name query.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview actions without modifying qBittorrent.",
+        ),
+    ] = True,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode when --tracker is used.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Pause torrents matching a category, tracker or name filter."""
+    _run_bulk_torrent_action(
+        action="pause",
+        category=category,
+        tracker=tracker,
+        name=name,
+        match=match,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
+
+@torrents_app.command()
+def resume(
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category",
+            help="Resume torrents in a specific category.",
+        ),
+    ] = None,
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help="Resume torrents using a specific tracker.",
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Resume torrents matching a name query.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview actions without modifying qBittorrent.",
+        ),
+    ] = True,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode when --tracker is used.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Resume paused torrents matching a category, tracker or name filter."""
+    _run_bulk_torrent_action(
+        action="resume",
+        category=category,
+        tracker=tracker,
+        name=name,
+        match=match,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
+
+@torrents_app.command()
+def reannounce(
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category",
+            help="Reannounce torrents in a specific category.",
+        ),
+    ] = None,
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help="Reannounce torrents using a specific tracker.",
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Reannounce torrents matching a name query.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview actions without modifying qBittorrent.",
+        ),
+    ] = True,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode when --tracker is used.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Reannounce torrents matching a category, tracker or name filter."""
+    _run_bulk_torrent_action(
+        action="reannounce",
+        category=category,
+        tracker=tracker,
+        name=name,
+        match=match,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
 
 
 @trackers_app.command()
@@ -838,6 +1011,51 @@ def remove(
     _exit_if_no_targeted_matches(summary["matched_tracker"])
 
 
+def _run_bulk_torrent_action(
+    *,
+    action: TorrentBulkAction,
+    category: str | None,
+    tracker: str | None,
+    name: str | None,
+    match: TrackerMatchModeOption,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Execute a bulk torrent action with shared validation and output."""
+    active_filters = sum(
+        1 for value in (category, tracker, name) if value is not None
+    )
+    if active_filters != 1:
+        _fail("Provide exactly one of --category, --tracker, or --name.")
+
+    _configure_logging()
+
+    try:
+        client = _create_qbit_client()
+        summary = apply_bulk_torrent_action(
+            client=client,
+            action=action,
+            category=category,
+            tracker=tracker,
+            match_mode=match.value,
+            name=name,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+    except ValueError as error:
+        _fail(str(error))
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    _print_bulk_torrent_summary(summary)
+    _print_bulk_torrent_details(summary)
+    _exit_if_no_targeted_matches(summary["matched"])
+
+
 def _create_qbit_client() -> Any:
     """Create and authenticate a qBittorrent API client."""
     config = load_qbit_config()
@@ -1163,6 +1381,32 @@ def _print_replace_summary(summary: dict[str, int | bool]) -> None:
     typer.echo(f"- replaced_urls: {summary['replaced_urls']}")
     typer.echo(f"- removed_urls: {summary['removed_urls']}")
     typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+
+
+def _print_bulk_torrent_summary(summary: dict[str, Any]) -> None:
+    """Print the final bulk torrent action summary."""
+    typer.echo("Summary:")
+    typer.echo(f"- action: {summary['action']}")
+    typer.echo(f"- filter: {summary['selection']['filter']}")
+    typer.echo(f"- value: {summary['selection']['value']}")
+    if summary["selection"].get("match") is not None:
+        typer.echo(f"- match: {summary['selection']['match']}")
+    typer.echo(f"- scanned: {summary['scanned']}")
+    typer.echo(f"- matched: {summary['matched']}")
+    typer.echo(f"- modified: {summary['modified']}")
+    typer.echo(f"- skipped: {summary['skipped']}")
+    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+
+
+def _print_bulk_torrent_details(summary: dict[str, Any]) -> None:
+    """Print verbose bulk torrent action details when available."""
+    details = summary.get("details")
+    if not details:
+        return
+
+    typer.echo("Details:")
+    for item in details:
+        typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
 
 
 def _print_details(summary: dict[str, Any]) -> None:
