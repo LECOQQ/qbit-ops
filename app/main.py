@@ -18,7 +18,7 @@ from app.backup import (
     load_export_file,
 )
 from app.config import ConfigError, load_qbit_config
-from app.torrents import inspect_torrent, list_torrents
+from app.torrents import inspect_torrent, list_torrents, search_torrents_by_name
 from app.trackers import (
     add_tracker_if_source_present,
     analyze_tracker_health,
@@ -209,12 +209,26 @@ def list_qbit_torrents(
 @torrents_app.command(name="inspect")
 def inspect_qbit_torrent(
     torrent_hash: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--hash",
             help="Torrent hash to inspect.",
         ),
-    ],
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Search torrents by name and rank matches by relevance.",
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            help="Maximum number of name search results. Use 0 for no limit.",
+        ),
+    ] = 20,
     output_format: Annotated[
         OutputFormatOption,
         typer.Option(
@@ -223,10 +237,19 @@ def inspect_qbit_torrent(
         ),
     ] = OutputFormatOption.text,
 ) -> None:
-    """Inspect a torrent and its trackers."""
+    """Inspect a torrent by hash or search torrents by name."""
+    if (torrent_hash is None) == (name is None):
+        _fail("Provide exactly one of --hash or --name.")
+
     try:
         client = _create_qbit_client()
-        report = inspect_torrent(client, torrent_hash)
+        if name is not None:
+            report = search_torrents_by_name(client, name, limit=limit)
+            _print_torrent_name_search(report, output_format)
+            _exit_if_no_targeted_matches(report["summary"]["matched"])
+            return
+
+        report = inspect_torrent(client, torrent_hash or "")
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -247,27 +270,7 @@ def inspect_qbit_torrent(
         _print_json_output({"torrent": report})
         return
 
-    progress = _format_percentage(report["progress"])
-    typer.echo(f"Torrent: {report['name']} ({report['hash']})")
-    typer.echo(f"- state: {report['state']}")
-    typer.echo(f"- progress: {progress}")
-    typer.echo(f"- ratio: {report['ratio']:.2f}")
-    typer.echo(f"- size: {report['size']}")
-    typer.echo(f"- save_path: {report['save_path']}")
-    typer.echo(f"- category: {report['category']}")
-    typer.echo(f"- added_on: {report['added_on']}")
-    typer.echo(f"- active_trackers: {report['active_tracker_count']}")
-
-    if report["trackers"]:
-        typer.echo("Trackers:")
-        for tracker in report["trackers"]:
-            status_label = "disabled" if tracker["disabled"] else "active"
-            typer.echo(
-                f"- {tracker['url']} "
-                f"status={tracker['status']} ({status_label})"
-            )
-    else:
-        typer.echo("Trackers: none")
+    _print_torrent_details(report)
 
 
 @trackers_app.command()
@@ -803,6 +806,63 @@ def _format_percentage(value: float) -> str:
 def _print_json_output(payload: Any) -> None:
     """Print a JSON payload for audit commands."""
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _print_torrent_details(report: dict[str, Any]) -> None:
+    """Print detailed torrent inspection output."""
+    progress = _format_percentage(report["progress"])
+    typer.echo(f"Torrent: {report['name']} ({report['hash']})")
+    typer.echo(f"- state: {report['state']}")
+    typer.echo(f"- progress: {progress}")
+    typer.echo(f"- ratio: {report['ratio']:.2f}")
+    typer.echo(f"- size: {report['size']}")
+    typer.echo(f"- save_path: {report['save_path']}")
+    typer.echo(f"- category: {report['category']}")
+    typer.echo(f"- added_on: {report['added_on']}")
+    typer.echo(f"- active_trackers: {report['active_tracker_count']}")
+
+    if report["trackers"]:
+        typer.echo("Trackers:")
+        for tracker in report["trackers"]:
+            status_label = "disabled" if tracker["disabled"] else "active"
+            typer.echo(
+                f"- {tracker['url']} "
+                f"status={tracker['status']} ({status_label})"
+            )
+    else:
+        typer.echo("Trackers: none")
+
+
+def _print_torrent_name_search(
+    report: dict[str, Any],
+    output_format: OutputFormatOption,
+) -> None:
+    """Print torrent name search results."""
+    if output_format == OutputFormatOption.json:
+        _print_json_output(report)
+        return
+
+    summary = report["summary"]
+    typer.echo(f"Name search: {report['query']!r}")
+    typer.echo("Summary:")
+    typer.echo(f"- matched: {summary['matched']}")
+    typer.echo(f"- limit: {summary['limit']}")
+
+    if not report["matches"]:
+        typer.echo("No matching torrents found.")
+        return
+
+    typer.echo("Matches:")
+    for match in report["matches"]:
+        progress = _format_percentage(match["progress"])
+        typer.echo(
+            "- "
+            f"{match['name']} ({match['hash']}) "
+            f"score={match['match_score']:.2f} "
+            f"state={match['state']} "
+            f"progress={progress} "
+            f"ratio={match['ratio']:.2f}"
+        )
 
 
 def _print_backup_diff(report: dict[str, Any]) -> None:

@@ -175,6 +175,12 @@ Inspect a torrent by hash:
 qbit-ops torrents inspect --hash "TORRENT_HASH"
 ```
 
+Search torrents by name:
+
+```bash
+qbit-ops torrents inspect --name "L.amour.est.dans.le.pre.S20E02"
+```
+
 List trackers:
 
 ```bash
@@ -275,6 +281,20 @@ Inspect a torrent by hash:
 
 ```bash
 poetry run qbit-ops torrents inspect --hash "TORRENT_HASH"
+```
+
+Search torrents by name:
+
+```bash
+poetry run qbit-ops torrents inspect --name "L.amour.est.dans.le.pre"
+```
+
+Search torrents by name as JSON:
+
+```bash
+poetry run qbit-ops torrents inspect \
+  --name "L.amour.est.dans.le.pre" \
+  --output json
 ```
 
 Inspect a torrent as JSON:
@@ -577,6 +597,17 @@ Example:
 ```bash
 qbit-ops backup export --output json > backup.json
 ```
+
+`torrents inspect --name` ranks matches by relevance:
+
+- exact name match;
+- name starts with the query;
+- name contains the query;
+- fuzzy similarity fallback.
+
+Use `--hash` when you already know the torrent hash and need full tracker
+details. Use `--name` to find candidate torrents first, then inspect the hash
+you selected.
 
 `backup diff` compares two export files produced by `backup export` or
 `trackers export`. It reports:

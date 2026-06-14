@@ -1,6 +1,7 @@
 """List qBittorrent torrents."""
 
 from collections.abc import Mapping
+from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -66,26 +67,100 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
         if current_hash.lower() != normalized_hash:
             continue
 
-        trackers = _get_tracker_details(client.torrents_trackers(current_hash))
-        active_tracker_count = sum(
-            1 for tracker in trackers if not tracker["disabled"]
-        )
-
-        return {
-            "hash": current_hash,
-            "name": _get_field_as_string(torrent, "name"),
-            "state": _get_field_as_string(torrent, "state"),
-            "size": _get_field_as_int(torrent, "size"),
-            "progress": _get_field_as_float(torrent, "progress"),
-            "ratio": _get_field_as_float(torrent, "ratio"),
-            "save_path": _get_field_as_string(torrent, "save_path"),
-            "category": _get_field_as_string(torrent, "category"),
-            "added_on": _get_field_as_int(torrent, "added_on"),
-            "trackers": trackers,
-            "active_tracker_count": active_tracker_count,
-        }
+        return _build_torrent_details(client, torrent, current_hash)
 
     return None
+
+
+def search_torrents_by_name(
+    client: Any,
+    query: str,
+    *,
+    limit: int = 20,
+    min_score: float = 0.5,
+) -> dict[str, Any]:
+    """Search torrents by name and rank matches by relevance."""
+    normalized_query = query.strip()
+    matches: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        torrent_name = _get_field_as_string(torrent, "name")
+        match_score = _score_name_match(torrent_name, normalized_query)
+        if match_score < min_score:
+            continue
+
+        torrent_hash = _get_field_as_string(torrent, "hash")
+        matches.append(
+            {
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "state": _get_field_as_string(torrent, "state"),
+                "progress": _get_field_as_float(torrent, "progress"),
+                "ratio": _get_field_as_float(torrent, "ratio"),
+                "match_score": round(match_score, 4),
+            }
+        )
+
+    matches.sort(
+        key=lambda item: (-item["match_score"], item["name"].casefold()),
+    )
+    if limit > 0:
+        matches = matches[:limit]
+
+    return {
+        "query": normalized_query,
+        "summary": {
+            "matched": len(matches),
+            "limit": limit,
+        },
+        "matches": matches,
+    }
+
+
+def _build_torrent_details(
+    client: Any,
+    torrent: Any,
+    torrent_hash: str,
+) -> dict[str, Any]:
+    """Build a detailed torrent report with tracker information."""
+    trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
+    active_tracker_count = sum(
+        1 for tracker in trackers if not tracker["disabled"]
+    )
+
+    return {
+        "hash": torrent_hash,
+        "name": _get_field_as_string(torrent, "name"),
+        "state": _get_field_as_string(torrent, "state"),
+        "size": _get_field_as_int(torrent, "size"),
+        "progress": _get_field_as_float(torrent, "progress"),
+        "ratio": _get_field_as_float(torrent, "ratio"),
+        "save_path": _get_field_as_string(torrent, "save_path"),
+        "category": _get_field_as_string(torrent, "category"),
+        "added_on": _get_field_as_int(torrent, "added_on"),
+        "trackers": trackers,
+        "active_tracker_count": active_tracker_count,
+    }
+
+
+def _score_name_match(name: str, query: str) -> float:
+    """Score how closely a torrent name matches a search query."""
+    normalized_name = name.casefold()
+    normalized_query = query.casefold().strip()
+    if normalized_query == "":
+        return 0.0
+    if normalized_name == normalized_query:
+        return 1.0
+    if normalized_name.startswith(normalized_query):
+        return 0.95
+    if normalized_query in normalized_name:
+        return 0.85
+
+    return SequenceMatcher(
+        None,
+        normalized_name,
+        normalized_query,
+    ).ratio()
 
 
 def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
