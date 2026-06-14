@@ -22,3 +22,4 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+.sync-stamp

@@ -13,7 +13,13 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint
+.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint sync
+
+.sync-stamp: pyproject.toml poetry.lock
+	@poetry install --sync --no-interaction
+	@touch .sync-stamp
+
+sync: .sync-stamp ## Sync the virtualenv when pyproject.toml or poetry.lock changes
 
 doctor: ## Check required local tools
 	@missing=0; \
@@ -41,6 +47,7 @@ help: ## Show available commands
 
 install: doctor ## Install dependencies and configure Git hooks
 	@poetry install
+	@touch .sync-stamp
 	@$(PY) pre-commit install --hook-type commit-msg
 
 hooks-install: ## Reinstall the Conventional Commits hook
@@ -61,7 +68,7 @@ lint: ## Check Python style and types without modifying files
 test: ## Run Python tests
 	@$(PY) pytest
 
-check: lint test ## Run all required quality checks
+check: sync lint test ## Run all required quality checks
 
 ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --no-interaction --no-ansi
