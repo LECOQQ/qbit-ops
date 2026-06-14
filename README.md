@@ -17,6 +17,7 @@ readable summaries.
 - List torrents with basic audit fields.
 - Inspect a torrent by hash with tracker details.
 - Export a full instance backup with torrents, trackers and metadata.
+- Compare two export files before applying bulk changes.
 - List trackers used by a qBittorrent instance.
 - Analyze tracker health, disabled trackers and dynamic query variants.
 - Inspect torrents using a specific tracker.
@@ -210,6 +211,12 @@ Export a full backup with torrents, trackers and metadata:
 qbit-ops backup export --output json
 ```
 
+Compare two export files:
+
+```bash
+qbit-ops backup diff backup-before.json backup-after.json
+```
+
 When working from a Poetry development environment, prefix commands with
 `poetry run`, for example:
 
@@ -335,6 +342,19 @@ Export a full backup with torrents, trackers and metadata:
 poetry run qbit-ops backup export --output json
 ```
 
+Compare two export files:
+
+```bash
+poetry run qbit-ops backup diff backup-before.json backup-after.json
+```
+
+Compare two export files as JSON:
+
+```bash
+poetry run qbit-ops backup diff backup-before.json backup-after.json \
+  --output json
+```
+
 Add a tracker if another tracker is already present:
 
 ```bash
@@ -402,6 +422,7 @@ poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
 poetry run qbit-ops trackers export --output json
 poetry run qbit-ops backup export --output json
+poetry run qbit-ops backup diff backup-before.json backup-after.json
 ```
 
 ### Add a tracker conditionally
@@ -539,6 +560,7 @@ All audit commands accept `--output text|json`:
 - `trackers inspect`
 - `trackers export`
 - `backup export`
+- `backup diff`
 
 Text output is the default and prints a human-readable summary. JSON output is
 intended for scripting and backups.
@@ -554,6 +576,19 @@ Example:
 
 ```bash
 qbit-ops backup export --output json > backup.json
+```
+
+`backup diff` compares two export files produced by `backup export` or
+`trackers export`. It reports:
+
+- torrents added, removed or changed;
+- normalized tracker additions and removals per torrent;
+- tracker usage additions, removals and count changes.
+
+Example:
+
+```bash
+qbit-ops backup diff backup-before.json backup-after.json
 ```
 
 ## Tracker Health
@@ -620,9 +655,13 @@ printed after the summary.
 - `1`: configuration, connection, authentication or API error.
 - `2`: targeted command completed but matched no torrent.
 
-Exit code `2` is used by `torrents inspect`, `trackers inspect`,
-`trackers add-if-present` and `trackers remove` or `trackers replace` when no
-torrent matches the requested criteria.
+Exit code `2` is used when a command completes successfully but reports a
+non-error outcome that may still require attention:
+
+- `torrents inspect`, `trackers inspect`, `trackers add-if-present`,
+  `trackers remove`, `trackers replace`: no torrent matched the requested
+  criteria;
+- `backup diff`: the two exports differ.
 
 ## Development
 

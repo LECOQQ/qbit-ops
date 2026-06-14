@@ -3,13 +3,20 @@
 import json
 import logging
 from enum import IntEnum, StrEnum
+from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
 import qbittorrentapi
 import typer
 
 from app import __version__
-from app.backup import export_instance_state
+from app.backup import (
+    BackupExportError,
+    diff_backup_exports,
+    export_instance_state,
+    has_backup_diff,
+    load_export_file,
+)
 from app.config import ConfigError, load_qbit_config
 from app.torrents import inspect_torrent, list_torrents
 from app.trackers import (
@@ -608,6 +615,49 @@ def export_backup(
     typer.echo("Use --output json for the full backup payload.")
 
 
+@backup_app.command(name="diff")
+def diff_backup(
+    baseline: Annotated[
+        Path,
+        typer.Argument(
+            help="Baseline export JSON file.",
+        ),
+    ],
+    target: Annotated[
+        Path,
+        typer.Argument(
+            help="Target export JSON file.",
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
+    """Compare two backup or tracker export JSON files."""
+    try:
+        baseline_export = load_export_file(baseline)
+        target_export = load_export_file(target)
+        report = diff_backup_exports(
+            baseline_export,
+            target_export,
+            baseline_source=str(baseline),
+            target_source=str(target),
+        )
+    except BackupExportError as error:
+        _fail(str(error))
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(report)
+    else:
+        _print_backup_diff(report)
+
+    _exit_if_backup_diff(report)
+
+
 @trackers_app.command(name="export")
 def export_trackers(
     output_format: Annotated[
@@ -755,6 +805,70 @@ def _print_json_output(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _print_backup_diff(report: dict[str, Any]) -> None:
+    """Print a human-readable backup diff report."""
+    summary = report["summary"]
+
+    if summary["identical"]:
+        typer.echo("Backup diff: exports are identical.")
+        return
+
+    typer.echo("Backup diff:")
+    typer.echo(f"- baseline: {summary['baseline']['source']}")
+    typer.echo(f"- target: {summary['target']['source']}")
+    typer.echo(f"- added_torrents: {summary['added_torrents']}")
+    typer.echo(f"- removed_torrents: {summary['removed_torrents']}")
+    typer.echo(f"- changed_torrents: {summary['changed_torrents']}")
+    typer.echo("- tracker_usage_added: " f"{summary['tracker_usage_added']}")
+    typer.echo(
+        "- tracker_usage_removed: " f"{summary['tracker_usage_removed']}"
+    )
+    typer.echo(
+        "- tracker_usage_changed: " f"{summary['tracker_usage_changed']}"
+    )
+
+    if report["added_torrents"]:
+        typer.echo("Added torrents:")
+        for torrent in report["added_torrents"]:
+            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+
+    if report["removed_torrents"]:
+        typer.echo("Removed torrents:")
+        for torrent in report["removed_torrents"]:
+            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+
+    if report["changed_torrents"]:
+        typer.echo("Changed torrents:")
+        for torrent in report["changed_torrents"]:
+            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+            tracker_changes = torrent["normalized_trackers"]
+            for tracker_url in tracker_changes["added"]:
+                typer.echo(f"  added: {tracker_url}")
+            for tracker_url in tracker_changes["removed"]:
+                typer.echo(f"  removed: {tracker_url}")
+
+    tracker_usage = report["tracker_usage"]
+    if tracker_usage["added"]:
+        typer.echo("Tracker usage added:")
+        for tracker_url, torrent_count in tracker_usage["added"].items():
+            typer.echo(f"- {tracker_url} ({torrent_count} torrent(s))")
+
+    if tracker_usage["removed"]:
+        typer.echo("Tracker usage removed:")
+        for tracker_url, torrent_count in tracker_usage["removed"].items():
+            typer.echo(f"- {tracker_url} ({torrent_count} torrent(s))")
+
+    if tracker_usage["changed"]:
+        typer.echo("Tracker usage changed:")
+        for item in tracker_usage["changed"]:
+            typer.echo(
+                "- "
+                f"{item['tracker']} "
+                f"baseline={item['baseline']} "
+                f"target={item['target']}"
+            )
+
+
 def _configure_logging() -> None:
     """Configure readable logs for CLI commands."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -769,6 +883,12 @@ def _fail(message: str) -> NoReturn:
 def _exit_if_no_targeted_matches(match_count: int) -> None:
     """Exit explicitly when a targeted command does not match any torrent."""
     if match_count == 0:
+        raise typer.Exit(code=ExitCode.NO_MATCH)
+
+
+def _exit_if_backup_diff(report: dict[str, Any]) -> None:
+    """Exit explicitly when two exports differ."""
+    if has_backup_diff(report):
         raise typer.Exit(code=ExitCode.NO_MATCH)
 
 
