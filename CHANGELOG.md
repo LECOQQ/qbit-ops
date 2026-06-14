@@ -3,6 +3,13 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.2.1](https://github.com/LECOQQ/qbit-ops/compare/v0.2.0...v0.2.1) (2026-06-14)
+
+
+### Bug Fixes
+
+* **version:** fixed version badge & sync venv ([a987d4f](https://github.com/LECOQQ/qbit-ops/commit/a987d4f542a6affa595475109c930138818b79f3))
+
 ## [0.2.0](https://github.com/LECOQQ/qbit-ops/compare/v0.1.0...v0.2.0) (2026-06-14)
 
 
