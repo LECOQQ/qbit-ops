@@ -2,7 +2,7 @@
 
 import json
 import logging
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Annotated, Any, NoReturn
 
 import qbittorrentapi
@@ -27,6 +27,14 @@ app.add_typer(connection_app, name="connection")
 app.add_typer(trackers_app, name="trackers")
 
 
+class ExitCode(IntEnum):
+    """Define explicit process exit codes."""
+
+    SUCCESS = 0
+    ERROR = 1
+    NO_MATCH = 2
+
+
 class TrackerMatchModeOption(StrEnum):
     """Expose tracker matching modes for Typer options."""
 
@@ -45,7 +53,7 @@ def main(ctx: typer.Context) -> None:
     """Print the project name and version when no command is provided."""
     if ctx.invoked_subcommand is None:
         typer.echo(f"{PROJECT_NAME} {__version__}")
-        raise typer.Exit()
+        raise typer.Exit(code=ExitCode.SUCCESS)
 
 
 @connection_app.command()
@@ -123,6 +131,7 @@ def add_if_present(
 
     _print_summary(summary)
     _print_details(summary)
+    _exit_if_no_targeted_matches(summary["matched_source"])
 
 
 @trackers_app.command(name="list")
@@ -202,6 +211,7 @@ def inspect(
     typer.echo("Summary:")
     typer.echo(f"- scanned: {report['scanned']}")
     typer.echo(f"- matched_tracker: {report['matched_tracker']}")
+    _exit_if_no_targeted_matches(report["matched_tracker"])
 
 
 @trackers_app.command(name="export")
@@ -288,6 +298,7 @@ def remove(
 
     _print_remove_summary(summary)
     _print_details(summary)
+    _exit_if_no_targeted_matches(summary["matched_tracker"])
 
 
 def _create_qbit_client() -> Any:
@@ -327,7 +338,13 @@ def _configure_logging() -> None:
 def _fail(message: str) -> NoReturn:
     """Print an actionable error and exit with a failure code."""
     typer.secho(f"ERROR: {message}", err=True, fg=typer.colors.RED)
-    raise typer.Exit(code=1)
+    raise typer.Exit(code=ExitCode.ERROR)
+
+
+def _exit_if_no_targeted_matches(match_count: int) -> None:
+    """Exit explicitly when a targeted command does not match any torrent."""
+    if match_count == 0:
+        raise typer.Exit(code=ExitCode.NO_MATCH)
 
 
 def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
