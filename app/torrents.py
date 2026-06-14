@@ -1,8 +1,15 @@
 """List qBittorrent torrents."""
 
+import logging
 from collections.abc import Mapping
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
+
+from app.trackers import TrackerMatchMode, has_tracker
+
+logger = logging.getLogger(__name__)
+
+TorrentBulkAction = Literal["pause", "resume", "reannounce"]
 
 
 def list_torrents(client: Any) -> list[dict[str, Any]]:
@@ -176,6 +183,256 @@ def search_torrents_by_name(
         },
         "matches": matches,
     }
+
+
+def apply_bulk_torrent_action(
+    client: Any,
+    action: TorrentBulkAction,
+    *,
+    category: str | None = None,
+    tracker: str | None = None,
+    match_mode: TrackerMatchMode = "exact",
+    name: str | None = None,
+    dry_run: bool = True,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Apply a bulk torrent action to a filtered torrent selection."""
+    selection = select_torrents_for_bulk_action(
+        client=client,
+        category=category,
+        tracker=tracker,
+        match_mode=match_mode,
+        name=name,
+    )
+    modified = 0
+    skipped = 0
+    modified_hashes: list[str] = []
+    details: list[dict[str, str]] = []
+
+    for torrent in selection["torrents"]:
+        torrent_hash = torrent["hash"]
+        torrent_name = torrent["name"]
+        torrent_state = torrent["state"]
+
+        if action == "pause" and _is_paused_state(torrent_state):
+            skipped += 1
+            if verbose:
+                details.append(
+                    {
+                        "hash": torrent_hash,
+                        "name": torrent_name,
+                        "action": "already_paused",
+                    }
+                )
+            continue
+
+        if action == "resume" and not _is_paused_state(torrent_state):
+            skipped += 1
+            if verbose:
+                details.append(
+                    {
+                        "hash": torrent_hash,
+                        "name": torrent_name,
+                        "action": "not_paused",
+                    }
+                )
+            continue
+
+        log_prefix = _bulk_action_log_prefix(action, dry_run)
+        logger.info("%s: %s", log_prefix, torrent_name)
+        modified_hashes.append(torrent_hash)
+        modified += 1
+        if verbose:
+            details.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "action": _bulk_action_result_name(action, dry_run),
+                }
+            )
+
+    if not dry_run and modified_hashes:
+        try:
+            _call_bulk_torrent_action(client, action, modified_hashes)
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to {action} selected torrents: {error}"
+            ) from error
+
+    summary: dict[str, Any] = {
+        "action": action,
+        "selection": selection["selection"],
+        "scanned": selection["scanned"],
+        "matched": selection["matched"],
+        "modified": modified,
+        "skipped": skipped,
+        "dry_run": dry_run,
+    }
+    if verbose:
+        summary["details"] = details
+
+    return summary
+
+
+def select_torrents_for_bulk_action(
+    client: Any,
+    *,
+    category: str | None = None,
+    tracker: str | None = None,
+    match_mode: TrackerMatchMode = "exact",
+    name: str | None = None,
+) -> dict[str, Any]:
+    """Select torrents for a bulk action using one filter."""
+    active_filters = [
+        filter_name
+        for filter_name, filter_value in (
+            ("category", category),
+            ("tracker", tracker),
+            ("name", name),
+        )
+        if filter_value is not None
+    ]
+    if len(active_filters) != 1:
+        raise ValueError("Provide exactly one of category, tracker, or name.")
+
+    selected_torrents: list[dict[str, Any]] = []
+    scanned = 0
+
+    for torrent in client.torrents_info():
+        scanned += 1
+        if not _torrent_matches_bulk_filter(
+            client=client,
+            torrent=torrent,
+            category=category,
+            tracker=tracker,
+            match_mode=match_mode,
+            name=name,
+        ):
+            continue
+
+        selected_torrents.append(_build_bulk_torrent_entry(torrent))
+
+    selected_torrents.sort(key=lambda item: item["name"].casefold())
+
+    return {
+        "selection": _build_bulk_selection_metadata(
+            category=category,
+            tracker=tracker,
+            match_mode=match_mode,
+            name=name,
+        ),
+        "scanned": scanned,
+        "matched": len(selected_torrents),
+        "torrents": selected_torrents,
+    }
+
+
+def _build_bulk_torrent_entry(torrent: Any) -> dict[str, Any]:
+    """Build torrent fields used by bulk actions."""
+    return {
+        "hash": _get_field_as_string(torrent, "hash"),
+        "name": _get_field_as_string(torrent, "name"),
+        "state": _get_field_as_string(torrent, "state"),
+        "category": _format_category_label(
+            _get_field_as_string(torrent, "category")
+        ),
+    }
+
+
+def _build_bulk_selection_metadata(
+    *,
+    category: str | None,
+    tracker: str | None,
+    match_mode: TrackerMatchMode,
+    name: str | None,
+) -> dict[str, str]:
+    """Describe which filter was used for a bulk torrent action."""
+    if category is not None:
+        return {
+            "filter": "category",
+            "value": _format_category_label(category.strip()),
+        }
+
+    if tracker is not None:
+        return {
+            "filter": "tracker",
+            "value": tracker.strip(),
+            "match": match_mode,
+        }
+
+    return {
+        "filter": "name",
+        "value": (name or "").strip(),
+    }
+
+
+def _torrent_matches_bulk_filter(
+    client: Any,
+    torrent: Any,
+    *,
+    category: str | None,
+    tracker: str | None,
+    match_mode: TrackerMatchMode,
+    name: str | None,
+) -> bool:
+    """Return whether a torrent matches the requested bulk filter."""
+    if category is not None:
+        torrent_category = _get_field_as_string(torrent, "category")
+        return _category_matches(torrent_category, category.strip())
+
+    if tracker is not None:
+        torrent_hash = _get_field_as_string(torrent, "hash")
+        trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
+        return has_tracker(trackers, tracker.strip(), match_mode)
+
+    if name is not None:
+        torrent_name = _get_field_as_string(torrent, "name")
+        return _score_name_match(torrent_name, name) >= 0.5
+
+    return False
+
+
+def _call_bulk_torrent_action(
+    client: Any,
+    action: TorrentBulkAction,
+    torrent_hashes: list[str],
+) -> None:
+    """Call the qBittorrent API for a bulk torrent action."""
+    if action == "pause":
+        client.torrents_pause(torrent_hashes)
+        return
+
+    if action == "resume":
+        client.torrents_resume(torrent_hashes)
+        return
+
+    client.torrents_reannounce(torrent_hashes)
+
+
+def _bulk_action_log_prefix(action: TorrentBulkAction, dry_run: bool) -> str:
+    """Return a readable log prefix for a bulk torrent action."""
+    if dry_run:
+        return f"Would {action}"
+
+    return action.capitalize()
+
+
+def _bulk_action_result_name(
+    action: TorrentBulkAction,
+    dry_run: bool,
+) -> str:
+    """Return a stable action label for verbose bulk summaries."""
+    if dry_run:
+        return f"would_{action}"
+
+    return action
+
+
+def _is_paused_state(state: str) -> bool:
+    """Return whether qBittorrent reports a torrent as paused."""
+    return state.casefold().startswith("paused")
 
 
 def _build_torrent_details(

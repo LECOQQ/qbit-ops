@@ -3,6 +3,7 @@
 from typing import Any
 
 from app.torrents import (
+    apply_bulk_torrent_action,
     inspect_torrent,
     list_category_usage,
     list_torrents,
@@ -330,6 +331,133 @@ def test_list_torrents_by_category_supports_uncategorized_label() -> None:
     assert report["torrents"][0]["category"] == "(uncategorized)"
 
 
+def test_apply_bulk_torrent_action_pauses_matching_category() -> None:
+    """Ensure bulk pause applies only to matching torrents."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "uploading",
+            },
+            {
+                "hash": "hash-b",
+                "name": "Torrent B",
+                "category": "radarr",
+                "state": "uploading",
+            },
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        category="sonarr",
+        dry_run=False,
+    )
+
+    assert summary["matched"] == 1
+    assert summary["modified"] == 1
+    assert summary["skipped"] == 0
+    assert client.paused_hashes == [["hash-a"]]
+
+
+def test_apply_bulk_torrent_action_skips_already_paused_torrents() -> None:
+    """Ensure bulk pause is idempotent for paused torrents."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "pausedUP",
+            }
+        ],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        category="sonarr",
+        dry_run=False,
+    )
+
+    assert summary == {
+        "action": "pause",
+        "selection": {"filter": "category", "value": "sonarr"},
+        "scanned": 1,
+        "matched": 1,
+        "modified": 0,
+        "skipped": 1,
+        "dry_run": False,
+    }
+    assert client.paused_hashes == []
+
+
+def test_apply_bulk_torrent_action_resumes_paused_torrents() -> None:
+    """Ensure bulk resume only targets paused torrents."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "pausedUP",
+            },
+            {
+                "hash": "hash-b",
+                "name": "Torrent B",
+                "category": "sonarr",
+                "state": "uploading",
+            },
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="resume",
+        category="sonarr",
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert summary["skipped"] == 1
+    assert client.resumed_hashes == [["hash-a"]]
+
+
+def test_apply_bulk_torrent_action_reannounces_by_tracker() -> None:
+    """Ensure bulk reannounce can target torrents by tracker."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "hash-a", "name": "Torrent A", "state": "uploading"},
+            {"hash": "hash-b", "name": "Torrent B", "state": "uploading"},
+        ],
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce", "status": "2"},
+            ],
+            "hash-b": [
+                {"url": "https://other.example/announce", "status": "2"},
+            ],
+        },
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="reannounce",
+        tracker="https://tracker.example/announce",
+        dry_run=False,
+    )
+
+    assert summary["matched"] == 1
+    assert summary["modified"] == 1
+    assert client.reannounced_hashes == [["hash-a"]]
+
+
 def test_list_torrents_with_trackers_returns_tracker_details() -> None:
     """Ensure detailed torrent listing includes tracker metadata."""
     client = FakeQbitClient(
@@ -393,6 +521,9 @@ class FakeQbitClient:
         """Store fake torrent and tracker data."""
         self.torrents = torrents
         self.trackers_by_hash = trackers_by_hash
+        self.paused_hashes: list[str | list[str]] = []
+        self.resumed_hashes: list[str | list[str]] = []
+        self.reannounced_hashes: list[str | list[str]] = []
 
     def torrents_info(self) -> list[dict[str, Any]]:
         """Return fake torrents."""
@@ -401,3 +532,15 @@ class FakeQbitClient:
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, str]]:
         """Return fake trackers for a torrent."""
         return self.trackers_by_hash[torrent_hash]
+
+    def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
+        """Record fake torrent pauses."""
+        self.paused_hashes.append(torrent_hashes)
+
+    def torrents_resume(self, torrent_hashes: str | list[str]) -> None:
+        """Record fake torrent resumes."""
+        self.resumed_hashes.append(torrent_hashes)
+
+    def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
+        """Record fake torrent reannouncements."""
+        self.reannounced_hashes.append(torrent_hashes)

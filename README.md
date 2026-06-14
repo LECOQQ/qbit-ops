@@ -7,8 +7,8 @@
 
 `qbit-ops` is a small qBittorrent operations CLI for homelab usage.
 
-It helps run bulk tracker operations with safe defaults, explicit dry-runs and
-readable summaries.
+It helps run bulk qBittorrent operations with safe defaults, explicit dry-runs
+and readable summaries.
 
 ## Features
 
@@ -26,6 +26,7 @@ readable summaries.
 - Add a tracker only when another tracker is already present.
 - Remove a tracker in bulk.
 - Replace a tracker in bulk without creating duplicate target trackers.
+- Pause, resume or reannounce torrents in bulk by category, tracker or name.
 - Match trackers exactly or without query parameters.
 - Ignore disabled qBittorrent pseudo-trackers such as DHT, PeX and LSD.
 - Use `--output json` on all audit commands for scripting.
@@ -37,6 +38,8 @@ readable summaries.
 
 - `--dry-run` is enabled by default for bulk modifications.
 - Real changes require `--no-dry-run`.
+- Bulk torrent actions require exactly one filter: `--category`, `--tracker` or
+  `--name`.
 - Tracker URLs are normalized before comparison.
 - `--match exact` is the default matching mode.
 - `--match without-query` must be requested explicitly.
@@ -240,6 +243,12 @@ Compare two export files:
 
 ```bash
 qbit-ops backup diff backup-before.json backup-after.json
+```
+
+Pause torrents in a category:
+
+```bash
+qbit-ops torrents pause --category sonarr --dry-run
 ```
 
 When working from a Poetry development environment, prefix commands with
@@ -482,6 +491,27 @@ poetry run qbit-ops trackers replace \
   --no-dry-run
 ```
 
+Pause torrents in a category:
+
+```bash
+poetry run qbit-ops torrents pause --category sonarr --dry-run
+```
+
+Resume torrents in a category:
+
+```bash
+poetry run qbit-ops torrents resume --category sonarr --no-dry-run
+```
+
+Reannounce torrents using a tracker:
+
+```bash
+poetry run qbit-ops torrents reannounce \
+  --tracker "https://tracker-a.example/announce" \
+  --dry-run \
+  --verbose
+```
+
 ## Use Cases
 
 ### Audit trackers
@@ -619,6 +649,36 @@ poetry run qbit-ops trackers replace \
   --no-dry-run
 ```
 
+### Pause, resume or reannounce torrents in bulk
+
+Use these commands to act on torrents filtered by category, tracker or name.
+Exactly one filter is required.
+
+Dry-run pause by category:
+
+```bash
+poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
+```
+
+Apply resume by tracker:
+
+```bash
+poetry run qbit-ops torrents resume \
+  --tracker "https://tracker-a.example/announce" \
+  --no-dry-run
+```
+
+Reannounce torrents matching a name:
+
+```bash
+poetry run qbit-ops torrents reannounce \
+  --name "L.amour.est.dans.le.pre" \
+  --dry-run
+```
+
+`pause` and `resume` are idempotent: already paused or active torrents are
+reported in `skipped`.
+
 ## Matching Modes
 
 - `exact`: compares the full normalized tracker URL. This is the default.
@@ -738,6 +798,21 @@ Summary:
 - dry_run: true/false
 ```
 
+Bulk torrent actions use a dedicated summary:
+
+```text
+Summary:
+- action: pause|resume|reannounce
+- filter: category|tracker|name
+- value: ...
+- match: exact|without-query
+- scanned: X
+- matched: X
+- modified: X
+- skipped: X
+- dry_run: true/false
+```
+
 When `--verbose` is passed to a bulk modification command, impacted torrents are
 printed after the summary.
 
@@ -751,8 +826,9 @@ Exit code `2` is used when a command completes successfully but reports a
 non-error outcome that may still require attention:
 
 - `torrents inspect`, `torrents list --tracker`, `torrents list --category`,
-  `trackers inspect`, `trackers add-if-present`, `trackers remove`,
-  `trackers replace`: no torrent matched the requested criteria;
+  `torrents pause`, `torrents resume`, `torrents reannounce`, `trackers inspect`,
+  `trackers add-if-present`, `trackers remove`, `trackers replace`: no torrent
+  matched the requested criteria;
 - `backup diff`: the two exports differ.
 
 ## Development
