@@ -6,6 +6,7 @@ from app.torrents import (
     inspect_torrent,
     list_torrents,
     list_torrents_with_trackers,
+    search_torrents_by_name,
 )
 
 
@@ -130,6 +131,112 @@ def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
     )
 
     assert inspect_torrent(client, "missing-hash") is None
+
+
+def test_search_torrents_by_name_ranks_best_matches_first() -> None:
+    """Ensure name search ranks exact and substring matches first."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "L.amour.est.dans.le.pre.S20E02",
+                "state": "uploading",
+                "progress": 1,
+                "ratio": 1.0,
+            },
+            {
+                "hash": "hash-b",
+                "name": "L.amour.est.dans.le.pre.S19E01",
+                "state": "pausedUP",
+                "progress": 0.5,
+                "ratio": 0.5,
+            },
+            {
+                "hash": "hash-c",
+                "name": "Something completely different",
+                "state": "stoppedUP",
+                "progress": 1,
+                "ratio": 2.0,
+            },
+        ],
+        trackers_by_hash={
+            "hash-a": [],
+            "hash-b": [],
+            "hash-c": [],
+        },
+    )
+
+    report = search_torrents_by_name(client, "S20E02")
+
+    assert report["query"] == "S20E02"
+    assert report["summary"]["matched"] == 1
+    assert report["matches"] == [
+        {
+            "hash": "hash-a",
+            "name": "L.amour.est.dans.le.pre.S20E02",
+            "state": "uploading",
+            "progress": 1.0,
+            "ratio": 1.0,
+            "match_score": 0.85,
+        }
+    ]
+
+
+def test_search_torrents_by_name_supports_prefix_and_limit() -> None:
+    """Ensure broader name searches return multiple ranked matches."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "L.amour.est.dans.le.pre.S20E02",
+                "state": "uploading",
+                "progress": 1,
+                "ratio": 1.0,
+            },
+            {
+                "hash": "hash-b",
+                "name": "L.amour.est.dans.le.pre.S19E01",
+                "state": "pausedUP",
+                "progress": 0.5,
+                "ratio": 0.5,
+            },
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": []},
+    )
+
+    report = search_torrents_by_name(
+        client,
+        "L.amour.est",
+        limit=2,
+    )
+
+    assert report["summary"] == {"matched": 2, "limit": 2}
+    assert [match["hash"] for match in report["matches"]] == [
+        "hash-b",
+        "hash-a",
+    ]
+    assert report["matches"][0]["match_score"] == 0.95
+
+    limited_report = search_torrents_by_name(
+        client,
+        "L.amour.est",
+        limit=1,
+    )
+    assert limited_report["summary"] == {"matched": 1, "limit": 1}
+    assert limited_report["matches"][0]["hash"] == "hash-b"
+
+
+def test_search_torrents_by_name_returns_empty_when_nothing_matches() -> None:
+    """Ensure name search returns an empty result set explicitly."""
+    client = FakeQbitClient(
+        torrents=[{"hash": "hash-a", "name": "Torrent A"}],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    report = search_torrents_by_name(client, "missing-name")
+
+    assert report["summary"]["matched"] == 0
+    assert report["matches"] == []
 
 
 def test_list_torrents_with_trackers_returns_tracker_details() -> None:
