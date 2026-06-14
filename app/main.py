@@ -9,6 +9,7 @@ import qbittorrentapi
 import typer
 
 from app import __version__
+from app.backup import export_instance_state
 from app.config import ConfigError, load_qbit_config
 from app.torrents import inspect_torrent, list_torrents
 from app.trackers import (
@@ -26,10 +27,12 @@ PROJECT_NAME = "qbit-ops"
 app = typer.Typer(add_completion=False, help="Administer qBittorrent.")
 config_app = typer.Typer(help="Inspect qbit-ops configuration.")
 connection_app = typer.Typer(help="Check qBittorrent connectivity.")
+backup_app = typer.Typer(help="Export qBittorrent state.")
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
 app.add_typer(config_app, name="config")
 app.add_typer(connection_app, name="connection")
+app.add_typer(backup_app, name="backup")
 app.add_typer(torrents_app, name="torrents")
 app.add_typer(trackers_app, name="trackers")
 
@@ -49,12 +52,6 @@ class TrackerMatchModeOption(StrEnum):
     without_query = "without-query"
 
 
-class ExportFormatOption(StrEnum):
-    """Expose tracker export formats for Typer options."""
-
-    json = "json"
-
-
 class OutputFormatOption(StrEnum):
     """Expose generic output formats for Typer options."""
 
@@ -71,7 +68,15 @@ def main(ctx: typer.Context) -> None:
 
 
 @connection_app.command()
-def check() -> None:
+def check(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
     """Check qBittorrent connectivity using `.env` settings."""
     try:
         _create_qbit_client()
@@ -82,11 +87,31 @@ def check() -> None:
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    typer.echo("Connection OK: qBittorrent is reachable with .env settings.")
+    report = {
+        "status": "ok",
+        "connection": "ok",
+        "message": (
+            "Connection OK: qBittorrent is reachable with .env settings."
+        ),
+    }
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(report)
+        return
+
+    typer.echo(report["message"])
 
 
 @config_app.command()
-def doctor() -> None:
+def doctor(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
     """Check qbit-ops configuration and qBittorrent API access."""
     try:
         config = load_qbit_config()
@@ -103,13 +128,26 @@ def doctor() -> None:
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
+    report = {
+        "config": "ok",
+        "host": config.host,
+        "authentication": "ok",
+        "connection": "ok",
+        "qbittorrent_version": qbit_version,
+        "web_api_version": web_api_version,
+    }
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(report)
+        return
+
     typer.echo("Config doctor:")
-    typer.echo("- config: ok")
-    typer.echo(f"- host: {config.host}")
-    typer.echo("- authentication: ok")
-    typer.echo("- connection: ok")
-    typer.echo(f"- qbittorrent_version: {qbit_version}")
-    typer.echo(f"- web_api_version: {web_api_version}")
+    typer.echo(f"- config: {report['config']}")
+    typer.echo(f"- host: {report['host']}")
+    typer.echo(f"- authentication: {report['authentication']}")
+    typer.echo(f"- connection: {report['connection']}")
+    typer.echo(f"- qbittorrent_version: {report['qbittorrent_version']}")
+    typer.echo(f"- web_api_version: {report['web_api_version']}")
 
 
 @torrents_app.command(name="list")
@@ -134,7 +172,12 @@ def list_qbit_torrents(
         _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormatOption.json:
-        typer.echo(json.dumps({"torrents": torrents}, indent=2, sort_keys=True))
+        _print_json_output(
+            {
+                "summary": {"torrents": len(torrents)},
+                "torrents": torrents,
+            }
+        )
         return
 
     if not torrents:
@@ -186,13 +229,7 @@ def inspect_qbit_torrent(
 
     if report is None:
         if output_format == OutputFormatOption.json:
-            typer.echo(
-                json.dumps(
-                    {"torrent": None, "hash": torrent_hash},
-                    indent=2,
-                    sort_keys=True,
-                )
-            )
+            _print_json_output({"torrent": None, "hash": torrent_hash})
         else:
             typer.echo(f"No torrent found for hash: {torrent_hash}")
 
@@ -200,7 +237,7 @@ def inspect_qbit_torrent(
         return
 
     if output_format == OutputFormatOption.json:
-        typer.echo(json.dumps({"torrent": report}, indent=2, sort_keys=True))
+        _print_json_output({"torrent": report})
         return
 
     progress = _format_percentage(report["progress"])
@@ -298,6 +335,13 @@ def list_trackers(
             help="Tracker grouping mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
 ) -> None:
     """List trackers currently present on the qBittorrent instance."""
     try:
@@ -309,6 +353,16 @@ def list_trackers(
         _fail(str(error))
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(
+            {
+                "match": match.value,
+                "summary": {"trackers": len(tracker_usage)},
+                "trackers": tracker_usage,
+            }
+        )
+        return
 
     if not tracker_usage:
         typer.echo("No trackers found.")
@@ -344,7 +398,7 @@ def health(
         _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormatOption.json:
-        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+        _print_json_output(report)
         return
 
     summary = report["summary"]
@@ -416,7 +470,7 @@ def inspect_tracker_usage(
         _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormatOption.json:
-        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+        _print_json_output(report)
         _exit_if_no_targeted_matches(report["matched_tracker"])
         return
 
@@ -498,15 +552,71 @@ def replace(
     _exit_if_no_targeted_matches(summary["matched_source"])
 
 
+@backup_app.command(name="export")
+def export_backup(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker normalization mode for exported identities.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+) -> None:
+    """Export torrents, trackers and metadata for backup or audit."""
+    try:
+        config = load_qbit_config()
+        client = _create_qbit_client()
+        state = export_instance_state(
+            client=client,
+            config=config,
+            qbit_ops_version=__version__,
+            qbittorrent_version=_get_optional_client_value(
+                client,
+                "app_version",
+            ),
+            web_api_version=_get_optional_client_value(
+                client,
+                "app_web_api_version",
+            ),
+            match_mode=match.value,
+        )
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        _print_json_output(state)
+        return
+
+    summary = state["summary"]
+    metadata = state["metadata"]
+    typer.echo("Backup export:")
+    typer.echo(f"- exported_at: {metadata['exported_at']}")
+    typer.echo(f"- torrents: {summary['torrents']}")
+    typer.echo(f"- unique_trackers: {summary['unique_trackers']}")
+    typer.echo(f"- tracker_match: {summary['tracker_match']}")
+    typer.echo("Use --output json for the full backup payload.")
+
+
 @trackers_app.command(name="export")
 def export_trackers(
-    export_format: Annotated[
-        ExportFormatOption,
+    output_format: Annotated[
+        OutputFormatOption,
         typer.Option(
-            "--format",
-            help="Export output format.",
+            "--output",
+            help="Output format.",
         ),
-    ] = ExportFormatOption.json,
+    ] = OutputFormatOption.text,
     match: Annotated[
         TrackerMatchModeOption,
         typer.Option(
@@ -526,8 +636,15 @@ def export_trackers(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if export_format == ExportFormatOption.json:
-        typer.echo(json.dumps(state, indent=2, sort_keys=True))
+    if output_format == OutputFormatOption.json:
+        _print_json_output(state)
+        return
+
+    summary = state["summary"]
+    typer.echo("Tracker export:")
+    typer.echo(f"- torrents: {summary['torrents']}")
+    typer.echo(f"- match: {summary['match']}")
+    typer.echo("Use --output json for the full export payload.")
 
 
 @trackers_app.command()
@@ -631,6 +748,11 @@ def _get_optional_client_value(client: Any, method_name: str) -> str:
 def _format_percentage(value: float) -> str:
     """Format a 0-to-1 ratio as a percentage."""
     return f"{value * 100:.1f}%"
+
+
+def _print_json_output(payload: Any) -> None:
+    """Print a JSON payload for audit commands."""
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def _configure_logging() -> None:

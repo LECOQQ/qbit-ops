@@ -2,7 +2,11 @@
 
 from typing import Any
 
-from app.torrents import inspect_torrent, list_torrents
+from app.torrents import (
+    inspect_torrent,
+    list_torrents,
+    list_torrents_with_trackers,
+)
 
 
 def test_list_torrents_returns_audit_fields() -> None:
@@ -126,6 +130,58 @@ def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
     )
 
     assert inspect_torrent(client, "missing-hash") is None
+
+
+def test_list_torrents_with_trackers_returns_tracker_details() -> None:
+    """Ensure detailed torrent listing includes tracker metadata."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "state": "uploading",
+                "size": 1024,
+                "progress": 1,
+                "ratio": 2.5,
+                "save_path": "/data/torrents",
+                "category": "movies",
+                "added_on": 1710000000,
+            }
+        ],
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce", "status": "2"},
+                {"url": "** [DHT] **", "status": "0"},
+            ],
+        },
+    )
+
+    assert list_torrents_with_trackers(client) == [
+        {
+            "hash": "hash-a",
+            "name": "Torrent A",
+            "state": "uploading",
+            "size": 1024,
+            "progress": 1.0,
+            "ratio": 2.5,
+            "save_path": "/data/torrents",
+            "category": "movies",
+            "added_on": 1710000000,
+            "trackers": [
+                {
+                    "url": "https://tracker.example/announce",
+                    "status": "2",
+                    "disabled": False,
+                },
+                {
+                    "url": "** [DHT] **",
+                    "status": "0",
+                    "disabled": True,
+                },
+            ],
+            "active_tracker_count": 1,
+        }
+    ]
 
 
 class FakeQbitClient:

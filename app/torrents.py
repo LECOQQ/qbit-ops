@@ -28,6 +28,35 @@ def list_torrents(client: Any) -> list[dict[str, Any]]:
     return torrents
 
 
+def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
+    """List torrents with tracker details for export and audit."""
+    torrents: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        torrent_hash = _get_field_as_string(torrent, "hash")
+        trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
+        active_tracker_count = sum(
+            1 for tracker in trackers if not tracker["disabled"]
+        )
+        torrents.append(
+            {
+                "hash": torrent_hash,
+                "name": _get_field_as_string(torrent, "name"),
+                "state": _get_field_as_string(torrent, "state"),
+                "size": _get_field_as_int(torrent, "size"),
+                "progress": _get_field_as_float(torrent, "progress"),
+                "ratio": _get_field_as_float(torrent, "ratio"),
+                "save_path": _get_field_as_string(torrent, "save_path"),
+                "category": _get_field_as_string(torrent, "category"),
+                "added_on": _get_field_as_int(torrent, "added_on"),
+                "trackers": trackers,
+                "active_tracker_count": active_tracker_count,
+            }
+        )
+
+    return torrents
+
+
 def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     """Return detailed torrent information when a hash matches."""
     normalized_hash = torrent_hash.strip().lower()
