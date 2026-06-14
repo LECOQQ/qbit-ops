@@ -193,6 +193,7 @@ def apply_bulk_torrent_action(
     tracker: str | None = None,
     match_mode: TrackerMatchMode = "exact",
     name: str | None = None,
+    select_all: bool = False,
     dry_run: bool = True,
     verbose: bool = False,
 ) -> dict[str, Any]:
@@ -203,6 +204,7 @@ def apply_bulk_torrent_action(
         tracker=tracker,
         match_mode=match_mode,
         name=name,
+        select_all=select_all,
     )
     modified = 0
     skipped = 0
@@ -281,6 +283,7 @@ def select_torrents_for_bulk_action(
     tracker: str | None = None,
     match_mode: TrackerMatchMode = "exact",
     name: str | None = None,
+    select_all: bool = False,
 ) -> dict[str, Any]:
     """Select torrents for a bulk action using one filter."""
     active_filters = [
@@ -292,15 +295,22 @@ def select_torrents_for_bulk_action(
         )
         if filter_value is not None
     ]
-    if len(active_filters) != 1:
-        raise ValueError("Provide exactly one of category, tracker, or name.")
+    if select_all:
+        if active_filters:
+            raise ValueError(
+                "Use select_all alone, without category, tracker, or name."
+            )
+    elif len(active_filters) != 1:
+        raise ValueError(
+            "Provide exactly one of category, tracker, name, or select_all."
+        )
 
     selected_torrents: list[dict[str, Any]] = []
     scanned = 0
 
     for torrent in client.torrents_info():
         scanned += 1
-        if not _torrent_matches_bulk_filter(
+        if not select_all and not _torrent_matches_bulk_filter(
             client=client,
             torrent=torrent,
             category=category,
@@ -320,6 +330,7 @@ def select_torrents_for_bulk_action(
             tracker=tracker,
             match_mode=match_mode,
             name=name,
+            select_all=select_all,
         ),
         "scanned": scanned,
         "matched": len(selected_torrents),
@@ -345,8 +356,15 @@ def _build_bulk_selection_metadata(
     tracker: str | None,
     match_mode: TrackerMatchMode,
     name: str | None,
+    select_all: bool = False,
 ) -> dict[str, str]:
     """Describe which filter was used for a bulk torrent action."""
+    if select_all:
+        return {
+            "filter": "all",
+            "value": "*",
+        }
+
     if category is not None:
         return {
             "filter": "category",

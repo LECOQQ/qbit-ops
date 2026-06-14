@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import pytest
+
 from app.torrents import (
     apply_bulk_torrent_action,
     inspect_torrent,
@@ -456,6 +458,61 @@ def test_apply_bulk_torrent_action_reannounces_by_tracker() -> None:
     assert summary["matched"] == 1
     assert summary["modified"] == 1
     assert client.reannounced_hashes == [["hash-a"]]
+
+
+def test_apply_bulk_torrent_action_selects_all_torrents() -> None:
+    """Ensure bulk actions can target every torrent with select_all."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "uploading",
+            },
+            {
+                "hash": "hash-b",
+                "name": "Torrent B",
+                "category": "radarr",
+                "state": "uploading",
+            },
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        select_all=True,
+        dry_run=False,
+    )
+
+    assert summary["selection"] == {"filter": "all", "value": "*"}
+    assert summary["matched"] == 2
+    assert summary["modified"] == 2
+    assert client.paused_hashes == [["hash-a", "hash-b"]]
+
+
+def test_select_all_rejects_combined_filters() -> None:
+    """Ensure select_all cannot be combined with another filter."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "hash-a", "name": "Torrent A", "category": "sonarr"},
+        ],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Use select_all alone, without category, tracker, or name.",
+    ):
+        apply_bulk_torrent_action(
+            client=client,
+            action="pause",
+            category="sonarr",
+            select_all=True,
+            dry_run=False,
+        )
 
 
 def test_list_torrents_with_trackers_returns_tracker_details() -> None:
