@@ -112,11 +112,18 @@ def inspect_tracker(
             {
                 "hash": torrent_hash,
                 "name": torrent_name,
+                "state": _get_field_as_string(torrent, "state"),
+                "size": _get_field_as_int(torrent, "size"),
+                "progress": _get_field_as_float(torrent, "progress"),
+                "ratio": _get_field_as_float(torrent, "ratio"),
+                "active_tracker_count": len(trackers),
                 "matching_tracker_urls": matching_tracker_urls,
             }
         )
 
     return {
+        "tracker": tracker,
+        "match": match_mode,
         "scanned": scanned,
         "matched_tracker": len(torrents),
         "torrents": torrents,
@@ -574,6 +581,34 @@ def _get_torrent_name(torrent: Any) -> str:
         return _get_torrent_hash(torrent)
 
     return torrent_name
+
+
+def _get_field_as_int(item: Any, field_name: str) -> int:
+    """Read an integer field from an object or mapping."""
+    value: Any
+    if isinstance(item, Mapping):
+        value = item.get(field_name, 0)
+    else:
+        value = getattr(item, field_name, 0)
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_field_as_float(item: Any, field_name: str) -> float:
+    """Read a float field from an object or mapping."""
+    value: Any
+    if isinstance(item, Mapping):
+        value = item.get(field_name, 0.0)
+    else:
+        value = getattr(item, field_name, 0.0)
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _get_field_as_string(item: Any, field_name: str) -> str:

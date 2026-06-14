@@ -159,6 +159,20 @@ def doctor(
 
 @torrents_app.command(name="list")
 def list_qbit_torrents(
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help="List torrents using a specific tracker.",
+        ),
+    ] = None,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode when --tracker is used.",
+        ),
+    ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
         OutputFormatOption,
         typer.Option(
@@ -170,13 +184,26 @@ def list_qbit_torrents(
     """List torrents with useful audit fields."""
     try:
         client = _create_qbit_client()
-        torrents = list_torrents(client)
+        if tracker is not None:
+            report = inspect_tracker(
+                client=client,
+                tracker=tracker,
+                match_mode=match.value,
+            )
+        else:
+            torrents = list_torrents(client)
+            report = None
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
         _fail(str(error))
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
+
+    if report is not None:
+        _print_torrents_for_tracker(report, output_format)
+        _exit_if_no_targeted_matches(report["matched_tracker"])
+        return
 
     if output_format == OutputFormatOption.json:
         _print_json_output(
@@ -192,15 +219,7 @@ def list_qbit_torrents(
     else:
         typer.echo("Torrents:")
         for torrent in torrents:
-            progress = _format_percentage(torrent["progress"])
-            typer.echo(
-                "- "
-                f"{torrent['name']} ({torrent['hash']}) "
-                f"state={torrent['state']} "
-                f"progress={progress} "
-                f"ratio={torrent['ratio']:.2f} "
-                f"trackers={torrent['tracker_count']}"
-            )
+            _print_torrent_audit_line(torrent)
 
     typer.echo("Summary:")
     typer.echo(f"- torrents: {len(torrents)}")
@@ -489,7 +508,10 @@ def inspect_tracker_usage(
     else:
         typer.echo("Matching torrents:")
         for torrent in report["torrents"]:
-            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+            _print_torrent_audit_line(
+                torrent,
+                tracker_count_field="active_tracker_count",
+            )
             for tracker_url in torrent["matching_tracker_urls"]:
                 typer.echo(f"  - {tracker_url}")
 
@@ -806,6 +828,66 @@ def _format_percentage(value: float) -> str:
 def _print_json_output(payload: Any) -> None:
     """Print a JSON payload for audit commands."""
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _print_torrent_audit_line(
+    torrent: dict[str, Any],
+    *,
+    tracker_count_field: str = "tracker_count",
+) -> None:
+    """Print one torrent audit line."""
+    progress = _format_percentage(torrent["progress"])
+    tracker_count = torrent.get(
+        tracker_count_field,
+        torrent.get("tracker_count", 0),
+    )
+    typer.echo(
+        "- "
+        f"{torrent['name']} ({torrent['hash']}) "
+        f"state={torrent['state']} "
+        f"progress={progress} "
+        f"ratio={torrent['ratio']:.2f} "
+        f"trackers={tracker_count}"
+    )
+
+
+def _print_torrents_for_tracker(
+    report: dict[str, Any],
+    output_format: OutputFormatOption,
+) -> None:
+    """Print torrents filtered by tracker."""
+    if output_format == OutputFormatOption.json:
+        _print_json_output(
+            {
+                "tracker": report["tracker"],
+                "match": report["match"],
+                "summary": {
+                    "scanned": report["scanned"],
+                    "matched": report["matched_tracker"],
+                },
+                "torrents": report["torrents"],
+            }
+        )
+        return
+
+    typer.echo(f"Tracker filter: {report['tracker']}")
+    typer.echo(f"- match: {report['match']}")
+
+    if not report["torrents"]:
+        typer.echo("No matching torrents found.")
+    else:
+        typer.echo("Torrents:")
+        for torrent in report["torrents"]:
+            _print_torrent_audit_line(
+                torrent,
+                tracker_count_field="active_tracker_count",
+            )
+            for tracker_url in torrent["matching_tracker_urls"]:
+                typer.echo(f"  - {tracker_url}")
+
+    typer.echo("Summary:")
+    typer.echo(f"- scanned: {report['scanned']}")
+    typer.echo(f"- matched: {report['matched_tracker']}")
 
 
 def _print_torrent_details(report: dict[str, Any]) -> None:

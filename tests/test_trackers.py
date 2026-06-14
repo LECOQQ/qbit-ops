@@ -196,12 +196,19 @@ def test_inspect_tracker_lists_matching_torrents() -> None:
     )
 
     assert report == {
+        "tracker": "https://tracker.example/announce",
+        "match": "without-query",
         "scanned": 2,
         "matched_tracker": 2,
         "torrents": [
             {
                 "hash": "hash-a",
                 "name": "hash-a",
+                "state": "",
+                "size": 0,
+                "progress": 0.0,
+                "ratio": 0.0,
+                "active_tracker_count": 2,
                 "matching_tracker_urls": [
                     "https://tracker.example/announce?sig=a",
                 ],
@@ -209,6 +216,11 @@ def test_inspect_tracker_lists_matching_torrents() -> None:
             {
                 "hash": "hash-b",
                 "name": "hash-b",
+                "state": "",
+                "size": 0,
+                "progress": 0.0,
+                "ratio": 0.0,
+                "active_tracker_count": 1,
                 "matching_tracker_urls": [
                     "https://tracker.example/announce?sig=b",
                 ],
