@@ -1,5 +1,6 @@
 """Provide the command-line application."""
 
+import json
 import logging
 from enum import StrEnum
 from typing import Annotated, Any, NoReturn
@@ -11,6 +12,8 @@ from app import __version__
 from app.config import ConfigError, load_qbit_config
 from app.trackers import (
     add_tracker_if_source_present,
+    export_tracker_state,
+    inspect_tracker,
     list_tracker_usage,
     remove_tracker_from_all,
 )
@@ -29,6 +32,12 @@ class TrackerMatchModeOption(StrEnum):
 
     exact = "exact"
     without_query = "without-query"
+
+
+class ExportFormatOption(StrEnum):
+    """Expose tracker export formats for Typer options."""
+
+    json = "json"
 
 
 @app.callback(invoke_without_command=True)
@@ -84,6 +93,13 @@ def add_if_present(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
 ) -> None:
     """Add a target tracker when a source tracker is already present."""
     _configure_logging()
@@ -96,6 +112,7 @@ def add_if_present(
             target_tracker=target,
             dry_run=dry_run,
             match_mode=match.value,
+            verbose=verbose,
         )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -105,6 +122,7 @@ def add_if_present(
         _fail(f"qBittorrent API error: {error}")
 
     _print_summary(summary)
+    _print_details(summary)
 
 
 @trackers_app.command(name="list")
@@ -141,6 +159,84 @@ def list_trackers(
 
 
 @trackers_app.command()
+def inspect(
+    tracker: Annotated[
+        str,
+        typer.Option(
+            "--tracker",
+            help="Tracker used to find matching torrents.",
+        ),
+    ],
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+) -> None:
+    """Inspect torrents using a tracker."""
+    try:
+        client = _create_qbit_client()
+        report = inspect_tracker(
+            client=client,
+            tracker=tracker,
+            match_mode=match.value,
+        )
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if not report["torrents"]:
+        typer.echo("No matching torrents found.")
+    else:
+        typer.echo("Matching torrents:")
+        for torrent in report["torrents"]:
+            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+            for tracker_url in torrent["matching_tracker_urls"]:
+                typer.echo(f"  - {tracker_url}")
+
+    typer.echo("Summary:")
+    typer.echo(f"- scanned: {report['scanned']}")
+    typer.echo(f"- matched_tracker: {report['matched_tracker']}")
+
+
+@trackers_app.command(name="export")
+def export_trackers(
+    export_format: Annotated[
+        ExportFormatOption,
+        typer.Option(
+            "--format",
+            help="Export output format.",
+        ),
+    ] = ExportFormatOption.json,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker normalization mode for exported identities.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+) -> None:
+    """Export active tracker state."""
+    try:
+        client = _create_qbit_client()
+        state = export_tracker_state(client=client, match_mode=match.value)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if export_format == ExportFormatOption.json:
+        typer.echo(json.dumps(state, indent=2, sort_keys=True))
+
+
+@trackers_app.command()
 def remove(
     tracker: Annotated[
         str,
@@ -163,6 +259,13 @@ def remove(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
 ) -> None:
     """Remove a tracker from every torrent using it."""
     _configure_logging()
@@ -174,6 +277,7 @@ def remove(
             tracker=tracker,
             dry_run=dry_run,
             match_mode=match.value,
+            verbose=verbose,
         )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -183,6 +287,7 @@ def remove(
         _fail(f"qBittorrent API error: {error}")
 
     _print_remove_summary(summary)
+    _print_details(summary)
 
 
 def _create_qbit_client() -> Any:
@@ -248,6 +353,19 @@ def _print_remove_summary(summary: dict[str, int | bool]) -> None:
     typer.echo(f"- modified: {summary['modified']}")
     typer.echo(f"- removed_urls: {summary['removed_urls']}")
     typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+
+
+def _print_details(summary: dict[str, Any]) -> None:
+    """Print verbose operation details when available."""
+    details = summary.get("details")
+    if not details:
+        return
+
+    typer.echo("Details:")
+    for item in details:
+        typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
+        for tracker_url in item.get("matching_tracker_urls", []):
+            typer.echo(f"  - {tracker_url}")
 
 
 if __name__ == "__main__":
