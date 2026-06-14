@@ -16,6 +16,7 @@ readable summaries.
 - Diagnose qbit-ops configuration and qBittorrent API access.
 - List torrents with basic audit fields.
 - Inspect a torrent by hash with tracker details.
+- Export a full instance backup with torrents, trackers and metadata.
 - List trackers used by a qBittorrent instance.
 - Analyze tracker health, disabled trackers and dynamic query variants.
 - Inspect torrents using a specific tracker.
@@ -25,6 +26,7 @@ readable summaries.
 - Replace a tracker in bulk without creating duplicate target trackers.
 - Match trackers exactly or without query parameters.
 - Ignore disabled qBittorrent pseudo-trackers such as DHT, PeX and LSD.
+- Use `--output json` on all audit commands for scripting.
 - Keep `--dry-run` enabled by default for modifying commands.
 
 ## Safety Model
@@ -202,6 +204,12 @@ Analyze tracker health:
 qbit-ops trackers health
 ```
 
+Export a full backup with torrents, trackers and metadata:
+
+```bash
+qbit-ops backup export --output json
+```
+
 When working from a Poetry development environment, prefix commands with
 `poetry run`, for example:
 
@@ -226,10 +234,22 @@ Check connection settings:
 poetry run qbit-ops connection check
 ```
 
+Check connection settings as JSON:
+
+```bash
+poetry run qbit-ops connection check --output json
+```
+
 Run configuration diagnostics:
 
 ```bash
 poetry run qbit-ops config doctor
+```
+
+Run configuration diagnostics as JSON:
+
+```bash
+poetry run qbit-ops config doctor --output json
 ```
 
 List torrents:
@@ -270,6 +290,12 @@ List trackers grouped without query parameters:
 poetry run qbit-ops trackers list --match without-query
 ```
 
+List trackers as JSON:
+
+```bash
+poetry run qbit-ops trackers list --output json
+```
+
 Analyze tracker health:
 
 ```bash
@@ -300,7 +326,13 @@ poetry run qbit-ops trackers inspect \
 Export the active tracker state as JSON:
 
 ```bash
-poetry run qbit-ops trackers export
+poetry run qbit-ops trackers export --output json
+```
+
+Export a full backup with torrents, trackers and metadata:
+
+```bash
+poetry run qbit-ops backup export --output json
 ```
 
 Add a tracker if another tracker is already present:
@@ -368,7 +400,8 @@ poetry run qbit-ops trackers list --match without-query
 poetry run qbit-ops trackers health
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
-poetry run qbit-ops trackers export
+poetry run qbit-ops trackers export --output json
+poetry run qbit-ops backup export --output json
 ```
 
 ### Add a tracker conditionally
@@ -492,6 +525,36 @@ poetry run qbit-ops trackers replace \
 
 Both modes preserve the raw qBittorrent URLs for API operations. This matters
 for remove operations, because qBittorrent expects the original tracker URLs.
+
+## Audit Output
+
+All audit commands accept `--output text|json`:
+
+- `connection check`
+- `config doctor`
+- `torrents list`
+- `torrents inspect`
+- `trackers list`
+- `trackers health`
+- `trackers inspect`
+- `trackers export`
+- `backup export`
+
+Text output is the default and prints a human-readable summary. JSON output is
+intended for scripting and backups.
+
+`backup export --output json` produces a full payload with:
+
+- export metadata (`exported_at`, qBittorrent versions, configured host);
+- torrent metadata and tracker details for every torrent;
+- normalized tracker identities;
+- aggregated tracker usage counts.
+
+Example:
+
+```bash
+qbit-ops backup export --output json > backup.json
+```
 
 ## Tracker Health
 
