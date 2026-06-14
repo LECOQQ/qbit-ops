@@ -14,6 +14,8 @@ readable summaries.
 
 - Check qBittorrent connectivity from `.env`.
 - List trackers used by a qBittorrent instance.
+- Inspect torrents using a specific tracker.
+- Export the active tracker state as JSON.
 - Add a tracker only when another tracker is already present.
 - Remove a tracker in bulk.
 - Match trackers exactly or without query parameters.
@@ -153,6 +155,18 @@ List trackers:
 qbit-ops trackers list
 ```
 
+Inspect torrents using a tracker:
+
+```bash
+qbit-ops trackers inspect --tracker "https://tracker-a.example/announce"
+```
+
+Export the active tracker state:
+
+```bash
+qbit-ops trackers export
+```
+
 Group dynamic tracker URLs without query parameters:
 
 ```bash
@@ -193,6 +207,19 @@ List trackers grouped without query parameters:
 
 ```bash
 poetry run qbit-ops trackers list --match without-query
+```
+
+Inspect torrents using a tracker:
+
+```bash
+poetry run qbit-ops trackers inspect \
+  --tracker "https://tracker-a.example/announce"
+```
+
+Export the active tracker state as JSON:
+
+```bash
+poetry run qbit-ops trackers export
 ```
 
 Add a tracker if another tracker is already present:
@@ -237,6 +264,9 @@ Use these commands to inspect the qBittorrent instance before changing it:
 poetry run qbit-ops connection check
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
+poetry run qbit-ops trackers inspect \
+  --tracker "https://tracker-a.example/announce"
+poetry run qbit-ops trackers export
 ```
 
 ### Add a tracker conditionally
@@ -250,7 +280,8 @@ Dry-run:
 poetry run qbit-ops trackers add-if-present \
   --source "https://tracker-a.example/announce" \
   --target "https://tracker-b.example/announce" \
-  --dry-run
+  --dry-run \
+  --verbose
 ```
 
 Apply:
@@ -280,7 +311,8 @@ poetry run qbit-ops trackers add-if-present \
   --source "http://connect.maxp2p.org:8080/passkey/announce" \
   --target "https://tracker-b.example/announce" \
   --match without-query \
-  --dry-run
+  --dry-run \
+  --verbose
 ```
 
 Remove dynamic variants with query parameters ignored:
@@ -289,7 +321,8 @@ Remove dynamic variants with query parameters ignored:
 poetry run qbit-ops trackers remove \
   --tracker "http://connect.maxp2p.org:8080/passkey/announce" \
   --match without-query \
-  --dry-run
+  --dry-run \
+  --verbose
 ```
 
 ### Remove a tracker in bulk
@@ -301,7 +334,8 @@ Dry-run:
 ```bash
 poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce" \
-  --dry-run
+  --dry-run \
+  --verbose
 ```
 
 Apply:
@@ -343,6 +377,9 @@ Summary:
 - removed_urls: X
 - dry_run: true/false
 ```
+
+When `--verbose` is passed to a bulk modification command, impacted torrents are
+printed after the summary.
 
 ## Development
 

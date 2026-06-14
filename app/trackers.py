@@ -83,18 +83,104 @@ def list_tracker_usage(
     return dict(sorted(tracker_usage.items()))
 
 
+def inspect_tracker(
+    client: Any,
+    tracker: str,
+    match_mode: TrackerMatchMode = "exact",
+) -> dict[str, Any]:
+    """List torrents using a tracker."""
+    scanned = 0
+    torrents: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        scanned += 1
+        torrent_hash = _get_torrent_hash(torrent)
+        torrent_name = _get_torrent_name(torrent)
+        trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
+        matching_tracker_urls = _get_matching_tracker_urls(
+            trackers,
+            tracker,
+            match_mode,
+        )
+
+        if not matching_tracker_urls:
+            continue
+
+        torrents.append(
+            {
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "matching_tracker_urls": matching_tracker_urls,
+            }
+        )
+
+    return {
+        "scanned": scanned,
+        "matched_tracker": len(torrents),
+        "torrents": torrents,
+    }
+
+
+def export_tracker_state(
+    client: Any,
+    match_mode: TrackerMatchMode = "exact",
+) -> dict[str, Any]:
+    """Export active tracker state for every torrent."""
+    torrents: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        torrent_hash = _get_torrent_hash(torrent)
+        torrent_name = _get_torrent_name(torrent)
+        trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
+        normalized_trackers = sorted(
+            {
+                normalized_tracker
+                for tracker_url in trackers
+                if (
+                    normalized_tracker := normalize_tracker_url(
+                        tracker_url,
+                        match_mode,
+                    )
+                )
+                != ""
+            }
+        )
+        torrents.append(
+            {
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "trackers": trackers,
+                "normalized_trackers": normalized_trackers,
+            }
+        )
+
+    return {
+        "summary": {
+            "torrents": len(torrents),
+            "match": match_mode,
+        },
+        "torrents": torrents,
+    }
+
+
 def add_tracker_if_source_present(
     client: Any,
     source_tracker: str,
     target_tracker: str,
     dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
-) -> dict[str, int | bool]:
+    verbose: bool = False,
+) -> dict[str, Any]:
     """Add a target tracker to torrents already using the source tracker."""
     scanned = 0
     matched_source = 0
     already_had_target = 0
     modified = 0
+    details: list[dict[str, str]] = []
 
     for torrent in client.torrents_info():
         scanned += 1
@@ -111,10 +197,19 @@ def add_tracker_if_source_present(
         if has_tracker(trackers, target_tracker, match_mode):
             already_had_target += 1
             logger.info("Already present: %s", torrent_name)
+            if verbose:
+                details.append(
+                    {
+                        "hash": torrent_hash,
+                        "name": torrent_name,
+                        "action": "already_had_target",
+                    }
+                )
             continue
 
         if dry_run:
             logger.info("Would add tracker to: %s", torrent_name)
+            action = "would_add"
         else:
             logger.info("Adding tracker to: %s", torrent_name)
             try:
@@ -127,16 +222,29 @@ def add_tracker_if_source_present(
                     "Failed to add tracker to torrent "
                     f"'{torrent_name}' ({torrent_hash}): {error}"
                 ) from error
+            action = "added"
 
         modified += 1
+        if verbose:
+            details.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "action": action,
+                }
+            )
 
-    return {
+    summary: dict[str, Any] = {
         "scanned": scanned,
         "matched_source": matched_source,
         "already_had_target": already_had_target,
         "modified": modified,
         "dry_run": dry_run,
     }
+    if verbose:
+        summary["details"] = details
+
+    return summary
 
 
 def remove_tracker_from_all(
@@ -144,12 +252,14 @@ def remove_tracker_from_all(
     tracker: str,
     dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
-) -> dict[str, int | bool]:
+    verbose: bool = False,
+) -> dict[str, Any]:
     """Remove a tracker from every torrent using it."""
     scanned = 0
     matched_tracker = 0
     modified = 0
     removed_urls = 0
+    details: list[dict[str, Any]] = []
 
     for torrent in client.torrents_info():
         scanned += 1
@@ -176,6 +286,7 @@ def remove_tracker_from_all(
                 torrent_name,
                 len(matching_tracker_urls),
             )
+            action = "would_remove"
         else:
             logger.info(
                 "Removing tracker from: %s (%s URL(s))",
@@ -192,16 +303,30 @@ def remove_tracker_from_all(
                     "Failed to remove tracker from torrent "
                     f"'{torrent_name}' ({torrent_hash}): {error}"
                 ) from error
+            action = "removed"
 
         modified += 1
+        if verbose:
+            details.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "action": action,
+                    "matching_tracker_urls": matching_tracker_urls,
+                }
+            )
 
-    return {
+    summary = {
         "scanned": scanned,
         "matched_tracker": matched_tracker,
         "modified": modified,
         "removed_urls": removed_urls,
         "dry_run": dry_run,
     }
+    if verbose:
+        summary["details"] = details
+
+    return summary
 
 
 def _get_active_tracker_urls(trackers: Any) -> list[str]:

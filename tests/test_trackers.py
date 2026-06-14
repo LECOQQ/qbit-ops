@@ -3,7 +3,10 @@
 from typing import Any
 
 from app.trackers import (
+    add_tracker_if_source_present,
+    export_tracker_state,
     has_tracker,
+    inspect_tracker,
     list_tracker_usage,
     normalize_tracker_url,
     remove_tracker_from_all,
@@ -129,6 +132,111 @@ def test_list_tracker_usage_ignores_disabled_trackers() -> None:
     }
 
 
+def test_inspect_tracker_lists_matching_torrents() -> None:
+    """Ensure tracker inspection reports matching torrents and raw URLs."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce?sig=a"},
+                {"url": "https://other.example/announce"},
+            ],
+            "hash-b": [
+                {"url": "https://tracker.example/announce?sig=b"},
+            ],
+        }
+    )
+
+    report = inspect_tracker(
+        client=client,
+        tracker="https://tracker.example/announce",
+        match_mode="without-query",
+    )
+
+    assert report == {
+        "scanned": 2,
+        "matched_tracker": 2,
+        "torrents": [
+            {
+                "hash": "hash-a",
+                "name": "hash-a",
+                "matching_tracker_urls": [
+                    "https://tracker.example/announce?sig=a",
+                ],
+            },
+            {
+                "hash": "hash-b",
+                "name": "hash-b",
+                "matching_tracker_urls": [
+                    "https://tracker.example/announce?sig=b",
+                ],
+            },
+        ],
+    }
+
+
+def test_export_tracker_state_exports_active_trackers() -> None:
+    """Ensure tracker export includes raw and normalized active trackers."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce?sig=a"},
+                {"url": "** [DHT] **", "status": "0"},
+            ],
+        }
+    )
+
+    assert export_tracker_state(client, match_mode="without-query") == {
+        "summary": {
+            "torrents": 1,
+            "match": "without-query",
+        },
+        "torrents": [
+            {
+                "hash": "hash-a",
+                "name": "hash-a",
+                "trackers": [
+                    "https://tracker.example/announce?sig=a",
+                ],
+                "normalized_trackers": [
+                    "https://tracker.example/announce",
+                ],
+            },
+        ],
+    }
+
+
+def test_add_tracker_if_source_present_returns_verbose_details() -> None:
+    """Ensure add operations can report impacted torrents."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce"}],
+            "hash-b": [{"url": "https://tracker-c.example/announce"}],
+        }
+    )
+
+    summary = add_tracker_if_source_present(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+        verbose=True,
+    )
+
+    assert summary == {
+        "scanned": 2,
+        "matched_source": 1,
+        "already_had_target": 0,
+        "modified": 1,
+        "dry_run": True,
+        "details": [
+            {
+                "hash": "hash-a",
+                "name": "hash-a",
+                "action": "would_add",
+            },
+        ],
+    }
+
+
 def test_remove_tracker_from_all_is_dry_run_by_default() -> None:
     """Ensure tracker removal previews matching torrents by default."""
     client = FakeQbitClient(
@@ -187,6 +295,39 @@ def test_remove_tracker_matches_query_variants_without_query() -> None:
             ],
         )
     ]
+
+
+def test_remove_tracker_from_all_returns_verbose_details() -> None:
+    """Ensure removal operations can report impacted torrents."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker.example/announce/"}],
+        }
+    )
+
+    summary = remove_tracker_from_all(
+        client=client,
+        tracker="https://tracker.example/announce",
+        verbose=True,
+    )
+
+    assert summary == {
+        "scanned": 1,
+        "matched_tracker": 1,
+        "modified": 1,
+        "removed_urls": 1,
+        "dry_run": True,
+        "details": [
+            {
+                "hash": "hash-a",
+                "name": "hash-a",
+                "action": "would_remove",
+                "matching_tracker_urls": [
+                    "https://tracker.example/announce/",
+                ],
+            },
+        ],
+    }
 
 
 def test_remove_tracker_from_all_removes_matching_raw_urls() -> None:
@@ -251,3 +392,10 @@ class FakeQbitClient:
     ) -> None:
         """Record fake tracker removals."""
         self.removed_trackers.append((torrent_hash, urls))
+
+    def torrents_add_trackers(
+        self,
+        torrent_hash: str,
+        urls: str,
+    ) -> None:
+        """Record fake tracker additions."""
