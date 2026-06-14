@@ -169,6 +169,12 @@ List torrents:
 qbit-ops torrents list
 ```
 
+List torrents using a tracker:
+
+```bash
+qbit-ops torrents list --tracker "https://tracker-a.example/announce"
+```
+
 Inspect a torrent by hash:
 
 ```bash
@@ -275,6 +281,21 @@ List torrents as JSON:
 
 ```bash
 poetry run qbit-ops torrents list --output json
+```
+
+List torrents using a tracker:
+
+```bash
+poetry run qbit-ops torrents list \
+  --tracker "https://tracker-a.example/announce"
+```
+
+List torrents using a tracker without query parameters:
+
+```bash
+poetry run qbit-ops torrents list \
+  --tracker "http://connect.maxp2p.org:8080/passkey/announce" \
+  --match without-query
 ```
 
 Inspect a torrent by hash:
@@ -689,9 +710,9 @@ printed after the summary.
 Exit code `2` is used when a command completes successfully but reports a
 non-error outcome that may still require attention:
 
-- `torrents inspect`, `trackers inspect`, `trackers add-if-present`,
-  `trackers remove`, `trackers replace`: no torrent matched the requested
-  criteria;
+- `torrents inspect`, `torrents list --tracker`, `trackers inspect`,
+  `trackers add-if-present`, `trackers remove`, `trackers replace`: no torrent
+  matched the requested criteria;
 - `backup diff`: the two exports differ.
 
 ## Development
