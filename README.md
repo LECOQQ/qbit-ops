@@ -15,6 +15,7 @@ readable summaries.
 - Check qBittorrent connectivity from `.env`.
 - Diagnose qbit-ops configuration and qBittorrent API access.
 - List torrents with basic audit fields.
+- Inspect a torrent by hash with tracker details.
 - List trackers used by a qBittorrent instance.
 - Analyze tracker health, disabled trackers and dynamic query variants.
 - Inspect torrents using a specific tracker.
@@ -165,6 +166,12 @@ List torrents:
 qbit-ops torrents list
 ```
 
+Inspect a torrent by hash:
+
+```bash
+qbit-ops torrents inspect --hash "TORRENT_HASH"
+```
+
 List trackers:
 
 ```bash
@@ -237,6 +244,20 @@ List torrents as JSON:
 poetry run qbit-ops torrents list --output json
 ```
 
+Inspect a torrent by hash:
+
+```bash
+poetry run qbit-ops torrents inspect --hash "TORRENT_HASH"
+```
+
+Inspect a torrent as JSON:
+
+```bash
+poetry run qbit-ops torrents inspect \
+  --hash "TORRENT_HASH" \
+  --output json
+```
+
 List trackers with exact matching:
 
 ```bash
@@ -266,6 +287,14 @@ Inspect torrents using a tracker:
 ```bash
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
+```
+
+Inspect torrents using a tracker as JSON:
+
+```bash
+poetry run qbit-ops trackers inspect \
+  --tracker "https://tracker-a.example/announce" \
+  --output json
 ```
 
 Export the active tracker state as JSON:
@@ -333,6 +362,7 @@ Use these commands to inspect the qBittorrent instance before changing it:
 poetry run qbit-ops connection check
 poetry run qbit-ops config doctor
 poetry run qbit-ops torrents list
+poetry run qbit-ops torrents inspect --hash "TORRENT_HASH"
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
 poetry run qbit-ops trackers health
@@ -527,9 +557,9 @@ printed after the summary.
 - `1`: configuration, connection, authentication or API error.
 - `2`: targeted command completed but matched no torrent.
 
-Exit code `2` is used by `trackers inspect`, `trackers add-if-present` and
-`trackers remove` or `trackers replace` when no torrent matches the requested
-tracker criteria.
+Exit code `2` is used by `torrents inspect`, `trackers inspect`,
+`trackers add-if-present` and `trackers remove` or `trackers replace` when no
+torrent matches the requested criteria.
 
 ## Development
 

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.torrents import list_torrents
+from app.torrents import inspect_torrent, list_torrents
 
 
 def test_list_torrents_returns_audit_fields() -> None:
@@ -66,6 +66,66 @@ def test_list_torrents_defaults_invalid_numeric_fields() -> None:
             "tracker_count": 0,
         }
     ]
+
+
+def test_inspect_torrent_returns_detailed_report() -> None:
+    """Ensure torrent inspection returns useful audit fields and trackers."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "HASH-A",
+                "name": "Torrent A",
+                "state": "uploading",
+                "size": 2048,
+                "progress": 1,
+                "ratio": 1.5,
+                "save_path": "/data/torrents",
+                "category": "movies",
+                "added_on": 1710000000,
+            }
+        ],
+        trackers_by_hash={
+            "HASH-A": [
+                {"url": "https://tracker.example/announce", "status": "2"},
+                {"url": "** [DHT] **", "status": "0"},
+            ],
+        },
+    )
+
+    assert inspect_torrent(client, "hash-a") == {
+        "hash": "HASH-A",
+        "name": "Torrent A",
+        "state": "uploading",
+        "size": 2048,
+        "progress": 1.0,
+        "ratio": 1.5,
+        "save_path": "/data/torrents",
+        "category": "movies",
+        "added_on": 1710000000,
+        "trackers": [
+            {
+                "url": "https://tracker.example/announce",
+                "status": "2",
+                "disabled": False,
+            },
+            {
+                "url": "** [DHT] **",
+                "status": "0",
+                "disabled": True,
+            },
+        ],
+        "active_tracker_count": 1,
+    }
+
+
+def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
+    """Ensure torrent inspection fails explicitly when no hash matches."""
+    client = FakeQbitClient(
+        torrents=[{"hash": "hash-a", "name": "Torrent A"}],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    assert inspect_torrent(client, "missing-hash") is None
 
 
 class FakeQbitClient:
