@@ -10,6 +10,7 @@ from app.trackers import (
     list_tracker_usage,
     normalize_tracker_url,
     remove_tracker_from_all,
+    replace_tracker_in_all,
 )
 
 TrackersByHash = dict[str, list[dict[str, str]]]
@@ -366,6 +367,155 @@ def test_remove_tracker_from_all_removes_matching_raw_urls() -> None:
     ]
 
 
+def test_replace_tracker_in_all_is_dry_run_by_default() -> None:
+    """Ensure tracker replacement previews matching torrents by default."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce"}],
+            "hash-b": [{"url": "https://tracker-c.example/announce"}],
+        }
+    )
+
+    summary = replace_tracker_in_all(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert summary == {
+        "scanned": 2,
+        "matched_source": 1,
+        "already_had_target": 0,
+        "modified": 1,
+        "replaced_urls": 1,
+        "removed_urls": 0,
+        "dry_run": True,
+    }
+    assert client.edited_trackers == []
+    assert client.removed_trackers == []
+
+
+def test_replace_tracker_in_all_replaces_source_url() -> None:
+    """Ensure real replacement edits the matching raw source URL."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce/"}],
+        }
+    )
+
+    summary = replace_tracker_in_all(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+        dry_run=False,
+    )
+
+    assert summary == {
+        "scanned": 1,
+        "matched_source": 1,
+        "already_had_target": 0,
+        "modified": 1,
+        "replaced_urls": 1,
+        "removed_urls": 0,
+        "dry_run": False,
+    }
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "https://tracker-a.example/announce/",
+            "https://tracker-b.example/announce",
+        )
+    ]
+
+
+def test_replace_tracker_removes_source_when_target_already_exists() -> None:
+    """Ensure replacement avoids duplicating an existing target tracker."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce"},
+                {"url": "https://tracker-b.example/announce"},
+            ],
+        }
+    )
+
+    summary = replace_tracker_in_all(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+        dry_run=False,
+        verbose=True,
+    )
+
+    assert summary == {
+        "scanned": 1,
+        "matched_source": 1,
+        "already_had_target": 1,
+        "modified": 1,
+        "replaced_urls": 0,
+        "removed_urls": 1,
+        "dry_run": False,
+        "details": [
+            {
+                "hash": "hash-a",
+                "name": "hash-a",
+                "action": "removed_source",
+                "replaced_tracker_url": "",
+                "matching_tracker_urls": [
+                    "https://tracker-a.example/announce",
+                ],
+                "removed_tracker_urls": [
+                    "https://tracker-a.example/announce",
+                ],
+            }
+        ],
+    }
+    assert client.edited_trackers == []
+    assert client.removed_trackers == [
+        ("hash-a", ["https://tracker-a.example/announce"])
+    ]
+
+
+def test_replace_tracker_removes_extra_without_query_variants() -> None:
+    """Ensure dynamic source variants do not become duplicate targets."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce?sig=a"},
+                {"url": "https://tracker-a.example/announce?sig=b"},
+            ],
+        }
+    )
+
+    summary = replace_tracker_in_all(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+        dry_run=False,
+        match_mode="without-query",
+    )
+
+    assert summary == {
+        "scanned": 1,
+        "matched_source": 1,
+        "already_had_target": 0,
+        "modified": 1,
+        "replaced_urls": 1,
+        "removed_urls": 1,
+        "dry_run": False,
+    }
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "https://tracker-a.example/announce?sig=a",
+            "https://tracker-b.example/announce",
+        )
+    ]
+    assert client.removed_trackers == [
+        ("hash-a", ["https://tracker-a.example/announce?sig=b"])
+    ]
+
+
 class FakeQbitClient:
     """Provide the qBittorrent methods needed by tracker tests."""
 
@@ -373,6 +523,7 @@ class FakeQbitClient:
         """Store fake tracker data by torrent hash."""
         self.trackers_by_hash = trackers_by_hash
         self.removed_trackers: list[tuple[str, list[str]]] = []
+        self.edited_trackers: list[tuple[str, str, str]] = []
 
     def torrents_info(self) -> list[dict[str, str]]:
         """Return fake torrents."""
@@ -399,3 +550,12 @@ class FakeQbitClient:
         urls: str,
     ) -> None:
         """Record fake tracker additions."""
+
+    def torrents_edit_tracker(
+        self,
+        torrent_hash: str,
+        original_url: str,
+        new_url: str,
+    ) -> None:
+        """Record fake tracker replacements."""
+        self.edited_trackers.append((torrent_hash, original_url, new_url))

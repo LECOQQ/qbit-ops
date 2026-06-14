@@ -329,6 +329,124 @@ def remove_tracker_from_all(
     return summary
 
 
+def replace_tracker_in_all(
+    client: Any,
+    source_tracker: str,
+    target_tracker: str,
+    dry_run: bool = True,
+    match_mode: TrackerMatchMode = "exact",
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Replace a source tracker with a target on matching torrents."""
+    _ensure_distinct_tracker_identity(
+        source_tracker,
+        target_tracker,
+        match_mode,
+    )
+
+    scanned = 0
+    matched_source = 0
+    already_had_target = 0
+    modified = 0
+    replaced_urls = 0
+    removed_urls = 0
+    details: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        scanned += 1
+        torrent_hash = _get_torrent_hash(torrent)
+        torrent_name = _get_torrent_name(torrent)
+        trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
+        matching_source_urls = _get_matching_tracker_urls(
+            trackers,
+            source_tracker,
+            match_mode,
+        )
+
+        if not matching_source_urls:
+            continue
+
+        matched_source += 1
+        target_already_present = has_tracker(
+            trackers,
+            target_tracker,
+            match_mode,
+        )
+        source_urls_to_remove = matching_source_urls
+        source_url_to_replace = ""
+        action = "would_remove_source"
+
+        if target_already_present:
+            already_had_target += 1
+            log_prefix = "Would remove" if dry_run else "Removing"
+            logger.info(
+                "%s source tracker from %s because target is present",
+                log_prefix,
+                torrent_name,
+            )
+        else:
+            source_url_to_replace = matching_source_urls[0]
+            source_urls_to_remove = matching_source_urls[1:]
+            action = "would_replace"
+            log_prefix = "Would replace" if dry_run else "Replacing"
+            logger.info("%s tracker on: %s", log_prefix, torrent_name)
+
+        if not dry_run:
+            try:
+                if source_url_to_replace:
+                    client.torrents_edit_tracker(
+                        torrent_hash=torrent_hash,
+                        original_url=source_url_to_replace,
+                        new_url=target_tracker,
+                    )
+                    action = "replaced"
+
+                if source_urls_to_remove:
+                    client.torrents_remove_trackers(
+                        torrent_hash=torrent_hash,
+                        urls=source_urls_to_remove,
+                    )
+                    if not source_url_to_replace:
+                        action = "removed_source"
+            except Exception as error:
+                raise RuntimeError(
+                    "Failed to replace tracker on torrent "
+                    f"'{torrent_name}' ({torrent_hash}): {error}"
+                ) from error
+
+        replaced_urls += 1 if source_url_to_replace else 0
+        removed_urls += len(source_urls_to_remove)
+        modified += 1
+
+        if verbose:
+            details.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "action": action,
+                    "replaced_tracker_url": source_url_to_replace,
+                    "matching_tracker_urls": matching_source_urls,
+                    "removed_tracker_urls": source_urls_to_remove,
+                }
+            )
+
+    summary: dict[str, Any] = {
+        "scanned": scanned,
+        "matched_source": matched_source,
+        "already_had_target": already_had_target,
+        "modified": modified,
+        "replaced_urls": replaced_urls,
+        "removed_urls": removed_urls,
+        "dry_run": dry_run,
+    }
+    if verbose:
+        summary["details"] = details
+
+    return summary
+
+
 def _get_active_tracker_urls(trackers: Any) -> list[str]:
     """Extract non-disabled tracker URLs from qBittorrent tracker objects."""
     return [
@@ -358,6 +476,21 @@ def _is_disabled_tracker(tracker: Any) -> bool:
     """Return whether qBittorrent reports a tracker as disabled."""
     status = _get_field_as_string(tracker, "status").strip().lower()
     return status in {"0", "disabled"}
+
+
+def _ensure_distinct_tracker_identity(
+    source_tracker: str,
+    target_tracker: str,
+    match_mode: TrackerMatchMode,
+) -> None:
+    """Ensure source and target trackers are distinct for replacement."""
+    normalized_source = normalize_tracker_url(source_tracker, match_mode)
+    normalized_target = normalize_tracker_url(target_tracker, match_mode)
+
+    if normalized_source == normalized_target:
+        raise RuntimeError(
+            "Source and target trackers resolve to the same tracker identity."
+        )
 
 
 def _get_torrent_hash(torrent: Any) -> str:

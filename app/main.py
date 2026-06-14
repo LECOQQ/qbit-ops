@@ -16,6 +16,7 @@ from app.trackers import (
     inspect_tracker,
     list_tracker_usage,
     remove_tracker_from_all,
+    replace_tracker_in_all,
 )
 
 PROJECT_NAME = "qbit-ops"
@@ -214,6 +215,69 @@ def inspect(
     _exit_if_no_targeted_matches(report["matched_tracker"])
 
 
+@trackers_app.command()
+def replace(
+    source: Annotated[
+        str,
+        typer.Option(
+            "--source",
+            help="Source tracker to replace.",
+        ),
+    ],
+    target: Annotated[
+        str,
+        typer.Option(
+            "--target",
+            help="Target tracker to keep after replacement.",
+        ),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview replacements without modifying qBittorrent.",
+        ),
+    ] = True,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Replace a tracker on every torrent using it."""
+    _configure_logging()
+
+    try:
+        client = _create_qbit_client()
+        summary = replace_tracker_in_all(
+            client=client,
+            source_tracker=source,
+            target_tracker=target,
+            dry_run=dry_run,
+            match_mode=match.value,
+            verbose=verbose,
+        )
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    _print_replace_summary(summary)
+    _print_details(summary)
+    _exit_if_no_targeted_matches(summary["matched_source"])
+
+
 @trackers_app.command(name="export")
 def export_trackers(
     export_format: Annotated[
@@ -372,6 +436,18 @@ def _print_remove_summary(summary: dict[str, int | bool]) -> None:
     typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
 
 
+def _print_replace_summary(summary: dict[str, int | bool]) -> None:
+    """Print the final tracker replacement summary."""
+    typer.echo("Summary:")
+    typer.echo(f"- scanned: {summary['scanned']}")
+    typer.echo(f"- matched_source: {summary['matched_source']}")
+    typer.echo(f"- already_had_target: {summary['already_had_target']}")
+    typer.echo(f"- modified: {summary['modified']}")
+    typer.echo(f"- replaced_urls: {summary['replaced_urls']}")
+    typer.echo(f"- removed_urls: {summary['removed_urls']}")
+    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+
+
 def _print_details(summary: dict[str, Any]) -> None:
     """Print verbose operation details when available."""
     details = summary.get("details")
@@ -381,8 +457,12 @@ def _print_details(summary: dict[str, Any]) -> None:
     typer.echo("Details:")
     for item in details:
         typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
+        if item.get("replaced_tracker_url"):
+            typer.echo(f"  replaced: {item['replaced_tracker_url']}")
         for tracker_url in item.get("matching_tracker_urls", []):
             typer.echo(f"  - {tracker_url}")
+        for tracker_url in item.get("removed_tracker_urls", []):
+            typer.echo(f"  removed: {tracker_url}")
 
 
 if __name__ == "__main__":
