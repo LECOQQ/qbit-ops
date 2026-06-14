@@ -28,6 +28,57 @@ def list_torrents(client: Any) -> list[dict[str, Any]]:
     return torrents
 
 
+def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
+    """Return detailed torrent information when a hash matches."""
+    normalized_hash = torrent_hash.strip().lower()
+
+    for torrent in client.torrents_info():
+        current_hash = _get_field_as_string(torrent, "hash")
+        if current_hash.lower() != normalized_hash:
+            continue
+
+        trackers = _get_tracker_details(client.torrents_trackers(current_hash))
+        active_tracker_count = sum(
+            1 for tracker in trackers if not tracker["disabled"]
+        )
+
+        return {
+            "hash": current_hash,
+            "name": _get_field_as_string(torrent, "name"),
+            "state": _get_field_as_string(torrent, "state"),
+            "size": _get_field_as_int(torrent, "size"),
+            "progress": _get_field_as_float(torrent, "progress"),
+            "ratio": _get_field_as_float(torrent, "ratio"),
+            "save_path": _get_field_as_string(torrent, "save_path"),
+            "category": _get_field_as_string(torrent, "category"),
+            "added_on": _get_field_as_int(torrent, "added_on"),
+            "trackers": trackers,
+            "active_tracker_count": active_tracker_count,
+        }
+
+    return None
+
+
+def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
+    """Extract tracker URLs and status from qBittorrent tracker objects."""
+    tracker_details: list[dict[str, Any]] = []
+
+    for tracker in trackers:
+        tracker_url = _get_field_as_string(tracker, "url")
+        if tracker_url == "":
+            continue
+
+        tracker_details.append(
+            {
+                "url": tracker_url,
+                "status": _get_field_as_string(tracker, "status"),
+                "disabled": _is_disabled_tracker(tracker),
+            }
+        )
+
+    return tracker_details
+
+
 def _get_active_tracker_urls(trackers: Any) -> list[str]:
     """Extract non-disabled tracker URLs from qBittorrent tracker objects."""
     return [

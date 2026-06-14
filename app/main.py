@@ -10,7 +10,7 @@ import typer
 
 from app import __version__
 from app.config import ConfigError, load_qbit_config
-from app.torrents import list_torrents
+from app.torrents import inspect_torrent, list_torrents
 from app.trackers import (
     add_tracker_if_source_present,
     analyze_tracker_health,
@@ -154,6 +154,76 @@ def list_qbit_torrents(
 
     typer.echo("Summary:")
     typer.echo(f"- torrents: {len(torrents)}")
+
+
+@torrents_app.command(name="inspect")
+def inspect_qbit_torrent(
+    torrent_hash: Annotated[
+        str,
+        typer.Option(
+            "--hash",
+            help="Torrent hash to inspect.",
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
+    """Inspect a torrent and its trackers."""
+    try:
+        client = _create_qbit_client()
+        report = inspect_torrent(client, torrent_hash)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if report is None:
+        if output_format == OutputFormatOption.json:
+            typer.echo(
+                json.dumps(
+                    {"torrent": None, "hash": torrent_hash},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            typer.echo(f"No torrent found for hash: {torrent_hash}")
+
+        _exit_if_no_targeted_matches(0)
+        return
+
+    if output_format == OutputFormatOption.json:
+        typer.echo(json.dumps({"torrent": report}, indent=2, sort_keys=True))
+        return
+
+    progress = _format_percentage(report["progress"])
+    typer.echo(f"Torrent: {report['name']} ({report['hash']})")
+    typer.echo(f"- state: {report['state']}")
+    typer.echo(f"- progress: {progress}")
+    typer.echo(f"- ratio: {report['ratio']:.2f}")
+    typer.echo(f"- size: {report['size']}")
+    typer.echo(f"- save_path: {report['save_path']}")
+    typer.echo(f"- category: {report['category']}")
+    typer.echo(f"- added_on: {report['added_on']}")
+    typer.echo(f"- active_trackers: {report['active_tracker_count']}")
+
+    if report["trackers"]:
+        typer.echo("Trackers:")
+        for tracker in report["trackers"]:
+            status_label = "disabled" if tracker["disabled"] else "active"
+            typer.echo(
+                f"- {tracker['url']} "
+                f"status={tracker['status']} ({status_label})"
+            )
+    else:
+        typer.echo("Trackers: none")
 
 
 @trackers_app.command()
@@ -306,8 +376,8 @@ def health(
             typer.echo(f"- {tracker_url}")
 
 
-@trackers_app.command()
-def inspect(
+@trackers_app.command(name="inspect")
+def inspect_tracker_usage(
     tracker: Annotated[
         str,
         typer.Option(
@@ -322,6 +392,13 @@ def inspect(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
 ) -> None:
     """Inspect torrents using a tracker."""
     try:
@@ -337,6 +414,11 @@ def inspect(
         _fail(str(error))
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+        _exit_if_no_targeted_matches(report["matched_tracker"])
+        return
 
     if not report["torrents"]:
         typer.echo("No matching torrents found.")
