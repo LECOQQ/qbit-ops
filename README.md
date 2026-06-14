@@ -13,6 +13,8 @@ readable summaries.
 ## Features
 
 - Check qBittorrent connectivity from `.env`.
+- Diagnose qbit-ops configuration and qBittorrent API access.
+- List torrents with basic audit fields.
 - List trackers used by a qBittorrent instance.
 - Inspect torrents using a specific tracker.
 - Export the active tracker state as JSON.
@@ -150,6 +152,18 @@ Check connectivity:
 qbit-ops connection check
 ```
 
+Run configuration diagnostics:
+
+```bash
+qbit-ops config doctor
+```
+
+List torrents:
+
+```bash
+qbit-ops torrents list
+```
+
 List trackers:
 
 ```bash
@@ -196,6 +210,24 @@ Check connection settings:
 
 ```bash
 poetry run qbit-ops connection check
+```
+
+Run configuration diagnostics:
+
+```bash
+poetry run qbit-ops config doctor
+```
+
+List torrents:
+
+```bash
+poetry run qbit-ops torrents list
+```
+
+List torrents as JSON:
+
+```bash
+poetry run qbit-ops torrents list --output json
 ```
 
 List trackers with exact matching:
@@ -280,6 +312,8 @@ Use these commands to inspect the qBittorrent instance before changing it:
 
 ```bash
 poetry run qbit-ops connection check
+poetry run qbit-ops config doctor
+poetry run qbit-ops torrents list
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
 poetry run qbit-ops trackers inspect \

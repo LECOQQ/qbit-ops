@@ -10,6 +10,7 @@ import typer
 
 from app import __version__
 from app.config import ConfigError, load_qbit_config
+from app.torrents import list_torrents
 from app.trackers import (
     add_tracker_if_source_present,
     export_tracker_state,
@@ -22,9 +23,13 @@ from app.trackers import (
 PROJECT_NAME = "qbit-ops"
 
 app = typer.Typer(add_completion=False, help="Administer qBittorrent.")
+config_app = typer.Typer(help="Inspect qbit-ops configuration.")
 connection_app = typer.Typer(help="Check qBittorrent connectivity.")
+torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
+app.add_typer(config_app, name="config")
 app.add_typer(connection_app, name="connection")
+app.add_typer(torrents_app, name="torrents")
 app.add_typer(trackers_app, name="trackers")
 
 
@@ -49,6 +54,13 @@ class ExportFormatOption(StrEnum):
     json = "json"
 
 
+class OutputFormatOption(StrEnum):
+    """Expose generic output formats for Typer options."""
+
+    text = "text"
+    json = "json"
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Print the project name and version when no command is provided."""
@@ -70,6 +82,77 @@ def check() -> None:
         _fail(f"qBittorrent API error: {error}")
 
     typer.echo("Connection OK: qBittorrent is reachable with .env settings.")
+
+
+@config_app.command()
+def doctor() -> None:
+    """Check qbit-ops configuration and qBittorrent API access."""
+    try:
+        config = load_qbit_config()
+        client = _create_qbit_client()
+        qbit_version = _get_optional_client_value(client, "app_version")
+        web_api_version = _get_optional_client_value(
+            client,
+            "app_web_api_version",
+        )
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    typer.echo("Config doctor:")
+    typer.echo("- config: ok")
+    typer.echo(f"- host: {config.host}")
+    typer.echo("- authentication: ok")
+    typer.echo("- connection: ok")
+    typer.echo(f"- qbittorrent_version: {qbit_version}")
+    typer.echo(f"- web_api_version: {web_api_version}")
+
+
+@torrents_app.command(name="list")
+def list_qbit_torrents(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
+    """List torrents with useful audit fields."""
+    try:
+        client = _create_qbit_client()
+        torrents = list_torrents(client)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        typer.echo(json.dumps({"torrents": torrents}, indent=2, sort_keys=True))
+        return
+
+    if not torrents:
+        typer.echo("No torrents found.")
+    else:
+        typer.echo("Torrents:")
+        for torrent in torrents:
+            progress = _format_percentage(torrent["progress"])
+            typer.echo(
+                "- "
+                f"{torrent['name']} ({torrent['hash']}) "
+                f"state={torrent['state']} "
+                f"progress={progress} "
+                f"ratio={torrent['ratio']:.2f} "
+                f"trackers={torrent['tracker_count']}"
+            )
+
+    typer.echo("Summary:")
+    typer.echo(f"- torrents: {len(torrents)}")
 
 
 @trackers_app.command()
@@ -392,6 +475,25 @@ def _create_qbit_client() -> Any:
         ) from error
 
     return client
+
+
+def _get_optional_client_value(client: Any, method_name: str) -> str:
+    """Read an optional value from a qBittorrent API method."""
+    method = getattr(client, method_name, None)
+    if method is None:
+        return "unknown"
+
+    try:
+        value = method()
+    except Exception:
+        return "unknown"
+
+    return str(value)
+
+
+def _format_percentage(value: float) -> str:
+    """Format a 0-to-1 ratio as a percentage."""
+    return f"{value * 100:.1f}%"
 
 
 def _configure_logging() -> None:
