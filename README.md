@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 [![Version](https://img.shields.io/badge/version-0.0.1-blue.svg)](CHANGELOG.md)
 
 `qbit-ops` is a small qBittorrent operations CLI for homelab usage.
@@ -682,8 +682,11 @@ poetry run qbit-ops torrents reannounce \
   --dry-run
 ```
 
-`pause` and `resume` are idempotent: already paused or active torrents are
-reported in `skipped`.
+`pause` and `resume` are idempotent:
+
+- `pause` skips torrents already paused.
+- `resume` skips torrents that are not paused; active torrents are never
+  restarted.
 
 ## Matching Modes
 
@@ -859,10 +862,6 @@ make check
 
 Please keep changes small, explicit and aligned with the safety-first behavior
 of the CLI.
-
-## Versioning
-
-The current project version is stored in `VERSION` and `app/__init__.py`.
 
 ## License
 
