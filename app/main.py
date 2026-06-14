@@ -26,6 +26,7 @@ from app.torrents import (
     list_torrents,
     list_torrents_by_category,
     search_torrents_by_name,
+    validate_bulk_torrent_selection,
 )
 from app.trackers import (
     add_tracker_if_source_present,
@@ -447,7 +448,7 @@ def resume(
         bool,
         typer.Option(
             "--all",
-            help="Resume all paused torrents.",
+            help="Resume all stopped torrents.",
         ),
     ] = False,
     dry_run: Annotated[
@@ -479,6 +480,79 @@ def resume(
         tracker=tracker,
         name=name,
         select_all=select_all,
+        match=match,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
+
+@torrents_app.command()
+def start(
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category",
+            help="Start stopped torrents in a specific category.",
+        ),
+    ] = None,
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help="Start stopped torrents using a specific tracker.",
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Start stopped torrents matching a name query.",
+        ),
+    ] = None,
+    select_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Start all stopped torrents.",
+        ),
+    ] = False,
+    completed_only: Annotated[
+        bool,
+        typer.Option(
+            "--completed",
+            help="Start stopped completed torrents (Web UI Start All).",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview actions without modifying qBittorrent.",
+        ),
+    ] = True,
+    match: Annotated[
+        TrackerMatchModeOption,
+        typer.Option(
+            "--match",
+            help="Tracker comparison mode when --tracker is used.",
+        ),
+    ] = TrackerMatchModeOption.exact,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Start stopped torrents, including completed ones with --completed."""
+    _run_bulk_torrent_action(
+        action="start",
+        category=category,
+        tracker=tracker,
+        name=name,
+        select_all=select_all,
+        completed_only=completed_only,
         match=match,
         dry_run=dry_run,
         verbose=verbose,
@@ -1045,16 +1119,19 @@ def _run_bulk_torrent_action(
     match: TrackerMatchModeOption,
     dry_run: bool,
     verbose: bool,
+    completed_only: bool = False,
 ) -> None:
     """Execute a bulk torrent action with shared validation and output."""
-    active_filters = sum(
-        1 for value in (category, tracker, name) if value is not None
-    )
-    if select_all:
-        if active_filters > 0:
-            _fail("Use --all alone, without --category, --tracker, or --name.")
-    elif active_filters != 1:
-        _fail("Provide exactly one of --category, --tracker, --name, or --all.")
+    try:
+        validate_bulk_torrent_selection(
+            category=category,
+            tracker=tracker,
+            name=name,
+            select_all=select_all,
+            completed_only=completed_only,
+        )
+    except ValueError as error:
+        _fail(str(error))
 
     _configure_logging()
 
@@ -1068,6 +1145,7 @@ def _run_bulk_torrent_action(
             match_mode=match.value,
             name=name,
             select_all=select_all,
+            completed_only=completed_only,
             dry_run=dry_run,
             verbose=verbose,
         )

@@ -26,7 +26,7 @@ and readable summaries.
 - Add a tracker only when another tracker is already present.
 - Remove a tracker in bulk.
 - Replace a tracker in bulk without creating duplicate target trackers.
-- Pause, resume or reannounce torrents in bulk by category, tracker, name or all.
+- Pause, resume, start or reannounce torrents in bulk by category, tracker, name, completed or all.
 - Match trackers exactly or without query parameters.
 - Ignore disabled qBittorrent pseudo-trackers such as DHT, PeX and LSD.
 - Use `--output json` on all audit commands for scripting.
@@ -39,7 +39,7 @@ and readable summaries.
 - `--dry-run` is enabled by default for bulk modifications.
 - Real changes require `--no-dry-run`.
 - Bulk torrent actions require exactly one filter: `--category`, `--tracker`,
-  `--name` or `--all`.
+  `--name`, `--all` or `--completed` (on `start` only).
 - Tracker URLs are normalized before comparison.
 - `--match exact` is the default matching mode.
 - `--match without-query` must be requested explicitly.
@@ -649,10 +649,11 @@ poetry run qbit-ops trackers replace \
   --no-dry-run
 ```
 
-### Pause, resume or reannounce torrents in bulk
+### Pause, resume, start or reannounce torrents in bulk
 
-Use these commands to act on torrents filtered by category, tracker, name or all.
-Exactly one filter is required.
+Use these commands to act on torrents filtered by category, tracker, name,
+completed or all. Exactly one filter is required, except `--completed` which
+can also be combined with `--category`, `--tracker` or `--name`.
 
 Dry-run pause by category:
 
@@ -660,7 +661,14 @@ Dry-run pause by category:
 poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
 ```
 
-Apply resume to all paused torrents:
+Start all stopped completed torrents (qBittorrent Web UI equivalent):
+
+```bash
+poetry run qbit-ops torrents start --completed --dry-run --verbose
+poetry run qbit-ops torrents start --completed --no-dry-run
+```
+
+Apply resume to all stopped torrents:
 
 ```bash
 poetry run qbit-ops torrents resume --all --no-dry-run
@@ -682,11 +690,12 @@ poetry run qbit-ops torrents reannounce \
   --dry-run
 ```
 
-`pause` and `resume` are idempotent:
+`pause`, `resume` and `start` are idempotent:
 
-- `pause` skips torrents already paused.
-- `resume` skips torrents that are not paused; active torrents are never
-  restarted.
+- `pause` skips torrents already stopped (`paused*` or `stopped*` states).
+- `resume` and `start` skip torrents that are not stopped; active torrents are
+  never restarted.
+- `start --completed` only targets torrents with `progress=100%`.
 
 ## Matching Modes
 
@@ -811,8 +820,8 @@ Bulk torrent actions use a dedicated summary:
 
 ```text
 Summary:
-- action: pause|resume|reannounce
-- filter: category|tracker|name|all
+- action: pause|resume|start|reannounce
+- filter: category|tracker|name|completed|all
 - value: ...
 - match: exact|without-query
 - scanned: X
@@ -835,7 +844,7 @@ Exit code `2` is used when a command completes successfully but reports a
 non-error outcome that may still require attention:
 
 - `torrents inspect`, `torrents list --tracker`, `torrents list --category`,
-  `torrents pause`, `torrents resume`, `torrents reannounce`, `trackers inspect`,
+  `torrents pause`, `torrents resume`, `torrents start`, `torrents reannounce`, `trackers inspect`,
   `trackers add-if-present`, `trackers remove`, `trackers replace`: no torrent
   matched the requested criteria;
 - `backup diff`: the two exports differ.

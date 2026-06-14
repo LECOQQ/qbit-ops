@@ -9,7 +9,7 @@ from app.trackers import TrackerMatchMode, has_tracker
 
 logger = logging.getLogger(__name__)
 
-TorrentBulkAction = Literal["pause", "resume", "reannounce"]
+TorrentBulkAction = Literal["pause", "resume", "start", "reannounce"]
 
 
 def list_torrents(client: Any) -> list[dict[str, Any]]:
@@ -194,6 +194,7 @@ def apply_bulk_torrent_action(
     match_mode: TrackerMatchMode = "exact",
     name: str | None = None,
     select_all: bool = False,
+    completed_only: bool = False,
     dry_run: bool = True,
     verbose: bool = False,
 ) -> dict[str, Any]:
@@ -205,6 +206,7 @@ def apply_bulk_torrent_action(
         match_mode=match_mode,
         name=name,
         select_all=select_all,
+        completed_only=completed_only,
     )
     modified = 0
     skipped = 0
@@ -216,26 +218,15 @@ def apply_bulk_torrent_action(
         torrent_name = torrent["name"]
         torrent_state = torrent["state"]
 
-        if action == "pause" and _is_paused_state(torrent_state):
+        skip_action = _bulk_action_skip_reason(action, torrent_state)
+        if skip_action is not None:
             skipped += 1
             if verbose:
                 details.append(
                     {
                         "hash": torrent_hash,
                         "name": torrent_name,
-                        "action": "already_paused",
-                    }
-                )
-            continue
-
-        if action == "resume" and not _is_paused_state(torrent_state):
-            skipped += 1
-            if verbose:
-                details.append(
-                    {
-                        "hash": torrent_hash,
-                        "name": torrent_name,
-                        "action": "not_paused",
+                        "action": skip_action,
                     }
                 )
             continue
@@ -284,33 +275,35 @@ def select_torrents_for_bulk_action(
     match_mode: TrackerMatchMode = "exact",
     name: str | None = None,
     select_all: bool = False,
+    completed_only: bool = False,
 ) -> dict[str, Any]:
     """Select torrents for a bulk action using one filter."""
-    active_filters = [
-        filter_name
-        for filter_name, filter_value in (
-            ("category", category),
-            ("tracker", tracker),
-            ("name", name),
-        )
-        if filter_value is not None
-    ]
-    if select_all:
-        if active_filters:
-            raise ValueError(
-                "Use select_all alone, without category, tracker, or name."
-            )
-    elif len(active_filters) != 1:
-        raise ValueError(
-            "Provide exactly one of category, tracker, name, or select_all."
-        )
+    validate_bulk_torrent_selection(
+        category=category,
+        tracker=tracker,
+        name=name,
+        select_all=select_all,
+        completed_only=completed_only,
+    )
 
     selected_torrents: list[dict[str, Any]] = []
     scanned = 0
 
     for torrent in client.torrents_info():
         scanned += 1
-        if not select_all and not _torrent_matches_bulk_filter(
+        if completed_only and not _is_completed_torrent(torrent):
+            continue
+
+        if select_all or (
+            completed_only
+            and category is None
+            and tracker is None
+            and name is None
+        ):
+            selected_torrents.append(_build_bulk_torrent_entry(torrent))
+            continue
+
+        if not _torrent_matches_bulk_filter(
             client=client,
             torrent=torrent,
             category=category,
@@ -331,6 +324,7 @@ def select_torrents_for_bulk_action(
             match_mode=match_mode,
             name=name,
             select_all=select_all,
+            completed_only=completed_only,
         ),
         "scanned": scanned,
         "matched": len(selected_torrents),
@@ -357,11 +351,37 @@ def _build_bulk_selection_metadata(
     match_mode: TrackerMatchMode,
     name: str | None,
     select_all: bool = False,
+    completed_only: bool = False,
 ) -> dict[str, str]:
     """Describe which filter was used for a bulk torrent action."""
     if select_all:
         return {
             "filter": "all",
+            "value": "*",
+        }
+
+    if completed_only:
+        if category is not None:
+            return {
+                "filter": "completed+category",
+                "value": _format_category_label(category.strip()),
+            }
+
+        if tracker is not None:
+            return {
+                "filter": "completed+tracker",
+                "value": tracker.strip(),
+                "match": match_mode,
+            }
+
+        if name is not None:
+            return {
+                "filter": "completed+name",
+                "value": (name or "").strip(),
+            }
+
+        return {
+            "filter": "completed",
             "value": "*",
         }
 
@@ -422,7 +442,12 @@ def _call_bulk_torrent_action(
         client.torrents_pause(torrent_hashes)
         return
 
-    if action == "resume":
+    if action in ("resume", "start"):
+        start_method = getattr(client, "torrents_start", None)
+        if start_method is not None:
+            start_method(torrent_hashes)
+            return
+
         client.torrents_resume(torrent_hashes)
         return
 
@@ -448,9 +473,71 @@ def _bulk_action_result_name(
     return action
 
 
-def _is_paused_state(state: str) -> bool:
-    """Return whether qBittorrent reports a torrent as paused."""
-    return state.casefold().startswith("paused")
+def validate_bulk_torrent_selection(
+    *,
+    category: str | None,
+    tracker: str | None,
+    name: str | None,
+    select_all: bool,
+    completed_only: bool,
+) -> None:
+    """Ensure bulk torrent filters are mutually consistent."""
+    named_filters = sum(
+        1 for value in (category, tracker, name) if value is not None
+    )
+
+    if completed_only:
+        if select_all:
+            raise ValueError(
+                "Use --completed alone or with --category, --tracker, "
+                "or --name."
+            )
+        if named_filters > 1:
+            raise ValueError(
+                "Provide at most one of --category, --tracker, or --name "
+                "with --completed."
+            )
+        return
+
+    if select_all:
+        if named_filters > 0:
+            raise ValueError(
+                "Use --all alone, without --category, --tracker, or --name."
+            )
+        return
+
+    if named_filters != 1:
+        raise ValueError(
+            "Provide exactly one of category, tracker, name, select_all, "
+            "or completed_only."
+        )
+
+
+def _bulk_action_skip_reason(
+    action: TorrentBulkAction,
+    state: str,
+) -> str | None:
+    """Return a skip reason when a bulk action would be a no-op."""
+    if action == "pause" and _is_stopped_state(state):
+        return "already_stopped"
+
+    if action in ("resume", "start") and not _is_stopped_state(state):
+        return "already_running"
+
+    return None
+
+
+def _is_stopped_state(state: str) -> bool:
+    """Return whether qBittorrent reports a torrent as stopped."""
+    normalized_state = state.casefold()
+    return normalized_state.startswith("paused") or normalized_state.startswith(
+        "stopped"
+    )
+
+
+def _is_completed_torrent(torrent: Any) -> bool:
+    """Return whether qBittorrent reports a torrent as completed."""
+    return _get_field_as_float(torrent, "progress") >= 1.0
 
 
 def _build_torrent_details(
