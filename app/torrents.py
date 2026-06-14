@@ -7,26 +7,87 @@ from typing import Any
 
 def list_torrents(client: Any) -> list[dict[str, Any]]:
     """List torrents with useful audit fields."""
+    torrents = [
+        _build_torrent_audit_entry(client, torrent)
+        for torrent in client.torrents_info()
+    ]
+    torrents.sort(key=lambda item: item["name"].casefold())
+    return torrents
+
+
+def list_torrents_by_category(client: Any, category: str) -> dict[str, Any]:
+    """List torrents belonging to a category."""
+    scanned = 0
     torrents: list[dict[str, Any]] = []
+    normalized_category = category.strip()
 
     for torrent in client.torrents_info():
-        torrent_hash = _get_field_as_string(torrent, "hash")
-        trackers = _get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
-        torrents.append(
-            {
-                "hash": torrent_hash,
-                "name": _get_field_as_string(torrent, "name"),
-                "state": _get_field_as_string(torrent, "state"),
-                "size": _get_field_as_int(torrent, "size"),
-                "progress": _get_field_as_float(torrent, "progress"),
-                "ratio": _get_field_as_float(torrent, "ratio"),
-                "tracker_count": len(trackers),
-            }
-        )
+        scanned += 1
+        torrent_category = _get_field_as_string(torrent, "category")
+        if not _category_matches(torrent_category, normalized_category):
+            continue
 
-    return torrents
+        torrents.append(_build_torrent_audit_entry(client, torrent))
+
+    torrents.sort(key=lambda item: item["name"].casefold())
+
+    return {
+        "category": _format_category_label(normalized_category),
+        "scanned": scanned,
+        "matched": len(torrents),
+        "torrents": torrents,
+    }
+
+
+def list_category_usage(client: Any) -> dict[str, int]:
+    """List categories and count torrents in each one."""
+    category_usage: dict[str, int] = {}
+
+    for torrent in client.torrents_info():
+        category = _format_category_label(
+            _get_field_as_string(torrent, "category")
+        )
+        category_usage[category] = category_usage.get(category, 0) + 1
+
+    return dict(sorted(category_usage.items()))
+
+
+UNCATEGORIZED_LABEL = "(uncategorized)"
+
+
+def _build_torrent_audit_entry(client: Any, torrent: Any) -> dict[str, Any]:
+    """Build standard audit fields for one torrent."""
+    torrent_hash = _get_field_as_string(torrent, "hash")
+    trackers = _get_active_tracker_urls(client.torrents_trackers(torrent_hash))
+
+    return {
+        "hash": torrent_hash,
+        "name": _get_field_as_string(torrent, "name"),
+        "category": _format_category_label(
+            _get_field_as_string(torrent, "category")
+        ),
+        "state": _get_field_as_string(torrent, "state"),
+        "size": _get_field_as_int(torrent, "size"),
+        "progress": _get_field_as_float(torrent, "progress"),
+        "ratio": _get_field_as_float(torrent, "ratio"),
+        "tracker_count": len(trackers),
+    }
+
+
+def _category_matches(torrent_category: str, requested_category: str) -> bool:
+    """Return whether a torrent category matches the requested filter."""
+    if requested_category.casefold() == UNCATEGORIZED_LABEL.casefold():
+        return torrent_category.strip() == ""
+
+    return torrent_category.casefold() == requested_category.casefold()
+
+
+def _format_category_label(category: str) -> str:
+    """Normalize category labels for display and comparison."""
+    if category.strip() == "":
+        return UNCATEGORIZED_LABEL
+
+    return category.strip()
 
 
 def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
