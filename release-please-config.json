@@ -5,7 +5,6 @@
       "release-type": "python",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "README.md",
         {
           "type": "toml",
           "path": "pyproject.toml",
