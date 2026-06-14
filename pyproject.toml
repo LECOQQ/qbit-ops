@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "qbit-ops"
-version = "0.1.0"
+version = "0.2.0"
 description = "qBittorrent administration CLI for homelab operations."
 authors = []
 readme = "README.md"
@@ -56,5 +56,5 @@ addopts = "-q --maxfail=1 --disable-warnings"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.1.0"
+version = "0.2.0"
 tag_format = "v$version"

@@ -3,7 +3,7 @@
 [![CI](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](CHANGELOG.md) <!-- x-release-please-version -->
+[![Version](https://img.shields.io/badge/version-0.2.0)](CHANGELOG.md) <!-- x-release-please-version -->
 
 `qbit-ops` is a small qBittorrent operations CLI for homelab usage.
 
