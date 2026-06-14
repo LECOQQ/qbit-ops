@@ -26,7 +26,7 @@ and readable summaries.
 - Add a tracker only when another tracker is already present.
 - Remove a tracker in bulk.
 - Replace a tracker in bulk without creating duplicate target trackers.
-- Pause, resume or reannounce torrents in bulk by category, tracker or name.
+- Pause, resume or reannounce torrents in bulk by category, tracker, name or all.
 - Match trackers exactly or without query parameters.
 - Ignore disabled qBittorrent pseudo-trackers such as DHT, PeX and LSD.
 - Use `--output json` on all audit commands for scripting.
@@ -38,8 +38,8 @@ and readable summaries.
 
 - `--dry-run` is enabled by default for bulk modifications.
 - Real changes require `--no-dry-run`.
-- Bulk torrent actions require exactly one filter: `--category`, `--tracker` or
-  `--name`.
+- Bulk torrent actions require exactly one filter: `--category`, `--tracker`,
+  `--name` or `--all`.
 - Tracker URLs are normalized before comparison.
 - `--match exact` is the default matching mode.
 - `--match without-query` must be requested explicitly.
@@ -651,13 +651,19 @@ poetry run qbit-ops trackers replace \
 
 ### Pause, resume or reannounce torrents in bulk
 
-Use these commands to act on torrents filtered by category, tracker or name.
+Use these commands to act on torrents filtered by category, tracker, name or all.
 Exactly one filter is required.
 
 Dry-run pause by category:
 
 ```bash
 poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
+```
+
+Apply resume to all paused torrents:
+
+```bash
+poetry run qbit-ops torrents resume --all --no-dry-run
 ```
 
 Apply resume by tracker:
@@ -803,7 +809,7 @@ Bulk torrent actions use a dedicated summary:
 ```text
 Summary:
 - action: pause|resume|reannounce
-- filter: category|tracker|name
+- filter: category|tracker|name|all
 - value: ...
 - match: exact|without-query
 - scanned: X

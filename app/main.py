@@ -378,6 +378,13 @@ def pause(
             help="Pause torrents matching a name query.",
         ),
     ] = None,
+    select_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Pause all torrents.",
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -400,12 +407,13 @@ def pause(
         ),
     ] = False,
 ) -> None:
-    """Pause torrents matching a category, tracker or name filter."""
+    """Pause torrents matching a category, tracker, name filter, or all."""
     _run_bulk_torrent_action(
         action="pause",
         category=category,
         tracker=tracker,
         name=name,
+        select_all=select_all,
         match=match,
         dry_run=dry_run,
         verbose=verbose,
@@ -435,6 +443,13 @@ def resume(
             help="Resume torrents matching a name query.",
         ),
     ] = None,
+    select_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Resume all paused torrents.",
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -457,12 +472,13 @@ def resume(
         ),
     ] = False,
 ) -> None:
-    """Resume paused torrents matching a category, tracker or name filter."""
+    """Resume torrents matching a category, tracker, name filter, or all."""
     _run_bulk_torrent_action(
         action="resume",
         category=category,
         tracker=tracker,
         name=name,
+        select_all=select_all,
         match=match,
         dry_run=dry_run,
         verbose=verbose,
@@ -492,6 +508,13 @@ def reannounce(
             help="Reannounce torrents matching a name query.",
         ),
     ] = None,
+    select_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Reannounce all torrents.",
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -514,12 +537,13 @@ def reannounce(
         ),
     ] = False,
 ) -> None:
-    """Reannounce torrents matching a category, tracker or name filter."""
+    """Reannounce torrents matching a category, tracker, name filter, or all."""
     _run_bulk_torrent_action(
         action="reannounce",
         category=category,
         tracker=tracker,
         name=name,
+        select_all=select_all,
         match=match,
         dry_run=dry_run,
         verbose=verbose,
@@ -1017,6 +1041,7 @@ def _run_bulk_torrent_action(
     category: str | None,
     tracker: str | None,
     name: str | None,
+    select_all: bool,
     match: TrackerMatchModeOption,
     dry_run: bool,
     verbose: bool,
@@ -1025,8 +1050,11 @@ def _run_bulk_torrent_action(
     active_filters = sum(
         1 for value in (category, tracker, name) if value is not None
     )
-    if active_filters != 1:
-        _fail("Provide exactly one of --category, --tracker, or --name.")
+    if select_all:
+        if active_filters > 0:
+            _fail("Use --all alone, without --category, --tracker, or --name.")
+    elif active_filters != 1:
+        _fail("Provide exactly one of --category, --tracker, --name, or --all.")
 
     _configure_logging()
 
@@ -1039,6 +1067,7 @@ def _run_bulk_torrent_action(
             tracker=tracker,
             match_mode=match.value,
             name=name,
+            select_all=select_all,
             dry_run=dry_run,
             verbose=verbose,
         )
