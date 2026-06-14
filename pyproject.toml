@@ -56,6 +56,5 @@ addopts = "-q --maxfail=1 --disable-warnings"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.0.1"
+version = "0.1.0"
 tag_format = "v$version"
-version_files = ["app/__init__.py:__version__"]

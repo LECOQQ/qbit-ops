@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint version
+.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint
 
 doctor: ## Check required local tools
 	@missing=0; \
@@ -29,7 +29,7 @@ doctor: ## Check required local tools
 
 info: ## Show project and environment information
 	@printf 'Project: %s\n' "$(PROJECT_NAME)"
-	@printf 'Version: %s\n' "$$(tr -d '[:space:]' < VERSION)"
+	@printf 'Version: %s\n' "$$(poetry version -s 2>/dev/null || echo unknown)"
 	@printf 'Profile: %s\n' "$(PROFILE)"
 	@printf 'Stack: %s\n' "$(STACK)"
 	@printf 'Python: %s\n' "$$(python3 --version 2>&1)"
@@ -70,10 +70,3 @@ ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 
 ci-entrypoint: ## Verify the CLI entrypoint responds
 	@$(PY) qbit-ops --help
-
-version: ## Set the POC release version with VERSION=x.y.z
-	@test -n "$(VERSION)" || { \
-		printf 'ERROR: VERSION is required (example: make version VERSION=0.1.0)\n' >&2; \
-		exit 1; \
-	}
-	@python3 tooling/python/set_project_version.py "$(VERSION)"
