@@ -167,6 +167,71 @@ def export_tracker_state(
     }
 
 
+def analyze_tracker_health(client: Any) -> dict[str, Any]:
+    """Analyze tracker health across all torrents."""
+    scanned = 0
+    active_tracker_occurrences = 0
+    disabled_tracker_occurrences = 0
+    exact_trackers: set[str] = set()
+    logical_trackers: set[str] = set()
+    disabled_trackers: set[str] = set()
+    query_variants: dict[str, dict[str, set[str]]] = {}
+
+    for torrent in client.torrents_info():
+        scanned += 1
+        torrent_hash = _get_torrent_hash(torrent)
+        torrent_name = _get_torrent_name(torrent)
+
+        for tracker in client.torrents_trackers(torrent_hash):
+            tracker_url = _get_field_as_string(tracker, "url")
+            if tracker_url == "":
+                continue
+
+            if _is_disabled_tracker(tracker):
+                disabled_tracker_occurrences += 1
+                disabled_trackers.add(tracker_url)
+                continue
+
+            active_tracker_occurrences += 1
+            exact_tracker = normalize_tracker_url(tracker_url)
+            logical_tracker = normalize_tracker_url(
+                tracker_url,
+                "without-query",
+            )
+            exact_trackers.add(exact_tracker)
+            logical_trackers.add(logical_tracker)
+
+            group = query_variants.setdefault(
+                logical_tracker,
+                {"variants": set(), "torrents": set()},
+            )
+            group["variants"].add(exact_tracker)
+            group["torrents"].add(f"{torrent_name} ({torrent_hash})")
+
+    query_variant_groups = [
+        {
+            "tracker": tracker_url,
+            "variants": sorted(group["variants"]),
+            "torrents": sorted(group["torrents"]),
+        }
+        for tracker_url, group in sorted(query_variants.items())
+        if len(group["variants"]) > 1
+    ]
+
+    return {
+        "summary": {
+            "scanned": scanned,
+            "active_tracker_occurrences": active_tracker_occurrences,
+            "disabled_tracker_occurrences": disabled_tracker_occurrences,
+            "unique_exact_trackers": len(exact_trackers),
+            "unique_logical_trackers": len(logical_trackers),
+            "query_variant_groups": len(query_variant_groups),
+        },
+        "disabled_trackers": sorted(disabled_trackers),
+        "query_variant_groups": query_variant_groups,
+    }
+
+
 def add_tracker_if_source_present(
     client: Any,
     source_tracker: str,
