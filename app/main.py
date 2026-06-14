@@ -13,6 +13,7 @@ from app.config import ConfigError, load_qbit_config
 from app.torrents import list_torrents
 from app.trackers import (
     add_tracker_if_source_present,
+    analyze_tracker_health,
     export_tracker_state,
     inspect_tracker,
     list_tracker_usage,
@@ -249,6 +250,60 @@ def list_trackers(
 
     typer.echo("Summary:")
     typer.echo(f"- trackers: {len(tracker_usage)}")
+
+
+@trackers_app.command()
+def health(
+    output_format: Annotated[
+        OutputFormatOption,
+        typer.Option(
+            "--output",
+            help="Output format.",
+        ),
+    ] = OutputFormatOption.text,
+) -> None:
+    """Analyze tracker health across the qBittorrent instance."""
+    try:
+        client = _create_qbit_client()
+        report = analyze_tracker_health(client)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if output_format == OutputFormatOption.json:
+        typer.echo(json.dumps(report, indent=2, sort_keys=True))
+        return
+
+    summary = report["summary"]
+    typer.echo("Tracker health:")
+    typer.echo(f"- scanned: {summary['scanned']}")
+    typer.echo(
+        f"- active_tracker_occurrences: {summary['active_tracker_occurrences']}"
+    )
+    typer.echo(
+        "- disabled_tracker_occurrences: "
+        f"{summary['disabled_tracker_occurrences']}"
+    )
+    typer.echo(f"- unique_exact_trackers: {summary['unique_exact_trackers']}")
+    typer.echo(
+        f"- unique_logical_trackers: {summary['unique_logical_trackers']}"
+    )
+    typer.echo(f"- query_variant_groups: {summary['query_variant_groups']}")
+
+    if report["query_variant_groups"]:
+        typer.echo("Query variant groups:")
+        for group in report["query_variant_groups"]:
+            typer.echo(f"- {group['tracker']}")
+            for variant in group["variants"]:
+                typer.echo(f"  - {variant}")
+
+    if report["disabled_trackers"]:
+        typer.echo("Disabled trackers:")
+        for tracker_url in report["disabled_trackers"]:
+            typer.echo(f"- {tracker_url}")
 
 
 @trackers_app.command()

@@ -16,6 +16,7 @@ readable summaries.
 - Diagnose qbit-ops configuration and qBittorrent API access.
 - List torrents with basic audit fields.
 - List trackers used by a qBittorrent instance.
+- Analyze tracker health, disabled trackers and dynamic query variants.
 - Inspect torrents using a specific tracker.
 - Export the active tracker state as JSON.
 - Add a tracker only when another tracker is already present.
@@ -188,6 +189,12 @@ Group dynamic tracker URLs without query parameters:
 qbit-ops trackers list --match without-query
 ```
 
+Analyze tracker health:
+
+```bash
+qbit-ops trackers health
+```
+
 When working from a Poetry development environment, prefix commands with
 `poetry run`, for example:
 
@@ -240,6 +247,18 @@ List trackers grouped without query parameters:
 
 ```bash
 poetry run qbit-ops trackers list --match without-query
+```
+
+Analyze tracker health:
+
+```bash
+poetry run qbit-ops trackers health
+```
+
+Analyze tracker health as JSON:
+
+```bash
+poetry run qbit-ops trackers health --output json
 ```
 
 Inspect torrents using a tracker:
@@ -316,6 +335,7 @@ poetry run qbit-ops config doctor
 poetry run qbit-ops torrents list
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
+poetry run qbit-ops trackers health
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
 poetry run qbit-ops trackers export
@@ -442,6 +462,24 @@ poetry run qbit-ops trackers replace \
 
 Both modes preserve the raw qBittorrent URLs for API operations. This matters
 for remove operations, because qBittorrent expects the original tracker URLs.
+
+## Tracker Health
+
+`trackers health` reports:
+
+- scanned torrents;
+- active tracker occurrences;
+- disabled tracker occurrences;
+- unique exact tracker URLs;
+- unique logical tracker URLs without query parameters;
+- query variant groups;
+- disabled tracker URLs such as DHT, PeX or LSD.
+
+Use JSON output when the report should be consumed by another tool:
+
+```bash
+qbit-ops trackers health --output json
+```
 
 ## Output
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from app.trackers import (
     add_tracker_if_source_present,
+    analyze_tracker_health,
     export_tracker_state,
     has_tracker,
     inspect_tracker,
@@ -130,6 +131,47 @@ def test_list_tracker_usage_ignores_disabled_trackers() -> None:
 
     assert list_tracker_usage(client) == {
         "https://tracker.example/announce": 1,
+    }
+
+
+def test_analyze_tracker_health_reports_variants_and_disabled() -> None:
+    """Ensure tracker health reports query variants and disabled trackers."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.example/announce?sig=a"},
+                {"url": "** [DHT] **", "status": "0"},
+            ],
+            "hash-b": [
+                {"url": "https://tracker.example/announce?sig=b"},
+                {"url": "https://other.example/announce"},
+            ],
+        }
+    )
+
+    assert analyze_tracker_health(client) == {
+        "summary": {
+            "scanned": 2,
+            "active_tracker_occurrences": 3,
+            "disabled_tracker_occurrences": 1,
+            "unique_exact_trackers": 3,
+            "unique_logical_trackers": 2,
+            "query_variant_groups": 1,
+        },
+        "disabled_trackers": ["** [DHT] **"],
+        "query_variant_groups": [
+            {
+                "tracker": "https://tracker.example/announce",
+                "variants": [
+                    "https://tracker.example/announce?sig=a",
+                    "https://tracker.example/announce?sig=b",
+                ],
+                "torrents": [
+                    "hash-a (hash-a)",
+                    "hash-b (hash-b)",
+                ],
+            }
+        ],
     }
 
 
