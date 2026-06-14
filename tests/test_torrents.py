@@ -428,7 +428,73 @@ def test_apply_bulk_torrent_action_resumes_paused_torrents() -> None:
 
     assert summary["modified"] == 1
     assert summary["skipped"] == 1
-    assert client.resumed_hashes == [["hash-a"]]
+    assert client.started_hashes == [["hash-a"]]
+
+
+def test_apply_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
+    """Ensure bulk resume handles qBittorrent 5 stopped states."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Torrent A",
+                "category": "sonarr",
+                "state": "stoppedUP",
+                "progress": 1.0,
+            }
+        ],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="resume",
+        select_all=True,
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert client.started_hashes == [["hash-a"]]
+
+
+def test_apply_bulk_torrent_action_starts_completed_torrents() -> None:
+    """Ensure start --completed targets stopped completed torrents only."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": "hash-a",
+                "name": "Completed stopped",
+                "state": "stoppedUP",
+                "progress": 1.0,
+            },
+            {
+                "hash": "hash-b",
+                "name": "Completed running",
+                "state": "stalledUP",
+                "progress": 1.0,
+            },
+            {
+                "hash": "hash-c",
+                "name": "Incomplete stopped",
+                "state": "stoppedDL",
+                "progress": 0.5,
+            },
+        ],
+        trackers_by_hash={"hash-a": [], "hash-b": [], "hash-c": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="start",
+        completed_only=True,
+        dry_run=False,
+    )
+
+    assert summary["selection"] == {"filter": "completed", "value": "*"}
+    assert summary["matched"] == 2
+    assert summary["modified"] == 1
+    assert summary["skipped"] == 1
+    assert client.started_hashes == [["hash-a"]]
 
 
 def test_apply_bulk_torrent_action_reannounces_by_tracker() -> None:
@@ -504,7 +570,7 @@ def test_select_all_rejects_combined_filters() -> None:
 
     with pytest.raises(
         ValueError,
-        match="Use select_all alone, without category, tracker, or name.",
+        match="Use --all alone, without --category, --tracker, or --name.",
     ):
         apply_bulk_torrent_action(
             client=client,
@@ -580,6 +646,7 @@ class FakeQbitClient:
         self.trackers_by_hash = trackers_by_hash
         self.paused_hashes: list[str | list[str]] = []
         self.resumed_hashes: list[str | list[str]] = []
+        self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
 
     def torrents_info(self) -> list[dict[str, Any]]:
@@ -597,6 +664,10 @@ class FakeQbitClient:
     def torrents_resume(self, torrent_hashes: str | list[str]) -> None:
         """Record fake torrent resumes."""
         self.resumed_hashes.append(torrent_hashes)
+
+    def torrents_start(self, torrent_hashes: str | list[str]) -> None:
+        """Record fake torrent starts."""
+        self.started_hashes.append(torrent_hashes)
 
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
         """Record fake torrent reannouncements."""
