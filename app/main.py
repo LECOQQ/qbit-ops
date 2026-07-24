@@ -20,6 +20,7 @@ from app.backup import (
     load_export_file,
 )
 from app.config import ConfigError, load_qbit_config
+from app.selectors import AmbiguousTorrentHashError
 from app.status import (
     StatusSnapshot,
     build_unavailable_snapshot,
@@ -50,6 +51,7 @@ from app.trackers import (
 )
 from app.ui import (
     OutputFormat,
+    print_ambiguous_hash_error,
     print_error,
     print_summary,
     print_table,
@@ -332,6 +334,7 @@ def list_qbit_torrents(
         "Torrents",
         ["Name", "Hash", "Category", "State", "Progress", "Ratio", "Trackers"],
         [_torrent_audit_row(torrent) for torrent in torrents],
+        fold_columns={"Hash"},
     )
     print_summary({"torrents": len(torrents)})
 
@@ -387,7 +390,7 @@ def inspect_qbit_torrent(
         str | None,
         typer.Option(
             "--hash",
-            help="Torrent hash to inspect.",
+            help="Complete torrent hash or unambiguous prefix to inspect.",
         ),
     ] = None,
     name: Annotated[
@@ -412,7 +415,7 @@ def inspect_qbit_torrent(
         ),
     ] = OutputFormatOption.text,
 ) -> None:
-    """Inspect a torrent by hash or search torrents by name."""
+    """Inspect a torrent by hash (or prefix) or search torrents by name."""
     if (torrent_hash is None) == (name is None):
         _fail("Provide exactly one of --hash or --name.")
 
@@ -425,6 +428,8 @@ def inspect_qbit_torrent(
             return
 
         report = inspect_torrent(client, torrent_hash or "")
+    except AmbiguousTorrentHashError as error:
+        _fail_ambiguous_hash(error)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -450,6 +455,14 @@ def inspect_qbit_torrent(
 
 @torrents_app.command()
 def pause(
+    torrent_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--hash",
+            help="Pause the torrent matching a complete hash or unique "
+            "prefix.",
+        ),
+    ] = None,
     category: Annotated[
         str | None,
         typer.Option(
@@ -462,13 +475,6 @@ def pause(
         typer.Option(
             "--tracker",
             help="Pause torrents using a specific tracker.",
-        ),
-    ] = None,
-    name: Annotated[
-        str | None,
-        typer.Option(
-            "--name",
-            help="Pause torrents matching a name query.",
         ),
     ] = None,
     select_all: Annotated[
@@ -500,12 +506,12 @@ def pause(
         ),
     ] = False,
 ) -> None:
-    """Pause torrents matching a category, tracker, name filter, or all."""
+    """Pause torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
         action="pause",
+        torrent_hash=torrent_hash,
         category=category,
         tracker=tracker,
-        name=name,
         select_all=select_all,
         match=match,
         dry_run=dry_run,
@@ -515,6 +521,14 @@ def pause(
 
 @torrents_app.command()
 def resume(
+    torrent_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--hash",
+            help="Resume the torrent matching a complete hash or unique "
+            "prefix.",
+        ),
+    ] = None,
     category: Annotated[
         str | None,
         typer.Option(
@@ -527,13 +541,6 @@ def resume(
         typer.Option(
             "--tracker",
             help="Resume torrents using a specific tracker.",
-        ),
-    ] = None,
-    name: Annotated[
-        str | None,
-        typer.Option(
-            "--name",
-            help="Resume torrents matching a name query.",
         ),
     ] = None,
     select_all: Annotated[
@@ -565,12 +572,12 @@ def resume(
         ),
     ] = False,
 ) -> None:
-    """Resume torrents matching a category, tracker, name filter, or all."""
+    """Resume torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
         action="resume",
+        torrent_hash=torrent_hash,
         category=category,
         tracker=tracker,
-        name=name,
         select_all=select_all,
         match=match,
         dry_run=dry_run,
@@ -580,6 +587,14 @@ def resume(
 
 @torrents_app.command()
 def start(
+    torrent_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--hash",
+            help="Start the torrent matching a complete hash or unique "
+            "prefix.",
+        ),
+    ] = None,
     category: Annotated[
         str | None,
         typer.Option(
@@ -592,13 +607,6 @@ def start(
         typer.Option(
             "--tracker",
             help="Start stopped torrents using a specific tracker.",
-        ),
-    ] = None,
-    name: Annotated[
-        str | None,
-        typer.Option(
-            "--name",
-            help="Start stopped torrents matching a name query.",
         ),
     ] = None,
     select_all: Annotated[
@@ -640,9 +648,9 @@ def start(
     """Start stopped torrents, including completed ones with --completed."""
     _run_bulk_torrent_action(
         action="start",
+        torrent_hash=torrent_hash,
         category=category,
         tracker=tracker,
-        name=name,
         select_all=select_all,
         completed_only=completed_only,
         match=match,
@@ -653,6 +661,14 @@ def start(
 
 @torrents_app.command()
 def reannounce(
+    torrent_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--hash",
+            help="Reannounce the torrent matching a complete hash or "
+            "unique prefix.",
+        ),
+    ] = None,
     category: Annotated[
         str | None,
         typer.Option(
@@ -665,13 +681,6 @@ def reannounce(
         typer.Option(
             "--tracker",
             help="Reannounce torrents using a specific tracker.",
-        ),
-    ] = None,
-    name: Annotated[
-        str | None,
-        typer.Option(
-            "--name",
-            help="Reannounce torrents matching a name query.",
         ),
     ] = None,
     select_all: Annotated[
@@ -703,12 +712,12 @@ def reannounce(
         ),
     ] = False,
 ) -> None:
-    """Reannounce torrents matching a category, tracker, name filter, or all."""
+    """Reannounce torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
         action="reannounce",
+        torrent_hash=torrent_hash,
         category=category,
         tracker=tracker,
-        name=name,
         select_all=select_all,
         match=match,
         dry_run=dry_run,
@@ -948,6 +957,7 @@ def inspect_tracker_usage(
                 ]
                 for torrent in report["torrents"]
             ],
+            fold_columns={"Hash"},
         )
 
     print_summary(
@@ -1283,9 +1293,9 @@ def remove(
 def _run_bulk_torrent_action(
     *,
     action: TorrentBulkAction,
+    torrent_hash: str | None,
     category: str | None,
     tracker: str | None,
-    name: str | None,
     select_all: bool,
     match: TrackerMatchModeOption,
     dry_run: bool,
@@ -1295,9 +1305,9 @@ def _run_bulk_torrent_action(
     """Execute a bulk torrent action with shared validation and output."""
     try:
         validate_bulk_torrent_selection(
+            torrent_hash=torrent_hash,
             category=category,
             tracker=tracker,
-            name=name,
             select_all=select_all,
             completed_only=completed_only,
         )
@@ -1312,16 +1322,18 @@ def _run_bulk_torrent_action(
             summary = apply_bulk_torrent_action(
                 client=client,
                 action=action,
+                torrent_hash=torrent_hash,
                 category=category,
                 tracker=tracker,
                 match_mode=match.value,
-                name=name,
                 select_all=select_all,
                 completed_only=completed_only,
                 dry_run=dry_run,
                 verbose=verbose,
                 on_progress=on_progress,
             )
+    except AmbiguousTorrentHashError as error:
+        _fail_ambiguous_hash(error)
     except ValueError as error:
         _fail(str(error))
     except ConfigError as error:
@@ -1531,6 +1543,7 @@ def _print_torrents_for_category(
                 "Trackers",
             ],
             [_torrent_audit_row(torrent) for torrent in report["torrents"]],
+            fold_columns={"Hash"},
         )
 
     print_summary({"scanned": report["scanned"], "matched": report["matched"]})
@@ -1583,6 +1596,7 @@ def _print_torrents_for_tracker(
                 ]
                 for torrent in report["torrents"]
             ],
+            fold_columns={"Hash"},
         )
 
     print_summary(
@@ -1654,6 +1668,7 @@ def _print_torrent_name_search(
             ]
             for match in report["matches"]
         ],
+        fold_columns={"Hash"},
     )
 
 
@@ -1756,6 +1771,16 @@ def _configure_logging() -> None:
 def _fail(message: str) -> NoReturn:
     """Print an actionable error and exit with a failure code."""
     print_error(message)
+    raise typer.Exit(code=ExitCode.ERROR)
+
+
+def _fail_ambiguous_hash(error: AmbiguousTorrentHashError) -> NoReturn:
+    """Print ambiguous hash candidates and exit with a failure code.
+
+    Deliberately reuses `ExitCode.ERROR` rather than introducing a new
+    ambiguity-specific exit code: see docs/DECISIONS.md.
+    """
+    print_ambiguous_hash_error(error.value, error.candidates)
     raise typer.Exit(code=ExitCode.ERROR)
 
 

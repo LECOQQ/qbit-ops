@@ -101,15 +101,65 @@ poetry run qbit-ops torrents inspect \
 ```
 
 `torrents inspect --name` ranks matches by relevance: exact match, prefix
-match, substring match, then fuzzy similarity. Use `--hash` once you know the
-torrent; use `--name` to find candidates first.
+match, substring match, then fuzzy similarity. It is **read-only discovery
+only** — a way to find a hash, not a way to target a mutation. `torrents
+inspect --hash` now also accepts a complete hash or an unambiguous prefix
+(not only a full hash), matched case-insensitively; an ambiguous prefix
+fails with the candidate list instead of guessing.
 
 ### Bulk torrent actions
 
-`pause`, `resume`, `start` and `reannounce` act on torrents filtered by
-`--category`, `--tracker`, `--name`, `--all`, or `--completed` (`start`
-only). Exactly one filter is required, except `--completed`, which can also
-combine with `--category`, `--tracker` or `--name`.
+`pause`, `resume`, `start` and `reannounce` act on torrents targeted by
+`--hash`, `--category`, `--tracker`, `--all`, or `--completed` (`start`
+only). Exactly one targeting mode is required. `--hash` is always used
+alone: it resolves to a single torrent, so it cannot combine with
+`--category`, `--tracker`, `--all`, or `--completed`. `--completed` is the
+only mode that can still combine with `--category` or `--tracker`.
+
+**`--hash` is the safe, canonical way to target one torrent** — a complete
+infohash or an unambiguous prefix, resolved case-insensitively:
+
+```bash
+poetry run qbit-ops torrents inspect --name "debian"      # 1. discover
+poetry run qbit-ops torrents reannounce --hash abc123 --dry-run   # 2. act
+poetry run qbit-ops torrents reannounce --hash abc123 --no-dry-run
+```
+
+Resolution rules:
+
+1. No torrent matches the hash or prefix → the command matches nothing and
+   exits with the existing no-match exit code (`2`); no mutation is
+   attempted.
+2. Exactly one torrent matches → it resolves to the complete hash and the
+   action proceeds normally. The resolved full hash is shown in the
+   command's summary output (`value` row), even in dry-run.
+3. Several torrents share the prefix → the command fails with the
+   candidate hashes and names, mutates nothing, and exits `1`:
+
+   ```text
+   ✗ ERROR Hash prefix 'abc' matches 2 torrents:
+
+     abc123def456…  Debian ISO
+     abc987fed654…  Debian live image
+
+   Use a longer hash prefix.
+   ```
+
+**Migration note** — fuzzy `--name` targeting was removed from mutating
+commands (pre-1.0 breaking change; see `docs/DECISIONS.md`). It never
+guaranteed a single target and could silently affect several torrents that
+happened to share part of their name:
+
+```text
+Before:
+qbit-ops torrents reannounce --name "debian"
+
+After:
+qbit-ops torrents inspect --name "debian"
+qbit-ops torrents reannounce --hash abc123
+```
+
+Other examples:
 
 ```bash
 poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
@@ -121,10 +171,6 @@ poetry run qbit-ops torrents resume \
 
 poetry run qbit-ops torrents start --completed --dry-run --verbose
 poetry run qbit-ops torrents start --completed --no-dry-run
-
-poetry run qbit-ops torrents reannounce \
-  --name "L.amour.est.dans.le.pre" \
-  --dry-run
 ```
 
 `pause`, `resume` and `start` are idempotent:
@@ -354,8 +400,8 @@ Bulk torrent actions use a dedicated summary:
 ```text
 Summary:
 - action: pause|resume|start|reannounce
-- filter: category|tracker|name|completed|all
-- value: ...
+- filter: hash|category|tracker|completed|all
+- value: ...    (the resolved full hash when filter is "hash")
 - match: exact|without-query
 - scanned: X
 - matched: X
@@ -372,15 +418,23 @@ torrents after the summary.
 Every command except `status` uses:
 
 - `0`: success.
-- `1`: configuration, connection, authentication or API error.
-- `2`: the command completed but matched no torrent (or, for `backup diff`,
-  the two exports differ).
+- `1`: configuration, connection, authentication or API error — **also used
+  when a `--hash` prefix is ambiguous** (matches several torrents). No new
+  exit code was introduced for ambiguity; it is treated as a validation
+  error, distinct from "no match".
+- `2`: the command completed but matched no torrent — including an
+  unresolvable `--hash` (or, for `backup diff`, the two exports differ).
 
 Commands using exit code `2` on no match: `torrents inspect`, `torrents
 list --tracker`, `torrents list --category`, `torrents pause`, `torrents
 resume`, `torrents start`, `torrents reannounce`, `trackers inspect`,
 `trackers add-if-present`, `trackers remove`, `trackers replace`, `trackers
 replace-passkey`.
+
+`torrents inspect --hash`, `torrents pause --hash`, `torrents resume
+--hash`, `torrents start --hash`, and `torrents reannounce --hash` use exit
+code `1` when the prefix is ambiguous, and exit code `2` when it matches no
+torrent.
 
 ### `status` exit codes
 
