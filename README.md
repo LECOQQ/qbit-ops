@@ -27,8 +27,8 @@ qbit-ops trackers replace-passkey \
 - 📊 **`status`** — a bounded, read-only operational snapshot (connection,
   transfer counts, alerts) with stable health-based exit codes, in
   table/JSON/JSONL/CSV.
-- 🔍 **Audit** torrents, categories, trackers and connectivity — text or
-  JSON output.
+- 🔍 **Audit** torrents, categories, trackers and connectivity — one shared
+  `--format table|json|jsonl|csv` across every read-only command.
 - 🧭 **Bulk torrent control** — pause, resume, start, reannounce, targeted
   by hash (complete or unique prefix), category, tracker, completed or all.
 - 🔗 **Bulk tracker management** — add conditionally, remove, replace, or
@@ -131,8 +131,6 @@ qbit-ops torrents list --category sonarr
 
 qbit-ops trackers list
 qbit-ops trackers health
-
-qbit-ops backup export --output json > backup.json
 
 qbit-ops torrents pause --category sonarr --dry-run --verbose
 

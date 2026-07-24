@@ -143,6 +143,46 @@ def test_status_quiet_emits_no_stdout_when_critical(
     assert result.stdout == ""
 
 
+def test_status_quiet_never_shows_the_connection_banner(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure --quiet's silence extends to the connection banner itself.
+
+    Asserted at the call-path level (`_create_qbit_client(quiet=True)`),
+    since CliRunner's non-terminal stderr already makes `spinner()` a
+    no-op regardless of `quiet` — an output-only assertion could not
+    catch a regression here.
+    """
+    calls = configure_qbit_backend(client=FakeQbitClient(torrents=[]))
+
+    result = runner.invoke(app, ["status", "--quiet"])
+
+    assert result.exit_code == StatusExitCode.HEALTHY
+    assert calls == [{"quiet": True}]
+
+
+def test_status_errors_stay_visible_on_stderr_even_when_quiet(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure --quiet never silences a genuine connection failure.
+
+    Fixes a Phase 1 regression: errors were only printed when `quiet`
+    was falsy, contradicting Phase 1's own contract ("connection/
+    configuration errors may still emit a concise message on stderr").
+    """
+    configure_qbit_backend(
+        client_error=QbitAuthenticationError("Authentication failed."),
+    )
+
+    result = runner.invoke(app, ["status", "--quiet"])
+
+    assert result.exit_code == StatusExitCode.UNAVAILABLE
+    assert result.stdout == ""
+    assert "Authentication failed." in result.stderr
+
+
 def test_status_quiet_rejects_an_explicit_non_default_format(
     runner: CliRunner,
     configure_qbit_backend,
