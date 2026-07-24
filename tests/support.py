@@ -39,6 +39,9 @@ class FakeQbitClient:
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
+        self.added_trackers: list[tuple[str, str]] = []
+        self.removed_trackers: list[tuple[str, list[str]]] = []
+        self.edited_trackers: list[tuple[str, str, str]] = []
 
     def app_version(self) -> str:
         """Return the fake qBittorrent version."""
@@ -81,6 +84,27 @@ class FakeQbitClient:
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
         """Record fake torrent reannouncements."""
         self.reannounced_hashes.append(torrent_hashes)
+
+    def torrents_add_trackers(self, torrent_hash: str, urls: str) -> None:
+        """Record fake tracker additions."""
+        self.added_trackers.append((torrent_hash, urls))
+
+    def torrents_remove_trackers(
+        self,
+        torrent_hash: str,
+        urls: list[str],
+    ) -> None:
+        """Record fake tracker removals."""
+        self.removed_trackers.append((torrent_hash, urls))
+
+    def torrents_edit_tracker(
+        self,
+        torrent_hash: str,
+        original_url: str,
+        new_url: str,
+    ) -> None:
+        """Record fake tracker replacements."""
+        self.edited_trackers.append((torrent_hash, original_url, new_url))
 
 
 def make_config(**overrides: Any) -> QbitConfig:

@@ -143,23 +143,22 @@ def test_status_quiet_emits_no_stdout_when_critical(
     assert result.stdout == ""
 
 
-def test_status_quiet_never_shows_the_connection_banner(
+def test_status_quiet_creates_client_exactly_once(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet's silence extends to the connection banner itself.
+    """Ensure --quiet still creates exactly one qBittorrent client.
 
-    Asserted at the call-path level (`_create_qbit_client(quiet=True)`),
-    since CliRunner's non-terminal stderr already makes `spinner()` a
-    no-op regardless of `quiet` — an output-only assertion could not
-    catch a regression here.
+    `_create_qbit_client()` never shows a connection spinner or banner
+    (see `docs/DECISIONS.md`), so there is no `quiet` flag left to
+    assert on; this instead pins down the call count itself.
     """
     calls = configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--quiet"])
 
     assert result.exit_code == StatusExitCode.HEALTHY
-    assert calls == [{"quiet": True}]
+    assert calls == [{}]
 
 
 def test_status_errors_stay_visible_on_stderr_even_when_quiet(
