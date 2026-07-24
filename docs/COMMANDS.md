@@ -8,6 +8,7 @@ drop the `poetry run` prefix.
 
 ## Table of Contents
 
+- [Status](#status)
 - [Connection & Config](#connection--config)
 - [Torrents](#torrents)
 - [Trackers](#trackers)
@@ -19,15 +20,57 @@ drop the `poetry run` prefix.
 - [Output Summaries](#output-summaries)
 - [Exit Codes](#exit-codes)
 
+## Status
+
+```bash
+poetry run qbit-ops status
+poetry run qbit-ops status --format json
+poetry run qbit-ops status --format jsonl
+poetry run qbit-ops status --format csv
+poetry run qbit-ops status --quiet   # only the exit code matters
+```
+
+`status` is a root-level, read-only command answering "is this instance
+reachable, and what is its current operational state?". It performs a
+bounded, fixed number of qBittorrent API calls (`app_version`,
+`app_web_api_version`, `transfer_info`, `torrents_info` — never a
+per-torrent tracker scan), so it stays cheap regardless of torrent count.
+
+It reports:
+
+- **connection**: reachable, authenticated, qBittorrent version, Web API
+  version, redacted instance host;
+- **transfers**: total, downloading, seeding, completed, stalled, checking,
+  errored, unknown torrent counts, plus global download/upload speed;
+- **alerts**: structured findings such as `torrents_errored`,
+  `torrents_stalled`, `torrents_unknown_state`, `qbittorrent_unavailable`,
+  `authentication_failed`.
+
+Health is one of `healthy`, `warning`, `critical`, `unavailable`, with a
+dedicated exit code for each — see [Exit Codes](#exit-codes). `--quiet`
+suppresses all normal output (no table, no JSON) and is meant for
+healthchecks: only the exit code carries information. Combining `--quiet`
+with an explicit non-default `--format` is a validation error (exit `4`).
+
+`status` uses `--format table|json|jsonl|csv` (see
+[Output Summaries](#output-summaries) below for how this differs from the
+`--output text|json` used by audit commands). `status --watch` is not
+implemented yet.
+
 ## Connection & Config
 
 ```bash
 poetry run qbit-ops connection check
-poetry run qbit-ops connection check --output json
+poetry run qbit-ops connection check --format json
 
 poetry run qbit-ops config doctor
 poetry run qbit-ops config doctor --output json
 ```
+
+`connection check` uses the same `--format table|json|jsonl|csv` option as
+`status` (migrated in the same phase to prove the option is reusable).
+`config doctor` still uses `--output text|json`, like the rest of the
+audit commands below.
 
 ## Torrents
 
@@ -246,13 +289,18 @@ for `remove`, since qBittorrent expects the original tracker URL.
 
 ## Audit Output
 
-All audit commands accept `--output text|json`: `connection check`, `config
-doctor`, `torrents list`, `torrents categories`, `torrents inspect`,
-`trackers list`, `trackers health`, `trackers inspect`, `trackers export`,
-`backup export`, `backup diff`.
+Most audit commands accept `--output text|json`: `config doctor`, `torrents
+list`, `torrents categories`, `torrents inspect`, `trackers list`, `trackers
+health`, `trackers inspect`, `trackers export`, `backup export`, `backup
+diff`.
 
 Text output is the default, human-readable summary. JSON output is for
 scripting and backups.
+
+`status` and `connection check` are the exception: they use `--format
+table|json|jsonl|csv` instead (`table` replaces `text`; `jsonl` and `csv` are
+new). This is an intentional pre-1.0 break, not yet applied to the other
+audit commands — see `docs/DECISIONS.md` (2026-07-24).
 
 ## Tracker Health
 
@@ -321,6 +369,8 @@ torrents after the summary.
 
 ## Exit Codes
 
+Every command except `status` uses:
+
 - `0`: success.
 - `1`: configuration, connection, authentication or API error.
 - `2`: the command completed but matched no torrent (or, for `backup diff`,
@@ -331,3 +381,18 @@ list --tracker`, `torrents list --category`, `torrents pause`, `torrents
 resume`, `torrents start`, `torrents reannounce`, `trackers inspect`,
 `trackers add-if-present`, `trackers remove`, `trackers replace`, `trackers
 replace-passkey`.
+
+### `status` exit codes
+
+`status` reports operational health rather than success/failure, so it uses
+its own codes (documented in `docs/DECISIONS.md`, 2026-07-24):
+
+- `0`: `healthy`.
+- `1`: `warning` (stalled torrents and/or unrecognized torrent states).
+- `2`: `critical` (one or more torrents in an error state).
+- `3`: `unavailable` (configuration, connection, or authentication failure).
+- `4`: invalid local configuration or invalid CLI usage (e.g. `--quiet`
+  combined with an explicit non-default `--format`).
+
+If both a warning and a critical condition are present, `status` reports
+`critical` (the most severe).

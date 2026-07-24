@@ -1,5 +1,7 @@
 """Provide the command-line application."""
 
+import csv
+import io
 import json
 import logging
 from enum import IntEnum, StrEnum
@@ -18,6 +20,14 @@ from app.backup import (
     load_export_file,
 )
 from app.config import ConfigError, load_qbit_config
+from app.status import (
+    StatusSnapshot,
+    build_unavailable_snapshot,
+    collect_status_snapshot,
+    snapshot_to_csv_rows,
+    snapshot_to_json_dict,
+    status_exit_code,
+)
 from app.torrents import (
     TorrentBulkAction,
     apply_bulk_torrent_action,
@@ -39,10 +49,12 @@ from app.trackers import (
     replace_tracker_passkey,
 )
 from app.ui import (
+    OutputFormat,
     print_error,
     print_summary,
     print_table,
     progress_bar,
+    render_status_table,
     spinner,
 )
 
@@ -62,11 +74,32 @@ app.add_typer(trackers_app, name="trackers")
 
 
 class ExitCode(IntEnum):
-    """Define explicit process exit codes."""
+    """Define explicit process exit codes.
+
+    These remain the exit-code semantics for every command other than
+    `status`, which documents its own health-based exit codes below.
+    """
 
     SUCCESS = 0
     ERROR = 1
     NO_MATCH = 2
+
+
+class StatusExitCode(IntEnum):
+    """Define exit codes specific to the `status` command.
+
+    Deliberately separate from `ExitCode`: `status` reports operational
+    health rather than success/failure, so its exit codes carry
+    different semantics (0-3 map to `app.status.Health`; 4 is reserved
+    for invalid local configuration or invalid CLI usage). Other
+    commands keep `ExitCode` until a later consolidation decision.
+    """
+
+    HEALTHY = 0
+    WARNING = 1
+    CRITICAL = 2
+    UNAVAILABLE = 3
+    INVALID_USAGE = 4
 
 
 class TrackerMatchModeOption(StrEnum):
@@ -77,10 +110,23 @@ class TrackerMatchModeOption(StrEnum):
 
 
 class OutputFormatOption(StrEnum):
-    """Expose generic output formats for Typer options."""
+    """Expose generic output formats for Typer options.
+
+    Kept for the commands not yet migrated to `app.ui.OutputFormat`
+    (table/json/jsonl/csv). See docs/DECISIONS.md for the intentional
+    pre-1.0 break on `status` and `connection check`.
+    """
 
     text = "text"
     json = "json"
+
+
+class QbitConnectionError(RuntimeError):
+    """Report that qBittorrent could not be reached."""
+
+
+class QbitAuthenticationError(RuntimeError):
+    """Report that qBittorrent rejected the configured credentials."""
 
 
 @app.callback(invoke_without_command=True)
@@ -91,15 +137,49 @@ def main(ctx: typer.Context) -> None:
         raise typer.Exit(code=ExitCode.SUCCESS)
 
 
+@app.command()
+def status(
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format.",
+        ),
+    ] = OutputFormat.table,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            help=(
+                "Suppress normal output; only the exit code reflects health."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Show a bounded operational snapshot of the qBittorrent instance."""
+    if quiet and output_format != OutputFormat.table:
+        print_error(
+            "Use --quiet on its own; it already suppresses --format output."
+        )
+        raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
+
+    snapshot = _collect_status_snapshot_safely(quiet=quiet)
+
+    if not quiet:
+        _render_status(snapshot, output_format)
+
+    raise typer.Exit(code=status_exit_code(snapshot.health))
+
+
 @connection_app.command()
 def check(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Check qBittorrent connectivity using `.env` settings."""
     try:
@@ -119,8 +199,17 @@ def check(
         ),
     }
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.table:
+        typer.echo(report["message"])
+    elif output_format == OutputFormat.json:
         _print_json_output(report)
+    elif output_format == OutputFormat.jsonl:
+        typer.echo(json.dumps(report, sort_keys=True))
+    else:
+        _print_csv_rows(
+            ["key", "value"],
+            [(key, str(value)) for key, value in report.items()],
+        )
 
 
 @config_app.command()
@@ -1247,8 +1336,13 @@ def _run_bulk_torrent_action(
     _exit_if_no_targeted_matches(summary["matched"])
 
 
-def _create_qbit_client() -> Any:
-    """Create and authenticate a qBittorrent API client."""
+def _create_qbit_client(*, quiet: bool = False) -> Any:
+    """Create and authenticate a qBittorrent API client.
+
+    `quiet` skips the connecting spinner entirely so callers that must
+    honor `--quiet` (e.g. `status`) never emit Rich decorations, even
+    when running in an interactive terminal.
+    """
     config = load_qbit_config()
     client = qbittorrentapi.Client(
         host=config.host,
@@ -1257,27 +1351,104 @@ def _create_qbit_client() -> Any:
     )
 
     try:
-        with spinner(
-            "Connecting to qBittorrent...",
-            done="Connected to qBittorrent",
-        ):
+        if quiet:
             client.auth_log_in()
+        else:
+            with spinner(
+                "Connecting to qBittorrent...",
+                done="Connected to qBittorrent",
+            ):
+                client.auth_log_in()
     except Exception as error:
         if _is_qbit_error(error, {"LoginFailed"}):
-            raise RuntimeError(
+            raise QbitAuthenticationError(
                 "Authentication to qBittorrent failed. Check QBIT_USER and "
                 "QBIT_PASSWORD."
             ) from error
         if _is_qbit_error(error, {"APIConnectionError"}):
-            raise RuntimeError(
+            raise QbitConnectionError(
                 f"Unable to connect to qBittorrent at {config.host}."
             ) from error
 
-        raise RuntimeError(
+        raise QbitConnectionError(
             f"Unable to initialize qBittorrent client: {error}"
         ) from error
 
     return client
+
+
+def _collect_status_snapshot_safely(*, quiet: bool) -> StatusSnapshot:
+    """Collect a status snapshot, degrading to `unavailable` on failure."""
+    try:
+        config = load_qbit_config()
+    except ConfigError as error:
+        message = f"Configuration error: {error}"
+        if not quiet:
+            print_error(message)
+        return build_unavailable_snapshot(
+            code="configuration_invalid",
+            message=message,
+        )
+
+    host = config.host
+
+    try:
+        client = _create_qbit_client(quiet=quiet)
+        return collect_status_snapshot(client, host=host)
+    except QbitAuthenticationError as error:
+        if not quiet:
+            print_error(str(error))
+        return build_unavailable_snapshot(
+            code="authentication_failed",
+            message=str(error),
+            host=host,
+        )
+    except RuntimeError as error:
+        if not quiet:
+            print_error(str(error))
+        return build_unavailable_snapshot(
+            code="qbittorrent_unavailable",
+            message=str(error),
+            host=host,
+        )
+    except Exception as error:
+        message = f"qBittorrent API error: {error}"
+        if not quiet:
+            print_error(message)
+        return build_unavailable_snapshot(
+            code="qbittorrent_unavailable",
+            message=message,
+            host=host,
+        )
+
+
+def _render_status(
+    snapshot: StatusSnapshot,
+    output_format: OutputFormat,
+) -> None:
+    """Render a status snapshot in the requested output format."""
+    if output_format == OutputFormat.table:
+        render_status_table(snapshot)
+        return
+
+    if output_format == OutputFormat.json:
+        _print_json_output(snapshot_to_json_dict(snapshot))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        typer.echo(json.dumps(snapshot_to_json_dict(snapshot), sort_keys=True))
+        return
+
+    _print_csv_rows(["section", "key", "value"], snapshot_to_csv_rows(snapshot))
+
+
+def _print_csv_rows(fieldnames: list[str], rows: list[tuple[str, ...]]) -> None:
+    """Print rows as CSV with a stable header, free of Rich formatting."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(fieldnames)
+    writer.writerows(rows)
+    typer.echo(buffer.getvalue(), nl=False)
 
 
 def _get_optional_client_value(client: Any, method_name: str) -> str:
