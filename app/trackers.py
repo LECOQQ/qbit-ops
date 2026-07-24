@@ -519,13 +519,70 @@ def replace_tracker_in_all(
     return summary
 
 
-def build_passkey_tracker_url(
-    tracker_url: str,
+PASSKEY_PLACEHOLDER = "{passkey}"
+
+
+def _parse_passkey_template(
+    template: str,
+) -> tuple[str, str, Literal["query", "path"], str | int]:
+    """Locate the passkey placeholder in a tracker URL template.
+
+    Returns the template's scheme, netloc, placeholder mode, and
+    position: a query parameter name in "query" mode, or a zero-based
+    path segment index in "path" mode.
+    """
+    stripped_template = template.strip()
+    if stripped_template.count(PASSKEY_PLACEHOLDER) != 1:
+        raise RuntimeError(
+            "Tracker template must contain exactly one "
+            f"'{PASSKEY_PLACEHOLDER}' placeholder marking the passkey "
+            "position."
+        )
+
+    parsed_template = urlsplit(stripped_template)
+
+    if PASSKEY_PLACEHOLDER in parsed_template.query:
+        query_params = parse_qsl(parsed_template.query, keep_blank_values=True)
+        placeholder_keys = [
+            key for key, value in query_params if value == PASSKEY_PLACEHOLDER
+        ]
+        if len(placeholder_keys) == 1:
+            return (
+                parsed_template.scheme,
+                parsed_template.netloc,
+                "query",
+                placeholder_keys[0],
+            )
+
+    path_segments = parsed_template.path.split("/")
+    placeholder_indexes = [
+        index
+        for index, segment in enumerate(path_segments)
+        if segment == PASSKEY_PLACEHOLDER
+    ]
+    if len(placeholder_indexes) == 1:
+        return (
+            parsed_template.scheme,
+            parsed_template.netloc,
+            "path",
+            placeholder_indexes[0],
+        )
+
+    raise RuntimeError(
+        f"Tracker template must place the '{PASSKEY_PLACEHOLDER}' "
+        "placeholder either as a query parameter value "
+        "(e.g. '?passkey={passkey}') or as a full path segment "
+        "(e.g. '/announce/{passkey}')."
+    )
+
+
+def _build_query_passkey_url(
+    url: str,
+    passkey_param: str,
     new_passkey: str,
-    passkey_param: str = "passkey",
 ) -> str:
-    """Build a tracker URL with its passkey query parameter replaced."""
-    parsed_url = urlsplit(tracker_url.strip())
+    """Return a tracker URL with a specific query parameter replaced."""
+    parsed_url = urlsplit(url)
     query_params = parse_qsl(parsed_url.query, keep_blank_values=True)
 
     replaced = False
@@ -544,26 +601,92 @@ def build_passkey_tracker_url(
         (
             parsed_url.scheme,
             parsed_url.netloc,
-            parsed_url.path.rstrip("/"),
+            parsed_url.path,
             urlencode(updated_params),
-            "",
+            parsed_url.fragment,
+        )
+    )
+
+
+def _match_path_passkey(
+    actual_url: str,
+    scheme: str,
+    netloc: str,
+    template_segments: list[str],
+    placeholder_index: int,
+) -> str | None:
+    """Return the current passkey value if a URL matches the path template."""
+    parsed_actual = urlsplit(actual_url)
+    if parsed_actual.scheme != scheme or parsed_actual.netloc != netloc:
+        return None
+
+    actual_segments = parsed_actual.path.split("/")
+    if len(actual_segments) != len(template_segments):
+        return None
+
+    for index, (actual_segment, template_segment) in enumerate(
+        zip(actual_segments, template_segments, strict=True)
+    ):
+        if index == placeholder_index:
+            if not actual_segment:
+                return None
+        elif actual_segment != template_segment:
+            return None
+
+    return actual_segments[placeholder_index]
+
+
+def _build_path_passkey_url(
+    actual_url: str,
+    placeholder_index: int,
+    new_passkey: str,
+) -> str:
+    """Return a tracker URL with its passkey path segment replaced."""
+    parsed_actual = urlsplit(actual_url)
+    actual_segments = parsed_actual.path.split("/")
+    actual_segments[placeholder_index] = new_passkey
+
+    return urlunsplit(
+        (
+            parsed_actual.scheme,
+            parsed_actual.netloc,
+            "/".join(actual_segments),
+            parsed_actual.query,
+            parsed_actual.fragment,
         )
     )
 
 
 def replace_tracker_passkey(
     client: Any,
-    tracker_url: str,
+    tracker_template: str,
     new_passkey: str,
-    passkey_param: str = "passkey",
     dry_run: bool = True,
     verbose: bool = False,
 ) -> dict[str, Any]:
     """Replace a tracker's passkey on every torrent using that tracker.
 
-    Torrents are matched on the tracker's host and path only, so the
-    caller does not need to know each torrent's current passkey value.
+    The tracker template locates the passkey with a literal
+    '{passkey}' placeholder, either as a query parameter value
+    (e.g. '?passkey={passkey}') or as a full path segment
+    (e.g. '/announce/{passkey}'). Torrents are matched on the
+    tracker's fixed host/path shape, so the caller does not need to
+    know each torrent's current passkey value.
     """
+    scheme, netloc, mode, position = _parse_passkey_template(tracker_template)
+    template_path_segments = (
+        urlsplit(tracker_template.strip()).path.split("/")
+        if mode == "path"
+        else []
+    )
+    query_base_url = (
+        urlunsplit(
+            (scheme, netloc, urlsplit(tracker_template.strip()).path, "", "")
+        )
+        if mode == "query"
+        else ""
+    )
+
     scanned = 0
     matched_source = 0
     already_had_target = 0
@@ -579,26 +702,51 @@ def replace_tracker_passkey(
         trackers = _get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
-        matching_urls = _get_matching_tracker_urls(
-            trackers,
-            tracker_url,
-            "without-query",
-        )
+
+        if mode == "query":
+            assert isinstance(position, str)
+            matching_urls = _get_matching_tracker_urls(
+                trackers, query_base_url, "without-query"
+            )
+            stale_urls = {
+                matching_url: updated_url
+                for matching_url in matching_urls
+                if (
+                    updated_url := _build_query_passkey_url(
+                        matching_url, position, new_passkey
+                    )
+                )
+                != matching_url
+            }
+        else:
+            assert isinstance(position, int)
+            matching_urls = []
+            stale_urls = {}
+            for tracker_entry_url in trackers:
+                current_passkey = _match_path_passkey(
+                    tracker_entry_url,
+                    scheme,
+                    netloc,
+                    template_path_segments,
+                    position,
+                )
+                if current_passkey is None:
+                    continue
+
+                matching_urls.append(tracker_entry_url)
+                if current_passkey == new_passkey:
+                    continue
+
+                stale_urls[tracker_entry_url] = _build_path_passkey_url(
+                    tracker_entry_url,
+                    position,
+                    new_passkey,
+                )
 
         if not matching_urls:
             continue
 
         matched_source += 1
-        stale_urls = {
-            matching_url: updated_url
-            for matching_url in matching_urls
-            if (
-                updated_url := build_passkey_tracker_url(
-                    matching_url, new_passkey, passkey_param
-                )
-            )
-            != matching_url
-        }
 
         if not stale_urls:
             already_had_target += 1

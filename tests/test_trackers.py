@@ -2,10 +2,11 @@
 
 from typing import Any
 
+import pytest
+
 from app.trackers import (
     add_tracker_if_source_present,
     analyze_tracker_health,
-    build_passkey_tracker_url,
     export_tracker_state,
     has_tracker,
     inspect_tracker,
@@ -572,95 +573,38 @@ def test_replace_tracker_removes_extra_without_query_variants() -> None:
     ]
 
 
-def test_build_passkey_tracker_url_replaces_existing_passkey() -> None:
-    """Ensure an existing passkey query parameter is swapped in place."""
-    assert (
-        build_passkey_tracker_url(
-            "https://tracker.example/announce?passkey=old",
-            "new",
+def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
+    """Ensure a template missing the placeholder is rejected."""
+    client = FakeQbitClient(trackers_by_hash={})
+
+    with pytest.raises(RuntimeError, match="placeholder"):
+        replace_tracker_passkey(
+            client=client,
+            tracker_template="https://tracker.example/announce",
+            new_passkey="new",
         )
-        == "https://tracker.example/announce?passkey=new"
-    )
 
 
-def test_build_passkey_tracker_url_preserves_other_query_params() -> None:
-    """Ensure unrelated query parameters survive the passkey swap."""
-    assert (
-        build_passkey_tracker_url(
-            "https://tracker.example/announce?a=1&passkey=old&b=2",
-            "new",
-        )
-        == "https://tracker.example/announce?a=1&passkey=new&b=2"
-    )
-
-
-def test_build_passkey_tracker_url_adds_missing_passkey() -> None:
-    """Ensure a missing passkey parameter is appended."""
-    assert (
-        build_passkey_tracker_url(
-            "https://tracker.example/announce",
-            "new",
-        )
-        == "https://tracker.example/announce?passkey=new"
-    )
-
-
-def test_build_passkey_tracker_url_supports_custom_param_name() -> None:
-    """Ensure a custom passkey parameter name can be targeted."""
-    assert (
-        build_passkey_tracker_url(
-            "https://tracker.example/announce?key=old",
-            "new",
-            passkey_param="key",
-        )
-        == "https://tracker.example/announce?key=new"
-    )
-
-
-def test_replace_tracker_passkey_is_dry_run_by_default() -> None:
-    """Ensure passkey replacement previews matching torrents by default."""
+def test_replace_tracker_passkey_updates_query_placeholder() -> None:
+    """Ensure a query-string passkey placeholder is replaced in place."""
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker.example/announce?passkey=old"}],
+            "hash-a": [
+                {"url": "https://tracker.la-cale.space/announce?passkey=old"}
+            ],
             "hash-b": [{"url": "https://tracker-c.example/announce"}],
         }
     )
 
     summary = replace_tracker_passkey(
         client=client,
-        tracker_url="https://tracker.example/announce",
-        new_passkey="new",
-    )
-
-    assert summary == {
-        "scanned": 2,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 0,
-        "dry_run": True,
-    }
-    assert client.edited_trackers == []
-
-
-def test_replace_tracker_passkey_updates_matching_torrents() -> None:
-    """Ensure real replacement edits the tracker URL with the new passkey."""
-    client = FakeQbitClient(
-        trackers_by_hash={
-            "hash-a": [{"url": "https://tracker.example/announce?passkey=old"}],
-        }
-    )
-
-    summary = replace_tracker_passkey(
-        client=client,
-        tracker_url="https://tracker.example/announce",
+        tracker_template="https://tracker.la-cale.space/announce?passkey={passkey}",
         new_passkey="new",
         dry_run=False,
     )
 
     assert summary == {
-        "scanned": 1,
+        "scanned": 2,
         "matched_source": 1,
         "already_had_target": 0,
         "modified": 1,
@@ -671,23 +615,163 @@ def test_replace_tracker_passkey_updates_matching_torrents() -> None:
     assert client.edited_trackers == [
         (
             "hash-a",
-            "https://tracker.example/announce?passkey=old",
-            "https://tracker.example/announce?passkey=new",
+            "https://tracker.la-cale.space/announce?passkey=old",
+            "https://tracker.la-cale.space/announce?passkey=new",
         )
     ]
+
+
+def test_replace_tracker_passkey_preserves_other_query_params() -> None:
+    """Ensure unrelated query parameters survive the passkey swap."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {
+                    "url": "https://tracker.example/announce"
+                    "?a=1&passkey=old&b=2"
+                },
+            ],
+        }
+    )
+
+    summary = replace_tracker_passkey(
+        client=client,
+        tracker_template="https://tracker.example/announce?passkey={passkey}",
+        new_passkey="new",
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "https://tracker.example/announce?a=1&passkey=old&b=2",
+            "https://tracker.example/announce?a=1&passkey=new&b=2",
+        )
+    ]
+
+
+def test_replace_tracker_passkey_updates_path_segment_before_announce() -> None:
+    """Ensure a passkey path segment placed before 'announce' is replaced."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker.yggreborn.org/old-passkey/announce"}
+            ],
+        }
+    )
+
+    summary = replace_tracker_passkey(
+        client=client,
+        tracker_template="https://tracker.yggreborn.org/{passkey}/announce",
+        new_passkey="new-passkey",
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "https://tracker.yggreborn.org/old-passkey/announce",
+            "https://tracker.yggreborn.org/new-passkey/announce",
+        )
+    ]
+
+
+def test_replace_tracker_passkey_updates_path_segment_after_announce() -> None:
+    """Ensure a passkey path segment placed after 'announce' is replaced."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tk.tr4ker.net/announce/old-passkey"}],
+        }
+    )
+
+    summary = replace_tracker_passkey(
+        client=client,
+        tracker_template="https://tk.tr4ker.net/announce/{passkey}",
+        new_passkey="new-passkey",
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "https://tk.tr4ker.net/announce/old-passkey",
+            "https://tk.tr4ker.net/announce/new-passkey",
+        )
+    ]
+
+
+def test_replace_tracker_passkey_preserves_dynamic_query_params() -> None:
+    """Ensure per-torrent query params survive a path-based passkey swap."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {
+                    "url": "http://connect.maxp2p.org:8080/old-passkey"
+                    "/announce?announce_sig=abc&announce_ts=1"
+                },
+            ],
+        }
+    )
+
+    summary = replace_tracker_passkey(
+        client=client,
+        tracker_template="http://connect.maxp2p.org:8080/{passkey}/announce",
+        new_passkey="new-passkey",
+        dry_run=False,
+    )
+
+    assert summary["modified"] == 1
+    assert client.edited_trackers == [
+        (
+            "hash-a",
+            "http://connect.maxp2p.org:8080/old-passkey/announce"
+            "?announce_sig=abc&announce_ts=1",
+            "http://connect.maxp2p.org:8080/new-passkey/announce"
+            "?announce_sig=abc&announce_ts=1",
+        )
+    ]
+
+
+def test_replace_tracker_passkey_is_dry_run_by_default() -> None:
+    """Ensure passkey replacement previews matching torrents by default."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tk.tr4ker.net/announce/old"}],
+        }
+    )
+
+    summary = replace_tracker_passkey(
+        client=client,
+        tracker_template="https://tk.tr4ker.net/announce/{passkey}",
+        new_passkey="new",
+    )
+
+    assert summary == {
+        "scanned": 1,
+        "matched_source": 1,
+        "already_had_target": 0,
+        "modified": 1,
+        "replaced_urls": 1,
+        "removed_urls": 0,
+        "dry_run": True,
+    }
+    assert client.edited_trackers == []
 
 
 def test_replace_tracker_passkey_skips_torrents_already_up_to_date() -> None:
     """Ensure torrents already using the new passkey are left untouched."""
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker.example/announce?passkey=new"}],
+            "hash-a": [{"url": "https://tk.tr4ker.net/announce/new"}],
         }
     )
 
     summary = replace_tracker_passkey(
         client=client,
-        tracker_url="https://tracker.example/announce",
+        tracker_template="https://tk.tr4ker.net/announce/{passkey}",
         new_passkey="new",
         dry_run=False,
         verbose=True,
@@ -707,7 +791,7 @@ def test_replace_tracker_passkey_skips_torrents_already_up_to_date() -> None:
                 "name": "hash-a",
                 "action": "already_up_to_date",
                 "matching_tracker_urls": [
-                    "https://tracker.example/announce?passkey=new",
+                    "https://tk.tr4ker.net/announce/new",
                 ],
             }
         ],
@@ -719,13 +803,13 @@ def test_replace_tracker_passkey_ignores_unmatched_trackers() -> None:
     """Ensure torrents without the target tracker host/path are skipped."""
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker-b.example/announce"}],
+            "hash-a": [{"url": "https://tracker-b.example/announce/old"}],
         }
     )
 
     summary = replace_tracker_passkey(
         client=client,
-        tracker_url="https://tracker.example/announce",
+        tracker_template="https://tk.tr4ker.net/announce/{passkey}",
         new_passkey="new",
         dry_run=False,
     )
