@@ -800,6 +800,72 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
     assert client.edited_trackers == []
 
 
+# --- NO_MATCH vs NO_CHANGES: matched count vs actual changes -----------
+#
+# `matched` and `len(plan.changes)` are deliberately different signals:
+# a plan can match targets with nothing left to change (NO_CHANGES), or
+# match nothing at all (NO_MATCH). Callers (app/main.py::_run_mutation)
+# use `matched == 0` to report NO_MATCH and `not plan.changes` (with
+# matched > 0) to report NO_CHANGES — never APPLIED for either.
+
+
+def test_plan_tracker_addition_matches_nothing() -> None:
+    """Ensure an addition plan with no matching torrents reports zero."""
+    client = FakeQbitClient(
+        trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}
+    )
+
+    plan = plan_tracker_addition(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 0
+    assert plan.changes == ()
+    assert plan.already_had_target == ()
+
+
+def test_plan_tracker_removal_matches_nothing() -> None:
+    """Ensure a removal plan with no matching torrents reports zero.
+
+    `matched_tracker` always equals `len(changes)` for removal (a match
+    always implies a removal) so this plan type never reaches
+    NO_CHANGES — only NO_MATCH or a real change.
+    """
+    client = FakeQbitClient(
+        trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}
+    )
+
+    plan = plan_tracker_removal(
+        client=client, tracker="https://tracker-a.example/announce"
+    )
+
+    assert plan.matched_tracker == 0
+    assert plan.changes == ()
+
+
+def test_plan_tracker_replacement_matches_nothing() -> None:
+    """Ensure a replacement plan with no matching torrents reports zero.
+
+    `matched_source` always equals `len(changes)` for replacement (a
+    match always implies at least a removal), so this plan type never
+    reaches NO_CHANGES either — only NO_MATCH or a real change.
+    """
+    client = FakeQbitClient(
+        trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}
+    )
+
+    plan = plan_tracker_replacement(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 0
+    assert plan.changes == ()
+
+
 class FakeQbitClient:
     """Provide the qBittorrent methods needed by tracker tests."""
 

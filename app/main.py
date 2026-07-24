@@ -25,6 +25,7 @@ from app.execution import (
     ExecutionDecision,
     ExecutionPolicy,
     MutationOperation,
+    MutationStatus,
     is_interactive_terminal,
 )
 from app.selectors import AmbiguousTorrentHashError
@@ -929,11 +930,10 @@ def add_if_present(
         operation=MutationOperation.TRACKERS_ADD_IF_PRESENT,
         dry_run=dry_run,
         assume_yes=assume_yes,
+        matched=plan.matched_source,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda dry_run_label: _addition_summary_rows(
-            plan, dry_run=dry_run_label
-        ),
+        summary_rows=lambda status: _addition_summary_rows(plan, status=status),
         confirmation_message=_addition_confirmation_message(plan),
     )
 
@@ -1237,10 +1237,11 @@ def replace(
         operation=MutationOperation.TRACKERS_REPLACE,
         dry_run=dry_run,
         assume_yes=assume_yes,
+        matched=plan.matched_source,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda dry_run_label: _replacement_summary_rows(
-            plan, dry_run=dry_run_label
+        summary_rows=lambda status: _replacement_summary_rows(
+            plan, status=status
         ),
         confirmation_message=_replacement_confirmation_message(plan),
     )
@@ -1318,11 +1319,10 @@ def replace_tracker_passkey_command(
         operation=MutationOperation.TRACKERS_REPLACE_PASSKEY,
         dry_run=dry_run,
         assume_yes=assume_yes,
+        matched=plan.matched_source,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda dry_run_label: _passkey_summary_rows(
-            plan, dry_run=dry_run_label
-        ),
+        summary_rows=lambda status: _passkey_summary_rows(plan, status=status),
         confirmation_message=_passkey_confirmation_message(plan),
     )
 
@@ -1548,11 +1548,10 @@ def remove(
         operation=MutationOperation.TRACKERS_REMOVE,
         dry_run=dry_run,
         assume_yes=assume_yes,
+        matched=plan.matched_tracker,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda dry_run_label: _removal_summary_rows(
-            plan, dry_run=dry_run_label
-        ),
+        summary_rows=lambda status: _removal_summary_rows(plan, status=status),
         confirmation_message=_removal_confirmation_message(plan),
     )
 
@@ -1566,9 +1565,10 @@ def _run_mutation(
     operation: MutationOperation,
     dry_run: bool,
     assume_yes: bool,
+    matched: int,
     has_changes: bool,
     apply_fn: Callable[[], None],
-    summary_rows: Callable[[bool], dict[str, Any]],
+    summary_rows: Callable[[MutationStatus], dict[str, Any]],
     confirmation_message: str | None = None,
 ) -> bool:
     """Run the shared confirm/apply/refuse flow for an already-built plan.
@@ -1578,10 +1578,17 @@ def _run_mutation(
     (no `confirmation_message` needed); medium/high-risk commands show
     the plan, then confirm, then apply exactly that plan (no rescan).
 
-    `summary_rows(dry_run_label)` must build the `print_summary` rows
-    dict with its `dry_run` key set to the given label, so the same
-    plan-derived counts can be shown both as a pending preview
-    (`dry_run_label=True`) and as an applied result (`False`).
+    `matched` and `has_changes` are deliberately separate: a plan can
+    match targets without having any actual change to apply (e.g. every
+    torrent already paused, or a passkey already up to date). This
+    distinguishes `NO_MATCH` (the selector matched nothing) from
+    `NO_CHANGES` (matched, but already satisfied the requested state) —
+    neither ever prompts or calls a mutation API, and neither is ever
+    reported as `APPLIED`.
+
+    `summary_rows(status)` must build the `print_summary` rows dict with
+    its `status` key set to the given `MutationStatus`, so the same
+    plan-derived counts can be shown under every terminal status.
 
     Returns whether the plan was applied. Exits via `typer.Exit` on a
     non-interactive refusal (`ExitCode.ERROR`) or a declined
@@ -1594,8 +1601,12 @@ def _run_mutation(
         risk=MUTATION_RISK[operation],
     )
 
+    if matched == 0:
+        print_summary(summary_rows(MutationStatus.NO_MATCH))
+        return False
+
     if not has_changes:
-        print_summary(summary_rows(policy.dry_run))
+        print_summary(summary_rows(MutationStatus.NO_CHANGES))
         return False
 
     decision = policy.decide()
@@ -1605,10 +1616,10 @@ def _run_mutation(
 
     if decision is ExecutionDecision.APPLY_WITHOUT_PROMPT:
         apply_fn()
-        print_summary(summary_rows(False))
+        print_summary(summary_rows(MutationStatus.APPLIED))
         return True
 
-    print_summary(summary_rows(True))
+    print_summary(summary_rows(MutationStatus.PREVIEW))
 
     if decision is ExecutionDecision.PREVIEW_ONLY:
         return False
@@ -1683,10 +1694,11 @@ def _run_bulk_torrent_action(
         operation=operation,
         dry_run=dry_run,
         assume_yes=False,
+        matched=plan.matched,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda dry_run_label: _bulk_torrent_summary_rows(
-            plan, dry_run=dry_run_label
+        summary_rows=lambda status: _bulk_torrent_summary_rows(
+            plan, status=status
         ),
     )
 
@@ -2224,7 +2236,7 @@ def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
 def _bulk_torrent_summary_rows(
     plan: BulkTorrentActionPlan,
     *,
-    dry_run: bool,
+    status: MutationStatus,
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a bulk torrent action plan."""
     rows: dict[str, Any] = {
@@ -2238,7 +2250,7 @@ def _bulk_torrent_summary_rows(
     rows["matched"] = plan.matched
     rows["modified"] = len(plan.changes)
     rows["skipped"] = len(plan.skipped)
-    rows["dry_run"] = dry_run
+    rows["status"] = status
     return rows
 
 
@@ -2261,7 +2273,7 @@ def _print_bulk_torrent_details(
 def _addition_summary_rows(
     plan: TrackerAdditionPlan,
     *,
-    dry_run: bool,
+    status: MutationStatus,
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a tracker addition plan."""
     return {
@@ -2269,7 +2281,7 @@ def _addition_summary_rows(
         "matched_source": plan.matched_source,
         "already_had_target": len(plan.already_had_target),
         "modified": len(plan.changes),
-        "dry_run": dry_run,
+        "status": status,
     }
 
 
@@ -2300,7 +2312,7 @@ def _addition_confirmation_message(plan: TrackerAdditionPlan) -> str:
 def _removal_summary_rows(
     plan: TrackerRemovalPlan,
     *,
-    dry_run: bool,
+    status: MutationStatus,
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a tracker removal plan."""
     return {
@@ -2308,7 +2320,7 @@ def _removal_summary_rows(
         "matched_tracker": plan.matched_tracker,
         "modified": len(plan.changes),
         "removed_urls": plan.removed_url_count,
-        "dry_run": dry_run,
+        "status": status,
     }
 
 
@@ -2341,7 +2353,7 @@ def _removal_confirmation_message(plan: TrackerRemovalPlan) -> str:
 def _replacement_summary_rows(
     plan: TrackerReplacementPlan,
     *,
-    dry_run: bool,
+    status: MutationStatus,
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a tracker replacement plan."""
     already_had_target = sum(
@@ -2354,7 +2366,7 @@ def _replacement_summary_rows(
         "modified": len(plan.changes),
         "replaced_urls": plan.replaced_url_count,
         "removed_urls": plan.removed_url_count,
-        "dry_run": dry_run,
+        "status": status,
     }
 
 
@@ -2396,7 +2408,7 @@ def _replacement_confirmation_message(plan: TrackerReplacementPlan) -> str:
 def _passkey_summary_rows(
     plan: PasskeyReplacementPlan,
     *,
-    dry_run: bool,
+    status: MutationStatus,
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a passkey replacement plan.
 
@@ -2409,7 +2421,7 @@ def _passkey_summary_rows(
         "already_up_to_date": plan.already_up_to_date,
         "modified": len(plan.changes),
         "replaced_urls": plan.replaced_url_count,
-        "dry_run": dry_run,
+        "status": status,
     }
 
 

@@ -56,6 +56,23 @@ class ExecutionDecision(StrEnum):
     REFUSE_NON_INTERACTIVE = "refuse_non_interactive"
 
 
+class MutationStatus(StrEnum):
+    """The terminal, user-facing outcome shown in a mutation summary.
+
+    Distinct from `ExecutionDecision`: a decision is made only when a
+    plan has at least one real change. `NO_MATCH` and `NO_CHANGES` are
+    reported *before* any decision is made (see
+    `docs/COMMANDS.md#mutation-risk--confirmation-policy`) — an empty or
+    already-satisfied plan is never shown as `APPLIED`.
+    """
+
+    PREVIEW = "preview"
+    APPLIED = "applied"
+    CANCELLED = "cancelled"
+    NO_MATCH = "no_match"
+    NO_CHANGES = "no_changes"
+
+
 @dataclass(frozen=True)
 class ExecutionPolicy:
     """Pure decision object: no I/O, no Typer, no Rich.
