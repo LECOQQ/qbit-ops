@@ -6,6 +6,7 @@ import pytest
 
 from app.selectors import AmbiguousTorrentHashError
 from app.torrents import (
+    TorrentBulkAction,
     apply_bulk_torrent_action,
     inspect_torrent,
     list_category_usage,
@@ -630,6 +631,41 @@ def test_plan_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
     assert plan.matched == 0
     assert plan.changes == ()
     assert client.paused_hashes == []
+
+
+@pytest.mark.parametrize(
+    "action,state",
+    [
+        ("pause", "pausedUP"),
+        ("resume", "uploading"),
+        ("start", "uploading"),
+    ],
+)
+def test_plan_bulk_torrent_action_matches_but_no_changes(
+    action: TorrentBulkAction, state: str
+) -> None:
+    """Ensure an already-satisfied action matches without producing a change.
+
+    `matched > 0` with `changes == ()` is the NO_CHANGES case: the
+    selector found the torrent, but the requested state was already
+    true, so there is nothing to apply.
+    """
+    client = FakeQbitClient(
+        torrents=[{"hash": "hash-a", "name": "Torrent A", "state": state}],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    plan = plan_bulk_torrent_action(
+        client=client, action=action, select_all=True
+    )
+    apply_bulk_torrent_action(client, plan)
+
+    assert plan.matched == 1
+    assert plan.changes == ()
+    assert len(plan.skipped) == 1
+    assert client.paused_hashes == []
+    assert client.resumed_hashes == []
+    assert client.started_hashes == []
 
 
 def test_apply_bulk_torrent_action_reuses_the_planned_target_set() -> None:

@@ -448,11 +448,63 @@ Execution contract, identical across every mutating command:
   --yes` (without `--no-dry-run`) still only previews.
 - **Declining the confirmation prompt is not an error.** No mutation
   happens, `qbit-ops` prints `Operation cancelled.`, and exits `0`.
-- A plan with no matching torrents never prompts, on any risk tier — there
-  is nothing to confirm.
+- A plan that matched nothing, or matched but had nothing left to change,
+  never prompts, on any risk tier — there is nothing to confirm. Neither is
+  ever reported as `APPLIED`, even with `--no-dry-run --yes` (see
+  [Mutation status vocabulary](#mutation-status-vocabulary) below).
 - Preview and real execution always share the **same plan**: torrents are
   scanned once; confirming re-uses that already-built plan instead of
   scanning again, so what you confirmed is exactly what gets applied.
+
+### Mutation status vocabulary
+
+Every mutation command's summary ends with a `status` row using exactly
+one of these five values (`app.execution.MutationStatus`):
+
+| Status | Meaning | Exit code |
+| --- | --- | --- |
+| `PREVIEW` | Dry-run (the default): changes were planned but nothing was sent to qBittorrent. | `0`, or `2` if `matched` is `0` |
+| `APPLIED` | One or more changes were successfully sent to qBittorrent. | `0` |
+| `CANCELLED` | The user declined the confirmation prompt; no mutation occurred. Shown as `Operation cancelled.` after the preview, not as a second summary. | `0` |
+| `NO_MATCH` | The requested selector (`--hash`, `--tracker`, `--category`, ...) matched nothing at all. | `2` |
+| `NO_CHANGES` | The selector matched one or more targets, but every one already satisfied the requested state (e.g. every torrent already paused, a passkey already current). | `0` |
+
+`NO_MATCH` and `NO_CHANGES` are resolved **before** any risk/confirmation
+decision is made — they never prompt, never call a mutation API, and are
+never shown as `APPLIED`, regardless of `--no-dry-run` or `--yes`:
+
+```console
+$ qbit-ops trackers remove --tracker "https://unmatched.example/announce" \
+  --no-dry-run
+         Summary
+scanned         12
+matched_tracker 0
+modified        0
+removed_urls    0
+status          NO_MATCH
+```
+
+```console
+$ qbit-ops torrents resume --all --no-dry-run
+     Summary
+action   resume
+filter   all
+value    *
+scanned  8
+matched  3
+modified 0
+skipped  3
+status   NO_CHANGES
+```
+
+`trackers remove` and `trackers replace` always turn a match into at least
+one change (removing a duplicate or stale tracker URL counts as a change),
+so those two commands can report `NO_MATCH` but never `NO_CHANGES`.
+`trackers add-if-present` and `trackers replace-passkey` can report either,
+depending on whether matched torrents already have the target tracker or
+passkey. Bulk torrent actions (`pause`/`resume`/`start`/`reannounce`) are
+idempotent, so `NO_CHANGES` is common there too (e.g. `resume --all` when
+every torrent is already running).
 
 ```bash
 # low risk: applies immediately, no prompt, even unattended
@@ -505,7 +557,7 @@ Summary:
 - matched_source: X
 - already_had_target: X
 - modified: X
-- dry_run: true/false
+- status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
 
 Tracker removal uses a dedicated summary:
@@ -516,7 +568,7 @@ Summary:
 - matched_tracker: X
 - modified: X
 - removed_urls: X
-- dry_run: true/false
+- status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
 
 Tracker replacement uses a dedicated summary:
@@ -529,7 +581,7 @@ Summary:
 - modified: X
 - replaced_urls: X
 - removed_urls: X
-- dry_run: true/false
+- status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
 
 Passkey replacement uses its own summary (no tracker URL ever appears in
@@ -542,15 +594,8 @@ Summary:
 - already_up_to_date: X
 - modified: X
 - replaced_urls: X
-- dry_run: true/false
+- status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
-
-For every mutation summary, `status` reads `PREVIEW (dry-run)` while
-`--no-dry-run` has not yet actually applied (including while a
-confirmation prompt is pending), and `APPLIED` once the plan's changes
-have actually been sent to qBittorrent. Declining a confirmation prompt
-never reaches `APPLIED` — see
-[Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy).
 
 Bulk torrent actions use a dedicated summary:
 
@@ -564,11 +609,14 @@ Summary:
 - matched: X
 - modified: X
 - skipped: X
-- dry_run: true/false
+- status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
 
 Pass `--verbose` on any bulk modification command to print impacted
 torrents after the summary.
+
+See [Mutation status vocabulary](#mutation-status-vocabulary) for exactly
+what each `status` value means and when it appears.
 
 ## Exit Codes
 

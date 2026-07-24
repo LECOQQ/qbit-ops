@@ -70,14 +70,26 @@ def test_mutation_defaults_to_dry_run_and_performs_no_mutation(
     configure_qbit_backend,
     argv: list[str],
 ) -> None:
-    """Ensure every mutation command previews only by default."""
+    """Ensure every mutation command previews only by default.
+
+    The fixture torrent is active, so idempotent actions (`resume`,
+    `start`) report `NO_CHANGES` rather than `PREVIEW`, and
+    `replace-passkey`'s path-shaped template does not match the fixture
+    tracker's URL shape, reporting `NO_MATCH` — any of the three is
+    correct here; what matters is that a dry-run never reports `APPLIED`
+    and never calls a mutation API.
+    """
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
     result = runner.invoke(app, argv)
 
     assert result.exit_code in (ExitCode.SUCCESS, ExitCode.NO_MATCH)
-    assert "PREVIEW" in result.stdout
+    assert "APPLIED" not in result.stdout
+    assert any(
+        status in result.stdout
+        for status in ("PREVIEW", "NO_CHANGES", "NO_MATCH")
+    )
     assert client.paused_hashes == []
     assert client.resumed_hashes == []
     assert client.started_hashes == []
@@ -323,7 +335,11 @@ def test_no_match_plan_does_not_prompt_or_refuse(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an empty plan skips confirmation entirely and exits NO_MATCH."""
+    """Ensure an empty plan skips confirmation entirely and exits NO_MATCH.
+
+    Regression test: an unmatched `--no-dry-run` selector used to report
+    `status APPLIED` even though nothing was ever sent to qBittorrent.
+    """
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -339,7 +355,184 @@ def test_no_match_plan_does_not_prompt_or_refuse(
     )
 
     assert result.exit_code == ExitCode.NO_MATCH
+    assert "APPLIED" not in result.stdout
+    assert "status" in result.stdout and "NO_MATCH" in result.stdout
     assert client.removed_trackers == []
+
+
+# --- NO_MATCH vs NO_CHANGES vs APPLIED, for every mutation command ----------
+
+
+@pytest.mark.parametrize(
+    "argv,attribute",
+    [
+        (
+            [
+                "trackers",
+                "add-if-present",
+                "--source",
+                "https://nonexistent.example/announce",
+                "--target",
+                "https://other.example/announce",
+                "--no-dry-run",
+                "--yes",
+            ],
+            "added_trackers",
+        ),
+        (
+            [
+                "trackers",
+                "remove",
+                "--tracker",
+                "https://nonexistent.example/announce",
+                "--no-dry-run",
+                "--yes",
+            ],
+            "removed_trackers",
+        ),
+        (
+            [
+                "trackers",
+                "replace",
+                "--source",
+                "https://nonexistent.example/announce",
+                "--target",
+                "https://other.example/announce",
+                "--no-dry-run",
+                "--yes",
+            ],
+            "edited_trackers",
+        ),
+        (
+            [
+                "trackers",
+                "replace-passkey",
+                "--tracker",
+                "https://nonexistent.example/announce/{passkey}",
+                "--new-passkey",
+                "new",
+                "--no-dry-run",
+                "--yes",
+            ],
+            "edited_trackers",
+        ),
+    ],
+)
+def test_unmatched_tracker_selector_reports_no_match_not_applied(
+    runner: CliRunner,
+    configure_qbit_backend,
+    argv: list[str],
+    attribute: str,
+) -> None:
+    """Ensure every tracker mutation reports NO_MATCH, never APPLIED."""
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == ExitCode.NO_MATCH
+    assert "APPLIED" not in result.stdout
+    assert "NO_MATCH" in result.stdout
+    assert getattr(client, attribute) == []
+
+
+@pytest.mark.parametrize(
+    "command,state",
+    [
+        ("pause", "pausedUP"),
+        ("resume", "uploading"),
+        ("start", "uploading"),
+        # reannounce has no idempotent no-op state; omitted.
+    ],
+)
+def test_already_satisfied_torrent_action_reports_no_changes(
+    runner: CliRunner,
+    configure_qbit_backend,
+    command: str,
+    state: str,
+) -> None:
+    """Ensure a matched-but-already-satisfied torrent reports NO_CHANGES."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_HASH, state=state)],
+        trackers_by_hash={TORRENT_HASH: []},
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, ["torrents", command, "--all", "--no-dry-run"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "APPLIED" not in result.stdout
+    assert "NO_CHANGES" in result.stdout
+    assert client.paused_hashes == []
+    assert client.resumed_hashes == []
+    assert client.started_hashes == []
+
+
+def test_add_if_present_already_had_target_reports_no_changes(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure add-if-present reports NO_CHANGES when the target is present."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_HASH, name="Fake Torrent")],
+        trackers_by_hash={
+            TORRENT_HASH: [
+                {"url": "https://tracker.example/announce", "status": "2"},
+                {"url": "https://other.example/announce", "status": "2"},
+            ]
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "https://tracker.example/announce",
+            "--target",
+            "https://other.example/announce",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "APPLIED" not in result.stdout
+    assert "NO_CHANGES" in result.stdout
+    assert client.added_trackers == []
+
+
+def test_replace_passkey_already_current_reports_no_changes(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure replace-passkey reports NO_CHANGES when already up to date."""
+    client = _client_with_tracker(
+        f"https://tracker.example/announce/{NEW_PASSKEY_MARKER}"
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace-passkey",
+            "--tracker",
+            "https://tracker.example/announce/{passkey}",
+            "--new-passkey",
+            NEW_PASSKEY_MARKER,
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "APPLIED" not in result.stdout
+    assert "NO_CHANGES" in result.stdout
+    assert NEW_PASSKEY_MARKER not in result.stdout
+    assert client.edited_trackers == []
 
 
 # --- Secret redaction: passkeys never reach stdout/stderr -------------------

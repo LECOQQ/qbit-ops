@@ -17,6 +17,7 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
+from app.execution import MutationStatus
 from app.selectors import ResolvedTorrent
 from app.status import Health, StatusSnapshot
 
@@ -130,27 +131,37 @@ def print_ambiguous_hash_error(
     err_console.print("Use a longer prefix.")
 
 
+_MUTATION_STATUS_LABELS: dict[MutationStatus, str] = {
+    MutationStatus.PREVIEW: "[yellow]PREVIEW (dry-run)[/yellow]",
+    MutationStatus.APPLIED: "[bold green]APPLIED[/bold green]",
+    MutationStatus.CANCELLED: "[bold red]CANCELLED[/bold red]",
+    MutationStatus.NO_MATCH: "[yellow]NO_MATCH[/yellow]",
+    MutationStatus.NO_CHANGES: "[cyan]NO_CHANGES[/cyan]",
+}
+
+
 def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
-    """Print a modification summary, highlighting dry-run status."""
+    """Print a modification summary, highlighting the mutation status.
+
+    A `"status"` key, if present, must be a `MutationStatus` — see
+    `docs/COMMANDS.md#mutation-risk--confirmation-policy` for what each
+    value means. It is rendered as a distinct final row instead of a raw
+    field so `NO_MATCH`/`NO_CHANGES` can never be confused with `APPLIED`.
+    """
     table = Table(
         title=title, show_header=False, box=None, padding=(0, 1, 0, 0)
     )
     table.add_column(style="bold cyan")
     table.add_column()
 
-    dry_run = rows.get("dry_run")
+    status = rows.get("status")
     for key, value in rows.items():
-        if key == "dry_run":
+        if key == "status":
             continue
         table.add_row(key, str(value))
 
-    if dry_run is not None:
-        status = (
-            "[yellow]PREVIEW (dry-run)[/yellow]"
-            if dry_run
-            else "[bold green]APPLIED[/bold green]"
-        )
-        table.add_row("status", status)
+    if status is not None:
+        table.add_row("status", _MUTATION_STATUS_LABELS[status])
 
     console.print(table)
 
