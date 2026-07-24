@@ -491,12 +491,20 @@ poetry run qbit-ops trackers replace \
   --no-dry-run
 ```
 
-Replace a tracker's passkey in bulk, keeping the same tracker URL (matches
-by host and path, so the current passkey does not need to be known):
+Replace a tracker's passkey in bulk, keeping the tracker URL otherwise
+unchanged. Mark the passkey's position with a literal `{passkey}`
+placeholder, either as a query parameter value or as a full path segment
+(the current passkey does not need to be known):
 
 ```bash
+# passkey in the query string
 poetry run qbit-ops trackers replace-passkey \
-  --tracker "https://tracker-a.example/announce" \
+  --tracker "https://tracker-a.example/announce?passkey={passkey}" \
+  --new-passkey "NEW_PASSKEY"
+
+# passkey as a path segment
+poetry run qbit-ops trackers replace-passkey \
+  --tracker "https://tracker-a.example/announce/{passkey}" \
   --new-passkey "NEW_PASSKEY"
 ```
 
@@ -504,7 +512,7 @@ Apply the passkey replacement:
 
 ```bash
 poetry run qbit-ops trackers replace-passkey \
-  --tracker "https://tracker-a.example/announce" \
+  --tracker "https://tracker-a.example/announce/{passkey}" \
   --new-passkey "NEW_PASSKEY" \
   --no-dry-run
 ```

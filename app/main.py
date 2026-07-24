@@ -923,8 +923,10 @@ def replace_tracker_passkey_command(
         str,
         typer.Option(
             "--tracker",
-            help="Tracker URL to update (its host and path identify it; "
-            "any existing passkey is ignored when matching).",
+            help="Tracker URL template with a literal '{passkey}' "
+            "placeholder marking the passkey position, either as a "
+            "query parameter value (e.g. '?passkey={passkey}') or as "
+            "a full path segment (e.g. '/announce/{passkey}').",
         ),
     ],
     new_passkey: Annotated[
@@ -934,13 +936,6 @@ def replace_tracker_passkey_command(
             help="New passkey value to apply.",
         ),
     ],
-    passkey_param: Annotated[
-        str,
-        typer.Option(
-            "--passkey-param",
-            help="Query parameter name that holds the passkey.",
-        ),
-    ] = "passkey",
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -963,9 +958,8 @@ def replace_tracker_passkey_command(
         client = _create_qbit_client()
         summary = replace_tracker_passkey(
             client=client,
-            tracker_url=tracker,
+            tracker_template=tracker,
             new_passkey=new_passkey,
-            passkey_param=passkey_param,
             dry_run=dry_run,
             verbose=verbose,
         )
