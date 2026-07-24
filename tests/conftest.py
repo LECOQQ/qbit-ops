@@ -55,7 +55,7 @@ def configure_qbit_backend(
 
         if client_error is not None:
 
-            def _raise_client_error(*, quiet: bool = False) -> Any:
+            def _raise_client_error(**_kwargs: Any) -> Any:
                 raise client_error
 
             monkeypatch.setattr(
@@ -66,7 +66,7 @@ def configure_qbit_backend(
 
         monkeypatch.setattr(
             "app.main._create_qbit_client",
-            lambda *, quiet=False: client,
+            lambda **_kwargs: client,
         )
 
     return _configure

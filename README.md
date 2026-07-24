@@ -29,8 +29,8 @@ qbit-ops trackers replace-passkey \
   table/JSON/JSONL/CSV.
 - 🔍 **Audit** torrents, categories, trackers and connectivity — text or
   JSON output.
-- 🧭 **Bulk torrent control** — pause, resume, start, reannounce, filtered
-  by category, tracker, name, completed or all.
+- 🧭 **Bulk torrent control** — pause, resume, start, reannounce, targeted
+  by hash (complete or unique prefix), category, tracker, completed or all.
 - 🔗 **Bulk tracker management** — add conditionally, remove, replace, or
   swap a tracker's passkey across every matching torrent.
 - 💾 **Backup & diff** — export full instance state and compare two exports.
@@ -43,8 +43,14 @@ qbit-ops trackers replace-passkey \
 
 - `--dry-run` is **on by default** for every modifying command.
 - Real changes require an explicit `--no-dry-run`.
-- Bulk torrent actions require exactly one filter (`--category`, `--tracker`,
-  `--name`, `--all`, or `--completed`).
+- Bulk torrent actions require exactly one targeting mode (`--hash`,
+  `--category`, `--tracker`, `--all`, or `--completed`).
+- **The infohash is the primary identifier for mutations.** `--hash` accepts
+  a complete hash or an unambiguous prefix; an ambiguous prefix is rejected
+  with the candidate list instead of guessing. Fuzzy name matching is
+  read-only (`torrents inspect --name`) and is no longer accepted by
+  `pause`, `resume`, `start`, or `reannounce` — see the migration note in
+  [docs/COMMANDS.md](docs/COMMANDS.md#torrents).
 - Tracker URLs are normalized for comparison but raw URLs are preserved for
   API calls.
 - Credentials never live in `.env`-less environments or CLI arguments — only
@@ -129,6 +135,9 @@ qbit-ops trackers health
 qbit-ops backup export --output json > backup.json
 
 qbit-ops torrents pause --category sonarr --dry-run --verbose
+
+qbit-ops torrents inspect --name "debian"        # discover a hash
+qbit-ops torrents reannounce --hash abc123 --dry-run   # act on it
 ```
 
 👉 Full command reference, use cases and output formats:

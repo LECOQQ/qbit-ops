@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from app.selectors import AmbiguousTorrentHashError
 from app.torrents import (
     apply_bulk_torrent_action,
     inspect_torrent,
@@ -138,6 +139,33 @@ def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
     )
 
     assert inspect_torrent(client, "missing-hash") is None
+
+
+def test_inspect_torrent_resolves_a_unique_hash_prefix() -> None:
+    """Ensure inspect accepts a unique prefix, not only a full hash."""
+    client = FakeQbitClient(
+        torrents=[{"hash": "abc123def456", "name": "Torrent A"}],
+        trackers_by_hash={"abc123def456": []},
+    )
+
+    report = inspect_torrent(client, "abc123")
+
+    assert report is not None
+    assert report["hash"] == "abc123def456"
+
+
+def test_inspect_torrent_raises_for_an_ambiguous_prefix() -> None:
+    """Ensure an ambiguous prefix raises instead of picking a torrent."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "abc123def456", "name": "Torrent A"},
+            {"hash": "abc987fed654", "name": "Torrent B"},
+        ],
+        trackers_by_hash={"abc123def456": [], "abc987fed654": []},
+    )
+
+    with pytest.raises(AmbiguousTorrentHashError):
+        inspect_torrent(client, "abc")
 
 
 def test_search_torrents_by_name_ranks_best_matches_first() -> None:
@@ -559,6 +587,118 @@ def test_apply_bulk_torrent_action_selects_all_torrents() -> None:
     assert client.paused_hashes == [["hash-a", "hash-b"]]
 
 
+def test_apply_bulk_torrent_action_pauses_by_hash_prefix() -> None:
+    """Ensure a unique hash prefix selects exactly one torrent."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
+            {"hash": "zz00112233ff", "name": "Torrent B", "state": "uploading"},
+        ],
+        trackers_by_hash={"abc123def456": [], "zz00112233ff": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        torrent_hash="abc123",
+        dry_run=False,
+    )
+
+    assert summary["selection"] == {"filter": "hash", "value": "abc123def456"}
+    assert summary["matched"] == 1
+    assert summary["modified"] == 1
+    assert client.paused_hashes == [["abc123def456"]]
+
+
+def test_apply_bulk_torrent_action_with_ambiguous_hash_mutates_nothing() -> (
+    None
+):
+    """Ensure an ambiguous prefix raises and performs no mutation."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
+            {"hash": "abc987fed654", "name": "Torrent B", "state": "uploading"},
+        ],
+        trackers_by_hash={"abc123def456": [], "abc987fed654": []},
+    )
+
+    with pytest.raises(AmbiguousTorrentHashError):
+        apply_bulk_torrent_action(
+            client=client,
+            action="pause",
+            torrent_hash="abc",
+            dry_run=False,
+        )
+
+    assert client.paused_hashes == []
+
+
+def test_apply_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
+    """Ensure an unmatched hash resolves to zero matches, not an error."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
+        ],
+        trackers_by_hash={"abc123def456": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        torrent_hash="doesnotexist",
+        dry_run=False,
+    )
+
+    assert summary["matched"] == 0
+    assert summary["modified"] == 0
+    assert client.paused_hashes == []
+
+
+def test_apply_bulk_torrent_action_hash_dry_run_performs_no_mutation() -> None:
+    """Ensure hash-based dry-run resolves the target without mutating."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
+        ],
+        trackers_by_hash={"abc123def456": []},
+    )
+
+    summary = apply_bulk_torrent_action(
+        client=client,
+        action="pause",
+        torrent_hash="abc123",
+        dry_run=True,
+    )
+
+    assert summary["matched"] == 1
+    assert summary["modified"] == 1
+    assert summary["dry_run"] is True
+    assert client.paused_hashes == []
+
+
+def test_hash_selector_rejects_combined_filters() -> None:
+    """Ensure --hash cannot combine with other bulk selectors."""
+    client = FakeQbitClient(
+        torrents=[
+            {"hash": "hash-a", "name": "Torrent A", "category": "sonarr"}
+        ],
+        trackers_by_hash={"hash-a": []},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Use --hash alone, without --category, --tracker, --all, "
+        "or --completed.",
+    ):
+        apply_bulk_torrent_action(
+            client=client,
+            action="pause",
+            torrent_hash="hash-a",
+            category="sonarr",
+            dry_run=False,
+        )
+
+
 def test_select_all_rejects_combined_filters() -> None:
     """Ensure select_all cannot be combined with another filter."""
     client = FakeQbitClient(
@@ -570,7 +710,7 @@ def test_select_all_rejects_combined_filters() -> None:
 
     with pytest.raises(
         ValueError,
-        match="Use --all alone, without --category, --tracker, or --name.",
+        match="Use --all alone, without --category or --tracker.",
     ):
         apply_bulk_torrent_action(
             client=client,

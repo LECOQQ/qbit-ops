@@ -16,12 +16,15 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from app.selectors import ResolvedTorrent
 from app.status import Health, StatusSnapshot
 
 console = Console()
 err_console = Console(stderr=True)
 
 ProgressCallback = Callable[[int, int], None]
+
+MAX_DISPLAYED_HASH_CANDIDATES = 10
 
 
 class OutputFormat(StrEnum):
@@ -102,6 +105,30 @@ def print_error(message: str) -> None:
     err_console.print(f"[bold red]✗ ERROR[/bold red] {message}")
 
 
+def print_ambiguous_hash_error(
+    value: str,
+    candidates: tuple[ResolvedTorrent, ...],
+) -> None:
+    """Print an actionable ambiguous-hash-prefix error on stderr."""
+    err_console.print(
+        f"[bold red]✗ ERROR[/bold red] Hash prefix '{value}' matches "
+        f"{len(candidates)} torrents:"
+    )
+    err_console.print()
+
+    displayed = candidates[:MAX_DISPLAYED_HASH_CANDIDATES]
+    for candidate in displayed:
+        short_hash = candidate.hash[:12]
+        err_console.print(f"  {short_hash}…  {candidate.name}")
+
+    remaining = len(candidates) - len(displayed)
+    if remaining > 0:
+        err_console.print(f"  … and {remaining} more.")
+
+    err_console.print()
+    err_console.print("Use a longer hash prefix.")
+
+
 def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
     """Print a modification summary, highlighting dry-run status."""
     table = Table(
@@ -131,11 +158,21 @@ def print_table(
     title: str,
     columns: list[str],
     rows: list[list[str]],
+    *,
+    fold_columns: set[str] | None = None,
 ) -> None:
-    """Print a simple Rich table."""
+    """Print a simple Rich table.
+
+    `fold_columns` names columns (e.g. "Hash") that must never be
+    truncated with an ellipsis: they wrap onto extra lines instead, so
+    a full torrent hash stays copyable even on a narrow terminal.
+    """
     table = Table(title=title, show_lines=False)
     for column in columns:
-        table.add_column(column)
+        if fold_columns and column in fold_columns:
+            table.add_column(column, overflow="fold")
+        else:
+            table.add_column(column)
     for row in rows:
         table.add_row(*row)
 
