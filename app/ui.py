@@ -14,6 +14,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.prompt import Confirm
 from rich.table import Table
 
 from app.selectors import ResolvedTorrent
@@ -45,33 +46,15 @@ _HEALTH_STYLES: dict[Health, str] = {
 
 
 @contextmanager
-def spinner(message: str, done: str | None = None) -> Generator[None]:
-    """Show a spinner on stderr while a task runs, then leave a static line.
-
-    No-ops outside an interactive terminal so piped/JSON output and
-    non-TTY logs (CI, cron) stay clean. The spinner line is replaced by a
-    "done" line only on success; an exception raised inside the block
-    leaves no trailing checkmark.
-    """
-    if not err_console.is_terminal:
-        yield
-        return
-
-    with err_console.status(message, spinner="dots"):
-        yield
-
-    err_console.print(f"[green]:heavy_check_mark:[/green] {done or message}")
-
-
-@contextmanager
-def progress_bar(
-    message: str,
-    done: str | None = None,
-) -> Generator[ProgressCallback]:
+def progress_bar(message: str) -> Generator[ProgressCallback]:
     """Show a Rich progress bar on stderr while a per-item task runs.
 
     Yields a callback usable as `on_progress(completed, total)`. No-ops
-    outside an interactive terminal, same rationale as `spinner`.
+    outside an interactive terminal so piped/JSON output and non-TTY logs
+    (CI, cron) stay clean. Fully transient: nothing is left behind in
+    scrollback once the block exits, so the caller's next output (a
+    preview, a confirmation prompt, a summary) starts on a clean line
+    instead of trailing a leftover "done" line.
     """
     if not err_console.is_terminal:
 
@@ -97,7 +80,25 @@ def progress_bar(
 
         yield _on_progress
 
-    err_console.print(f"[green]:heavy_check_mark:[/green] {done or message}")
+
+def confirm(prompt: str) -> bool:
+    """Ask a yes/no question on stderr, defaulting to No.
+
+    Only meant to be called when the caller has already established the
+    context is an interactive terminal (see `app.execution.ExecutionPolicy`);
+    this does not check `err_console.is_terminal` itself.
+    """
+    return Confirm.ask(prompt, console=err_console, default=False)
+
+
+def print_cancelled() -> None:
+    """Print the standard cancellation message for a declined mutation."""
+    console.print("Operation cancelled.")
+
+
+def print_applied() -> None:
+    """Print the standard confirmation-flow success message after a mutation."""
+    console.print("[bold green]Applied.[/bold green]")
 
 
 def print_error(message: str) -> None:

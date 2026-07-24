@@ -43,6 +43,18 @@ qbit-ops trackers replace-passkey \
 
 - `--dry-run` is **on by default** for every modifying command.
 - Real changes require an explicit `--no-dry-run`.
+- Every mutation is classified **low / medium / high** risk. Low-risk bulk
+  torrent actions (`pause`, `resume`, `start`, `reannounce`) never prompt.
+  Medium/high-risk tracker mutations (`add-if-present`, `remove`,
+  `replace`, `replace-passkey`) prompt for confirmation on real,
+  interactive execution — pre-approve unattended runs with `--yes`.
+  `--yes` never implies `--no-dry-run`. Declining a prompt performs no
+  mutation and exits `0`. See
+  [docs/COMMANDS.md](docs/COMMANDS.md#mutation-risk--confirmation-policy)
+  for the full policy.
+- Confirmation prompts and `--verbose` output never show tracker query
+  strings or passkeys — tracker identities are reduced to scheme + host,
+  and `replace-passkey` never renders the old or new passkey anywhere.
 - Bulk torrent actions require exactly one targeting mode (`--hash`,
   `--category`, `--tracker`, `--all`, or `--completed`).
 - **The infohash is the primary identifier for mutations.** `--hash` accepts

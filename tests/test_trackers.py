@@ -5,16 +5,20 @@ from typing import Any
 import pytest
 
 from app.trackers import (
-    add_tracker_if_source_present,
     analyze_tracker_health,
+    apply_tracker_addition,
+    apply_tracker_passkey_replacement,
+    apply_tracker_removal,
+    apply_tracker_replacement,
     export_tracker_state,
     has_tracker,
     inspect_tracker,
     list_tracker_usage,
     normalize_tracker_url,
-    remove_tracker_from_all,
-    replace_tracker_in_all,
-    replace_tracker_passkey,
+    plan_tracker_addition,
+    plan_tracker_passkey_replacement,
+    plan_tracker_removal,
+    plan_tracker_replacement,
 )
 
 TrackersByHash = dict[str, list[dict[str, str]]]
@@ -263,8 +267,8 @@ def test_export_tracker_state_exports_active_trackers() -> None:
     }
 
 
-def test_add_tracker_if_source_present_returns_verbose_details() -> None:
-    """Ensure add operations can report impacted torrents."""
+def test_plan_tracker_addition_reports_matching_torrents() -> None:
+    """Ensure the addition plan reports impacted torrents unconditionally."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce"}],
@@ -272,31 +276,65 @@ def test_add_tracker_if_source_present_returns_verbose_details() -> None:
         }
     )
 
-    summary = add_tracker_if_source_present(
+    plan = plan_tracker_addition(
         client=client,
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
-        verbose=True,
     )
 
-    assert summary == {
-        "scanned": 2,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "dry_run": True,
-        "details": [
-            {
-                "hash": "hash-a",
-                "name": "hash-a",
-                "action": "would_add",
-            },
-        ],
-    }
+    assert plan.scanned == 2
+    assert plan.matched_source == 1
+    assert plan.already_had_target == ()
+    assert len(plan.changes) == 1
+    assert plan.changes[0].hash == "hash-a"
+    assert plan.changes[0].name == "hash-a"
 
 
-def test_remove_tracker_from_all_is_dry_run_by_default() -> None:
-    """Ensure tracker removal previews matching torrents by default."""
+def test_apply_tracker_addition_adds_target_tracker() -> None:
+    """Ensure applying an addition plan calls the add-trackers API."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce"}],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+    apply_tracker_addition(client, plan)
+
+    assert client.added_trackers == [
+        ("hash-a", "https://tracker-b.example/announce")
+    ]
+
+
+def test_plan_tracker_addition_reports_already_had_target() -> None:
+    """Ensure torrents that already have the target tracker are reported."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce"},
+                {"url": "https://tracker-b.example/announce"},
+            ],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        client=client,
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 1
+    assert plan.changes == ()
+    assert len(plan.already_had_target) == 1
+    assert plan.already_had_target[0].hash == "hash-a"
+
+
+def test_plan_tracker_removal_reports_matching_torrents() -> None:
+    """Ensure the removal plan reports matching torrents without mutating."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker.example/announce/"}],
@@ -304,22 +342,18 @@ def test_remove_tracker_from_all_is_dry_run_by_default() -> None:
         }
     )
 
-    summary = remove_tracker_from_all(
+    plan = plan_tracker_removal(
         client=client,
         tracker="https://tracker.example/announce",
     )
 
-    assert summary == {
-        "scanned": 2,
-        "matched_tracker": 1,
-        "modified": 1,
-        "removed_urls": 1,
-        "dry_run": True,
-    }
+    assert plan.scanned == 2
+    assert plan.matched_tracker == 1
+    assert plan.removed_url_count == 1
     assert client.removed_trackers == []
 
 
-def test_remove_tracker_matches_query_variants_without_query() -> None:
+def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
     """Ensure without-query removal matches raw dynamic tracker URLs."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -330,20 +364,16 @@ def test_remove_tracker_matches_query_variants_without_query() -> None:
         }
     )
 
-    summary = remove_tracker_from_all(
+    plan = plan_tracker_removal(
         client=client,
         tracker="https://tracker.example/announce",
-        dry_run=False,
         match_mode="without-query",
     )
+    apply_tracker_removal(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_tracker": 1,
-        "modified": 1,
-        "removed_urls": 2,
-        "dry_run": False,
-    }
+    assert plan.scanned == 1
+    assert plan.matched_tracker == 1
+    assert plan.removed_url_count == 2
     assert client.removed_trackers == [
         (
             "hash-a",
@@ -355,40 +385,26 @@ def test_remove_tracker_matches_query_variants_without_query() -> None:
     ]
 
 
-def test_remove_tracker_from_all_returns_verbose_details() -> None:
-    """Ensure removal operations can report impacted torrents."""
+def test_plan_tracker_removal_reports_matching_urls_per_torrent() -> None:
+    """Ensure the removal plan carries the raw matching URLs per torrent."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker.example/announce/"}],
         }
     )
 
-    summary = remove_tracker_from_all(
+    plan = plan_tracker_removal(
         client=client,
         tracker="https://tracker.example/announce",
-        verbose=True,
     )
 
-    assert summary == {
-        "scanned": 1,
-        "matched_tracker": 1,
-        "modified": 1,
-        "removed_urls": 1,
-        "dry_run": True,
-        "details": [
-            {
-                "hash": "hash-a",
-                "name": "hash-a",
-                "action": "would_remove",
-                "matching_tracker_urls": [
-                    "https://tracker.example/announce/",
-                ],
-            },
-        ],
-    }
+    assert plan.matched_tracker == 1
+    assert len(plan.changes) == 1
+    assert plan.changes[0].hash == "hash-a"
+    assert plan.changes[0].urls == ("https://tracker.example/announce/",)
 
 
-def test_remove_tracker_from_all_removes_matching_raw_urls() -> None:
+def test_apply_tracker_removal_removes_matching_raw_urls() -> None:
     """Ensure real removal uses raw qBittorrent tracker URLs."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -400,19 +416,15 @@ def test_remove_tracker_from_all_removes_matching_raw_urls() -> None:
         }
     )
 
-    summary = remove_tracker_from_all(
+    plan = plan_tracker_removal(
         client=client,
         tracker="https://tracker.example/announce",
-        dry_run=False,
     )
+    apply_tracker_removal(client, plan)
 
-    assert summary == {
-        "scanned": 2,
-        "matched_tracker": 1,
-        "modified": 1,
-        "removed_urls": 2,
-        "dry_run": False,
-    }
+    assert plan.scanned == 2
+    assert plan.matched_tracker == 1
+    assert plan.removed_url_count == 2
     assert client.removed_trackers == [
         (
             "hash-a",
@@ -424,8 +436,8 @@ def test_remove_tracker_from_all_removes_matching_raw_urls() -> None:
     ]
 
 
-def test_replace_tracker_in_all_is_dry_run_by_default() -> None:
-    """Ensure tracker replacement previews matching torrents by default."""
+def test_plan_tracker_replacement_reports_matching_torrents() -> None:
+    """Ensure the replacement plan reports matching torrents by default."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce"}],
@@ -433,49 +445,38 @@ def test_replace_tracker_in_all_is_dry_run_by_default() -> None:
         }
     )
 
-    summary = replace_tracker_in_all(
+    plan = plan_tracker_replacement(
         client=client,
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
 
-    assert summary == {
-        "scanned": 2,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 0,
-        "dry_run": True,
-    }
+    assert plan.scanned == 2
+    assert plan.matched_source == 1
+    assert plan.replaced_url_count == 1
+    assert plan.removed_url_count == 0
     assert client.edited_trackers == []
     assert client.removed_trackers == []
 
 
-def test_replace_tracker_in_all_replaces_source_url() -> None:
-    """Ensure real replacement edits the matching raw source URL."""
+def test_apply_tracker_replacement_replaces_source_url() -> None:
+    """Ensure applying a replacement plan edits the matching raw source URL."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce/"}],
         }
     )
 
-    summary = replace_tracker_in_all(
+    plan = plan_tracker_replacement(
         client=client,
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
-        dry_run=False,
     )
+    apply_tracker_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 0,
-        "dry_run": False,
-    }
+    assert plan.matched_source == 1
+    assert plan.replaced_url_count == 1
+    assert plan.removed_url_count == 0
     assert client.edited_trackers == [
         (
             "hash-a",
@@ -485,7 +486,7 @@ def test_replace_tracker_in_all_replaces_source_url() -> None:
     ]
 
 
-def test_replace_tracker_removes_source_when_target_already_exists() -> None:
+def test_plan_tracker_replacement_removes_source_when_target_exists() -> None:
     """Ensure replacement avoids duplicating an existing target tracker."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -496,44 +497,26 @@ def test_replace_tracker_removes_source_when_target_already_exists() -> None:
         }
     )
 
-    summary = replace_tracker_in_all(
+    plan = plan_tracker_replacement(
         client=client,
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
-        dry_run=False,
-        verbose=True,
     )
+    apply_tracker_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 1,
-        "already_had_target": 1,
-        "modified": 1,
-        "replaced_urls": 0,
-        "removed_urls": 1,
-        "dry_run": False,
-        "details": [
-            {
-                "hash": "hash-a",
-                "name": "hash-a",
-                "action": "removed_source",
-                "replaced_tracker_url": "",
-                "matching_tracker_urls": [
-                    "https://tracker-a.example/announce",
-                ],
-                "removed_tracker_urls": [
-                    "https://tracker-a.example/announce",
-                ],
-            }
-        ],
-    }
+    assert plan.matched_source == 1
+    assert len(plan.changes) == 1
+    change = plan.changes[0]
+    assert change.already_had_target is True
+    assert change.replace_url is None
+    assert change.remove_urls == ("https://tracker-a.example/announce",)
     assert client.edited_trackers == []
     assert client.removed_trackers == [
         ("hash-a", ["https://tracker-a.example/announce"])
     ]
 
 
-def test_replace_tracker_removes_extra_without_query_variants() -> None:
+def test_apply_tracker_replacement_removes_extra_variants() -> None:
     """Ensure dynamic source variants do not become duplicate targets."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -544,23 +527,17 @@ def test_replace_tracker_removes_extra_without_query_variants() -> None:
         }
     )
 
-    summary = replace_tracker_in_all(
+    plan = plan_tracker_replacement(
         client=client,
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
-        dry_run=False,
         match_mode="without-query",
     )
+    apply_tracker_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 1,
-        "dry_run": False,
-    }
+    assert plan.matched_source == 1
+    assert plan.replaced_url_count == 1
+    assert plan.removed_url_count == 1
     assert client.edited_trackers == [
         (
             "hash-a",
@@ -578,15 +555,15 @@ def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
     client = FakeQbitClient(trackers_by_hash={})
 
     with pytest.raises(RuntimeError, match="placeholder"):
-        replace_tracker_passkey(
+        plan_tracker_passkey_replacement(
             client=client,
             tracker_template="https://tracker.example/announce",
             new_passkey="new",
         )
 
 
-def test_replace_tracker_passkey_updates_query_placeholder() -> None:
-    """Ensure a query-string passkey placeholder is replaced in place."""
+def test_plan_passkey_replacement_updates_query_placeholder() -> None:
+    """Ensure a query-string passkey placeholder is planned in place."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -596,63 +573,58 @@ def test_replace_tracker_passkey_updates_query_placeholder() -> None:
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-query.example/announce?passkey={passkey}",
-        new_passkey="new",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 2,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 0,
-        "dry_run": False,
-    }
+    assert plan.scanned == 2
+    assert plan.matched_source == 1
+    assert plan.already_up_to_date == 0
+    assert len(plan.changes) == 1
+    assert plan.changes[0].stale_url_count == 1
     assert client.edited_trackers == [
         (
             "hash-a",
             "https://tracker-query.example/announce?passkey=old",
-            "https://tracker-query.example/announce?passkey=new",
+            "https://tracker-query.example/announce"
+            "?passkey=UNMISTAKABLE-NEW-PASSKEY-VALUE",
         )
     ]
 
 
-def test_replace_tracker_passkey_preserves_other_query_params() -> None:
+def test_plan_passkey_replacement_preserves_other_query_params() -> None:
     """Ensure unrelated query parameters survive the passkey swap."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
-                {
-                    "url": "https://tracker.example/announce"
-                    "?a=1&passkey=old&b=2"
-                },
+                {"url": "https://tracker.example/announce?a=1&passkey=old&b=2"},
             ],
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker.example/announce?passkey={passkey}",
-        new_passkey="new",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary["modified"] == 1
+    assert len(plan.changes) == 1
     assert client.edited_trackers == [
         (
             "hash-a",
             "https://tracker.example/announce?a=1&passkey=old&b=2",
-            "https://tracker.example/announce?a=1&passkey=new&b=2",
+            "https://tracker.example/announce"
+            "?a=1&passkey=UNMISTAKABLE-NEW-PASSKEY-VALUE&b=2",
         )
     ]
 
 
-def test_replace_tracker_passkey_updates_path_segment_before_announce() -> None:
-    """Ensure a passkey path segment placed before 'announce' is replaced."""
+def test_plan_passkey_replacement_updates_path_before_announce() -> None:
+    """Ensure a passkey path segment placed before 'announce' is planned."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -661,49 +633,50 @@ def test_replace_tracker_passkey_updates_path_segment_before_announce() -> None:
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-prefix.example/{passkey}/announce",
-        new_passkey="new-passkey",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary["modified"] == 1
+    assert len(plan.changes) == 1
     assert client.edited_trackers == [
         (
             "hash-a",
             "https://tracker-prefix.example/old-passkey/announce",
-            "https://tracker-prefix.example/new-passkey/announce",
+            "https://tracker-prefix.example/"
+            "UNMISTAKABLE-NEW-PASSKEY-VALUE/announce",
         )
     ]
 
 
-def test_replace_tracker_passkey_updates_path_segment_after_announce() -> None:
-    """Ensure a passkey path segment placed after 'announce' is replaced."""
+def test_plan_passkey_replacement_updates_path_segment_after_announce() -> None:
+    """Ensure a passkey path segment placed after 'announce' is planned."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-suffix.example/announce/old-passkey"}],
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
-        new_passkey="new-passkey",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary["modified"] == 1
+    assert len(plan.changes) == 1
     assert client.edited_trackers == [
         (
             "hash-a",
             "https://tracker-suffix.example/announce/old-passkey",
-            "https://tracker-suffix.example/announce/new-passkey",
+            "https://tracker-suffix.example/announce/UNMISTAKABLE-NEW-PASSKEY-VALUE",
         )
     ]
 
 
-def test_replace_tracker_passkey_preserves_dynamic_query_params() -> None:
+def test_plan_passkey_replacement_preserves_dynamic_query_params() -> None:
     """Ensure per-torrent query params survive a path-based passkey swap."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -716,90 +689,96 @@ def test_replace_tracker_passkey_preserves_dynamic_query_params() -> None:
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="http://tracker-port.example:8080/{passkey}/announce",
-        new_passkey="new-passkey",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary["modified"] == 1
+    assert len(plan.changes) == 1
     assert client.edited_trackers == [
         (
             "hash-a",
             "http://tracker-port.example:8080/old-passkey/announce"
             "?announce_sig=abc&announce_ts=1",
-            "http://tracker-port.example:8080/new-passkey/announce"
-            "?announce_sig=abc&announce_ts=1",
+            "http://tracker-port.example:8080/UNMISTAKABLE-NEW-PASSKEY-VALUE"
+            "/announce?announce_sig=abc&announce_ts=1",
         )
     ]
 
 
-def test_replace_tracker_passkey_is_dry_run_by_default() -> None:
-    """Ensure passkey replacement previews matching torrents by default."""
+def test_plan_passkey_replacement_never_leaks_secret_in_repr() -> None:
+    """Ensure the plan's repr never exposes the old or new passkey.
+
+    `PasskeyReplacementChange.stale_urls` uses `field(repr=False)`
+    specifically so an accidental `print(change)` or `logger.debug(plan)`
+    cannot leak a passkey; this asserts that guarantee directly with an
+    unmistakable secret fixture.
+    """
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-suffix.example/announce/OLD-SECRET"}],
+        }
+    )
+
+    plan = plan_tracker_passkey_replacement(
+        client=client,
+        tracker_template="https://tracker-suffix.example/announce/{passkey}",
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
+    )
+
+    rendered = repr(plan.changes[0])
+    assert "UNMISTAKABLE-NEW-PASSKEY-VALUE" not in rendered
+    assert "OLD-SECRET" not in rendered
+
+
+def test_plan_passkey_replacement_is_pure_and_does_not_mutate() -> None:
+    """Ensure planning a passkey replacement never calls the edit API."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-suffix.example/announce/old"}],
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
-        new_passkey="new",
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 1,
-        "already_had_target": 0,
-        "modified": 1,
-        "replaced_urls": 1,
-        "removed_urls": 0,
-        "dry_run": True,
-    }
+    assert plan.scanned == 1
+    assert plan.matched_source == 1
+    assert plan.already_up_to_date == 0
+    assert plan.replaced_url_count == 1
     assert client.edited_trackers == []
 
 
-def test_replace_tracker_passkey_skips_torrents_already_up_to_date() -> None:
+def test_plan_passkey_replacement_skips_torrents_already_up_to_date() -> None:
     """Ensure torrents already using the new passkey are left untouched."""
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker-suffix.example/announce/new"}],
+            "hash-a": [
+                {"url": "https://tracker-suffix.example/announce/ALREADY-CURRENT"}
+            ],
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
-        new_passkey="new",
-        dry_run=False,
-        verbose=True,
+        new_passkey="ALREADY-CURRENT",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 1,
-        "already_had_target": 1,
-        "modified": 0,
-        "replaced_urls": 0,
-        "removed_urls": 0,
-        "dry_run": False,
-        "details": [
-            {
-                "hash": "hash-a",
-                "name": "hash-a",
-                "action": "already_up_to_date",
-                "matching_tracker_urls": [
-                    "https://tracker-suffix.example/announce/new",
-                ],
-            }
-        ],
-    }
+    assert plan.scanned == 1
+    assert plan.matched_source == 1
+    assert plan.already_up_to_date == 1
+    assert plan.changes == ()
     assert client.edited_trackers == []
 
 
-def test_replace_tracker_passkey_ignores_unmatched_trackers() -> None:
+def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
     """Ensure torrents without the target tracker host/path are skipped."""
     client = FakeQbitClient(
         trackers_by_hash={
@@ -807,22 +786,17 @@ def test_replace_tracker_passkey_ignores_unmatched_trackers() -> None:
         }
     )
 
-    summary = replace_tracker_passkey(
+    plan = plan_tracker_passkey_replacement(
         client=client,
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
-        new_passkey="new",
-        dry_run=False,
+        new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
+    apply_tracker_passkey_replacement(client, plan)
 
-    assert summary == {
-        "scanned": 1,
-        "matched_source": 0,
-        "already_had_target": 0,
-        "modified": 0,
-        "replaced_urls": 0,
-        "removed_urls": 0,
-        "dry_run": False,
-    }
+    assert plan.scanned == 1
+    assert plan.matched_source == 0
+    assert plan.already_up_to_date == 0
+    assert plan.changes == ()
     assert client.edited_trackers == []
 
 
@@ -834,6 +808,7 @@ class FakeQbitClient:
         self.trackers_by_hash = trackers_by_hash
         self.removed_trackers: list[tuple[str, list[str]]] = []
         self.edited_trackers: list[tuple[str, str, str]] = []
+        self.added_trackers: list[tuple[str, str]] = []
 
     def torrents_info(self) -> list[dict[str, str]]:
         """Return fake torrents."""
@@ -860,6 +835,7 @@ class FakeQbitClient:
         urls: str,
     ) -> None:
         """Record fake tracker additions."""
+        self.added_trackers.append((torrent_hash, urls))
 
     def torrents_edit_tracker(
         self,

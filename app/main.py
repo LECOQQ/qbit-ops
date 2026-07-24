@@ -3,7 +3,7 @@
 import csv
 import io
 import json
-import logging
+from collections.abc import Callable
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -20,6 +20,13 @@ from app.backup import (
     load_export_file,
 )
 from app.config import ConfigError, load_qbit_config
+from app.execution import (
+    MUTATION_RISK,
+    ExecutionDecision,
+    ExecutionPolicy,
+    MutationOperation,
+    is_interactive_terminal,
+)
 from app.selectors import AmbiguousTorrentHashError
 from app.status import (
     StatusSnapshot,
@@ -30,34 +37,47 @@ from app.status import (
     status_exit_code,
 )
 from app.torrents import (
+    BulkTorrentActionPlan,
     TorrentBulkAction,
     apply_bulk_torrent_action,
     inspect_torrent,
     list_category_usage,
     list_torrents,
     list_torrents_by_category,
+    plan_bulk_torrent_action,
     search_torrents_by_name,
     validate_bulk_torrent_selection,
 )
 from app.trackers import (
-    add_tracker_if_source_present,
+    PasskeyReplacementPlan,
+    TrackerAdditionPlan,
+    TrackerRemovalPlan,
+    TrackerReplacementPlan,
     analyze_tracker_health,
+    apply_tracker_addition,
+    apply_tracker_passkey_replacement,
+    apply_tracker_removal,
+    apply_tracker_replacement,
     export_tracker_state,
     inspect_tracker,
     list_tracker_usage,
-    remove_tracker_from_all,
-    replace_tracker_in_all,
-    replace_tracker_passkey,
+    plan_tracker_addition,
+    plan_tracker_passkey_replacement,
+    plan_tracker_removal,
+    plan_tracker_replacement,
+    redact_tracker_identity,
 )
 from app.ui import (
     OutputFormat,
+    confirm,
     print_ambiguous_hash_error,
+    print_applied,
+    print_cancelled,
     print_error,
     print_summary,
     print_table,
     progress_bar,
     render_status_table,
-    spinner,
 )
 
 PROJECT_NAME = "qbit-ops"
@@ -230,7 +250,7 @@ def check(
     """Check qBittorrent connectivity using `.env` settings."""
     _validate_format_support("connection_check", output_format)
     try:
-        _create_qbit_client(quiet=True)
+        _create_qbit_client()
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -273,7 +293,7 @@ def doctor(
     _validate_format_support("config_doctor", output_format)
     try:
         config = load_qbit_config()
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         qbit_version = _get_optional_client_value(client, "app_version")
         web_api_version = _get_optional_client_value(
             client,
@@ -350,7 +370,7 @@ def list_qbit_torrents(
         _fail("Use either --tracker or --category, not both.")
 
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         if tracker is not None:
             report = inspect_tracker(
                 client=client,
@@ -426,7 +446,7 @@ def list_qbit_categories(
     """List torrent categories and usage counts."""
     _validate_format_support("torrents_categories", output_format)
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         category_usage = list_category_usage(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -513,7 +533,7 @@ def inspect_qbit_torrent(
         _fail("Provide exactly one of --hash or --name.")
 
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         if name is not None:
             report = search_torrents_by_name(client, name, limit=limit)
             _print_torrent_name_search(report, output_format)
@@ -589,7 +609,7 @@ def pause(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview actions without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -609,6 +629,7 @@ def pause(
 ) -> None:
     """Pause torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_PAUSE,
         action="pause",
         torrent_hash=torrent_hash,
         category=category,
@@ -657,7 +678,7 @@ def resume(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview actions without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -677,6 +698,7 @@ def resume(
 ) -> None:
     """Resume torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_RESUME,
         action="resume",
         torrent_hash=torrent_hash,
         category=category,
@@ -732,7 +754,7 @@ def start(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview actions without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -752,6 +774,7 @@ def start(
 ) -> None:
     """Start stopped torrents, including completed ones with --completed."""
     _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_START,
         action="start",
         torrent_hash=torrent_hash,
         category=category,
@@ -801,7 +824,7 @@ def reannounce(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview actions without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -821,6 +844,7 @@ def reannounce(
 ) -> None:
     """Reannounce torrents matching a hash, category, tracker, or all."""
     _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_REANNOUNCE,
         action="reannounce",
         torrent_hash=torrent_hash,
         category=category,
@@ -852,7 +876,7 @@ def add_if_present(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview actions without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -862,6 +886,13 @@ def add_if_present(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    assume_yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Skip confirmation for real execution.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -871,18 +902,14 @@ def add_if_present(
     ] = False,
 ) -> None:
     """Add a target tracker when a source tracker is already present."""
-    _configure_logging()
-
     try:
         client = _create_qbit_client()
         with progress_bar("Scanning torrents...") as on_progress:
-            summary = add_tracker_if_source_present(
+            plan = plan_tracker_addition(
                 client=client,
                 source_tracker=source,
                 target_tracker=target,
-                dry_run=dry_run,
                 match_mode=match.value,
-                verbose=verbose,
                 on_progress=on_progress,
             )
     except ConfigError as error:
@@ -892,9 +919,27 @@ def add_if_present(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    _print_summary(summary)
-    _print_details(summary)
-    _exit_if_no_targeted_matches(summary["matched_source"])
+    def _apply() -> None:
+        try:
+            apply_tracker_addition(client, plan)
+        except RuntimeError as error:
+            _fail(str(error))
+
+    applied = _run_mutation(
+        operation=MutationOperation.TRACKERS_ADD_IF_PRESENT,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        has_changes=bool(plan.changes),
+        apply_fn=_apply,
+        summary_rows=lambda dry_run_label: _addition_summary_rows(
+            plan, dry_run=dry_run_label
+        ),
+        confirmation_message=_addition_confirmation_message(plan),
+    )
+
+    if verbose:
+        _print_addition_details(plan, applied=applied)
+    _exit_if_no_targeted_matches(plan.matched_source)
 
 
 @trackers_app.command(name="list")
@@ -917,7 +962,7 @@ def list_trackers(
     """List trackers currently present on the qBittorrent instance."""
     _validate_format_support("trackers_list", output_format)
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         tracker_usage = list_tracker_usage(client, match_mode=match.value)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -978,7 +1023,7 @@ def health(
     """Analyze tracker health across the qBittorrent instance."""
     _validate_format_support("trackers_health", output_format)
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         report = analyze_tracker_health(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1042,7 +1087,7 @@ def inspect_tracker_usage(
     """Inspect torrents using a tracker."""
     _validate_format_support("trackers_inspect", output_format)
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         report = inspect_tracker(
             client=client,
             tracker=tracker,
@@ -1139,7 +1184,7 @@ def replace(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview replacements without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -1149,6 +1194,13 @@ def replace(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    assume_yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Skip confirmation for real execution.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -1158,18 +1210,14 @@ def replace(
     ] = False,
 ) -> None:
     """Replace a tracker on every torrent using it."""
-    _configure_logging()
-
     try:
         client = _create_qbit_client()
         with progress_bar("Scanning torrents...") as on_progress:
-            summary = replace_tracker_in_all(
+            plan = plan_tracker_replacement(
                 client=client,
                 source_tracker=source,
                 target_tracker=target,
-                dry_run=dry_run,
                 match_mode=match.value,
-                verbose=verbose,
                 on_progress=on_progress,
             )
     except ConfigError as error:
@@ -1179,9 +1227,27 @@ def replace(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    _print_replace_summary(summary)
-    _print_details(summary)
-    _exit_if_no_targeted_matches(summary["matched_source"])
+    def _apply() -> None:
+        try:
+            apply_tracker_replacement(client, plan)
+        except RuntimeError as error:
+            _fail(str(error))
+
+    applied = _run_mutation(
+        operation=MutationOperation.TRACKERS_REPLACE,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        has_changes=bool(plan.changes),
+        apply_fn=_apply,
+        summary_rows=lambda dry_run_label: _replacement_summary_rows(
+            plan, dry_run=dry_run_label
+        ),
+        confirmation_message=_replacement_confirmation_message(plan),
+    )
+
+    if verbose:
+        _print_replacement_details(plan, applied=applied)
+    _exit_if_no_targeted_matches(plan.matched_source)
 
 
 @trackers_app.command(name="replace-passkey")
@@ -1207,9 +1273,16 @@ def replace_tracker_passkey_command(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview replacements without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
+    assume_yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Skip confirmation for real execution.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -1219,17 +1292,13 @@ def replace_tracker_passkey_command(
     ] = False,
 ) -> None:
     """Replace a tracker's passkey on every torrent using that tracker."""
-    _configure_logging()
-
     try:
         client = _create_qbit_client()
         with progress_bar("Scanning torrents...") as on_progress:
-            summary = replace_tracker_passkey(
+            plan = plan_tracker_passkey_replacement(
                 client=client,
                 tracker_template=tracker,
                 new_passkey=new_passkey,
-                dry_run=dry_run,
-                verbose=verbose,
                 on_progress=on_progress,
             )
     except ConfigError as error:
@@ -1239,9 +1308,27 @@ def replace_tracker_passkey_command(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    _print_replace_summary(summary)
-    _print_details(summary)
-    _exit_if_no_targeted_matches(summary["matched_source"])
+    def _apply() -> None:
+        try:
+            apply_tracker_passkey_replacement(client, plan)
+        except RuntimeError as error:
+            _fail(str(error))
+
+    applied = _run_mutation(
+        operation=MutationOperation.TRACKERS_REPLACE_PASSKEY,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        has_changes=bool(plan.changes),
+        apply_fn=_apply,
+        summary_rows=lambda dry_run_label: _passkey_summary_rows(
+            plan, dry_run=dry_run_label
+        ),
+        confirmation_message=_passkey_confirmation_message(plan),
+    )
+
+    if verbose:
+        _print_passkey_details(plan, applied=applied)
+    _exit_if_no_targeted_matches(plan.matched_source)
 
 
 @backup_app.command(name="export")
@@ -1265,7 +1352,7 @@ def export_backup(
     _validate_format_support("backup_export", output_format)
     try:
         config = load_qbit_config()
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         state = export_instance_state(
             client=client,
             config=config,
@@ -1375,7 +1462,7 @@ def export_trackers(
     """Export active tracker state."""
     _validate_format_support("trackers_export", output_format)
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         state = export_tracker_state(client=client, match_mode=match.value)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1409,7 +1496,7 @@ def remove(
         bool,
         typer.Option(
             "--dry-run/--no-dry-run",
-            help="Preview removals without modifying qBittorrent.",
+            help="Apply changes instead of previewing them.",
         ),
     ] = True,
     match: Annotated[
@@ -1419,6 +1506,13 @@ def remove(
             help="Tracker comparison mode.",
         ),
     ] = TrackerMatchModeOption.exact,
+    assume_yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Skip confirmation for real execution.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -1428,17 +1522,13 @@ def remove(
     ] = False,
 ) -> None:
     """Remove a tracker from every torrent using it."""
-    _configure_logging()
-
     try:
         client = _create_qbit_client()
         with progress_bar("Scanning torrents...") as on_progress:
-            summary = remove_tracker_from_all(
+            plan = plan_tracker_removal(
                 client=client,
                 tracker=tracker,
-                dry_run=dry_run,
                 match_mode=match.value,
-                verbose=verbose,
                 on_progress=on_progress,
             )
     except ConfigError as error:
@@ -1448,13 +1538,94 @@ def remove(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    _print_remove_summary(summary)
-    _print_details(summary)
-    _exit_if_no_targeted_matches(summary["matched_tracker"])
+    def _apply() -> None:
+        try:
+            apply_tracker_removal(client, plan)
+        except RuntimeError as error:
+            _fail(str(error))
+
+    applied = _run_mutation(
+        operation=MutationOperation.TRACKERS_REMOVE,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        has_changes=bool(plan.changes),
+        apply_fn=_apply,
+        summary_rows=lambda dry_run_label: _removal_summary_rows(
+            plan, dry_run=dry_run_label
+        ),
+        confirmation_message=_removal_confirmation_message(plan),
+    )
+
+    if verbose:
+        _print_removal_details(plan, applied=applied)
+    _exit_if_no_targeted_matches(plan.matched_tracker)
+
+
+def _run_mutation(
+    *,
+    operation: MutationOperation,
+    dry_run: bool,
+    assume_yes: bool,
+    has_changes: bool,
+    apply_fn: Callable[[], None],
+    summary_rows: Callable[[bool], dict[str, Any]],
+    confirmation_message: str | None = None,
+) -> bool:
+    """Run the shared confirm/apply/refuse flow for an already-built plan.
+
+    Centralizes `app.execution.ExecutionPolicy` decisions for every
+    mutation command: low-risk commands apply real changes immediately
+    (no `confirmation_message` needed); medium/high-risk commands show
+    the plan, then confirm, then apply exactly that plan (no rescan).
+
+    `summary_rows(dry_run_label)` must build the `print_summary` rows
+    dict with its `dry_run` key set to the given label, so the same
+    plan-derived counts can be shown both as a pending preview
+    (`dry_run_label=True`) and as an applied result (`False`).
+
+    Returns whether the plan was applied. Exits via `typer.Exit` on a
+    non-interactive refusal (`ExitCode.ERROR`) or a declined
+    confirmation (`ExitCode.SUCCESS`, per the cancellation contract).
+    """
+    policy = ExecutionPolicy(
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        interactive=is_interactive_terminal(),
+        risk=MUTATION_RISK[operation],
+    )
+
+    if not has_changes:
+        print_summary(summary_rows(policy.dry_run))
+        return False
+
+    decision = policy.decide()
+
+    if decision is ExecutionDecision.REFUSE_NON_INTERACTIVE:
+        _fail(policy.refusal_message(operation))
+
+    if decision is ExecutionDecision.APPLY_WITHOUT_PROMPT:
+        apply_fn()
+        print_summary(summary_rows(False))
+        return True
+
+    print_summary(summary_rows(True))
+
+    if decision is ExecutionDecision.PREVIEW_ONLY:
+        return False
+
+    assert confirmation_message is not None
+    if not confirm(confirmation_message):
+        print_cancelled()
+        raise typer.Exit(code=ExitCode.SUCCESS)
+
+    apply_fn()
+    print_applied()
+    return True
 
 
 def _run_bulk_torrent_action(
     *,
+    operation: MutationOperation,
     action: TorrentBulkAction,
     torrent_hash: str | None,
     category: str | None,
@@ -1477,12 +1648,10 @@ def _run_bulk_torrent_action(
     except ValueError as error:
         _fail(str(error))
 
-    _configure_logging()
-
     try:
         client = _create_qbit_client()
         with progress_bar(f"Scanning torrents to {action}...") as on_progress:
-            summary = apply_bulk_torrent_action(
+            plan = plan_bulk_torrent_action(
                 client=client,
                 action=action,
                 torrent_hash=torrent_hash,
@@ -1491,8 +1660,6 @@ def _run_bulk_torrent_action(
                 match_mode=match.value,
                 select_all=select_all,
                 completed_only=completed_only,
-                dry_run=dry_run,
-                verbose=verbose,
                 on_progress=on_progress,
             )
     except AmbiguousTorrentHashError as error:
@@ -1506,17 +1673,35 @@ def _run_bulk_torrent_action(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    _print_bulk_torrent_summary(summary)
-    _print_bulk_torrent_details(summary)
-    _exit_if_no_targeted_matches(summary["matched"])
+    def _apply() -> None:
+        try:
+            apply_bulk_torrent_action(client, plan)
+        except RuntimeError as error:
+            _fail(str(error))
+
+    applied = _run_mutation(
+        operation=operation,
+        dry_run=dry_run,
+        assume_yes=False,
+        has_changes=bool(plan.changes),
+        apply_fn=_apply,
+        summary_rows=lambda dry_run_label: _bulk_torrent_summary_rows(
+            plan, dry_run=dry_run_label
+        ),
+    )
+
+    if verbose:
+        _print_bulk_torrent_details(plan, applied=applied)
+    _exit_if_no_targeted_matches(plan.matched)
 
 
-def _create_qbit_client(*, quiet: bool = False) -> Any:
+def _create_qbit_client() -> Any:
     """Create and authenticate a qBittorrent API client.
 
-    `quiet` skips the connecting spinner entirely so callers that must
-    honor `--quiet` (e.g. `status`) never emit Rich decorations, even
-    when running in an interactive terminal.
+    Never shows a connection spinner or banner: every command already
+    communicates its own progress (a scan spinner, a preview, a
+    summary), so a separate "Connected to qBittorrent" line would only
+    be redundant.
     """
     config = load_qbit_config()
     client = qbittorrentapi.Client(
@@ -1526,14 +1711,7 @@ def _create_qbit_client(*, quiet: bool = False) -> Any:
     )
 
     try:
-        if quiet:
-            client.auth_log_in()
-        else:
-            with spinner(
-                "Connecting to qBittorrent...",
-                done="Connected to qBittorrent",
-            ):
-                client.auth_log_in()
+        client.auth_log_in()
     except Exception as error:
         if _is_qbit_error(error, {"LoginFailed"}):
             raise QbitAuthenticationError(
@@ -1574,7 +1752,7 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
     host = config.host
 
     try:
-        client = _create_qbit_client(quiet=True)
+        client = _create_qbit_client()
         return collect_status_snapshot(client, host=host)
     except QbitAuthenticationError as error:
         print_error(str(error))
@@ -2010,11 +2188,6 @@ def _print_backup_diff(report: dict[str, Any]) -> None:
         )
 
 
-def _configure_logging() -> None:
-    """Configure readable logs for CLI commands."""
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-
 def _fail(message: str) -> NoReturn:
     """Print an actionable error and exit with a failure code."""
     print_error(message)
@@ -2048,107 +2221,233 @@ def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
     return type(error).__name__ in class_names
 
 
-def _print_summary(summary: dict[str, int | bool]) -> None:
-    """Print the final command summary."""
-    print_summary(
-        {
-            "scanned": summary["scanned"],
-            "matched_source": summary["matched_source"],
-            "already_had_target": summary["already_had_target"],
-            "modified": summary["modified"],
-            "dry_run": summary["dry_run"],
-        }
-    )
-
-
-def _print_remove_summary(summary: dict[str, int | bool]) -> None:
-    """Print the final tracker removal summary."""
-    print_summary(
-        {
-            "scanned": summary["scanned"],
-            "matched_tracker": summary["matched_tracker"],
-            "modified": summary["modified"],
-            "removed_urls": summary["removed_urls"],
-            "dry_run": summary["dry_run"],
-        }
-    )
-
-
-def _print_replace_summary(summary: dict[str, int | bool]) -> None:
-    """Print the final tracker replacement summary."""
-    print_summary(
-        {
-            "scanned": summary["scanned"],
-            "matched_source": summary["matched_source"],
-            "already_had_target": summary["already_had_target"],
-            "modified": summary["modified"],
-            "replaced_urls": summary["replaced_urls"],
-            "removed_urls": summary["removed_urls"],
-            "dry_run": summary["dry_run"],
-        }
-    )
-
-
-def _print_bulk_torrent_summary(summary: dict[str, Any]) -> None:
-    """Print the final bulk torrent action summary."""
+def _bulk_torrent_summary_rows(
+    plan: BulkTorrentActionPlan,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a bulk torrent action plan."""
     rows: dict[str, Any] = {
-        "action": summary["action"],
-        "filter": summary["selection"]["filter"],
-        "value": summary["selection"]["value"],
+        "action": plan.action,
+        "filter": plan.selection["filter"],
+        "value": plan.selection["value"],
     }
-    if summary["selection"].get("match") is not None:
-        rows["match"] = summary["selection"]["match"]
-    rows["scanned"] = summary["scanned"]
-    rows["matched"] = summary["matched"]
-    rows["modified"] = summary["modified"]
-    rows["skipped"] = summary["skipped"]
-    rows["dry_run"] = summary["dry_run"]
+    if plan.selection.get("match") is not None:
+        rows["match"] = plan.selection["match"]
+    rows["scanned"] = plan.scanned
+    rows["matched"] = plan.matched
+    rows["modified"] = len(plan.changes)
+    rows["skipped"] = len(plan.skipped)
+    rows["dry_run"] = dry_run
+    return rows
 
-    print_summary(rows)
 
-
-def _print_bulk_torrent_details(summary: dict[str, Any]) -> None:
-    """Print verbose bulk torrent action details when available."""
-    details = summary.get("details")
-    if not details:
+def _print_bulk_torrent_details(
+    plan: BulkTorrentActionPlan,
+    *,
+    applied: bool,
+) -> None:
+    """Print verbose bulk torrent action details, if any."""
+    if not plan.changes and not plan.skipped:
         return
 
-    print_table(
-        "Details",
-        ["Action", "Name", "Hash"],
-        [[item["action"], item["name"], item["hash"]] for item in details],
+    change_label = plan.action if applied else f"would_{plan.action}"
+    rows = [[change_label, change.name, change.hash] for change in plan.changes]
+    rows += [[skip.reason, skip.name, skip.hash] for skip in plan.skipped]
+
+    print_table("Details", ["Action", "Name", "Hash"], rows)
+
+
+def _addition_summary_rows(
+    plan: TrackerAdditionPlan,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a tracker addition plan."""
+    return {
+        "scanned": plan.scanned,
+        "matched_source": plan.matched_source,
+        "already_had_target": len(plan.already_had_target),
+        "modified": len(plan.changes),
+        "dry_run": dry_run,
+    }
+
+
+def _print_addition_details(
+    plan: TrackerAdditionPlan, *, applied: bool
+) -> None:
+    """Print verbose tracker addition details, if any."""
+    if not plan.changes and not plan.already_had_target:
+        return
+
+    change_label = "added" if applied else "would_add"
+    rows = [[change_label, c.name, c.hash] for c in plan.changes]
+    rows += [
+        ["already_had_target", c.name, c.hash] for c in plan.already_had_target
+    ]
+    print_table("Details", ["Action", "Name", "Hash"], rows)
+
+
+def _addition_confirmation_message(plan: TrackerAdditionPlan) -> str:
+    """Build the confirmation prompt for `trackers add-if-present`."""
+    return (
+        f"Add tracker {redact_tracker_identity(plan.target_tracker)} to "
+        f"{len(plan.changes)} torrent(s) already using "
+        f"{redact_tracker_identity(plan.source_tracker)}?"
     )
 
 
-def _print_details(summary: dict[str, Any]) -> None:
-    """Print verbose operation details when available."""
-    details = summary.get("details")
-    if not details:
+def _removal_summary_rows(
+    plan: TrackerRemovalPlan,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a tracker removal plan."""
+    return {
+        "scanned": plan.scanned,
+        "matched_tracker": plan.matched_tracker,
+        "modified": len(plan.changes),
+        "removed_urls": plan.removed_url_count,
+        "dry_run": dry_run,
+    }
+
+
+def _print_removal_details(plan: TrackerRemovalPlan, *, applied: bool) -> None:
+    """Print verbose tracker removal details, if any."""
+    if not plan.changes:
+        return
+
+    change_label = "removed" if applied else "would_remove"
+    print_table(
+        "Details",
+        ["Action", "Name", "Hash", "URLs"],
+        [
+            [change_label, c.name, c.hash, str(len(c.urls))]
+            for c in plan.changes
+        ],
+    )
+
+
+def _removal_confirmation_message(plan: TrackerRemovalPlan) -> str:
+    """Build the confirmation prompt for `trackers remove`."""
+    return (
+        f"Remove tracker {redact_tracker_identity(plan.tracker)} from "
+        f"{plan.matched_tracker} torrent(s) "
+        f"({plan.removed_url_count} URL(s) total)? Private torrents relying "
+        "solely on this tracker will lose their announce."
+    )
+
+
+def _replacement_summary_rows(
+    plan: TrackerReplacementPlan,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a tracker replacement plan."""
+    already_had_target = sum(
+        1 for change in plan.changes if change.already_had_target
+    )
+    return {
+        "scanned": plan.scanned,
+        "matched_source": plan.matched_source,
+        "already_had_target": already_had_target,
+        "modified": len(plan.changes),
+        "replaced_urls": plan.replaced_url_count,
+        "removed_urls": plan.removed_url_count,
+        "dry_run": dry_run,
+    }
+
+
+def _print_replacement_details(
+    plan: TrackerReplacementPlan,
+    *,
+    applied: bool,
+) -> None:
+    """Print verbose tracker replacement details, if any."""
+    if not plan.changes:
         return
 
     rows: list[list[str]] = []
-    for item in details:
-        info_lines: list[str] = []
-        if item.get("replaced_tracker_url"):
-            info_lines.append(f"replaced: {item['replaced_tracker_url']}")
-        for source_url, target_url in item.get(
-            "replaced_tracker_urls", {}
-        ).items():
-            info_lines.append(f"replaced: {source_url} -> {target_url}")
-        info_lines.extend(item.get("matching_tracker_urls", []))
-        for tracker_url in item.get("removed_tracker_urls", []):
-            info_lines.append(f"removed: {tracker_url}")
-
-        rows.append(
-            [
-                item["action"],
-                item["name"],
-                item["hash"],
-                "\n".join(info_lines),
-            ]
-        )
+    for change in plan.changes:
+        if change.already_had_target:
+            label = "removed_source" if applied else "would_remove_source"
+        else:
+            label = "replaced" if applied else "would_replace"
+        info = f"{len(change.remove_urls)} removed"
+        if change.replace_url is not None:
+            info = f"1 replaced, {info}"
+        rows.append([label, change.name, change.hash, info])
 
     print_table("Details", ["Action", "Name", "Hash", "Info"], rows)
+
+
+def _replacement_confirmation_message(plan: TrackerReplacementPlan) -> str:
+    """Build the confirmation prompt for `trackers replace`."""
+    return (
+        f"Replace {redact_tracker_identity(plan.source_tracker)} with "
+        f"{redact_tracker_identity(plan.target_tracker)} on "
+        f"{plan.matched_source} torrent(s) "
+        f"({plan.replaced_url_count} replaced, {plan.removed_url_count} "
+        "removed)? Private torrents relying solely on the source tracker "
+        "will lose their announce until the target tracker takes over."
+    )
+
+
+def _passkey_summary_rows(
+    plan: PasskeyReplacementPlan,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a passkey replacement plan.
+
+    Deliberately excludes every field derived from `change.stale_urls`:
+    only counts ever reach this summary.
+    """
+    return {
+        "scanned": plan.scanned,
+        "matched_source": plan.matched_source,
+        "already_up_to_date": plan.already_up_to_date,
+        "modified": len(plan.changes),
+        "replaced_urls": plan.replaced_url_count,
+        "dry_run": dry_run,
+    }
+
+
+def _print_passkey_details(
+    plan: PasskeyReplacementPlan,
+    *,
+    applied: bool,
+) -> None:
+    """Print verbose passkey replacement details, if any.
+
+    Only ever prints `change.hash` / `change.name` / `change.stale_url_count`
+    — never `change.stale_urls`, which carries the new passkey.
+    """
+    if not plan.changes:
+        return
+
+    change_label = "replaced" if applied else "would_replace"
+    print_table(
+        "Details",
+        ["Action", "Name", "Hash", "URLs"],
+        [
+            [change_label, c.name, c.hash, str(c.stale_url_count)]
+            for c in plan.changes
+        ],
+    )
+
+
+def _passkey_confirmation_message(plan: PasskeyReplacementPlan) -> str:
+    """Build the confirmation prompt for `trackers replace-passkey`.
+
+    Never includes the old or new passkey, or any tracker URL.
+    """
+    return (
+        f"Update the passkey on {len(plan.changes)} torrent(s) "
+        f"({plan.replaced_url_count} tracker URL(s) total)? An incorrect "
+        "passkey will break every affected torrent's announce until "
+        "corrected."
+    )
 
 
 if __name__ == "__main__":

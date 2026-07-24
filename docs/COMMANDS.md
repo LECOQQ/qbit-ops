@@ -17,6 +17,7 @@ drop the `poetry run` prefix.
 - [Matching Modes](#matching-modes)
 - [Format Support Matrix](#format-support-matrix)
 - [Machine-Readable Silence Contract](#machine-readable-silence-contract)
+- [Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)
 - [Tracker Health](#tracker-health)
 - [Output Summaries](#output-summaries)
 - [Exit Codes](#exit-codes)
@@ -208,7 +209,9 @@ poetry run qbit-ops trackers export --format json
 ### Add a tracker if another tracker is present
 
 Adds a target tracker only to torrents that already use a known source
-tracker.
+tracker. Medium risk: real execution prompts for confirmation unless
+`--yes` is given (see
+[Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)).
 
 ```bash
 poetry run qbit-ops trackers add-if-present \
@@ -219,11 +222,13 @@ poetry run qbit-ops trackers add-if-present \
 poetry run qbit-ops trackers add-if-present \
   --source "https://tracker-a.example/announce" \
   --target "https://tracker-b.example/announce" \
-  --no-dry-run
+  --no-dry-run --yes
 ```
 
 ### Remove a tracker in bulk
 
+High risk: real execution prompts for confirmation unless `--yes` is given.
+
 ```bash
 poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce" \
@@ -231,14 +236,15 @@ poetry run qbit-ops trackers remove \
 
 poetry run qbit-ops trackers remove \
   --tracker "https://tracker-a.example/announce" \
-  --no-dry-run
+  --no-dry-run --yes
 ```
 
 ### Replace a tracker in bulk
 
 Migrates torrents from one tracker to another. If the target tracker is
 already present, `qbit-ops` removes the source instead of adding a
-duplicate.
+duplicate. High risk: real execution prompts for confirmation unless
+`--yes` is given.
 
 ```bash
 poetry run qbit-ops trackers replace \
@@ -249,14 +255,17 @@ poetry run qbit-ops trackers replace \
 poetry run qbit-ops trackers replace \
   --source "https://tracker-a.example/announce" \
   --target "https://tracker-b.example/announce" \
-  --no-dry-run
+  --no-dry-run --yes
 ```
 
 ### Replace a tracker's passkey in bulk
 
 Keeps the tracker URL otherwise unchanged. Mark the passkey's position with
 a literal `{passkey}` placeholder, either as a query parameter value or as a
-full path segment — the current passkey does not need to be known.
+full path segment — the current passkey does not need to be known. High
+risk: real execution prompts for confirmation unless `--yes` is given. The
+old and new passkey are never shown in the prompt, preview, or
+`--verbose` output.
 
 ```bash
 # passkey in the query string
@@ -269,7 +278,7 @@ poetry run qbit-ops trackers replace-passkey \
 poetry run qbit-ops trackers replace-passkey \
   --tracker "https://tracker-a.example/announce/{passkey}" \
   --new-passkey "NEW_PASSKEY" \
-  --no-dry-run
+  --no-dry-run --yes
 ```
 
 ### Handle dynamic tracker URLs
@@ -381,8 +390,9 @@ Supported formats: json, jsonl, table.
 
 Mutation commands (`pause`, `resume`, `start`, `reannounce`,
 `add-if-present`, `remove`, `replace`, `replace-passkey`) do not expose
-`--format`; they keep their existing Rich text summaries only, unchanged
-in this phase.
+`--format`; they keep their existing Rich text summaries only. See
+[Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)
+for their dry-run/confirmation behavior.
 
 ## Machine-Readable Silence Contract
 
@@ -408,6 +418,72 @@ carries operational information (`healthy`/`warning`/`critical`/
 which is already conveyed without needing a silent mode. Adding `--quiet`
 to e.g. `torrents list` would mean "emit nothing and exit 0" with no
 further contract to build on — see `docs/DECISIONS.md` (2026-07-24).
+
+## Mutation Risk & Confirmation Policy
+
+Every mutating command (`torrents pause/resume/start/reannounce`, `trackers
+add-if-present/remove/replace/replace-passkey`) is classified into exactly
+one risk tier, defined once in `app.execution.MUTATION_RISK` so it cannot
+drift between the CLI, its tests, and this table:
+
+| Risk | Commands | Confirmation | `--yes` |
+| --- | --- | --- | --- |
+| **low** | `torrents pause`, `torrents resume`, `torrents start`, `torrents reannounce` | never prompted | not exposed (no behavioral purpose) |
+| **medium** | `trackers add-if-present` | prompted on real, interactive execution | skips the prompt |
+| **high** | `trackers remove`, `trackers replace`, `trackers replace-passkey` | prompted on real, interactive execution | skips the prompt |
+
+Execution contract, identical across every mutating command:
+
+- No flag → **preview only**. The plan is built (source data is scanned
+  once) and shown as a summary; nothing is sent to qBittorrent.
+- `--no-dry-run` → requests real execution.
+- `--no-dry-run` alone on a **medium/high** command in a non-interactive
+  context (no TTY on stderr — CI, cron, a pipe) **fails immediately** with a
+  clear error naming the command and suggesting `--yes`. It never hangs
+  waiting for input that will never arrive.
+- `--no-dry-run` alone on a **medium/high** command in an interactive
+  terminal shows the preview, then asks `Continue? [y/N]` (default **No**).
+- `--no-dry-run --yes` → applies immediately, no prompt, on any risk tier.
+- `--yes` **never** implies `--no-dry-run`: `trackers remove --tracker ...
+  --yes` (without `--no-dry-run`) still only previews.
+- **Declining the confirmation prompt is not an error.** No mutation
+  happens, `qbit-ops` prints `Operation cancelled.`, and exits `0`.
+- A plan with no matching torrents never prompts, on any risk tier — there
+  is nothing to confirm.
+- Preview and real execution always share the **same plan**: torrents are
+  scanned once; confirming re-uses that already-built plan instead of
+  scanning again, so what you confirmed is exactly what gets applied.
+
+```bash
+# low risk: applies immediately, no prompt, even unattended
+qbit-ops torrents pause --all --no-dry-run
+
+# medium/high risk, interactive: preview, then a y/N prompt
+qbit-ops trackers remove --tracker "https://tracker.example/announce" \
+  --no-dry-run
+
+# medium/high risk, unattended (cron/CI): pre-approve with --yes
+qbit-ops trackers remove --tracker "https://tracker.example/announce" \
+  --no-dry-run --yes
+```
+
+### Confirmation prompt content
+
+The confirmation prompt states the operation's impact in plain terms —
+matching torrent counts, and for `remove`/`replace`, an explicit warning
+that a private torrent relying solely on the affected tracker will lose its
+announce. `replace-passkey`'s prompt warns that an incorrect passkey will
+break every affected torrent's announce until corrected.
+
+**Tracker identities shown in a prompt, preview, or `--verbose` detail
+table are always reduced to scheme + host** (`redact_tracker_identity`):
+private trackers commonly embed a passkey or other per-user secret in the
+path or query string, and guessing which part is safe to show is
+unreliable, so the full URL is never rendered in a mutation context — only
+in read-only inspection output, which the user explicitly requested. The
+old and new passkey values for `replace-passkey` are **never** rendered
+anywhere (prompt, preview, `--verbose`, stdout, stderr) — only counts (how
+many torrents, how many tracker URLs) are shown.
 
 ## Tracker Health
 
@@ -443,7 +519,7 @@ Summary:
 - dry_run: true/false
 ```
 
-Tracker replacement (and passkey replacement) uses a dedicated summary:
+Tracker replacement uses a dedicated summary:
 
 ```text
 Summary:
@@ -455,6 +531,26 @@ Summary:
 - removed_urls: X
 - dry_run: true/false
 ```
+
+Passkey replacement uses its own summary (no tracker URL ever appears in
+it, only counts):
+
+```text
+Summary:
+- scanned: X
+- matched_source: X
+- already_up_to_date: X
+- modified: X
+- replaced_urls: X
+- dry_run: true/false
+```
+
+For every mutation summary, `status` reads `PREVIEW (dry-run)` while
+`--no-dry-run` has not yet actually applied (including while a
+confirmation prompt is pending), and `APPLIED` once the plan's changes
+have actually been sent to qBittorrent. Declining a confirmation prompt
+never reaches `APPLIED` — see
+[Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy).
 
 Bulk torrent actions use a dedicated summary:
 

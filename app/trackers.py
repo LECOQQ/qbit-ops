@@ -1,13 +1,149 @@
 """Manage qBittorrent trackers."""
 
-import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-logger = logging.getLogger(__name__)
-
 TrackerMatchMode = Literal["exact", "without-query"]
+
+
+@dataclass(frozen=True)
+class TrackerAdditionChange:
+    """One torrent that will gain the target tracker."""
+
+    hash: str
+    name: str
+
+
+@dataclass(frozen=True)
+class TrackerAdditionPlan:
+    """Plan for `add_tracker_if_source_present`.
+
+    `changes` and `already_had_target` are collected unconditionally so
+    the CLI can render a full confirmation preview regardless of
+    `--verbose`.
+    """
+
+    source_tracker: str
+    target_tracker: str
+    match: TrackerMatchMode
+    scanned: int
+    matched_source: int
+    already_had_target: tuple[TrackerAdditionChange, ...]
+    changes: tuple[TrackerAdditionChange, ...]
+
+
+@dataclass(frozen=True)
+class TrackerRemovalChange:
+    """One torrent that will have matching tracker URLs removed."""
+
+    hash: str
+    name: str
+    urls: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TrackerRemovalPlan:
+    """Plan for `remove_tracker_from_all`."""
+
+    tracker: str
+    match: TrackerMatchMode
+    scanned: int
+    matched_tracker: int
+    changes: tuple[TrackerRemovalChange, ...]
+
+    @property
+    def removed_url_count(self) -> int:
+        """Total tracker URLs that would be/were removed across all torrents."""
+        return sum(len(change.urls) for change in self.changes)
+
+
+@dataclass(frozen=True)
+class TrackerReplacementChange:
+    """One torrent's replace/remove operation for a tracker replacement."""
+
+    hash: str
+    name: str
+    replace_url: str | None
+    remove_urls: tuple[str, ...]
+    already_had_target: bool
+
+
+@dataclass(frozen=True)
+class TrackerReplacementPlan:
+    """Plan for `replace_tracker_in_all`."""
+
+    source_tracker: str
+    target_tracker: str
+    match: TrackerMatchMode
+    scanned: int
+    matched_source: int
+    changes: tuple[TrackerReplacementChange, ...]
+
+    @property
+    def replaced_url_count(self) -> int:
+        """Torrents that get an edited (not just removed) tracker URL."""
+        return sum(
+            1 for change in self.changes if change.replace_url is not None
+        )
+
+    @property
+    def removed_url_count(self) -> int:
+        """Total duplicate/source tracker URLs removed across all torrents."""
+        return sum(len(change.remove_urls) for change in self.changes)
+
+
+@dataclass(frozen=True)
+class PasskeyReplacementChange:
+    """One torrent's passkey update.
+
+    `stale_urls` (old URL -> new URL, with the new passkey embedded) is
+    required by `apply_tracker_passkey_replacement` but must never be
+    rendered: `repr=False` keeps it out of default dataclass repr/logging,
+    and callers must only use `stale_url_count` for any user-facing
+    preview or summary.
+    """
+
+    hash: str
+    name: str
+    stale_url_count: int
+    stale_urls: tuple[tuple[str, str], ...] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class PasskeyReplacementPlan:
+    """Plan for `replace_tracker_passkey`.
+
+    Never carries the raw new passkey or new URLs outside of each
+    change's `stale_urls` (see `PasskeyReplacementChange`); the tracker
+    template itself does not contain the passkey value.
+    """
+
+    tracker_template: str
+    scanned: int
+    matched_source: int
+    already_up_to_date: int
+    changes: tuple[PasskeyReplacementChange, ...]
+
+    @property
+    def replaced_url_count(self) -> int:
+        """Total tracker URLs whose passkey would be/was updated."""
+        return sum(change.stale_url_count for change in self.changes)
+
+
+def redact_tracker_identity(url: str) -> str:
+    """Return a tracker URL reduced to scheme and host for safe display.
+
+    Private trackers commonly embed a passkey or other per-user secret
+    in the path (e.g. `/announce/<passkey>`) or the query string (e.g.
+    `?passkey=<value>`). Guessing which path segment is secret is
+    unreliable, so any tracker identity shown in a confirmation prompt
+    or preview is reduced to scheme + host only; the raw URL is still
+    used for the actual API calls.
+    """
+    parsed = urlsplit(url.strip())
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def normalize_tracker_url(
@@ -239,23 +375,19 @@ def analyze_tracker_health(client: Any) -> dict[str, Any]:
     }
 
 
-def add_tracker_if_source_present(
+def plan_tracker_addition(
     client: Any,
     source_tracker: str,
     target_tracker: str,
-    dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
-    verbose: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Add a target tracker to torrents already using the source tracker."""
+) -> TrackerAdditionPlan:
+    """Plan adding a target tracker to torrents already using the source."""
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
     scanned = 0
-    matched_source = 0
-    already_had_target = 0
-    modified = 0
-    details: list[dict[str, str]] = []
+    already_had_target: list[TrackerAdditionChange] = []
+    changes: list[TrackerAdditionChange] = []
 
     for torrent in all_torrents:
         scanned += 1
@@ -271,76 +403,53 @@ def add_tracker_if_source_present(
         if not has_tracker(trackers, source_tracker, match_mode):
             continue
 
-        matched_source += 1
         if has_tracker(trackers, target_tracker, match_mode):
-            already_had_target += 1
-            logger.info("Already present: %s", torrent_name)
-            if verbose:
-                details.append(
-                    {
-                        "hash": torrent_hash,
-                        "name": torrent_name,
-                        "action": "already_had_target",
-                    }
-                )
+            already_had_target.append(
+                TrackerAdditionChange(hash=torrent_hash, name=torrent_name)
+            )
             continue
 
-        if dry_run:
-            logger.info("Would add tracker to: %s", torrent_name)
-            action = "would_add"
-        else:
-            logger.info("Adding tracker to: %s", torrent_name)
-            try:
-                client.torrents_add_trackers(
-                    torrent_hash=torrent_hash,
-                    urls=target_tracker,
-                )
-            except Exception as error:
-                raise RuntimeError(
-                    "Failed to add tracker to torrent "
-                    f"'{torrent_name}' ({torrent_hash}): {error}"
-                ) from error
-            action = "added"
+        changes.append(
+            TrackerAdditionChange(hash=torrent_hash, name=torrent_name)
+        )
 
-        modified += 1
-        if verbose:
-            details.append(
-                {
-                    "hash": torrent_hash,
-                    "name": torrent_name,
-                    "action": action,
-                }
+    return TrackerAdditionPlan(
+        source_tracker=source_tracker,
+        target_tracker=target_tracker,
+        match=match_mode,
+        scanned=scanned,
+        matched_source=len(already_had_target) + len(changes),
+        already_had_target=tuple(already_had_target),
+        changes=tuple(changes),
+    )
+
+
+def apply_tracker_addition(client: Any, plan: TrackerAdditionPlan) -> None:
+    """Apply a previously built plan. Mutates exactly `plan.changes`."""
+    for change in plan.changes:
+        try:
+            client.torrents_add_trackers(
+                torrent_hash=change.hash,
+                urls=plan.target_tracker,
             )
-
-    summary: dict[str, Any] = {
-        "scanned": scanned,
-        "matched_source": matched_source,
-        "already_had_target": already_had_target,
-        "modified": modified,
-        "dry_run": dry_run,
-    }
-    if verbose:
-        summary["details"] = details
-
-    return summary
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to add tracker to torrent '{change.name}' "
+                f"({change.hash}): {error}"
+            ) from error
 
 
-def remove_tracker_from_all(
+def plan_tracker_removal(
     client: Any,
     tracker: str,
-    dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
-    verbose: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Remove a tracker from every torrent using it."""
+) -> TrackerRemovalPlan:
+    """Plan removing a tracker from every torrent using it."""
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
     scanned = 0
-    matched_tracker = 0
-    modified = 0
-    removed_urls = 0
-    details: list[dict[str, Any]] = []
+    changes: list[TrackerRemovalChange] = []
 
     for torrent in all_torrents:
         scanned += 1
@@ -361,68 +470,46 @@ def remove_tracker_from_all(
         if not matching_tracker_urls:
             continue
 
-        matched_tracker += 1
-        removed_urls += len(matching_tracker_urls)
-
-        if dry_run:
-            logger.info(
-                "Would remove tracker from: %s (%s URL(s))",
-                torrent_name,
-                len(matching_tracker_urls),
+        changes.append(
+            TrackerRemovalChange(
+                hash=torrent_hash,
+                name=torrent_name,
+                urls=tuple(matching_tracker_urls),
             )
-            action = "would_remove"
-        else:
-            logger.info(
-                "Removing tracker from: %s (%s URL(s))",
-                torrent_name,
-                len(matching_tracker_urls),
+        )
+
+    return TrackerRemovalPlan(
+        tracker=tracker,
+        match=match_mode,
+        scanned=scanned,
+        matched_tracker=len(changes),
+        changes=tuple(changes),
+    )
+
+
+def apply_tracker_removal(client: Any, plan: TrackerRemovalPlan) -> None:
+    """Apply a previously built plan. Mutates exactly `plan.changes`."""
+    for change in plan.changes:
+        try:
+            client.torrents_remove_trackers(
+                torrent_hash=change.hash,
+                urls=list(change.urls),
             )
-            try:
-                client.torrents_remove_trackers(
-                    torrent_hash=torrent_hash,
-                    urls=matching_tracker_urls,
-                )
-            except Exception as error:
-                raise RuntimeError(
-                    "Failed to remove tracker from torrent "
-                    f"'{torrent_name}' ({torrent_hash}): {error}"
-                ) from error
-            action = "removed"
-
-        modified += 1
-        if verbose:
-            details.append(
-                {
-                    "hash": torrent_hash,
-                    "name": torrent_name,
-                    "action": action,
-                    "matching_tracker_urls": matching_tracker_urls,
-                }
-            )
-
-    summary = {
-        "scanned": scanned,
-        "matched_tracker": matched_tracker,
-        "modified": modified,
-        "removed_urls": removed_urls,
-        "dry_run": dry_run,
-    }
-    if verbose:
-        summary["details"] = details
-
-    return summary
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to remove tracker from torrent '{change.name}' "
+                f"({change.hash}): {error}"
+            ) from error
 
 
-def replace_tracker_in_all(
+def plan_tracker_replacement(
     client: Any,
     source_tracker: str,
     target_tracker: str,
-    dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
-    verbose: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Replace a source tracker with a target on matching torrents."""
+) -> TrackerReplacementPlan:
+    """Plan replacing a source tracker with a target on matching torrents."""
     _ensure_distinct_tracker_identity(
         source_tracker,
         target_tracker,
@@ -432,12 +519,7 @@ def replace_tracker_in_all(
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
     scanned = 0
-    matched_source = 0
-    already_had_target = 0
-    modified = 0
-    replaced_urls = 0
-    removed_urls = 0
-    details: list[dict[str, Any]] = []
+    changes: list[TrackerReplacementChange] = []
 
     for torrent in all_torrents:
         scanned += 1
@@ -458,83 +540,66 @@ def replace_tracker_in_all(
         if not matching_source_urls:
             continue
 
-        matched_source += 1
         target_already_present = has_tracker(
             trackers,
             target_tracker,
             match_mode,
         )
-        source_urls_to_remove = matching_source_urls
-        source_url_to_replace = ""
-        action = "would_remove_source"
 
         if target_already_present:
-            already_had_target += 1
-            log_prefix = "Would remove" if dry_run else "Removing"
-            logger.info(
-                "%s source tracker from %s because target is present",
-                log_prefix,
-                torrent_name,
+            changes.append(
+                TrackerReplacementChange(
+                    hash=torrent_hash,
+                    name=torrent_name,
+                    replace_url=None,
+                    remove_urls=tuple(matching_source_urls),
+                    already_had_target=True,
+                )
             )
         else:
-            source_url_to_replace = matching_source_urls[0]
-            source_urls_to_remove = matching_source_urls[1:]
-            action = "would_replace"
-            log_prefix = "Would replace" if dry_run else "Replacing"
-            logger.info("%s tracker on: %s", log_prefix, torrent_name)
-
-        if not dry_run:
-            try:
-                if source_url_to_replace:
-                    client.torrents_edit_tracker(
-                        torrent_hash=torrent_hash,
-                        original_url=source_url_to_replace,
-                        new_url=target_tracker,
-                    )
-                    action = "replaced"
-
-                if source_urls_to_remove:
-                    client.torrents_remove_trackers(
-                        torrent_hash=torrent_hash,
-                        urls=source_urls_to_remove,
-                    )
-                    if not source_url_to_replace:
-                        action = "removed_source"
-            except Exception as error:
-                raise RuntimeError(
-                    "Failed to replace tracker on torrent "
-                    f"'{torrent_name}' ({torrent_hash}): {error}"
-                ) from error
-
-        replaced_urls += 1 if source_url_to_replace else 0
-        removed_urls += len(source_urls_to_remove)
-        modified += 1
-
-        if verbose:
-            details.append(
-                {
-                    "hash": torrent_hash,
-                    "name": torrent_name,
-                    "action": action,
-                    "replaced_tracker_url": source_url_to_replace,
-                    "matching_tracker_urls": matching_source_urls,
-                    "removed_tracker_urls": source_urls_to_remove,
-                }
+            changes.append(
+                TrackerReplacementChange(
+                    hash=torrent_hash,
+                    name=torrent_name,
+                    replace_url=matching_source_urls[0],
+                    remove_urls=tuple(matching_source_urls[1:]),
+                    already_had_target=False,
+                )
             )
 
-    summary: dict[str, Any] = {
-        "scanned": scanned,
-        "matched_source": matched_source,
-        "already_had_target": already_had_target,
-        "modified": modified,
-        "replaced_urls": replaced_urls,
-        "removed_urls": removed_urls,
-        "dry_run": dry_run,
-    }
-    if verbose:
-        summary["details"] = details
+    return TrackerReplacementPlan(
+        source_tracker=source_tracker,
+        target_tracker=target_tracker,
+        match=match_mode,
+        scanned=scanned,
+        matched_source=len(changes),
+        changes=tuple(changes),
+    )
 
-    return summary
+
+def apply_tracker_replacement(
+    client: Any, plan: TrackerReplacementPlan
+) -> None:
+    """Apply a previously built plan. Mutates exactly `plan.changes`."""
+    for change in plan.changes:
+        try:
+            if change.replace_url is not None:
+                client.torrents_edit_tracker(
+                    torrent_hash=change.hash,
+                    original_url=change.replace_url,
+                    new_url=plan.target_tracker,
+                )
+
+            if change.remove_urls:
+                client.torrents_remove_trackers(
+                    torrent_hash=change.hash,
+                    urls=list(change.remove_urls),
+                )
+        except Exception as error:
+            raise RuntimeError(
+                f"Failed to replace tracker on torrent '{change.name}' "
+                f"({change.hash}): {error}"
+            ) from error
 
 
 PASSKEY_PLACEHOLDER = "{passkey}"
@@ -675,15 +740,13 @@ def _build_path_passkey_url(
     )
 
 
-def replace_tracker_passkey(
+def plan_tracker_passkey_replacement(
     client: Any,
     tracker_template: str,
     new_passkey: str,
-    dry_run: bool = True,
-    verbose: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Replace a tracker's passkey on every torrent using that tracker.
+) -> PasskeyReplacementPlan:
+    """Plan replacing a tracker's passkey on every torrent using it.
 
     The tracker template locates the passkey with a literal
     '{passkey}' placeholder, either as a query parameter value
@@ -691,6 +754,11 @@ def replace_tracker_passkey(
     (e.g. '/announce/{passkey}'). Torrents are matched on the
     tracker's fixed host/path shape, so the caller does not need to
     know each torrent's current passkey value.
+
+    Neither `tracker_template` nor the returned plan's summary fields
+    ever carry `new_passkey`; it only ever appears inside each change's
+    `stale_urls`, which callers must never render (see
+    `PasskeyReplacementChange`).
     """
     scheme, netloc, mode, position = _parse_passkey_template(tracker_template)
     template_path_segments = (
@@ -710,11 +778,8 @@ def replace_tracker_passkey(
     total = len(all_torrents)
     scanned = 0
     matched_source = 0
-    already_had_target = 0
-    modified = 0
-    replaced_urls = 0
-    removed_urls = 0
-    details: list[dict[str, Any]] = []
+    already_up_to_date = 0
+    changes: list[PasskeyReplacementChange] = []
 
     for torrent in all_torrents:
         scanned += 1
@@ -773,61 +838,45 @@ def replace_tracker_passkey(
         matched_source += 1
 
         if not stale_urls:
-            already_had_target += 1
-            if verbose:
-                details.append(
-                    {
-                        "hash": torrent_hash,
-                        "name": torrent_name,
-                        "action": "already_up_to_date",
-                        "matching_tracker_urls": matching_urls,
-                    }
-                )
+            already_up_to_date += 1
             continue
 
-        log_prefix = "Would update" if dry_run else "Updating"
-        logger.info("%s passkey on: %s", log_prefix, torrent_name)
-
-        if not dry_run:
-            try:
-                for source_url, target_url in stale_urls.items():
-                    client.torrents_edit_tracker(
-                        torrent_hash=torrent_hash,
-                        original_url=source_url,
-                        new_url=target_url,
-                    )
-            except Exception as error:
-                raise RuntimeError(
-                    "Failed to update tracker passkey on torrent "
-                    f"'{torrent_name}' ({torrent_hash}): {error}"
-                ) from error
-
-        replaced_urls += len(stale_urls)
-        modified += 1
-
-        if verbose:
-            details.append(
-                {
-                    "hash": torrent_hash,
-                    "name": torrent_name,
-                    "action": "would_replace" if dry_run else "replaced",
-                    "replaced_tracker_urls": stale_urls,
-                }
+        changes.append(
+            PasskeyReplacementChange(
+                hash=torrent_hash,
+                name=torrent_name,
+                stale_url_count=len(stale_urls),
+                stale_urls=tuple(stale_urls.items()),
             )
+        )
 
-    summary: dict[str, Any] = {
-        "scanned": scanned,
-        "matched_source": matched_source,
-        "already_had_target": already_had_target,
-        "modified": modified,
-        "replaced_urls": replaced_urls,
-        "removed_urls": removed_urls,
-        "dry_run": dry_run,
-    }
-    if verbose:
-        summary["details"] = details
+    return PasskeyReplacementPlan(
+        tracker_template=tracker_template,
+        scanned=scanned,
+        matched_source=matched_source,
+        already_up_to_date=already_up_to_date,
+        changes=tuple(changes),
+    )
 
-    return summary
+
+def apply_tracker_passkey_replacement(
+    client: Any,
+    plan: PasskeyReplacementPlan,
+) -> None:
+    """Apply a previously built plan. Mutates exactly `plan.changes`."""
+    for change in plan.changes:
+        try:
+            for source_url, target_url in change.stale_urls:
+                client.torrents_edit_tracker(
+                    torrent_hash=change.hash,
+                    original_url=source_url,
+                    new_url=target_url,
+                )
+        except Exception as error:
+            raise RuntimeError(
+                "Failed to update tracker passkey on torrent "
+                f"'{change.name}' ({change.hash}): {error}"
+            ) from error
 
 
 def _get_active_tracker_urls(trackers: Any) -> list[str]:

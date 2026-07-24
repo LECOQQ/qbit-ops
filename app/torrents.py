@@ -1,7 +1,7 @@
 """List qBittorrent torrents."""
 
-import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Literal
 
@@ -13,9 +13,42 @@ from app.qbit_fields import (
 from app.selectors import TorrentNotFoundError, resolve_torrent_hash
 from app.trackers import TrackerMatchMode, has_tracker
 
-logger = logging.getLogger(__name__)
-
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce"]
+
+
+@dataclass(frozen=True)
+class BulkTorrentChange:
+    """One torrent that a bulk action will act on."""
+
+    hash: str
+    name: str
+
+
+@dataclass(frozen=True)
+class BulkTorrentSkip:
+    """One torrent excluded from a bulk action because it would be a no-op."""
+
+    hash: str
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class BulkTorrentActionPlan:
+    """The result of planning a bulk torrent action, before it is applied.
+
+    `changes` and `skipped` are collected unconditionally (not gated by a
+    `verbose` flag) since the CLI layer needs full detail to render a
+    confirmation preview; whether to *print* that detail is a rendering
+    decision, not a planning one.
+    """
+
+    action: TorrentBulkAction
+    selection: dict[str, str]
+    scanned: int
+    matched: int
+    changes: tuple[BulkTorrentChange, ...]
+    skipped: tuple[BulkTorrentSkip, ...]
 
 
 def list_torrents(client: Any) -> list[dict[str, Any]]:
@@ -200,7 +233,7 @@ def search_torrents_by_name(
     }
 
 
-def apply_bulk_torrent_action(
+def plan_bulk_torrent_action(
     client: Any,
     action: TorrentBulkAction,
     *,
@@ -210,17 +243,16 @@ def apply_bulk_torrent_action(
     match_mode: TrackerMatchMode = "exact",
     select_all: bool = False,
     completed_only: bool = False,
-    dry_run: bool = True,
-    verbose: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Apply a bulk torrent action to a filtered torrent selection.
+) -> BulkTorrentActionPlan:
+    """Plan a bulk torrent action against a filtered torrent selection.
 
-    `torrent_hash` accepts a complete hash or an unambiguous prefix,
-    resolved via `app.selectors.resolve_torrent_hash`. An ambiguous
-    prefix raises `AmbiguousTorrentHashError` before any mutation is
-    attempted; an unmatched hash resolves to zero selected torrents,
-    same as any other filter that matches nothing.
+    Pure with respect to the qBittorrent instance: this only reads state
+    and never mutates it. `torrent_hash` accepts a complete hash or an
+    unambiguous prefix, resolved via `app.selectors.resolve_torrent_hash`.
+    An ambiguous prefix raises `AmbiguousTorrentHashError` before any plan
+    is built; an unmatched hash resolves to zero selected torrents, same
+    as any other filter that matches nothing.
     """
     selection = select_torrents_for_bulk_action(
         client=client,
@@ -232,63 +264,51 @@ def apply_bulk_torrent_action(
         completed_only=completed_only,
         on_progress=on_progress,
     )
-    modified = 0
-    skipped = 0
-    modified_hashes: list[str] = []
-    details: list[dict[str, str]] = []
+    changes: list[BulkTorrentChange] = []
+    skips: list[BulkTorrentSkip] = []
 
     for torrent in selection["torrents"]:
         matched_hash = torrent["hash"]
         torrent_name = torrent["name"]
         torrent_state = torrent["state"]
 
-        skip_action = _bulk_action_skip_reason(action, torrent_state)
-        if skip_action is not None:
-            skipped += 1
-            if verbose:
-                details.append(
-                    {
-                        "hash": matched_hash,
-                        "name": torrent_name,
-                        "action": skip_action,
-                    }
+        skip_reason = _bulk_action_skip_reason(action, torrent_state)
+        if skip_reason is not None:
+            skips.append(
+                BulkTorrentSkip(
+                    hash=matched_hash, name=torrent_name, reason=skip_reason
                 )
+            )
             continue
 
-        log_prefix = _bulk_action_log_prefix(action, dry_run)
-        logger.info("%s: %s", log_prefix, torrent_name)
-        modified_hashes.append(matched_hash)
-        modified += 1
-        if verbose:
-            details.append(
-                {
-                    "hash": matched_hash,
-                    "name": torrent_name,
-                    "action": _bulk_action_result_name(action, dry_run),
-                }
-            )
+        changes.append(BulkTorrentChange(hash=matched_hash, name=torrent_name))
 
-    if not dry_run and modified_hashes:
-        try:
-            _call_bulk_torrent_action(client, action, modified_hashes)
-        except Exception as error:
-            raise RuntimeError(
-                f"Failed to {action} selected torrents: {error}"
-            ) from error
+    return BulkTorrentActionPlan(
+        action=action,
+        selection=selection["selection"],
+        scanned=selection["scanned"],
+        matched=selection["matched"],
+        changes=tuple(changes),
+        skipped=tuple(skips),
+    )
 
-    summary: dict[str, Any] = {
-        "action": action,
-        "selection": selection["selection"],
-        "scanned": selection["scanned"],
-        "matched": selection["matched"],
-        "modified": modified,
-        "skipped": skipped,
-        "dry_run": dry_run,
-    }
-    if verbose:
-        summary["details"] = details
 
-    return summary
+def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
+    """Apply a previously built plan. Mutates exactly `plan.changes`.
+
+    Never rescans torrents: the plan is the sole source of truth for what
+    gets mutated, so preview and execution can never diverge.
+    """
+    if not plan.changes:
+        return
+
+    hashes = [change.hash for change in plan.changes]
+    try:
+        _call_bulk_torrent_action(client, plan.action, hashes)
+    except Exception as error:
+        raise RuntimeError(
+            f"Failed to {plan.action} selected torrents: {error}"
+        ) from error
 
 
 def select_torrents_for_bulk_action(
@@ -531,25 +551,6 @@ def _call_bulk_torrent_action(
         return
 
     client.torrents_reannounce(torrent_hashes)
-
-
-def _bulk_action_log_prefix(action: TorrentBulkAction, dry_run: bool) -> str:
-    """Return a readable log prefix for a bulk torrent action."""
-    if dry_run:
-        return f"Would {action}"
-
-    return action.capitalize()
-
-
-def _bulk_action_result_name(
-    action: TorrentBulkAction,
-    dry_run: bool,
-) -> str:
-    """Return a stable action label for verbose bulk summaries."""
-    if dry_run:
-        return f"would_{action}"
-
-    return action
 
 
 def validate_bulk_torrent_selection(

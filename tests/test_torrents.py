@@ -12,6 +12,7 @@ from app.torrents import (
     list_torrents,
     list_torrents_by_category,
     list_torrents_with_trackers,
+    plan_bulk_torrent_action,
     search_torrents_by_name,
 )
 
@@ -361,7 +362,7 @@ def test_list_torrents_by_category_supports_uncategorized_label() -> None:
     assert report["torrents"][0]["category"] == "(uncategorized)"
 
 
-def test_apply_bulk_torrent_action_pauses_matching_category() -> None:
+def test_plan_bulk_torrent_action_pauses_matching_category() -> None:
     """Ensure bulk pause applies only to matching torrents."""
     client = FakeQbitClient(
         torrents=[
@@ -381,20 +382,18 @@ def test_apply_bulk_torrent_action_pauses_matching_category() -> None:
         trackers_by_hash={"hash-a": [], "hash-b": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        category="sonarr",
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", category="sonarr"
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["matched"] == 1
-    assert summary["modified"] == 1
-    assert summary["skipped"] == 0
+    assert plan.matched == 1
+    assert len(plan.changes) == 1
+    assert plan.skipped == ()
     assert client.paused_hashes == [["hash-a"]]
 
 
-def test_apply_bulk_torrent_action_skips_already_paused_torrents() -> None:
+def test_plan_bulk_torrent_action_skips_already_paused_torrents() -> None:
     """Ensure bulk pause is idempotent for paused torrents."""
     client = FakeQbitClient(
         torrents=[
@@ -408,26 +407,22 @@ def test_apply_bulk_torrent_action_skips_already_paused_torrents() -> None:
         trackers_by_hash={"hash-a": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        category="sonarr",
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", category="sonarr"
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary == {
-        "action": "pause",
-        "selection": {"filter": "category", "value": "sonarr"},
-        "scanned": 1,
-        "matched": 1,
-        "modified": 0,
-        "skipped": 1,
-        "dry_run": False,
-    }
+    assert plan.action == "pause"
+    assert plan.selection == {"filter": "category", "value": "sonarr"}
+    assert plan.scanned == 1
+    assert plan.matched == 1
+    assert plan.changes == ()
+    assert len(plan.skipped) == 1
+    assert plan.skipped[0].reason == "already_stopped"
     assert client.paused_hashes == []
 
 
-def test_apply_bulk_torrent_action_resumes_paused_torrents() -> None:
+def test_plan_bulk_torrent_action_resumes_paused_torrents() -> None:
     """Ensure bulk resume only targets paused torrents."""
     client = FakeQbitClient(
         torrents=[
@@ -447,19 +442,17 @@ def test_apply_bulk_torrent_action_resumes_paused_torrents() -> None:
         trackers_by_hash={"hash-a": [], "hash-b": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="resume",
-        category="sonarr",
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="resume", category="sonarr"
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["modified"] == 1
-    assert summary["skipped"] == 1
+    assert len(plan.changes) == 1
+    assert len(plan.skipped) == 1
     assert client.started_hashes == [["hash-a"]]
 
 
-def test_apply_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
+def test_plan_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
     """Ensure bulk resume handles qBittorrent 5 stopped states."""
     client = FakeQbitClient(
         torrents=[
@@ -474,18 +467,16 @@ def test_apply_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
         trackers_by_hash={"hash-a": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="resume",
-        select_all=True,
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="resume", select_all=True
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["modified"] == 1
+    assert len(plan.changes) == 1
     assert client.started_hashes == [["hash-a"]]
 
 
-def test_apply_bulk_torrent_action_starts_completed_torrents() -> None:
+def test_plan_bulk_torrent_action_starts_completed_torrents() -> None:
     """Ensure start --completed targets stopped completed torrents only."""
     client = FakeQbitClient(
         torrents=[
@@ -511,21 +502,19 @@ def test_apply_bulk_torrent_action_starts_completed_torrents() -> None:
         trackers_by_hash={"hash-a": [], "hash-b": [], "hash-c": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="start",
-        completed_only=True,
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="start", completed_only=True
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["selection"] == {"filter": "completed", "value": "*"}
-    assert summary["matched"] == 2
-    assert summary["modified"] == 1
-    assert summary["skipped"] == 1
+    assert plan.selection == {"filter": "completed", "value": "*"}
+    assert plan.matched == 2
+    assert len(plan.changes) == 1
+    assert len(plan.skipped) == 1
     assert client.started_hashes == [["hash-a"]]
 
 
-def test_apply_bulk_torrent_action_reannounces_by_tracker() -> None:
+def test_plan_bulk_torrent_action_reannounces_by_tracker() -> None:
     """Ensure bulk reannounce can target torrents by tracker."""
     client = FakeQbitClient(
         torrents=[
@@ -542,19 +531,19 @@ def test_apply_bulk_torrent_action_reannounces_by_tracker() -> None:
         },
     )
 
-    summary = apply_bulk_torrent_action(
+    plan = plan_bulk_torrent_action(
         client=client,
         action="reannounce",
         tracker="https://tracker.example/announce",
-        dry_run=False,
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["matched"] == 1
-    assert summary["modified"] == 1
+    assert plan.matched == 1
+    assert len(plan.changes) == 1
     assert client.reannounced_hashes == [["hash-a"]]
 
 
-def test_apply_bulk_torrent_action_selects_all_torrents() -> None:
+def test_plan_bulk_torrent_action_selects_all_torrents() -> None:
     """Ensure bulk actions can target every torrent with select_all."""
     client = FakeQbitClient(
         torrents=[
@@ -574,20 +563,18 @@ def test_apply_bulk_torrent_action_selects_all_torrents() -> None:
         trackers_by_hash={"hash-a": [], "hash-b": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        select_all=True,
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", select_all=True
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["selection"] == {"filter": "all", "value": "*"}
-    assert summary["matched"] == 2
-    assert summary["modified"] == 2
+    assert plan.selection == {"filter": "all", "value": "*"}
+    assert plan.matched == 2
+    assert len(plan.changes) == 2
     assert client.paused_hashes == [["hash-a", "hash-b"]]
 
 
-def test_apply_bulk_torrent_action_pauses_by_hash_prefix() -> None:
+def test_plan_bulk_torrent_action_pauses_by_hash_prefix() -> None:
     """Ensure a unique hash prefix selects exactly one torrent."""
     client = FakeQbitClient(
         torrents=[
@@ -597,23 +584,19 @@ def test_apply_bulk_torrent_action_pauses_by_hash_prefix() -> None:
         trackers_by_hash={"abc123def456": [], "zz00112233ff": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        torrent_hash="abc123",
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", torrent_hash="abc123"
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["selection"] == {"filter": "hash", "value": "abc123def456"}
-    assert summary["matched"] == 1
-    assert summary["modified"] == 1
+    assert plan.selection == {"filter": "hash", "value": "abc123def456"}
+    assert plan.matched == 1
+    assert len(plan.changes) == 1
     assert client.paused_hashes == [["abc123def456"]]
 
 
-def test_apply_bulk_torrent_action_with_ambiguous_hash_mutates_nothing() -> (
-    None
-):
-    """Ensure an ambiguous prefix raises and performs no mutation."""
+def test_plan_bulk_torrent_action_with_ambiguous_hash_raises() -> None:
+    """Ensure an ambiguous prefix raises before any plan is built."""
     client = FakeQbitClient(
         torrents=[
             {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
@@ -623,17 +606,14 @@ def test_apply_bulk_torrent_action_with_ambiguous_hash_mutates_nothing() -> (
     )
 
     with pytest.raises(AmbiguousTorrentHashError):
-        apply_bulk_torrent_action(
-            client=client,
-            action="pause",
-            torrent_hash="abc",
-            dry_run=False,
+        plan_bulk_torrent_action(
+            client=client, action="pause", torrent_hash="abc"
         )
 
     assert client.paused_hashes == []
 
 
-def test_apply_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
+def test_plan_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
     """Ensure an unmatched hash resolves to zero matches, not an error."""
     client = FakeQbitClient(
         torrents=[
@@ -642,20 +622,18 @@ def test_apply_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
         trackers_by_hash={"abc123def456": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        torrent_hash="doesnotexist",
-        dry_run=False,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", torrent_hash="doesnotexist"
     )
+    apply_bulk_torrent_action(client, plan)
 
-    assert summary["matched"] == 0
-    assert summary["modified"] == 0
+    assert plan.matched == 0
+    assert plan.changes == ()
     assert client.paused_hashes == []
 
 
-def test_apply_bulk_torrent_action_hash_dry_run_performs_no_mutation() -> None:
-    """Ensure hash-based dry-run resolves the target without mutating."""
+def test_apply_bulk_torrent_action_reuses_the_planned_target_set() -> None:
+    """Ensure applying a plan never rescans; it mutates exactly its changes."""
     client = FakeQbitClient(
         torrents=[
             {"hash": "abc123def456", "name": "Torrent A", "state": "uploading"},
@@ -663,17 +641,20 @@ def test_apply_bulk_torrent_action_hash_dry_run_performs_no_mutation() -> None:
         trackers_by_hash={"abc123def456": []},
     )
 
-    summary = apply_bulk_torrent_action(
-        client=client,
-        action="pause",
-        torrent_hash="abc123",
-        dry_run=True,
+    plan = plan_bulk_torrent_action(
+        client=client, action="pause", torrent_hash="abc123"
+    )
+    assert plan.matched == 1
+    assert plan.changes[0].hash == "abc123def456"
+
+    # A torrent added after planning must not affect what gets applied.
+    client.torrents.append(
+        {"hash": "zz00112233ff", "name": "Torrent B", "state": "uploading"}
     )
 
-    assert summary["matched"] == 1
-    assert summary["modified"] == 1
-    assert summary["dry_run"] is True
-    assert client.paused_hashes == []
+    apply_bulk_torrent_action(client, plan)
+
+    assert client.paused_hashes == [["abc123def456"]]
 
 
 def test_hash_selector_rejects_combined_filters() -> None:
@@ -690,12 +671,11 @@ def test_hash_selector_rejects_combined_filters() -> None:
         match="Use --hash alone, without --category, --tracker, --all, "
         "or --completed.",
     ):
-        apply_bulk_torrent_action(
+        plan_bulk_torrent_action(
             client=client,
             action="pause",
             torrent_hash="hash-a",
             category="sonarr",
-            dry_run=False,
         )
 
 
@@ -712,12 +692,11 @@ def test_select_all_rejects_combined_filters() -> None:
         ValueError,
         match="Use --all alone, without --category or --tracker.",
     ):
-        apply_bulk_torrent_action(
+        plan_bulk_torrent_action(
             client=client,
             action="pause",
             category="sonarr",
             select_all=True,
-            dry_run=False,
         )
 
 

@@ -235,24 +235,23 @@ def test_table_success_also_has_no_connection_message(
 
 
 @pytest.mark.parametrize("command_id", sorted(COMMAND_ARGV))
-def test_command_always_creates_client_quietly(
+def test_command_creates_client_exactly_once(
     runner: CliRunner,
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure every read-only command calls _create_qbit_client(quiet=True).
+    """Ensure every read-only command creates exactly one qBittorrent client.
 
-    Asserted at the call-path level, not just on rendered output: under
-    CliRunner, `err_console.is_terminal` is already False, so
-    `spinner()` no-ops regardless of `quiet` — output-only assertions
-    cannot catch a regression here.
+    `_create_qbit_client()` never shows a connection spinner or banner
+    (see `docs/DECISIONS.md`), so there is no `quiet` flag left to
+    assert on; this instead pins down the call count itself.
     """
     calls = configure_qbit_backend(client=_make_client())
 
     result = runner.invoke(app, COMMAND_ARGV[command_id])
 
     assert result.exit_code == ExitCode.SUCCESS
-    assert calls == [{"quiet": True}]
+    assert calls == [{}]
 
 
 @pytest.mark.parametrize("command_id", sorted(COMMAND_ARGV))
