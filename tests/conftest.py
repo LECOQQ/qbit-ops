@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from app.config import QbitConfig
 from tests.support import make_config
 
-ConfigureQbitBackend = Callable[..., None]
+ConfigureQbitBackend = Callable[..., list[dict[str, Any]]]
 
 
 @pytest.fixture
@@ -28,6 +28,13 @@ def configure_qbit_backend(
     `app.main._create_qbit_client` directly, which is the smallest seam
     that lets CLI tests exercise every command without a real
     qBittorrent instance or `.env` file.
+
+    Returns the list of kwargs each `_create_qbit_client()` call
+    received, so tests can assert on the call path itself (e.g.
+    `quiet=True`) rather than only on rendered output — CliRunner's
+    non-terminal stderr already makes `spinner()` a no-op regardless of
+    `quiet`, so output-only assertions cannot catch a silence-contract
+    regression there.
     """
 
     def _configure(
@@ -36,7 +43,9 @@ def configure_qbit_backend(
         config: QbitConfig | None = None,
         config_error: Exception | None = None,
         client_error: Exception | None = None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+
         if config_error is not None:
 
             def _raise_config_error() -> QbitConfig:
@@ -46,7 +55,7 @@ def configure_qbit_backend(
                 "app.main.load_qbit_config",
                 _raise_config_error,
             )
-            return
+            return calls
 
         monkeypatch.setattr(
             "app.main.load_qbit_config",
@@ -55,18 +64,24 @@ def configure_qbit_backend(
 
         if client_error is not None:
 
-            def _raise_client_error(**_kwargs: Any) -> Any:
+            def _raise_client_error(**kwargs: Any) -> Any:
+                calls.append(kwargs)
                 raise client_error
 
             monkeypatch.setattr(
                 "app.main._create_qbit_client",
                 _raise_client_error,
             )
-            return
+            return calls
+
+        def _fake_create_qbit_client(**kwargs: Any) -> Any:
+            calls.append(kwargs)
+            return client
 
         monkeypatch.setattr(
             "app.main._create_qbit_client",
-            lambda **_kwargs: client,
+            _fake_create_qbit_client,
         )
+        return calls
 
     return _configure

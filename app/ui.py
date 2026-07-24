@@ -112,7 +112,7 @@ def print_ambiguous_hash_error(
     """Print an actionable ambiguous-hash-prefix error on stderr."""
     err_console.print(
         f"[bold red]✗ ERROR[/bold red] Hash prefix '{value}' matches "
-        f"{len(candidates)} torrents:"
+        "multiple torrents."
     )
     err_console.print()
 
@@ -126,7 +126,7 @@ def print_ambiguous_hash_error(
         err_console.print(f"  … and {remaining} more.")
 
     err_console.print()
-    err_console.print("Use a longer hash prefix.")
+    err_console.print("Use a longer prefix.")
 
 
 def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:

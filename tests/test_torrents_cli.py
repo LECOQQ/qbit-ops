@@ -82,7 +82,7 @@ def test_pause_with_ambiguous_hash_performs_no_mutation(
     assert "matches" in result.stderr
     assert "Debian ISO" in result.stderr
     assert "Debian live image" in result.stderr
-    assert "longer hash prefix" in result.stderr
+    assert "longer prefix" in result.stderr
 
 
 def test_pause_with_unknown_hash_performs_no_mutation(
@@ -299,6 +299,83 @@ def test_reannounce_by_tracker_still_works(
 
     assert result.exit_code == ExitCode.SUCCESS
     assert client.reannounced_hashes == [[TORRENT_A_HASH]]
+
+
+def test_reannounce_help_exposes_hash(runner: CliRunner) -> None:
+    """Ensure `torrents reannounce --help` documents --hash.
+
+    Phase 2's end-of-phase report claimed --hash was migrated onto
+    reannounce, but no dedicated test exercised it (only --tracker was
+    covered) — this and the next three tests close that specific gap.
+    """
+    result = runner.invoke(app, ["torrents", "reannounce", "--help"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "--hash" in result.stdout
+    assert "--name" not in result.stdout
+
+
+def test_reannounce_with_unique_hash_prefix_selects_one_torrent(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure `reannounce --hash <prefix>` resolves and acts on one torrent."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A_HASH, name="A", state="uploading"),
+            make_torrent(hash=UNIQUE_HASH, name="B", state="uploading"),
+        ],
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "reannounce", "--hash", "zz0011", "--no-dry-run"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.reannounced_hashes == [[UNIQUE_HASH]]
+
+
+def test_reannounce_with_ambiguous_hash_performs_no_mutation(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure an ambiguous prefix mutates nothing for reannounce."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A_HASH, name="Debian ISO"),
+            make_torrent(hash=TORRENT_B_HASH, name="Debian live image"),
+        ],
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "reannounce", "--hash", "abc", "--no-dry-run"],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert client.reannounced_hashes == []
+
+
+def test_reannounce_with_unknown_hash_performs_no_mutation(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ensure an unmatched hash mutates nothing for reannounce."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_A_HASH, name="A")],
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "reannounce", "--hash", "doesnotexist", "--no-dry-run"],
+    )
+
+    assert result.exit_code == ExitCode.NO_MATCH
+    assert client.reannounced_hashes == []
 
 
 def test_inspect_name_search_remains_functional(

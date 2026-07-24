@@ -111,24 +111,67 @@ class TrackerMatchModeOption(StrEnum):
     without_query = "without-query"
 
 
-class OutputFormatOption(StrEnum):
-    """Expose generic output formats for Typer options.
-
-    Kept for the commands not yet migrated to `app.ui.OutputFormat`
-    (table/json/jsonl/csv). See docs/DECISIONS.md for the intentional
-    pre-1.0 break on `status` and `connection check`.
-    """
-
-    text = "text"
-    json = "json"
-
-
 class QbitConnectionError(RuntimeError):
     """Report that qBittorrent could not be reached."""
 
 
 class QbitAuthenticationError(RuntimeError):
     """Report that qBittorrent rejected the configured credentials."""
+
+
+# Every read-only command uses the same `app.ui.OutputFormat` enum and the
+# same `--format` option, but not every command can meaningfully render
+# every format (see docs/COMMANDS.md "Format Support Matrix" and
+# docs/DECISIONS.md, 2026-07-24). This table is the single source of truth:
+# both `_validate_format_support` and the CLI test suite read it, so the
+# implementation, its validation, and its tests cannot drift apart.
+FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
+    "status": frozenset(OutputFormat),
+    "connection_check": frozenset(OutputFormat),
+    "config_doctor": frozenset(OutputFormat),
+    "torrents_list": frozenset(OutputFormat),
+    "torrents_categories": frozenset(OutputFormat),
+    "torrents_inspect": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "trackers_list": frozenset(OutputFormat),
+    "trackers_health": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "trackers_inspect": frozenset(OutputFormat),
+    "trackers_export": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "backup_export": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "backup_diff": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+}
+
+
+def _validate_format_support(
+    command_id: str,
+    output_format: OutputFormat,
+) -> None:
+    """Reject a format a command cannot meaningfully render.
+
+    Called before any qBittorrent API call, so an unsupported format
+    fails fast without a network round-trip. `table` and `json` are
+    supported by every command; `jsonl` and `csv` are only offered where
+    they have a stable, non-artificial representation (see
+    `FORMAT_SUPPORT` above).
+    """
+    supported = FORMAT_SUPPORT[command_id]
+    if output_format in supported:
+        return
+
+    supported_names = ", ".join(sorted(fmt.value for fmt in supported))
+    _fail(
+        f"--format {output_format.value} is not supported here "
+        f"(no stable representation). Supported formats: {supported_names}."
+    )
 
 
 @app.callback(invoke_without_command=True)
@@ -159,13 +202,14 @@ def status(
     ] = False,
 ) -> None:
     """Show a bounded operational snapshot of the qBittorrent instance."""
+    _validate_format_support("status", output_format)
     if quiet and output_format != OutputFormat.table:
         print_error(
             "Use --quiet on its own; it already suppresses --format output."
         )
         raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
 
-    snapshot = _collect_status_snapshot_safely(quiet=quiet)
+    snapshot = _collect_status_snapshot_safely()
 
     if not quiet:
         _render_status(snapshot, output_format)
@@ -184,8 +228,9 @@ def check(
     ] = OutputFormat.table,
 ) -> None:
     """Check qBittorrent connectivity using `.env` settings."""
+    _validate_format_support("connection_check", output_format)
     try:
-        _create_qbit_client()
+        _create_qbit_client(quiet=True)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -206,7 +251,7 @@ def check(
     elif output_format == OutputFormat.json:
         _print_json_output(report)
     elif output_format == OutputFormat.jsonl:
-        typer.echo(json.dumps(report, sort_keys=True))
+        _print_jsonl_output(report)
     else:
         _print_csv_rows(
             ["key", "value"],
@@ -217,17 +262,18 @@ def check(
 @config_app.command()
 def doctor(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Check qbit-ops configuration and qBittorrent API access."""
+    _validate_format_support("config_doctor", output_format)
     try:
         config = load_qbit_config()
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         qbit_version = _get_optional_client_value(client, "app_version")
         web_api_version = _get_optional_client_value(
             client,
@@ -249,11 +295,22 @@ def doctor(
         "web_api_version": web_api_version,
     }
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.table:
+        print_summary(report, title="Config Doctor")
+        return
+
+    if output_format == OutputFormat.json:
         _print_json_output(report)
         return
 
-    print_summary(report, title="Config Doctor")
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(report)
+        return
+
+    _print_csv_rows(
+        ["key", "value"],
+        [(key, str(value)) for key, value in report.items()],
+    )
 
 
 @torrents_app.command(name="list")
@@ -280,19 +337,20 @@ def list_qbit_torrents(
         ),
     ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """List torrents with useful audit fields."""
+    _validate_format_support("torrents_list", output_format)
     if tracker is not None and category is not None:
         _fail("Use either --tracker or --category, not both.")
 
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         if tracker is not None:
             report = inspect_tracker(
                 client=client,
@@ -317,12 +375,28 @@ def list_qbit_torrents(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(
             {
                 "summary": {"torrents": len(torrents)},
                 "torrents": torrents,
             }
+        )
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(
+            {
+                "summary": {"torrents": len(torrents)},
+                "torrents": torrents,
+            }
+        )
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            _TORRENT_CSV_FIELDNAMES,
+            [_torrent_csv_row(torrent) for torrent in torrents],
         )
         return
 
@@ -342,16 +416,17 @@ def list_qbit_torrents(
 @torrents_app.command(name="categories")
 def list_qbit_categories(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """List torrent categories and usage counts."""
+    _validate_format_support("torrents_categories", output_format)
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         category_usage = list_category_usage(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -360,12 +435,26 @@ def list_qbit_categories(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
-        _print_json_output(
-            {
-                "summary": {"categories": len(category_usage)},
-                "categories": category_usage,
-            }
+    payload = {
+        "summary": {"categories": len(category_usage)},
+        "categories": category_usage,
+    }
+
+    if output_format == OutputFormat.json:
+        _print_json_output(payload)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(payload)
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            ["category", "torrents"],
+            [
+                (category_name, str(torrent_count))
+                for category_name, torrent_count in category_usage.items()
+            ],
         )
         return
 
@@ -390,7 +479,10 @@ def inspect_qbit_torrent(
         str | None,
         typer.Option(
             "--hash",
-            help="Complete torrent hash or unambiguous prefix to inspect.",
+            help=(
+                "Full infohash or unique leading prefix to inspect "
+                "(case-insensitive)."
+            ),
         ),
     ] = None,
     name: Annotated[
@@ -408,19 +500,20 @@ def inspect_qbit_torrent(
         ),
     ] = 20,
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Inspect a torrent by hash (or prefix) or search torrents by name."""
+    _validate_format_support("torrents_inspect", output_format)
     if (torrent_hash is None) == (name is None):
         _fail("Provide exactly one of --hash or --name.")
 
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         if name is not None:
             report = search_torrents_by_name(client, name, limit=limit)
             _print_torrent_name_search(report, output_format)
@@ -438,16 +531,22 @@ def inspect_qbit_torrent(
         _fail(f"qBittorrent API error: {error}")
 
     if report is None:
-        if output_format == OutputFormatOption.json:
+        if output_format == OutputFormat.json:
             _print_json_output({"torrent": None, "hash": torrent_hash})
+        elif output_format == OutputFormat.jsonl:
+            _print_jsonl_output({"torrent": None, "hash": torrent_hash})
         else:
-            typer.echo(f"No torrent found for hash: {torrent_hash}")
+            typer.echo(f"No torrent found for hash prefix: {torrent_hash}")
 
         _exit_if_no_targeted_matches(0)
         return
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output({"torrent": report})
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output({"torrent": report})
         return
 
     _print_torrent_details(report)
@@ -459,8 +558,10 @@ def pause(
         str | None,
         typer.Option(
             "--hash",
-            help="Pause the torrent matching a complete hash or unique "
-            "prefix.",
+            help=(
+                "Pause the torrent matching a full infohash or unique "
+                "leading prefix (case-insensitive)."
+            ),
         ),
     ] = None,
     category: Annotated[
@@ -525,8 +626,10 @@ def resume(
         str | None,
         typer.Option(
             "--hash",
-            help="Resume the torrent matching a complete hash or unique "
-            "prefix.",
+            help=(
+                "Resume the torrent matching a full infohash or unique "
+                "leading prefix (case-insensitive)."
+            ),
         ),
     ] = None,
     category: Annotated[
@@ -591,8 +694,10 @@ def start(
         str | None,
         typer.Option(
             "--hash",
-            help="Start the torrent matching a complete hash or unique "
-            "prefix.",
+            help=(
+                "Start the torrent matching a full infohash or unique "
+                "leading prefix (case-insensitive)."
+            ),
         ),
     ] = None,
     category: Annotated[
@@ -665,8 +770,10 @@ def reannounce(
         str | None,
         typer.Option(
             "--hash",
-            help="Reannounce the torrent matching a complete hash or "
-            "unique prefix.",
+            help=(
+                "Reannounce the torrent matching a full infohash or "
+                "unique leading prefix (case-insensitive)."
+            ),
         ),
     ] = None,
     category: Annotated[
@@ -800,16 +907,17 @@ def list_trackers(
         ),
     ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """List trackers currently present on the qBittorrent instance."""
+    _validate_format_support("trackers_list", output_format)
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         tracker_usage = list_tracker_usage(client, match_mode=match.value)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -818,13 +926,27 @@ def list_trackers(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
-        _print_json_output(
-            {
-                "match": match.value,
-                "summary": {"trackers": len(tracker_usage)},
-                "trackers": tracker_usage,
-            }
+    payload = {
+        "match": match.value,
+        "summary": {"trackers": len(tracker_usage)},
+        "trackers": tracker_usage,
+    }
+
+    if output_format == OutputFormat.json:
+        _print_json_output(payload)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(payload)
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            ["tracker", "torrents"],
+            [
+                (tracker_url, str(torrent_count))
+                for tracker_url, torrent_count in tracker_usage.items()
+            ],
         )
         return
 
@@ -846,16 +968,17 @@ def list_trackers(
 @trackers_app.command()
 def health(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Analyze tracker health across the qBittorrent instance."""
+    _validate_format_support("trackers_health", output_format)
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         report = analyze_tracker_health(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -864,8 +987,12 @@ def health(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(report)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(report)
         return
 
     print_summary(report["summary"], title="Tracker Health")
@@ -905,16 +1032,17 @@ def inspect_tracker_usage(
         ),
     ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Inspect torrents using a tracker."""
+    _validate_format_support("trackers_inspect", output_format)
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         report = inspect_tracker(
             client=client,
             tracker=tracker,
@@ -927,8 +1055,30 @@ def inspect_tracker_usage(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(report)
+        _exit_if_no_targeted_matches(report["matched_tracker"])
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(report)
+        _exit_if_no_targeted_matches(report["matched_tracker"])
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            [*_TORRENT_CSV_FIELDNAMES, "matching_tracker_urls"],
+            [
+                (
+                    *_torrent_csv_row(
+                        torrent,
+                        tracker_count_field="active_tracker_count",
+                    ),
+                    "; ".join(torrent["matching_tracker_urls"]),
+                )
+                for torrent in report["torrents"]
+            ],
+        )
         _exit_if_no_targeted_matches(report["matched_tracker"])
         return
 
@@ -1097,12 +1247,12 @@ def replace_tracker_passkey_command(
 @backup_app.command(name="export")
 def export_backup(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
     match: Annotated[
         TrackerMatchModeOption,
         typer.Option(
@@ -1112,9 +1262,10 @@ def export_backup(
     ] = TrackerMatchModeOption.exact,
 ) -> None:
     """Export torrents, trackers and metadata for backup or audit."""
+    _validate_format_support("backup_export", output_format)
     try:
         config = load_qbit_config()
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         state = export_instance_state(
             client=client,
             config=config,
@@ -1136,8 +1287,12 @@ def export_backup(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(state)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(state)
         return
 
     summary = state["summary"]
@@ -1151,7 +1306,7 @@ def export_backup(
         },
         title="Backup Export",
     )
-    typer.echo("Use --output json for the full backup payload.")
+    typer.echo("Use --format json for the full backup payload.")
 
 
 @backup_app.command(name="diff")
@@ -1169,14 +1324,15 @@ def diff_backup(
         ),
     ],
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
 ) -> None:
     """Compare two backup or tracker export JSON files."""
+    _validate_format_support("backup_diff", output_format)
     try:
         baseline_export = load_export_file(baseline)
         target_export = load_export_file(target)
@@ -1189,8 +1345,10 @@ def diff_backup(
     except BackupExportError as error:
         _fail(str(error))
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(report)
+    elif output_format == OutputFormat.jsonl:
+        _print_jsonl_output(report)
     else:
         _print_backup_diff(report)
 
@@ -1200,12 +1358,12 @@ def diff_backup(
 @trackers_app.command(name="export")
 def export_trackers(
     output_format: Annotated[
-        OutputFormatOption,
+        OutputFormat,
         typer.Option(
-            "--output",
+            "--format",
             help="Output format.",
         ),
-    ] = OutputFormatOption.text,
+    ] = OutputFormat.table,
     match: Annotated[
         TrackerMatchModeOption,
         typer.Option(
@@ -1215,8 +1373,9 @@ def export_trackers(
     ] = TrackerMatchModeOption.exact,
 ) -> None:
     """Export active tracker state."""
+    _validate_format_support("trackers_export", output_format)
     try:
-        client = _create_qbit_client()
+        client = _create_qbit_client(quiet=True)
         state = export_tracker_state(client=client, match_mode=match.value)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1225,12 +1384,16 @@ def export_trackers(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormatOption.json:
+    if output_format == OutputFormat.json:
         _print_json_output(state)
         return
 
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(state)
+        return
+
     print_summary(state["summary"], title="Tracker Export")
-    typer.echo("Use --output json for the full export payload.")
+    typer.echo("Use --format json for the full export payload.")
 
 
 @trackers_app.command()
@@ -1389,14 +1552,20 @@ def _create_qbit_client(*, quiet: bool = False) -> Any:
     return client
 
 
-def _collect_status_snapshot_safely(*, quiet: bool) -> StatusSnapshot:
-    """Collect a status snapshot, degrading to `unavailable` on failure."""
+def _collect_status_snapshot_safely() -> StatusSnapshot:
+    """Collect a status snapshot, degrading to `unavailable` on failure.
+
+    Errors always reach stderr, regardless of `--quiet` or `--format`:
+    per docs/PLAN.md Phase 1, `--quiet` suppresses successful normal
+    output, never genuine failures. The connection spinner/banner is
+    always suppressed (`quiet=True` below) since the rendered snapshot
+    (or the error message above) already communicates the outcome.
+    """
     try:
         config = load_qbit_config()
     except ConfigError as error:
         message = f"Configuration error: {error}"
-        if not quiet:
-            print_error(message)
+        print_error(message)
         return build_unavailable_snapshot(
             code="configuration_invalid",
             message=message,
@@ -1405,19 +1574,17 @@ def _collect_status_snapshot_safely(*, quiet: bool) -> StatusSnapshot:
     host = config.host
 
     try:
-        client = _create_qbit_client(quiet=quiet)
+        client = _create_qbit_client(quiet=True)
         return collect_status_snapshot(client, host=host)
     except QbitAuthenticationError as error:
-        if not quiet:
-            print_error(str(error))
+        print_error(str(error))
         return build_unavailable_snapshot(
             code="authentication_failed",
             message=str(error),
             host=host,
         )
     except RuntimeError as error:
-        if not quiet:
-            print_error(str(error))
+        print_error(str(error))
         return build_unavailable_snapshot(
             code="qbittorrent_unavailable",
             message=str(error),
@@ -1425,8 +1592,7 @@ def _collect_status_snapshot_safely(*, quiet: bool) -> StatusSnapshot:
         )
     except Exception as error:
         message = f"qBittorrent API error: {error}"
-        if not quiet:
-            print_error(message)
+        print_error(message)
         return build_unavailable_snapshot(
             code="qbittorrent_unavailable",
             message=message,
@@ -1487,6 +1653,11 @@ def _print_json_output(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _print_jsonl_output(payload: Any) -> None:
+    """Print exactly one compact JSON document, followed by a newline."""
+    typer.echo(json.dumps(payload, sort_keys=True))
+
+
 def _torrent_audit_row(
     torrent: dict[str, Any],
     *,
@@ -1508,21 +1679,64 @@ def _torrent_audit_row(
     ]
 
 
+_TORRENT_CSV_FIELDNAMES = [
+    "name",
+    "hash",
+    "category",
+    "state",
+    "progress",
+    "ratio",
+    "tracker_count",
+]
+
+
+def _torrent_csv_row(
+    torrent: dict[str, Any],
+    *,
+    tracker_count_field: str = "tracker_count",
+) -> tuple[str, ...]:
+    """Build one torrent CSV row with numeric fields left unformatted."""
+    tracker_count = torrent.get(
+        tracker_count_field,
+        torrent.get("tracker_count", 0),
+    )
+    return (
+        torrent["name"],
+        torrent["hash"],
+        torrent.get("category", "(uncategorized)"),
+        torrent["state"],
+        str(torrent["progress"]),
+        str(torrent["ratio"]),
+        str(tracker_count),
+    )
+
+
 def _print_torrents_for_category(
     report: dict[str, Any],
-    output_format: OutputFormatOption,
+    output_format: OutputFormat,
 ) -> None:
     """Print torrents filtered by category."""
-    if output_format == OutputFormatOption.json:
-        _print_json_output(
-            {
-                "category": report["category"],
-                "summary": {
-                    "scanned": report["scanned"],
-                    "matched": report["matched"],
-                },
-                "torrents": report["torrents"],
-            }
+    payload = {
+        "category": report["category"],
+        "summary": {
+            "scanned": report["scanned"],
+            "matched": report["matched"],
+        },
+        "torrents": report["torrents"],
+    }
+
+    if output_format == OutputFormat.json:
+        _print_json_output(payload)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(payload)
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            _TORRENT_CSV_FIELDNAMES,
+            [_torrent_csv_row(torrent) for torrent in report["torrents"]],
         )
         return
 
@@ -1551,20 +1765,40 @@ def _print_torrents_for_category(
 
 def _print_torrents_for_tracker(
     report: dict[str, Any],
-    output_format: OutputFormatOption,
+    output_format: OutputFormat,
 ) -> None:
     """Print torrents filtered by tracker."""
-    if output_format == OutputFormatOption.json:
-        _print_json_output(
-            {
-                "tracker": report["tracker"],
-                "match": report["match"],
-                "summary": {
-                    "scanned": report["scanned"],
-                    "matched": report["matched_tracker"],
-                },
-                "torrents": report["torrents"],
-            }
+    payload = {
+        "tracker": report["tracker"],
+        "match": report["match"],
+        "summary": {
+            "scanned": report["scanned"],
+            "matched": report["matched_tracker"],
+        },
+        "torrents": report["torrents"],
+    }
+
+    if output_format == OutputFormat.json:
+        _print_json_output(payload)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(payload)
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            [*_TORRENT_CSV_FIELDNAMES, "matching_tracker_urls"],
+            [
+                (
+                    *_torrent_csv_row(
+                        torrent,
+                        tracker_count_field="active_tracker_count",
+                    ),
+                    "; ".join(torrent["matching_tracker_urls"]),
+                )
+                for torrent in report["torrents"]
+            ],
         )
         return
 
@@ -1639,11 +1873,24 @@ def _print_torrent_details(report: dict[str, Any]) -> None:
 
 def _print_torrent_name_search(
     report: dict[str, Any],
-    output_format: OutputFormatOption,
+    output_format: OutputFormat,
 ) -> None:
-    """Print torrent name search results."""
-    if output_format == OutputFormatOption.json:
+    """Print torrent name search results.
+
+    `--format csv` is intentionally not offered here: this helper also
+    renders `torrents inspect --hash`'s single-torrent result elsewhere
+    in this module (nested tracker details, no stable tabular shape),
+    and `torrents inspect` uses one format-support rule for both modes
+    — see `FORMAT_SUPPORT["torrents_inspect"]` and docs/DECISIONS.md.
+    `_validate_format_support` already rejected `csv` before any API
+    call was made.
+    """
+    if output_format == OutputFormat.json:
         _print_json_output(report)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(report)
         return
 
     summary = report["summary"]

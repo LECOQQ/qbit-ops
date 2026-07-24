@@ -15,7 +15,8 @@ drop the `poetry run` prefix.
 - [Backup](#backup)
 - [Use Cases](#use-cases)
 - [Matching Modes](#matching-modes)
-- [Audit Output](#audit-output)
+- [Format Support Matrix](#format-support-matrix)
+- [Machine-Readable Silence Contract](#machine-readable-silence-contract)
 - [Tracker Health](#tracker-health)
 - [Output Summaries](#output-summaries)
 - [Exit Codes](#exit-codes)
@@ -51,11 +52,9 @@ dedicated exit code for each — see [Exit Codes](#exit-codes). `--quiet`
 suppresses all normal output (no table, no JSON) and is meant for
 healthchecks: only the exit code carries information. Combining `--quiet`
 with an explicit non-default `--format` is a validation error (exit `4`).
-
-`status` uses `--format table|json|jsonl|csv` (see
-[Output Summaries](#output-summaries) below for how this differs from the
-`--output text|json` used by audit commands). `status --watch` is not
-implemented yet.
+`--quiet` is only available on `status`: it is the only read-only command
+whose exit code carries information beyond success/failure — see
+[`--quiet` scope](#quiet-scope) below.
 
 ## Connection & Config
 
@@ -64,22 +63,17 @@ poetry run qbit-ops connection check
 poetry run qbit-ops connection check --format json
 
 poetry run qbit-ops config doctor
-poetry run qbit-ops config doctor --output json
+poetry run qbit-ops config doctor --format json
 ```
-
-`connection check` uses the same `--format table|json|jsonl|csv` option as
-`status` (migrated in the same phase to prove the option is reusable).
-`config doctor` still uses `--output text|json`, like the rest of the
-audit commands below.
 
 ## Torrents
 
 ```bash
 poetry run qbit-ops torrents list
-poetry run qbit-ops torrents list --output json
+poetry run qbit-ops torrents list --format json
 
 poetry run qbit-ops torrents categories
-poetry run qbit-ops torrents categories --output json
+poetry run qbit-ops torrents categories --format json
 
 poetry run qbit-ops torrents list --category sonarr
 poetry run qbit-ops torrents list --category "(uncategorized)"
@@ -91,21 +85,21 @@ poetry run qbit-ops torrents list \
   --tracker "http://connect.maxp2p.org:8080/passkey/announce" \
   --match without-query
 
-poetry run qbit-ops torrents inspect --hash "TORRENT_HASH"
-poetry run qbit-ops torrents inspect --hash "TORRENT_HASH" --output json
+poetry run qbit-ops torrents inspect --hash "TORRENT_HASH_OR_PREFIX"
+poetry run qbit-ops torrents inspect --hash "abc123" --format json
 
 poetry run qbit-ops torrents inspect --name "L.amour.est.dans.le.pre"
 poetry run qbit-ops torrents inspect \
   --name "L.amour.est.dans.le.pre" \
-  --output json
+  --format json
 ```
 
 `torrents inspect --name` ranks matches by relevance: exact match, prefix
 match, substring match, then fuzzy similarity. It is **read-only discovery
 only** — a way to find a hash, not a way to target a mutation. `torrents
-inspect --hash` now also accepts a complete hash or an unambiguous prefix
-(not only a full hash), matched case-insensitively; an ambiguous prefix
-fails with the candidate list instead of guessing.
+inspect --hash` accepts a full infohash or a unique leading prefix (matched
+case-insensitively); an ambiguous prefix fails with the candidate list
+instead of guessing.
 
 ### Bulk torrent actions
 
@@ -116,8 +110,12 @@ alone: it resolves to a single torrent, so it cannot combine with
 `--category`, `--tracker`, `--all`, or `--completed`. `--completed` is the
 only mode that can still combine with `--category` or `--tracker`.
 
-**`--hash` is the safe, canonical way to target one torrent** — a complete
-infohash or an unambiguous prefix, resolved case-insensitively:
+**`--hash` is the safe, canonical way to target one torrent** — a full
+infohash or a unique leading prefix, resolved case-insensitively. A unique
+prefix is the shortest leading sequence of hex characters that currently
+matches exactly one torrent on the connected instance; there is no fixed
+required length, and the same prefix can stop being unique as torrents are
+added or removed.
 
 ```bash
 poetry run qbit-ops torrents inspect --name "debian"      # 1. discover
@@ -125,25 +123,33 @@ poetry run qbit-ops torrents reannounce --hash abc123 --dry-run   # 2. act
 poetry run qbit-ops torrents reannounce --hash abc123 --no-dry-run
 ```
 
-Resolution rules:
+Resolution rules (identical in dry-run and real execution):
 
-1. No torrent matches the hash or prefix → the command matches nothing and
-   exits with the existing no-match exit code (`2`); no mutation is
-   attempted.
-2. Exactly one torrent matches → it resolves to the complete hash and the
-   action proceeds normally. The resolved full hash is shown in the
-   command's summary output (`value` row), even in dry-run.
-3. Several torrents share the prefix → the command fails with the
-   candidate hashes and names, mutates nothing, and exits `1`:
+1. **No torrent matches the hash or prefix** → the command matches nothing
+   and exits with the existing no-match exit code (`2`); no mutation is
+   attempted. `torrents inspect --hash` reports this as:
 
    ```text
-   ✗ ERROR Hash prefix 'abc' matches 2 torrents:
+   No torrent found for hash prefix: <value>
+   ```
+
+2. **Exactly one torrent matches** → it resolves to the complete hash and
+   the action proceeds normally. The resolved full hash is shown in the
+   command's summary output (`value` row), even in dry-run.
+3. **Several torrents share the prefix** → the command fails, mutates
+   nothing, and exits `1`:
+
+   ```text
+   ✗ ERROR Hash prefix 'abc' matches multiple torrents.
 
      abc123def456…  Debian ISO
      abc987fed654…  Debian live image
 
-   Use a longer hash prefix.
+   Use a longer prefix.
    ```
+
+   The candidate list is sorted deterministically (by hash, then name) and
+   capped at 10 entries, with a count of any omitted candidates.
 
 **Migration note** — fuzzy `--name` targeting was removed from mutating
 commands (pre-1.0 breaking change; see `docs/DECISIONS.md`). It never
@@ -185,18 +191,18 @@ poetry run qbit-ops torrents start --completed --no-dry-run
 ```bash
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
-poetry run qbit-ops trackers list --output json
+poetry run qbit-ops trackers list --format json
 
 poetry run qbit-ops trackers health
-poetry run qbit-ops trackers health --output json
+poetry run qbit-ops trackers health --format json
 
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce" \
-  --output json
+  --format json
 
-poetry run qbit-ops trackers export --output json
+poetry run qbit-ops trackers export --format json
 ```
 
 ### Add a tracker if another tracker is present
@@ -293,13 +299,13 @@ poetry run qbit-ops trackers replace \
 ## Backup
 
 ```bash
-poetry run qbit-ops backup export --output json > backup.json
+poetry run qbit-ops backup export --format json > backup.json
 poetry run qbit-ops backup diff backup-before.json backup-after.json
 poetry run qbit-ops backup diff backup-before.json backup-after.json \
-  --output json
+  --format json
 ```
 
-`backup export --output json` produces:
+`backup export --format json` produces:
 
 - export metadata (`exported_at`, qBittorrent versions, configured host);
 - torrent metadata and tracker details for every torrent;
@@ -321,8 +327,8 @@ poetry run qbit-ops torrents list
 poetry run qbit-ops torrents categories
 poetry run qbit-ops trackers list
 poetry run qbit-ops trackers health
-poetry run qbit-ops trackers export --output json
-poetry run qbit-ops backup export --output json
+poetry run qbit-ops trackers export --format json
+poetry run qbit-ops backup export --format json
 ```
 
 ## Matching Modes
@@ -333,20 +339,75 @@ poetry run qbit-ops backup export --output json
 Both modes preserve the raw qBittorrent URLs for API calls — this matters
 for `remove`, since qBittorrent expects the original tracker URL.
 
-## Audit Output
+## Format Support Matrix
 
-Most audit commands accept `--output text|json`: `config doctor`, `torrents
-list`, `torrents categories`, `torrents inspect`, `trackers list`, `trackers
-health`, `trackers inspect`, `trackers export`, `backup export`, `backup
-diff`.
+Every read-only command shares one `--format` option and one
+`app.ui.OutputFormat` enum (`table | json | jsonl | csv`). `--output` no
+longer exists anywhere in the CLI — this was an intentional pre-1.0 break,
+not an alias (see `docs/DECISIONS.md`, 2026-07-24).
 
-Text output is the default, human-readable summary. JSON output is for
-scripting and backups.
+`table` is the default and, together with `json`, is supported by every
+read-only command. `jsonl` emits exactly **one** compact JSON document per
+invocation (the same payload as `--format json`, on one line) — this
+applies uniformly whether the command's result is a single snapshot or a
+collection, so a script never has to guess how many lines to expect.
+`csv` is offered only where the result has a stable, non-artificial
+tabular shape; where it does not, the command rejects `--format csv` with
+a clear error instead of producing an ad hoc or lossy serialization.
 
-`status` and `connection check` are the exception: they use `--format
-table|json|jsonl|csv` instead (`table` replaces `text`; `jsonl` and `csv` are
-new). This is an intentional pre-1.0 break, not yet applied to the other
-audit commands — see `docs/DECISIONS.md` (2026-07-24).
+| Command | table | json | jsonl | csv | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `status` | ✅ | ✅ | ✅ | ✅ | `section,key,value` rows |
+| `connection check` | ✅ | ✅ | ✅ | ✅ | `key,value` rows |
+| `config doctor` | ✅ | ✅ | ✅ | ✅ | `key,value` rows |
+| `torrents list` (incl. `--category`/`--tracker`) | ✅ | ✅ | ✅ | ✅ | one row per torrent |
+| `torrents categories` | ✅ | ✅ | ✅ | ✅ | `category,torrents` rows |
+| `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested tracker details for `--hash`) |
+| `trackers list` | ✅ | ✅ | ✅ | ✅ | `tracker,torrents` rows |
+| `trackers health` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (variant groups, disabled trackers) |
+| `trackers inspect` | ✅ | ✅ | ✅ | ✅ | one row per torrent, matching tracker URLs joined with `; ` |
+| `trackers export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
+| `backup export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
+| `backup diff` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (added/removed/changed, tracker usage) |
+
+Requesting an unsupported format fails fast, before any qBittorrent API
+call:
+
+```console
+$ qbit-ops trackers health --format csv
+✗ ERROR --format csv is not supported here (no stable representation).
+Supported formats: json, jsonl, table.
+```
+
+Mutation commands (`pause`, `resume`, `start`, `reannounce`,
+`add-if-present`, `remove`, `replace`, `replace-passkey`) do not expose
+`--format`; they keep their existing Rich text summaries only, unchanged
+in this phase.
+
+## Machine-Readable Silence Contract
+
+For every read-only command, a successful `--format json`, `--format
+jsonl`, or `--format csv` invocation prints **only** the requested
+serialized data on stdout: no connection banner, no spinner, no Rich or
+ANSI decoration, no informational prose. This also applies to `table`
+output: the connecting spinner's `✔ Connected to qBittorrent` banner has
+been removed from every read-only command entirely (not just
+machine-readable formats), since the rendered result already communicates
+that the connection succeeded.
+
+Genuine errors are never silenced by this contract: configuration,
+connection, authentication, and validation failures are always printed to
+stderr and always produce a non-zero exit code, regardless of `--format`.
+
+### `--quiet` scope
+
+`--quiet` exists only on `status`. It was deliberately not added to the
+other read-only commands: `status` is the only one whose exit code alone
+carries operational information (`healthy`/`warning`/`critical`/
+`unavailable`); the rest only distinguish success, no-match, and error,
+which is already conveyed without needing a silent mode. Adding `--quiet`
+to e.g. `torrents list` would mean "emit nothing and exit 0" with no
+further contract to build on — see `docs/DECISIONS.md` (2026-07-24).
 
 ## Tracker Health
 
@@ -355,7 +416,7 @@ occurrences, unique exact and logical tracker URLs, query variant groups,
 and disabled pseudo-trackers (DHT, PeX, LSD).
 
 ```bash
-poetry run qbit-ops trackers health --output json
+poetry run qbit-ops trackers health --format json
 ```
 
 ## Output Summaries
