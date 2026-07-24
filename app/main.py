@@ -77,8 +77,10 @@ from app.ui import (
     print_error,
     print_summary,
     print_table,
-    progress_bar,
+    progress_enabled,
     render_status_table,
+    transient_progress,
+    transient_spinner,
 )
 
 PROJECT_NAME = "qbit-ops"
@@ -230,7 +232,13 @@ def status(
         )
         raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
 
-    snapshot = _collect_status_snapshot_safely()
+    enabled = progress_enabled(
+        output_format=output_format,
+        quiet=quiet,
+        interactive=is_interactive_terminal(),
+    )
+    with transient_spinner("Loading status...", enabled=enabled):
+        snapshot = _collect_status_snapshot_safely()
 
     if not quiet:
         _render_status(snapshot, output_format)
@@ -250,8 +258,13 @@ def check(
 ) -> None:
     """Check qBittorrent connectivity using `.env` settings."""
     _validate_format_support("connection_check", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
-        _create_qbit_client()
+        with transient_spinner("Checking connection...", enabled=enabled):
+            _create_qbit_client()
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -292,14 +305,19 @@ def doctor(
 ) -> None:
     """Check qbit-ops configuration and qBittorrent API access."""
     _validate_format_support("config_doctor", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         config = load_qbit_config()
-        client = _create_qbit_client()
-        qbit_version = _get_optional_client_value(client, "app_version")
-        web_api_version = _get_optional_client_value(
-            client,
-            "app_web_api_version",
-        )
+        with transient_spinner("Checking configuration...", enabled=enabled):
+            client = _create_qbit_client()
+            qbit_version = _get_optional_client_value(client, "app_version")
+            web_api_version = _get_optional_client_value(
+                client,
+                "app_web_api_version",
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -370,25 +388,41 @@ def list_qbit_torrents(
     if tracker is not None and category is not None:
         _fail("Use either --tracker or --category, not both.")
 
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
         if tracker is not None:
-            report = inspect_tracker(
-                client=client,
-                tracker=tracker,
-                match_mode=match.value,
-            )
+            with transient_progress(
+                "Scanning torrent trackers...", enabled=enabled
+            ) as advance:
+                report = inspect_tracker(
+                    client=client,
+                    tracker=tracker,
+                    match_mode=match.value,
+                    on_progress=advance,
+                )
             _print_torrents_for_tracker(report, output_format)
             _exit_if_no_targeted_matches(report["matched_tracker"])
             return
 
         if category is not None:
-            report = list_torrents_by_category(client, category)
+            with transient_progress(
+                "Scanning torrent trackers...", enabled=enabled
+            ) as advance:
+                report = list_torrents_by_category(
+                    client, category, on_progress=advance
+                )
             _print_torrents_for_category(report, output_format)
             _exit_if_no_targeted_matches(report["matched"])
             return
 
-        torrents = list_torrents(client)
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            torrents = list_torrents(client, on_progress=advance)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -446,9 +480,14 @@ def list_qbit_categories(
 ) -> None:
     """List torrent categories and usage counts."""
     _validate_format_support("torrents_categories", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
-        category_usage = list_category_usage(client)
+        with transient_spinner("Loading torrents...", enabled=enabled):
+            category_usage = list_category_usage(client)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -533,15 +572,21 @@ def inspect_qbit_torrent(
     if (torrent_hash is None) == (name is None):
         _fail("Provide exactly one of --hash or --name.")
 
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
         if name is not None:
-            report = search_torrents_by_name(client, name, limit=limit)
+            with transient_spinner("Loading torrents...", enabled=enabled):
+                report = search_torrents_by_name(client, name, limit=limit)
             _print_torrent_name_search(report, output_format)
             _exit_if_no_targeted_matches(report["summary"]["matched"])
             return
 
-        report = inspect_torrent(client, torrent_hash or "")
+        with transient_spinner("Loading torrent...", enabled=enabled):
+            report = inspect_torrent(client, torrent_hash or "")
     except AmbiguousTorrentHashError as error:
         _fail_ambiguous_hash(error)
     except ConfigError as error:
@@ -903,15 +948,18 @@ def add_if_present(
     ] = False,
 ) -> None:
     """Add a target tracker when a source tracker is already present."""
+    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
         client = _create_qbit_client()
-        with progress_bar("Scanning torrents...") as on_progress:
+        with transient_progress(
+            "Scanning torrents...", enabled=enabled
+        ) as advance:
             plan = plan_tracker_addition(
                 client=client,
                 source_tracker=source,
                 target_tracker=target,
                 match_mode=match.value,
-                on_progress=on_progress,
+                on_progress=advance,
             )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -961,9 +1009,18 @@ def list_trackers(
 ) -> None:
     """List trackers currently present on the qBittorrent instance."""
     _validate_format_support("trackers_list", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
-        tracker_usage = list_tracker_usage(client, match_mode=match.value)
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            tracker_usage = list_tracker_usage(
+                client, match_mode=match.value, on_progress=advance
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1022,9 +1079,16 @@ def health(
 ) -> None:
     """Analyze tracker health across the qBittorrent instance."""
     _validate_format_support("trackers_health", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
-        report = analyze_tracker_health(client)
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            report = analyze_tracker_health(client, on_progress=advance)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1086,13 +1150,21 @@ def inspect_tracker_usage(
 ) -> None:
     """Inspect torrents using a tracker."""
     _validate_format_support("trackers_inspect", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
-        report = inspect_tracker(
-            client=client,
-            tracker=tracker,
-            match_mode=match.value,
-        )
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            report = inspect_tracker(
+                client=client,
+                tracker=tracker,
+                match_mode=match.value,
+                on_progress=advance,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1210,15 +1282,18 @@ def replace(
     ] = False,
 ) -> None:
     """Replace a tracker on every torrent using it."""
+    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
         client = _create_qbit_client()
-        with progress_bar("Scanning torrents...") as on_progress:
+        with transient_progress(
+            "Scanning torrents...", enabled=enabled
+        ) as advance:
             plan = plan_tracker_replacement(
                 client=client,
                 source_tracker=source,
                 target_tracker=target,
                 match_mode=match.value,
-                on_progress=on_progress,
+                on_progress=advance,
             )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1293,14 +1368,17 @@ def replace_tracker_passkey_command(
     ] = False,
 ) -> None:
     """Replace a tracker's passkey on every torrent using that tracker."""
+    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
         client = _create_qbit_client()
-        with progress_bar("Scanning torrents...") as on_progress:
+        with transient_progress(
+            "Scanning torrents...", enabled=enabled
+        ) as advance:
             plan = plan_tracker_passkey_replacement(
                 client=client,
                 tracker_template=tracker,
                 new_passkey=new_passkey,
-                on_progress=on_progress,
+                on_progress=advance,
             )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1350,23 +1428,28 @@ def export_backup(
 ) -> None:
     """Export torrents, trackers and metadata for backup or audit."""
     _validate_format_support("backup_export", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         config = load_qbit_config()
         client = _create_qbit_client()
-        state = export_instance_state(
-            client=client,
-            config=config,
-            qbit_ops_version=__version__,
-            qbittorrent_version=_get_optional_client_value(
-                client,
-                "app_version",
-            ),
-            web_api_version=_get_optional_client_value(
-                client,
-                "app_web_api_version",
-            ),
-            match_mode=match.value,
-        )
+        with transient_spinner("Collecting backup data...", enabled=enabled):
+            state = export_instance_state(
+                client=client,
+                config=config,
+                qbit_ops_version=__version__,
+                qbittorrent_version=_get_optional_client_value(
+                    client,
+                    "app_version",
+                ),
+                web_api_version=_get_optional_client_value(
+                    client,
+                    "app_web_api_version",
+                ),
+                match_mode=match.value,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1461,9 +1544,18 @@ def export_trackers(
 ) -> None:
     """Export active tracker state."""
     _validate_format_support("trackers_export", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
     try:
         client = _create_qbit_client()
-        state = export_tracker_state(client=client, match_mode=match.value)
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            state = export_tracker_state(
+                client=client, match_mode=match.value, on_progress=advance
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1522,14 +1614,17 @@ def remove(
     ] = False,
 ) -> None:
     """Remove a tracker from every torrent using it."""
+    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
         client = _create_qbit_client()
-        with progress_bar("Scanning torrents...") as on_progress:
+        with transient_progress(
+            "Scanning torrents...", enabled=enabled
+        ) as advance:
             plan = plan_tracker_removal(
                 client=client,
                 tracker=tracker,
                 match_mode=match.value,
-                on_progress=on_progress,
+                on_progress=advance,
             )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1659,9 +1754,12 @@ def _run_bulk_torrent_action(
     except ValueError as error:
         _fail(str(error))
 
+    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
         client = _create_qbit_client()
-        with progress_bar(f"Scanning torrents to {action}...") as on_progress:
+        with transient_progress(
+            f"Scanning torrents to {action}...", enabled=enabled
+        ) as advance:
             plan = plan_bulk_torrent_action(
                 client=client,
                 action=action,
@@ -1671,7 +1769,7 @@ def _run_bulk_torrent_action(
                 match_mode=match.value,
                 select_all=select_all,
                 completed_only=completed_only,
-                on_progress=on_progress,
+                on_progress=advance,
             )
     except AmbiguousTorrentHashError as error:
         _fail_ambiguous_hash(error)
