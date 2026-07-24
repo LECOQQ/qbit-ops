@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Mapping
 from typing import Any, Literal
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -501,6 +501,145 @@ def replace_tracker_in_all(
                     "replaced_tracker_url": source_url_to_replace,
                     "matching_tracker_urls": matching_source_urls,
                     "removed_tracker_urls": source_urls_to_remove,
+                }
+            )
+
+    summary: dict[str, Any] = {
+        "scanned": scanned,
+        "matched_source": matched_source,
+        "already_had_target": already_had_target,
+        "modified": modified,
+        "replaced_urls": replaced_urls,
+        "removed_urls": removed_urls,
+        "dry_run": dry_run,
+    }
+    if verbose:
+        summary["details"] = details
+
+    return summary
+
+
+def build_passkey_tracker_url(
+    tracker_url: str,
+    new_passkey: str,
+    passkey_param: str = "passkey",
+) -> str:
+    """Build a tracker URL with its passkey query parameter replaced."""
+    parsed_url = urlsplit(tracker_url.strip())
+    query_params = parse_qsl(parsed_url.query, keep_blank_values=True)
+
+    replaced = False
+    updated_params: list[tuple[str, str]] = []
+    for key, value in query_params:
+        if key == passkey_param:
+            updated_params.append((key, new_passkey))
+            replaced = True
+        else:
+            updated_params.append((key, value))
+
+    if not replaced:
+        updated_params.append((passkey_param, new_passkey))
+
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path.rstrip("/"),
+            urlencode(updated_params),
+            "",
+        )
+    )
+
+
+def replace_tracker_passkey(
+    client: Any,
+    tracker_url: str,
+    new_passkey: str,
+    passkey_param: str = "passkey",
+    dry_run: bool = True,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Replace a tracker's passkey on every torrent using that tracker.
+
+    Torrents are matched on the tracker's host and path only, so the
+    caller does not need to know each torrent's current passkey value.
+    """
+    scanned = 0
+    matched_source = 0
+    already_had_target = 0
+    modified = 0
+    replaced_urls = 0
+    removed_urls = 0
+    details: list[dict[str, Any]] = []
+
+    for torrent in client.torrents_info():
+        scanned += 1
+        torrent_hash = _get_torrent_hash(torrent)
+        torrent_name = _get_torrent_name(torrent)
+        trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
+        matching_urls = _get_matching_tracker_urls(
+            trackers,
+            tracker_url,
+            "without-query",
+        )
+
+        if not matching_urls:
+            continue
+
+        matched_source += 1
+        stale_urls = {
+            matching_url: updated_url
+            for matching_url in matching_urls
+            if (
+                updated_url := build_passkey_tracker_url(
+                    matching_url, new_passkey, passkey_param
+                )
+            )
+            != matching_url
+        }
+
+        if not stale_urls:
+            already_had_target += 1
+            if verbose:
+                details.append(
+                    {
+                        "hash": torrent_hash,
+                        "name": torrent_name,
+                        "action": "already_up_to_date",
+                        "matching_tracker_urls": matching_urls,
+                    }
+                )
+            continue
+
+        log_prefix = "Would update" if dry_run else "Updating"
+        logger.info("%s passkey on: %s", log_prefix, torrent_name)
+
+        if not dry_run:
+            try:
+                for source_url, target_url in stale_urls.items():
+                    client.torrents_edit_tracker(
+                        torrent_hash=torrent_hash,
+                        original_url=source_url,
+                        new_url=target_url,
+                    )
+            except Exception as error:
+                raise RuntimeError(
+                    "Failed to update tracker passkey on torrent "
+                    f"'{torrent_name}' ({torrent_hash}): {error}"
+                ) from error
+
+        replaced_urls += len(stale_urls)
+        modified += 1
+
+        if verbose:
+            details.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "action": "would_replace" if dry_run else "replaced",
+                    "replaced_tracker_urls": stale_urls,
                 }
             )
 

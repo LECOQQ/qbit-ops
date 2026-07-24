@@ -491,6 +491,24 @@ poetry run qbit-ops trackers replace \
   --no-dry-run
 ```
 
+Replace a tracker's passkey in bulk, keeping the same tracker URL (matches
+by host and path, so the current passkey does not need to be known):
+
+```bash
+poetry run qbit-ops trackers replace-passkey \
+  --tracker "https://tracker-a.example/announce" \
+  --new-passkey "NEW_PASSKEY"
+```
+
+Apply the passkey replacement:
+
+```bash
+poetry run qbit-ops trackers replace-passkey \
+  --tracker "https://tracker-a.example/announce" \
+  --new-passkey "NEW_PASSKEY" \
+  --no-dry-run
+```
+
 Pause torrents in a category:
 
 ```bash
@@ -845,8 +863,8 @@ non-error outcome that may still require attention:
 
 - `torrents inspect`, `torrents list --tracker`, `torrents list --category`,
   `torrents pause`, `torrents resume`, `torrents start`, `torrents reannounce`, `trackers inspect`,
-  `trackers add-if-present`, `trackers remove`, `trackers replace`: no torrent
-  matched the requested criteria;
+  `trackers add-if-present`, `trackers remove`, `trackers replace`,
+  `trackers replace-passkey`: no torrent matched the requested criteria;
 - `backup diff`: the two exports differ.
 
 ## Development

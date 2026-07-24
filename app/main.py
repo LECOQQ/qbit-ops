@@ -36,6 +36,7 @@ from app.trackers import (
     list_tracker_usage,
     remove_tracker_from_all,
     replace_tracker_in_all,
+    replace_tracker_passkey,
 )
 
 PROJECT_NAME = "qbit-ops"
@@ -916,6 +917,70 @@ def replace(
     _exit_if_no_targeted_matches(summary["matched_source"])
 
 
+@trackers_app.command(name="replace-passkey")
+def replace_tracker_passkey_command(
+    tracker: Annotated[
+        str,
+        typer.Option(
+            "--tracker",
+            help="Tracker URL to update (its host and path identify it; "
+            "any existing passkey is ignored when matching).",
+        ),
+    ],
+    new_passkey: Annotated[
+        str,
+        typer.Option(
+            "--new-passkey",
+            help="New passkey value to apply.",
+        ),
+    ],
+    passkey_param: Annotated[
+        str,
+        typer.Option(
+            "--passkey-param",
+            help="Query parameter name that holds the passkey.",
+        ),
+    ] = "passkey",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Preview replacements without modifying qBittorrent.",
+        ),
+    ] = True,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Replace a tracker's passkey on every torrent using that tracker."""
+    _configure_logging()
+
+    try:
+        client = _create_qbit_client()
+        summary = replace_tracker_passkey(
+            client=client,
+            tracker_url=tracker,
+            new_passkey=new_passkey,
+            passkey_param=passkey_param,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    _print_replace_summary(summary)
+    _print_details(summary)
+    _exit_if_no_targeted_matches(summary["matched_source"])
+
+
 @backup_app.command(name="export")
 def export_backup(
     output_format: Annotated[
@@ -1527,6 +1592,10 @@ def _print_details(summary: dict[str, Any]) -> None:
         typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
         if item.get("replaced_tracker_url"):
             typer.echo(f"  replaced: {item['replaced_tracker_url']}")
+        for source_url, target_url in item.get(
+            "replaced_tracker_urls", {}
+        ).items():
+            typer.echo(f"  replaced: {source_url} -> {target_url}")
         for tracker_url in item.get("matching_tracker_urls", []):
             typer.echo(f"  - {tracker_url}")
         for tracker_url in item.get("removed_tracker_urls", []):
