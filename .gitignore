@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+.vscode
+AGENTS.md
 
 # Operating system files
 .DS_Store
