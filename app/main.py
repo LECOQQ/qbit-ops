@@ -38,7 +38,13 @@ from app.trackers import (
     replace_tracker_in_all,
     replace_tracker_passkey,
 )
-from app.ui import print_summary, print_table, spinner
+from app.ui import (
+    print_error,
+    print_summary,
+    print_table,
+    progress_bar,
+    spinner,
+)
 
 PROJECT_NAME = "qbit-ops"
 
@@ -664,14 +670,16 @@ def add_if_present(
 
     try:
         client = _create_qbit_client()
-        summary = add_tracker_if_source_present(
-            client=client,
-            source_tracker=source,
-            target_tracker=target,
-            dry_run=dry_run,
-            match_mode=match.value,
-            verbose=verbose,
-        )
+        with progress_bar("Scanning torrents...") as on_progress:
+            summary = add_tracker_if_source_present(
+                client=client,
+                source_tracker=source,
+                target_tracker=target,
+                dry_run=dry_run,
+                match_mode=match.value,
+                verbose=verbose,
+                on_progress=on_progress,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -905,14 +913,16 @@ def replace(
 
     try:
         client = _create_qbit_client()
-        summary = replace_tracker_in_all(
-            client=client,
-            source_tracker=source,
-            target_tracker=target,
-            dry_run=dry_run,
-            match_mode=match.value,
-            verbose=verbose,
-        )
+        with progress_bar("Scanning torrents...") as on_progress:
+            summary = replace_tracker_in_all(
+                client=client,
+                source_tracker=source,
+                target_tracker=target,
+                dry_run=dry_run,
+                match_mode=match.value,
+                verbose=verbose,
+                on_progress=on_progress,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -964,13 +974,15 @@ def replace_tracker_passkey_command(
 
     try:
         client = _create_qbit_client()
-        summary = replace_tracker_passkey(
-            client=client,
-            tracker_template=tracker,
-            new_passkey=new_passkey,
-            dry_run=dry_run,
-            verbose=verbose,
-        )
+        with progress_bar("Scanning torrents...") as on_progress:
+            summary = replace_tracker_passkey(
+                client=client,
+                tracker_template=tracker,
+                new_passkey=new_passkey,
+                dry_run=dry_run,
+                verbose=verbose,
+                on_progress=on_progress,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1158,13 +1170,15 @@ def remove(
 
     try:
         client = _create_qbit_client()
-        summary = remove_tracker_from_all(
-            client=client,
-            tracker=tracker,
-            dry_run=dry_run,
-            match_mode=match.value,
-            verbose=verbose,
-        )
+        with progress_bar("Scanning torrents...") as on_progress:
+            summary = remove_tracker_from_all(
+                client=client,
+                tracker=tracker,
+                dry_run=dry_run,
+                match_mode=match.value,
+                verbose=verbose,
+                on_progress=on_progress,
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1205,18 +1219,20 @@ def _run_bulk_torrent_action(
 
     try:
         client = _create_qbit_client()
-        summary = apply_bulk_torrent_action(
-            client=client,
-            action=action,
-            category=category,
-            tracker=tracker,
-            match_mode=match.value,
-            name=name,
-            select_all=select_all,
-            completed_only=completed_only,
-            dry_run=dry_run,
-            verbose=verbose,
-        )
+        with progress_bar(f"Scanning torrents to {action}...") as on_progress:
+            summary = apply_bulk_torrent_action(
+                client=client,
+                action=action,
+                category=category,
+                tracker=tracker,
+                match_mode=match.value,
+                name=name,
+                select_all=select_all,
+                completed_only=completed_only,
+                dry_run=dry_run,
+                verbose=verbose,
+                on_progress=on_progress,
+            )
     except ValueError as error:
         _fail(str(error))
     except ConfigError as error:
@@ -1568,7 +1584,7 @@ def _configure_logging() -> None:
 
 def _fail(message: str) -> NoReturn:
     """Print an actionable error and exit with a failure code."""
-    typer.secho(f"ERROR: {message}", err=True, fg=typer.colors.RED)
+    print_error(message)
     raise typer.Exit(code=ExitCode.ERROR)
 
 

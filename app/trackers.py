@@ -1,7 +1,7 @@
 """Manage qBittorrent trackers."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -246,16 +246,22 @@ def add_tracker_if_source_present(
     dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
     verbose: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Add a target tracker to torrents already using the source tracker."""
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     scanned = 0
     matched_source = 0
     already_had_target = 0
     modified = 0
     details: list[dict[str, str]] = []
 
-    for torrent in client.torrents_info():
+    for torrent in all_torrents:
         scanned += 1
+        if on_progress is not None:
+            on_progress(scanned, total)
+
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
@@ -325,16 +331,22 @@ def remove_tracker_from_all(
     dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
     verbose: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Remove a tracker from every torrent using it."""
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     scanned = 0
     matched_tracker = 0
     modified = 0
     removed_urls = 0
     details: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
+    for torrent in all_torrents:
         scanned += 1
+        if on_progress is not None:
+            on_progress(scanned, total)
+
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
@@ -408,6 +420,7 @@ def replace_tracker_in_all(
     dry_run: bool = True,
     match_mode: TrackerMatchMode = "exact",
     verbose: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Replace a source tracker with a target on matching torrents."""
     _ensure_distinct_tracker_identity(
@@ -416,6 +429,8 @@ def replace_tracker_in_all(
         match_mode,
     )
 
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     scanned = 0
     matched_source = 0
     already_had_target = 0
@@ -424,8 +439,11 @@ def replace_tracker_in_all(
     removed_urls = 0
     details: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
+    for torrent in all_torrents:
         scanned += 1
+        if on_progress is not None:
+            on_progress(scanned, total)
+
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
@@ -663,6 +681,7 @@ def replace_tracker_passkey(
     new_passkey: str,
     dry_run: bool = True,
     verbose: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Replace a tracker's passkey on every torrent using that tracker.
 
@@ -687,6 +706,8 @@ def replace_tracker_passkey(
         else ""
     )
 
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     scanned = 0
     matched_source = 0
     already_had_target = 0
@@ -695,8 +716,11 @@ def replace_tracker_passkey(
     removed_urls = 0
     details: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
+    for torrent in all_torrents:
         scanned += 1
+        if on_progress is not None:
+            on_progress(scanned, total)
+
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
