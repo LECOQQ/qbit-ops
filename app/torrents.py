@@ -1,7 +1,7 @@
 """List qBittorrent torrents."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from difflib import SequenceMatcher
 from typing import Any, Literal
 
@@ -197,6 +197,7 @@ def apply_bulk_torrent_action(
     completed_only: bool = False,
     dry_run: bool = True,
     verbose: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Apply a bulk torrent action to a filtered torrent selection."""
     selection = select_torrents_for_bulk_action(
@@ -207,6 +208,7 @@ def apply_bulk_torrent_action(
         name=name,
         select_all=select_all,
         completed_only=completed_only,
+        on_progress=on_progress,
     )
     modified = 0
     skipped = 0
@@ -276,6 +278,7 @@ def select_torrents_for_bulk_action(
     name: str | None = None,
     select_all: bool = False,
     completed_only: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Select torrents for a bulk action using one filter."""
     validate_bulk_torrent_selection(
@@ -286,11 +289,16 @@ def select_torrents_for_bulk_action(
         completed_only=completed_only,
     )
 
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     selected_torrents: list[dict[str, Any]] = []
     scanned = 0
 
-    for torrent in client.torrents_info():
+    for torrent in all_torrents:
         scanned += 1
+        if on_progress is not None:
+            on_progress(scanned, total)
+
         if completed_only and not _is_completed_torrent(torrent):
             continue
 
