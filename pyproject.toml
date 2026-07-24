@@ -11,6 +11,7 @@ python = "^3.12"
 python-dotenv = "*"
 qbittorrent-api = "*"
 typer = "*"
+rich = "^15.0.0"
 
 [tool.poetry.scripts]
 qbit-ops = "app.main:app"

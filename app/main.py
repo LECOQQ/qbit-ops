@@ -38,10 +38,11 @@ from app.trackers import (
     replace_tracker_in_all,
     replace_tracker_passkey,
 )
+from app.ui import print_summary, print_table, spinner
 
 PROJECT_NAME = "qbit-ops"
 
-app = typer.Typer(add_completion=False, help="Administer qBittorrent.")
+app = typer.Typer(add_completion=True, help="Administer qBittorrent.")
 config_app = typer.Typer(help="Inspect qbit-ops configuration.")
 connection_app = typer.Typer(help="Check qBittorrent connectivity.")
 backup_app = typer.Typer(help="Export qBittorrent state.")
@@ -114,9 +115,6 @@ def check(
 
     if output_format == OutputFormatOption.json:
         _print_json_output(report)
-        return
-
-    typer.echo(report["message"])
 
 
 @config_app.command()
@@ -158,13 +156,7 @@ def doctor(
         _print_json_output(report)
         return
 
-    typer.echo("Config doctor:")
-    typer.echo(f"- config: {report['config']}")
-    typer.echo(f"- host: {report['host']}")
-    typer.echo(f"- authentication: {report['authentication']}")
-    typer.echo(f"- connection: {report['connection']}")
-    typer.echo(f"- qbittorrent_version: {report['qbittorrent_version']}")
-    typer.echo(f"- web_api_version: {report['web_api_version']}")
+    print_summary(report, title="Config Doctor")
 
 
 @torrents_app.command(name="list")
@@ -239,13 +231,14 @@ def list_qbit_torrents(
 
     if not torrents:
         typer.echo("No torrents found.")
-    else:
-        typer.echo("Torrents:")
-        for torrent in torrents:
-            _print_torrent_audit_line(torrent)
+        return
 
-    typer.echo("Summary:")
-    typer.echo(f"- torrents: {len(torrents)}")
+    print_table(
+        "Torrents",
+        ["Name", "Hash", "Category", "State", "Progress", "Ratio", "Trackers"],
+        [_torrent_audit_row(torrent) for torrent in torrents],
+    )
+    print_summary({"torrents": len(torrents)})
 
 
 @torrents_app.command(name="categories")
@@ -282,12 +275,15 @@ def list_qbit_categories(
         typer.echo("No categories found.")
         return
 
-    typer.echo("Categories:")
-    for category_name, torrent_count in category_usage.items():
-        typer.echo(f"- {category_name} ({torrent_count} torrent(s))")
-
-    typer.echo("Summary:")
-    typer.echo(f"- categories: {len(category_usage)}")
+    print_table(
+        "Categories",
+        ["Category", "Torrents"],
+        [
+            [category_name, str(torrent_count)]
+            for category_name, torrent_count in category_usage.items()
+        ],
+    )
+    print_summary({"categories": len(category_usage)})
 
 
 @torrents_app.command(name="inspect")
@@ -730,12 +726,15 @@ def list_trackers(
         typer.echo("No trackers found.")
         return
 
-    typer.echo("Trackers:")
-    for tracker_url, torrent_count in tracker_usage.items():
-        typer.echo(f"- {tracker_url} ({torrent_count} torrent(s))")
-
-    typer.echo("Summary:")
-    typer.echo(f"- trackers: {len(tracker_usage)}")
+    print_table(
+        "Trackers",
+        ["Tracker", "Torrents"],
+        [
+            [tracker_url, str(torrent_count)]
+            for tracker_url, torrent_count in tracker_usage.items()
+        ],
+    )
+    print_summary({"trackers": len(tracker_usage)})
 
 
 @trackers_app.command()
@@ -763,33 +762,24 @@ def health(
         _print_json_output(report)
         return
 
-    summary = report["summary"]
-    typer.echo("Tracker health:")
-    typer.echo(f"- scanned: {summary['scanned']}")
-    typer.echo(
-        f"- active_tracker_occurrences: {summary['active_tracker_occurrences']}"
-    )
-    typer.echo(
-        "- disabled_tracker_occurrences: "
-        f"{summary['disabled_tracker_occurrences']}"
-    )
-    typer.echo(f"- unique_exact_trackers: {summary['unique_exact_trackers']}")
-    typer.echo(
-        f"- unique_logical_trackers: {summary['unique_logical_trackers']}"
-    )
-    typer.echo(f"- query_variant_groups: {summary['query_variant_groups']}")
+    print_summary(report["summary"], title="Tracker Health")
 
     if report["query_variant_groups"]:
-        typer.echo("Query variant groups:")
-        for group in report["query_variant_groups"]:
-            typer.echo(f"- {group['tracker']}")
-            for variant in group["variants"]:
-                typer.echo(f"  - {variant}")
+        print_table(
+            "Query Variant Groups",
+            ["Tracker", "Variants"],
+            [
+                [group["tracker"], "\n".join(group["variants"])]
+                for group in report["query_variant_groups"]
+            ],
+        )
 
     if report["disabled_trackers"]:
-        typer.echo("Disabled trackers:")
-        for tracker_url in report["disabled_trackers"]:
-            typer.echo(f"- {tracker_url}")
+        print_table(
+            "Disabled Trackers",
+            ["Tracker"],
+            [[tracker_url] for tracker_url in report["disabled_trackers"]],
+        )
 
 
 @trackers_app.command(name="inspect")
@@ -839,18 +829,36 @@ def inspect_tracker_usage(
     if not report["torrents"]:
         typer.echo("No matching torrents found.")
     else:
-        typer.echo("Matching torrents:")
-        for torrent in report["torrents"]:
-            _print_torrent_audit_line(
-                torrent,
-                tracker_count_field="active_tracker_count",
-            )
-            for tracker_url in torrent["matching_tracker_urls"]:
-                typer.echo(f"  - {tracker_url}")
+        print_table(
+            "Matching Torrents",
+            [
+                "Name",
+                "Hash",
+                "Category",
+                "State",
+                "Progress",
+                "Ratio",
+                "Trackers",
+                "Matching Tracker URLs",
+            ],
+            [
+                [
+                    *_torrent_audit_row(
+                        torrent,
+                        tracker_count_field="active_tracker_count",
+                    ),
+                    "\n".join(torrent["matching_tracker_urls"]),
+                ]
+                for torrent in report["torrents"]
+            ],
+        )
 
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {report['scanned']}")
-    typer.echo(f"- matched_tracker: {report['matched_tracker']}")
+    print_summary(
+        {
+            "scanned": report["scanned"],
+            "matched_tracker": report["matched_tracker"],
+        }
+    )
     _exit_if_no_targeted_matches(report["matched_tracker"])
 
 
@@ -1023,11 +1031,15 @@ def export_backup(
 
     summary = state["summary"]
     metadata = state["metadata"]
-    typer.echo("Backup export:")
-    typer.echo(f"- exported_at: {metadata['exported_at']}")
-    typer.echo(f"- torrents: {summary['torrents']}")
-    typer.echo(f"- unique_trackers: {summary['unique_trackers']}")
-    typer.echo(f"- tracker_match: {summary['tracker_match']}")
+    print_summary(
+        {
+            "exported_at": metadata["exported_at"],
+            "torrents": summary["torrents"],
+            "unique_trackers": summary["unique_trackers"],
+            "tracker_match": summary["tracker_match"],
+        },
+        title="Backup Export",
+    )
     typer.echo("Use --output json for the full backup payload.")
 
 
@@ -1106,10 +1118,7 @@ def export_trackers(
         _print_json_output(state)
         return
 
-    summary = state["summary"]
-    typer.echo("Tracker export:")
-    typer.echo(f"- torrents: {summary['torrents']}")
-    typer.echo(f"- match: {summary['match']}")
+    print_summary(state["summary"], title="Tracker Export")
     typer.echo("Use --output json for the full export payload.")
 
 
@@ -1232,7 +1241,11 @@ def _create_qbit_client() -> Any:
     )
 
     try:
-        client.auth_log_in()
+        with spinner(
+            "Connecting to qBittorrent...",
+            done="Connected to qBittorrent",
+        ):
+            client.auth_log_in()
     except Exception as error:
         if _is_qbit_error(error, {"LoginFailed"}):
             raise RuntimeError(
@@ -1275,26 +1288,25 @@ def _print_json_output(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _print_torrent_audit_line(
+def _torrent_audit_row(
     torrent: dict[str, Any],
     *,
     tracker_count_field: str = "tracker_count",
-) -> None:
-    """Print one torrent audit line."""
-    progress = _format_percentage(torrent["progress"])
+) -> list[str]:
+    """Build one torrent audit table row."""
     tracker_count = torrent.get(
         tracker_count_field,
         torrent.get("tracker_count", 0),
     )
-    typer.echo(
-        "- "
-        f"{torrent['name']} ({torrent['hash']}) "
-        f"category={torrent.get('category', '(uncategorized)')} "
-        f"state={torrent['state']} "
-        f"progress={progress} "
-        f"ratio={torrent['ratio']:.2f} "
-        f"trackers={tracker_count}"
-    )
+    return [
+        torrent["name"],
+        torrent["hash"],
+        torrent.get("category", "(uncategorized)"),
+        torrent["state"],
+        _format_percentage(torrent["progress"]),
+        f"{torrent['ratio']:.2f}",
+        str(tracker_count),
+    ]
 
 
 def _print_torrents_for_category(
@@ -1320,13 +1332,21 @@ def _print_torrents_for_category(
     if not report["torrents"]:
         typer.echo("No matching torrents found.")
     else:
-        typer.echo("Torrents:")
-        for torrent in report["torrents"]:
-            _print_torrent_audit_line(torrent)
+        print_table(
+            "Torrents",
+            [
+                "Name",
+                "Hash",
+                "Category",
+                "State",
+                "Progress",
+                "Ratio",
+                "Trackers",
+            ],
+            [_torrent_audit_row(torrent) for torrent in report["torrents"]],
+        )
 
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {report['scanned']}")
-    typer.echo(f"- matched: {report['matched']}")
+    print_summary({"scanned": report["scanned"], "matched": report["matched"]})
 
 
 def _print_torrents_for_tracker(
@@ -1354,41 +1374,64 @@ def _print_torrents_for_tracker(
     if not report["torrents"]:
         typer.echo("No matching torrents found.")
     else:
-        typer.echo("Torrents:")
-        for torrent in report["torrents"]:
-            _print_torrent_audit_line(
-                torrent,
-                tracker_count_field="active_tracker_count",
-            )
-            for tracker_url in torrent["matching_tracker_urls"]:
-                typer.echo(f"  - {tracker_url}")
+        print_table(
+            "Torrents",
+            [
+                "Name",
+                "Hash",
+                "Category",
+                "State",
+                "Progress",
+                "Ratio",
+                "Trackers",
+                "Matching Tracker URLs",
+            ],
+            [
+                [
+                    *_torrent_audit_row(
+                        torrent,
+                        tracker_count_field="active_tracker_count",
+                    ),
+                    "\n".join(torrent["matching_tracker_urls"]),
+                ]
+                for torrent in report["torrents"]
+            ],
+        )
 
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {report['scanned']}")
-    typer.echo(f"- matched: {report['matched_tracker']}")
+    print_summary(
+        {"scanned": report["scanned"], "matched": report["matched_tracker"]}
+    )
 
 
 def _print_torrent_details(report: dict[str, Any]) -> None:
     """Print detailed torrent inspection output."""
-    progress = _format_percentage(report["progress"])
-    typer.echo(f"Torrent: {report['name']} ({report['hash']})")
-    typer.echo(f"- state: {report['state']}")
-    typer.echo(f"- progress: {progress}")
-    typer.echo(f"- ratio: {report['ratio']:.2f}")
-    typer.echo(f"- size: {report['size']}")
-    typer.echo(f"- save_path: {report['save_path']}")
-    typer.echo(f"- category: {report['category']}")
-    typer.echo(f"- added_on: {report['added_on']}")
-    typer.echo(f"- active_trackers: {report['active_tracker_count']}")
+    print_summary(
+        {
+            "state": report["state"],
+            "progress": _format_percentage(report["progress"]),
+            "ratio": f"{report['ratio']:.2f}",
+            "size": report["size"],
+            "save_path": report["save_path"],
+            "category": report["category"],
+            "added_on": report["added_on"],
+            "active_trackers": report["active_tracker_count"],
+        },
+        title=f"Torrent: {report['name']} ({report['hash']})",
+    )
 
     if report["trackers"]:
-        typer.echo("Trackers:")
-        for tracker in report["trackers"]:
-            status_label = "disabled" if tracker["disabled"] else "active"
-            typer.echo(
-                f"- {tracker['url']} "
-                f"status={tracker['status']} ({status_label})"
-            )
+        print_table(
+            "Trackers",
+            ["URL", "Status"],
+            [
+                [
+                    tracker["url"],
+                    f"{tracker['status']} "
+                    f"({'disabled' if tracker['disabled'] else 'active'})",
+                ]
+                for tracker in report["trackers"]
+            ],
+        )
     else:
         typer.echo("Trackers: none")
 
@@ -1404,25 +1447,27 @@ def _print_torrent_name_search(
 
     summary = report["summary"]
     typer.echo(f"Name search: {report['query']!r}")
-    typer.echo("Summary:")
-    typer.echo(f"- matched: {summary['matched']}")
-    typer.echo(f"- limit: {summary['limit']}")
+    print_summary({"matched": summary["matched"], "limit": summary["limit"]})
 
     if not report["matches"]:
         typer.echo("No matching torrents found.")
         return
 
-    typer.echo("Matches:")
-    for match in report["matches"]:
-        progress = _format_percentage(match["progress"])
-        typer.echo(
-            "- "
-            f"{match['name']} ({match['hash']}) "
-            f"score={match['match_score']:.2f} "
-            f"state={match['state']} "
-            f"progress={progress} "
-            f"ratio={match['ratio']:.2f}"
-        )
+    print_table(
+        "Matches",
+        ["Name", "Hash", "Score", "State", "Progress", "Ratio"],
+        [
+            [
+                match["name"],
+                match["hash"],
+                f"{match['match_score']:.2f}",
+                match["state"],
+                _format_percentage(match["progress"]),
+                f"{match['ratio']:.2f}",
+            ]
+            for match in report["matches"]
+        ],
+    )
 
 
 def _print_backup_diff(report: dict[str, Any]) -> None:
@@ -1433,60 +1478,87 @@ def _print_backup_diff(report: dict[str, Any]) -> None:
         typer.echo("Backup diff: exports are identical.")
         return
 
-    typer.echo("Backup diff:")
-    typer.echo(f"- baseline: {summary['baseline']['source']}")
-    typer.echo(f"- target: {summary['target']['source']}")
-    typer.echo(f"- added_torrents: {summary['added_torrents']}")
-    typer.echo(f"- removed_torrents: {summary['removed_torrents']}")
-    typer.echo(f"- changed_torrents: {summary['changed_torrents']}")
-    typer.echo("- tracker_usage_added: " f"{summary['tracker_usage_added']}")
-    typer.echo(
-        "- tracker_usage_removed: " f"{summary['tracker_usage_removed']}"
-    )
-    typer.echo(
-        "- tracker_usage_changed: " f"{summary['tracker_usage_changed']}"
+    print_summary(
+        {
+            "baseline": summary["baseline"]["source"],
+            "target": summary["target"]["source"],
+            "added_torrents": summary["added_torrents"],
+            "removed_torrents": summary["removed_torrents"],
+            "changed_torrents": summary["changed_torrents"],
+            "tracker_usage_added": summary["tracker_usage_added"],
+            "tracker_usage_removed": summary["tracker_usage_removed"],
+            "tracker_usage_changed": summary["tracker_usage_changed"],
+        },
+        title="Backup Diff",
     )
 
     if report["added_torrents"]:
-        typer.echo("Added torrents:")
-        for torrent in report["added_torrents"]:
-            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+        print_table(
+            "Added Torrents",
+            ["Name", "Hash"],
+            [
+                [torrent["name"], torrent["hash"]]
+                for torrent in report["added_torrents"]
+            ],
+        )
 
     if report["removed_torrents"]:
-        typer.echo("Removed torrents:")
-        for torrent in report["removed_torrents"]:
-            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
+        print_table(
+            "Removed Torrents",
+            ["Name", "Hash"],
+            [
+                [torrent["name"], torrent["hash"]]
+                for torrent in report["removed_torrents"]
+            ],
+        )
 
     if report["changed_torrents"]:
-        typer.echo("Changed torrents:")
-        for torrent in report["changed_torrents"]:
-            typer.echo(f"- {torrent['name']} ({torrent['hash']})")
-            tracker_changes = torrent["normalized_trackers"]
-            for tracker_url in tracker_changes["added"]:
-                typer.echo(f"  added: {tracker_url}")
-            for tracker_url in tracker_changes["removed"]:
-                typer.echo(f"  removed: {tracker_url}")
+        print_table(
+            "Changed Torrents",
+            ["Name", "Hash", "Trackers Added", "Trackers Removed"],
+            [
+                [
+                    torrent["name"],
+                    torrent["hash"],
+                    "\n".join(torrent["normalized_trackers"]["added"]),
+                    "\n".join(torrent["normalized_trackers"]["removed"]),
+                ]
+                for torrent in report["changed_torrents"]
+            ],
+        )
 
     tracker_usage = report["tracker_usage"]
     if tracker_usage["added"]:
-        typer.echo("Tracker usage added:")
-        for tracker_url, torrent_count in tracker_usage["added"].items():
-            typer.echo(f"- {tracker_url} ({torrent_count} torrent(s))")
+        print_table(
+            "Tracker Usage Added",
+            ["Tracker", "Torrents"],
+            [
+                [tracker_url, str(torrent_count)]
+                for tracker_url, torrent_count in tracker_usage["added"].items()
+            ],
+        )
 
     if tracker_usage["removed"]:
-        typer.echo("Tracker usage removed:")
-        for tracker_url, torrent_count in tracker_usage["removed"].items():
-            typer.echo(f"- {tracker_url} ({torrent_count} torrent(s))")
+        print_table(
+            "Tracker Usage Removed",
+            ["Tracker", "Torrents"],
+            [
+                [tracker_url, str(torrent_count)]
+                for tracker_url, torrent_count in tracker_usage[
+                    "removed"
+                ].items()
+            ],
+        )
 
     if tracker_usage["changed"]:
-        typer.echo("Tracker usage changed:")
-        for item in tracker_usage["changed"]:
-            typer.echo(
-                "- "
-                f"{item['tracker']} "
-                f"baseline={item['baseline']} "
-                f"target={item['target']}"
-            )
+        print_table(
+            "Tracker Usage Changed",
+            ["Tracker", "Baseline", "Target"],
+            [
+                [item["tracker"], str(item["baseline"]), str(item["target"])]
+                for item in tracker_usage["changed"]
+            ],
+        )
 
 
 def _configure_logging() -> None:
@@ -1519,49 +1591,61 @@ def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
 
 def _print_summary(summary: dict[str, int | bool]) -> None:
     """Print the final command summary."""
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {summary['scanned']}")
-    typer.echo(f"- matched_source: {summary['matched_source']}")
-    typer.echo(f"- already_had_target: {summary['already_had_target']}")
-    typer.echo(f"- modified: {summary['modified']}")
-    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+    print_summary(
+        {
+            "scanned": summary["scanned"],
+            "matched_source": summary["matched_source"],
+            "already_had_target": summary["already_had_target"],
+            "modified": summary["modified"],
+            "dry_run": summary["dry_run"],
+        }
+    )
 
 
 def _print_remove_summary(summary: dict[str, int | bool]) -> None:
     """Print the final tracker removal summary."""
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {summary['scanned']}")
-    typer.echo(f"- matched_tracker: {summary['matched_tracker']}")
-    typer.echo(f"- modified: {summary['modified']}")
-    typer.echo(f"- removed_urls: {summary['removed_urls']}")
-    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+    print_summary(
+        {
+            "scanned": summary["scanned"],
+            "matched_tracker": summary["matched_tracker"],
+            "modified": summary["modified"],
+            "removed_urls": summary["removed_urls"],
+            "dry_run": summary["dry_run"],
+        }
+    )
 
 
 def _print_replace_summary(summary: dict[str, int | bool]) -> None:
     """Print the final tracker replacement summary."""
-    typer.echo("Summary:")
-    typer.echo(f"- scanned: {summary['scanned']}")
-    typer.echo(f"- matched_source: {summary['matched_source']}")
-    typer.echo(f"- already_had_target: {summary['already_had_target']}")
-    typer.echo(f"- modified: {summary['modified']}")
-    typer.echo(f"- replaced_urls: {summary['replaced_urls']}")
-    typer.echo(f"- removed_urls: {summary['removed_urls']}")
-    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+    print_summary(
+        {
+            "scanned": summary["scanned"],
+            "matched_source": summary["matched_source"],
+            "already_had_target": summary["already_had_target"],
+            "modified": summary["modified"],
+            "replaced_urls": summary["replaced_urls"],
+            "removed_urls": summary["removed_urls"],
+            "dry_run": summary["dry_run"],
+        }
+    )
 
 
 def _print_bulk_torrent_summary(summary: dict[str, Any]) -> None:
     """Print the final bulk torrent action summary."""
-    typer.echo("Summary:")
-    typer.echo(f"- action: {summary['action']}")
-    typer.echo(f"- filter: {summary['selection']['filter']}")
-    typer.echo(f"- value: {summary['selection']['value']}")
+    rows: dict[str, Any] = {
+        "action": summary["action"],
+        "filter": summary["selection"]["filter"],
+        "value": summary["selection"]["value"],
+    }
     if summary["selection"].get("match") is not None:
-        typer.echo(f"- match: {summary['selection']['match']}")
-    typer.echo(f"- scanned: {summary['scanned']}")
-    typer.echo(f"- matched: {summary['matched']}")
-    typer.echo(f"- modified: {summary['modified']}")
-    typer.echo(f"- skipped: {summary['skipped']}")
-    typer.echo(f"- dry_run: {str(summary['dry_run']).lower()}")
+        rows["match"] = summary["selection"]["match"]
+    rows["scanned"] = summary["scanned"]
+    rows["matched"] = summary["matched"]
+    rows["modified"] = summary["modified"]
+    rows["skipped"] = summary["skipped"]
+    rows["dry_run"] = summary["dry_run"]
+
+    print_summary(rows)
 
 
 def _print_bulk_torrent_details(summary: dict[str, Any]) -> None:
@@ -1570,9 +1654,11 @@ def _print_bulk_torrent_details(summary: dict[str, Any]) -> None:
     if not details:
         return
 
-    typer.echo("Details:")
-    for item in details:
-        typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
+    print_table(
+        "Details",
+        ["Action", "Name", "Hash"],
+        [[item["action"], item["name"], item["hash"]] for item in details],
+    )
 
 
 def _print_details(summary: dict[str, Any]) -> None:
@@ -1581,19 +1667,29 @@ def _print_details(summary: dict[str, Any]) -> None:
     if not details:
         return
 
-    typer.echo("Details:")
+    rows: list[list[str]] = []
     for item in details:
-        typer.echo(f"- {item['action']}: {item['name']} ({item['hash']})")
+        info_lines: list[str] = []
         if item.get("replaced_tracker_url"):
-            typer.echo(f"  replaced: {item['replaced_tracker_url']}")
+            info_lines.append(f"replaced: {item['replaced_tracker_url']}")
         for source_url, target_url in item.get(
             "replaced_tracker_urls", {}
         ).items():
-            typer.echo(f"  replaced: {source_url} -> {target_url}")
-        for tracker_url in item.get("matching_tracker_urls", []):
-            typer.echo(f"  - {tracker_url}")
+            info_lines.append(f"replaced: {source_url} -> {target_url}")
+        info_lines.extend(item.get("matching_tracker_urls", []))
         for tracker_url in item.get("removed_tracker_urls", []):
-            typer.echo(f"  removed: {tracker_url}")
+            info_lines.append(f"removed: {tracker_url}")
+
+        rows.append(
+            [
+                item["action"],
+                item["name"],
+                item["hash"],
+                "\n".join(info_lines),
+            ]
+        )
+
+    print_table("Details", ["Action", "Name", "Hash", "Info"], rows)
 
 
 if __name__ == "__main__":
