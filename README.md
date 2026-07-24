@@ -33,6 +33,8 @@ qbit-ops trackers replace-passkey \
 - 💾 **Backup & diff** — export full instance state and compare two exports.
 - 🧩 **Dynamic tracker matching** — ignore volatile query parameters (`sig`,
   `announce_ts`, ...) when comparing trackers.
+- 🎨 **Rich terminal output** — colored tables and summaries, plus shell tab
+  completion.
 
 ## 🛡️ Safety Model
 
@@ -70,6 +72,12 @@ qbit-ops --help
 ```
 
 Update later with `pipx reinstall qbit-ops` (run from the repo).
+
+Enable tab-completion for your shell (bash/zsh/fish):
+
+```bash
+qbit-ops --install-completion
+```
 
 ## ⚙️ Configuration
 
