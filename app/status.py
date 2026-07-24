@@ -7,6 +7,7 @@ Typer and without Rich so it can be reused by future consumers (a
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -201,6 +202,44 @@ EXIT_CODE_BY_HEALTH: dict[Health, int] = {
 def status_exit_code(health: Health) -> int:
     """Map a status health value to its documented CLI exit code."""
     return EXIT_CODE_BY_HEALTH[health]
+
+
+def watch_status(
+    *,
+    collect: Callable[[], StatusSnapshot],
+    emit: Callable[[StatusSnapshot], None],
+    interval: float,
+    sleep: Callable[[float], None],
+    now: Callable[[], float],
+) -> None:
+    """Run collect → emit → wait, forever, reusing the existing snapshot model.
+
+    No Typer, no Rich, no qBittorrent client: `collect` and `emit` are
+    the only seams, plus `sleep`/`now` for deterministic tests (`now`
+    should be a monotonic clock; real callers pass `time.monotonic`).
+
+    Timing targets the *start* of each cycle, not a fixed post-collect
+    delay, so a slow `collect()` does not accumulate drift: if a cycle
+    takes longer than `interval`, the next collection starts immediately
+    (never a negative sleep, never two overlapping collections — this
+    loop is strictly sequential, no concurrency).
+
+    Never returns on its own. The only ways out are an exception raised
+    by `collect`, `emit`, or `sleep` (including `KeyboardInterrupt`,
+    which callers are expected to catch) — there is no other stop
+    condition, by design; this is a tight loop, not a scheduler
+    framework.
+    """
+    while True:
+        cycle_started_at = now()
+
+        snapshot = collect()
+        emit(snapshot)
+
+        elapsed = now() - cycle_started_at
+        remaining = interval - elapsed
+        if remaining > 0:
+            sleep(remaining)
 
 
 def snapshot_to_json_dict(snapshot: StatusSnapshot) -> dict[str, Any]:
