@@ -24,6 +24,9 @@ qbit-ops trackers replace-passkey \
 
 ## ✨ Features
 
+- 📊 **`status`** — a bounded, read-only operational snapshot (connection,
+  transfer counts, alerts) with stable health-based exit codes, in
+  table/JSON/JSONL/CSV.
 - 🔍 **Audit** torrents, categories, trackers and connectivity — text or
   JSON output.
 - 🧭 **Bulk torrent control** — pause, resume, start, reannounce, filtered
@@ -104,6 +107,16 @@ in the working directory → `~/.config/qbit-ops/.env`.
 ## 🚀 Quickstart
 
 ```bash
+qbit-ops status
+# qbit-ops · healthy
+#
+# qBittorrent
+#   Version       5.0.1
+#   API           2.9.3
+#   Connected     yes
+# ...
+qbit-ops status --quiet; echo $?   # healthchecks: 0 healthy, 1 warning, 2 critical, 3 unavailable
+
 qbit-ops connection check
 qbit-ops config doctor
 

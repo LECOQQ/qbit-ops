@@ -30,7 +30,7 @@ def list_torrents_by_category(client: Any, category: str) -> dict[str, Any]:
 
     for torrent in client.torrents_info():
         scanned += 1
-        torrent_category = _get_field_as_string(torrent, "category")
+        torrent_category = get_field_as_string(torrent, "category")
         if not _category_matches(torrent_category, normalized_category):
             continue
 
@@ -52,7 +52,7 @@ def list_category_usage(client: Any) -> dict[str, int]:
 
     for torrent in client.torrents_info():
         category = _format_category_label(
-            _get_field_as_string(torrent, "category")
+            get_field_as_string(torrent, "category")
         )
         category_usage[category] = category_usage.get(category, 0) + 1
 
@@ -64,19 +64,19 @@ UNCATEGORIZED_LABEL = "(uncategorized)"
 
 def _build_torrent_audit_entry(client: Any, torrent: Any) -> dict[str, Any]:
     """Build standard audit fields for one torrent."""
-    torrent_hash = _get_field_as_string(torrent, "hash")
+    torrent_hash = get_field_as_string(torrent, "hash")
     trackers = _get_active_tracker_urls(client.torrents_trackers(torrent_hash))
 
     return {
         "hash": torrent_hash,
-        "name": _get_field_as_string(torrent, "name"),
+        "name": get_field_as_string(torrent, "name"),
         "category": _format_category_label(
-            _get_field_as_string(torrent, "category")
+            get_field_as_string(torrent, "category")
         ),
-        "state": _get_field_as_string(torrent, "state"),
-        "size": _get_field_as_int(torrent, "size"),
-        "progress": _get_field_as_float(torrent, "progress"),
-        "ratio": _get_field_as_float(torrent, "ratio"),
+        "state": get_field_as_string(torrent, "state"),
+        "size": get_field_as_int(torrent, "size"),
+        "progress": get_field_as_float(torrent, "progress"),
+        "ratio": get_field_as_float(torrent, "ratio"),
         "tracker_count": len(trackers),
     }
 
@@ -102,7 +102,7 @@ def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
     torrents: list[dict[str, Any]] = []
 
     for torrent in client.torrents_info():
-        torrent_hash = _get_field_as_string(torrent, "hash")
+        torrent_hash = get_field_as_string(torrent, "hash")
         trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
         active_tracker_count = sum(
             1 for tracker in trackers if not tracker["disabled"]
@@ -110,14 +110,14 @@ def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
         torrents.append(
             {
                 "hash": torrent_hash,
-                "name": _get_field_as_string(torrent, "name"),
-                "state": _get_field_as_string(torrent, "state"),
-                "size": _get_field_as_int(torrent, "size"),
-                "progress": _get_field_as_float(torrent, "progress"),
-                "ratio": _get_field_as_float(torrent, "ratio"),
-                "save_path": _get_field_as_string(torrent, "save_path"),
-                "category": _get_field_as_string(torrent, "category"),
-                "added_on": _get_field_as_int(torrent, "added_on"),
+                "name": get_field_as_string(torrent, "name"),
+                "state": get_field_as_string(torrent, "state"),
+                "size": get_field_as_int(torrent, "size"),
+                "progress": get_field_as_float(torrent, "progress"),
+                "ratio": get_field_as_float(torrent, "ratio"),
+                "save_path": get_field_as_string(torrent, "save_path"),
+                "category": get_field_as_string(torrent, "category"),
+                "added_on": get_field_as_int(torrent, "added_on"),
                 "trackers": trackers,
                 "active_tracker_count": active_tracker_count,
             }
@@ -131,7 +131,7 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     normalized_hash = torrent_hash.strip().lower()
 
     for torrent in client.torrents_info():
-        current_hash = _get_field_as_string(torrent, "hash")
+        current_hash = get_field_as_string(torrent, "hash")
         if current_hash.lower() != normalized_hash:
             continue
 
@@ -152,19 +152,19 @@ def search_torrents_by_name(
     matches: list[dict[str, Any]] = []
 
     for torrent in client.torrents_info():
-        torrent_name = _get_field_as_string(torrent, "name")
+        torrent_name = get_field_as_string(torrent, "name")
         match_score = _score_name_match(torrent_name, normalized_query)
         if match_score < min_score:
             continue
 
-        torrent_hash = _get_field_as_string(torrent, "hash")
+        torrent_hash = get_field_as_string(torrent, "hash")
         matches.append(
             {
                 "hash": torrent_hash,
                 "name": torrent_name,
-                "state": _get_field_as_string(torrent, "state"),
-                "progress": _get_field_as_float(torrent, "progress"),
-                "ratio": _get_field_as_float(torrent, "ratio"),
+                "state": get_field_as_string(torrent, "state"),
+                "progress": get_field_as_float(torrent, "progress"),
+                "ratio": get_field_as_float(torrent, "ratio"),
                 "match_score": round(match_score, 4),
             }
         )
@@ -299,7 +299,7 @@ def select_torrents_for_bulk_action(
         if on_progress is not None:
             on_progress(scanned, total)
 
-        if completed_only and not _is_completed_torrent(torrent):
+        if completed_only and not is_completed_torrent(torrent):
             continue
 
         if select_all or (
@@ -343,11 +343,11 @@ def select_torrents_for_bulk_action(
 def _build_bulk_torrent_entry(torrent: Any) -> dict[str, Any]:
     """Build torrent fields used by bulk actions."""
     return {
-        "hash": _get_field_as_string(torrent, "hash"),
-        "name": _get_field_as_string(torrent, "name"),
-        "state": _get_field_as_string(torrent, "state"),
+        "hash": get_field_as_string(torrent, "hash"),
+        "name": get_field_as_string(torrent, "name"),
+        "state": get_field_as_string(torrent, "state"),
         "category": _format_category_label(
-            _get_field_as_string(torrent, "category")
+            get_field_as_string(torrent, "category")
         ),
     }
 
@@ -423,18 +423,18 @@ def _torrent_matches_bulk_filter(
 ) -> bool:
     """Return whether a torrent matches the requested bulk filter."""
     if category is not None:
-        torrent_category = _get_field_as_string(torrent, "category")
+        torrent_category = get_field_as_string(torrent, "category")
         return _category_matches(torrent_category, category.strip())
 
     if tracker is not None:
-        torrent_hash = _get_field_as_string(torrent, "hash")
+        torrent_hash = get_field_as_string(torrent, "hash")
         trackers = _get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         return has_tracker(trackers, tracker.strip(), match_mode)
 
     if name is not None:
-        torrent_name = _get_field_as_string(torrent, "name")
+        torrent_name = get_field_as_string(torrent, "name")
         return _score_name_match(torrent_name, name) >= 0.5
 
     return False
@@ -526,16 +526,16 @@ def _bulk_action_skip_reason(
     state: str,
 ) -> str | None:
     """Return a skip reason when a bulk action would be a no-op."""
-    if action == "pause" and _is_stopped_state(state):
+    if action == "pause" and is_stopped_state(state):
         return "already_stopped"
 
-    if action in ("resume", "start") and not _is_stopped_state(state):
+    if action in ("resume", "start") and not is_stopped_state(state):
         return "already_running"
 
     return None
 
 
-def _is_stopped_state(state: str) -> bool:
+def is_stopped_state(state: str) -> bool:
     """Return whether qBittorrent reports a torrent as stopped."""
     normalized_state = state.casefold()
     return normalized_state.startswith("paused") or normalized_state.startswith(
@@ -543,9 +543,9 @@ def _is_stopped_state(state: str) -> bool:
     )
 
 
-def _is_completed_torrent(torrent: Any) -> bool:
+def is_completed_torrent(torrent: Any) -> bool:
     """Return whether qBittorrent reports a torrent as completed."""
-    return _get_field_as_float(torrent, "progress") >= 1.0
+    return get_field_as_float(torrent, "progress") >= 1.0
 
 
 def _build_torrent_details(
@@ -561,14 +561,14 @@ def _build_torrent_details(
 
     return {
         "hash": torrent_hash,
-        "name": _get_field_as_string(torrent, "name"),
-        "state": _get_field_as_string(torrent, "state"),
-        "size": _get_field_as_int(torrent, "size"),
-        "progress": _get_field_as_float(torrent, "progress"),
-        "ratio": _get_field_as_float(torrent, "ratio"),
-        "save_path": _get_field_as_string(torrent, "save_path"),
-        "category": _get_field_as_string(torrent, "category"),
-        "added_on": _get_field_as_int(torrent, "added_on"),
+        "name": get_field_as_string(torrent, "name"),
+        "state": get_field_as_string(torrent, "state"),
+        "size": get_field_as_int(torrent, "size"),
+        "progress": get_field_as_float(torrent, "progress"),
+        "ratio": get_field_as_float(torrent, "ratio"),
+        "save_path": get_field_as_string(torrent, "save_path"),
+        "category": get_field_as_string(torrent, "category"),
+        "added_on": get_field_as_int(torrent, "added_on"),
         "trackers": trackers,
         "active_tracker_count": active_tracker_count,
     }
@@ -599,14 +599,14 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     tracker_details: list[dict[str, Any]] = []
 
     for tracker in trackers:
-        tracker_url = _get_field_as_string(tracker, "url")
+        tracker_url = get_field_as_string(tracker, "url")
         if tracker_url == "":
             continue
 
         tracker_details.append(
             {
                 "url": tracker_url,
-                "status": _get_field_as_string(tracker, "status"),
+                "status": get_field_as_string(tracker, "status"),
                 "disabled": _is_disabled_tracker(tracker),
             }
         )
@@ -620,44 +620,44 @@ def _get_active_tracker_urls(trackers: Any) -> list[str]:
         tracker_url
         for tracker in trackers
         if not _is_disabled_tracker(tracker)
-        and (tracker_url := _get_field_as_string(tracker, "url")) != ""
+        and (tracker_url := get_field_as_string(tracker, "url")) != ""
     ]
 
 
 def _is_disabled_tracker(tracker: Any) -> bool:
     """Return whether qBittorrent reports a tracker as disabled."""
-    status = _get_field_as_string(tracker, "status").strip().lower()
+    status = get_field_as_string(tracker, "status").strip().lower()
     return status in {"0", "disabled"}
 
 
-def _get_field_as_string(item: Any, field_name: str) -> str:
+def get_field_as_string(item: Any, field_name: str) -> str:
     """Read a string field from an object or mapping."""
-    value = _get_field(item, field_name, "")
+    value = get_field(item, field_name, "")
     if value is None:
         return ""
 
     return str(value)
 
 
-def _get_field_as_int(item: Any, field_name: str) -> int:
+def get_field_as_int(item: Any, field_name: str) -> int:
     """Read an integer field from an object or mapping."""
-    value = _get_field(item, field_name, 0)
+    value = get_field(item, field_name, 0)
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
 
 
-def _get_field_as_float(item: Any, field_name: str) -> float:
+def get_field_as_float(item: Any, field_name: str) -> float:
     """Read a float field from an object or mapping."""
-    value = _get_field(item, field_name, 0.0)
+    value = get_field(item, field_name, 0.0)
     try:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
 
 
-def _get_field(item: Any, field_name: str, default: Any) -> Any:
+def get_field(item: Any, field_name: str, default: Any) -> Any:
     """Read a field from an object or mapping."""
     if isinstance(item, Mapping):
         return item.get(field_name, default)

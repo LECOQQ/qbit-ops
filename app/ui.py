@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from enum import StrEnum
 from typing import Any
 
 from rich.console import Console
@@ -15,10 +16,29 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from app.status import Health, StatusSnapshot
+
 console = Console()
 err_console = Console(stderr=True)
 
 ProgressCallback = Callable[[int, int], None]
+
+
+class OutputFormat(StrEnum):
+    """Expose the shared machine/human output formats for read commands."""
+
+    table = "table"
+    json = "json"
+    jsonl = "jsonl"
+    csv = "csv"
+
+
+_HEALTH_STYLES: dict[Health, str] = {
+    Health.HEALTHY: "bold green",
+    Health.WARNING: "bold yellow",
+    Health.CRITICAL: "bold red",
+    Health.UNAVAILABLE: "bold red",
+}
 
 
 @contextmanager
@@ -120,3 +140,65 @@ def print_table(
         table.add_row(*row)
 
     console.print(table)
+
+
+def format_byte_rate(bytes_per_second: int) -> str:
+    """Format a byte rate using binary units, e.g. '12.4 MiB/s'."""
+    value = float(max(bytes_per_second, 0))
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    unit_index = 0
+    while value >= 1024 and unit_index < len(units) - 1:
+        value /= 1024
+        unit_index += 1
+
+    unit = units[unit_index]
+    if unit == "B":
+        return f"{int(value)} {unit}/s"
+
+    return f"{value:.1f} {unit}/s"
+
+
+def render_status_table(snapshot: StatusSnapshot) -> None:
+    """Render a status snapshot as a concise Rich table view."""
+    style = _HEALTH_STYLES[snapshot.health]
+    health_label = f"[{style}]{snapshot.health.value}[/{style}]"
+    console.print(f"[bold]qbit-ops[/bold] · {health_label}")
+    console.print()
+
+    print_summary(
+        {
+            "Version": snapshot.qbittorrent_version or "unknown",
+            "API": snapshot.api_version or "unknown",
+            "Connected": "yes" if snapshot.connected else "no",
+        },
+        title="qBittorrent",
+    )
+
+    transfer_rows: dict[str, Any] = {
+        "Total": snapshot.counts.total,
+        "Downloading": snapshot.counts.downloading,
+        "Seeding": snapshot.counts.seeding,
+        "Completed": snapshot.counts.completed,
+        "Stalled": snapshot.counts.stalled,
+        "Checking": snapshot.counts.checking,
+        "Errors": snapshot.counts.errored,
+    }
+    if snapshot.counts.unknown:
+        transfer_rows["Unknown"] = snapshot.counts.unknown
+    print_summary(transfer_rows, title="Transfers")
+
+    print_summary(
+        {
+            "Download": format_byte_rate(
+                snapshot.rates.download_bytes_per_second
+            ),
+            "Upload": format_byte_rate(snapshot.rates.upload_bytes_per_second),
+        },
+        title="Rates",
+    )
+
+    if snapshot.alerts:
+        console.print()
+        console.print("[bold]Alerts[/bold]")
+        for alert in snapshot.alerts:
+            console.print(f"  {alert.message}")
