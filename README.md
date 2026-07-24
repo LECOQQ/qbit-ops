@@ -38,6 +38,11 @@ qbit-ops trackers replace-passkey \
   `announce_ts`, ...) when comparing trackers.
 - 🎨 **Rich terminal output** — colored tables and summaries, plus shell tab
   completion.
+- ⏳ **Transient progress feedback** — a spinner or progress bar on
+  interactive commands with a real scan or collection phase, fully
+  cleared before the final result. Machine-readable output
+  (`--format json|jsonl|csv`), non-interactive stderr, and `--quiet` stay
+  completely silent.
 
 ## 🛡️ Safety Model
 

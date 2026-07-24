@@ -51,24 +51,49 @@ class BulkTorrentActionPlan:
     skipped: tuple[BulkTorrentSkip, ...]
 
 
-def list_torrents(client: Any) -> list[dict[str, Any]]:
-    """List torrents with useful audit fields."""
-    torrents = [
-        _build_torrent_audit_entry(client, torrent)
-        for torrent in client.torrents_info()
-    ]
+def list_torrents(
+    client: Any,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[dict[str, Any]]:
+    """List torrents with useful audit fields.
+
+    Calls `client.torrents_trackers()` once per torrent (to count active
+    trackers), so `on_progress(completed, total)` reports real, known
+    progress through that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
+    torrents: list[dict[str, Any]] = []
+
+    for index, torrent in enumerate(all_torrents, start=1):
+        torrents.append(_build_torrent_audit_entry(client, torrent))
+        if on_progress is not None:
+            on_progress(index, total)
+
     torrents.sort(key=lambda item: item["name"].casefold())
     return torrents
 
 
-def list_torrents_by_category(client: Any, category: str) -> dict[str, Any]:
-    """List torrents belonging to a category."""
-    scanned = 0
+def list_torrents_by_category(
+    client: Any,
+    category: str,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    """List torrents belonging to a category.
+
+    Calls `client.torrents_trackers()` once per scanned torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
     normalized_category = category.strip()
 
-    for torrent in client.torrents_info():
-        scanned += 1
+    for index, torrent in enumerate(all_torrents, start=1):
+        if on_progress is not None:
+            on_progress(index, total)
+
         torrent_category = get_field_as_string(torrent, "category")
         if not _category_matches(torrent_category, normalized_category):
             continue
@@ -79,7 +104,7 @@ def list_torrents_by_category(client: Any, category: str) -> dict[str, Any]:
 
     return {
         "category": _format_category_label(normalized_category),
-        "scanned": scanned,
+        "scanned": total,
         "matched": len(torrents),
         "torrents": torrents,
     }
@@ -136,11 +161,21 @@ def _format_category_label(category: str) -> str:
     return category.strip()
 
 
-def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
-    """List torrents with tracker details for export and audit."""
+def list_torrents_with_trackers(
+    client: Any,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[dict[str, Any]]:
+    """List torrents with tracker details for export and audit.
+
+    Calls `client.torrents_trackers()` once per torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
+    for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = get_field_as_string(torrent, "hash")
         trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
         active_tracker_count = sum(
@@ -161,6 +196,8 @@ def list_torrents_with_trackers(client: Any) -> list[dict[str, Any]]:
                 "active_tracker_count": active_tracker_count,
             }
         )
+        if on_progress is not None:
+            on_progress(index, total)
 
     return torrents
 

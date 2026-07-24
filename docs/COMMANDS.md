@@ -17,6 +17,7 @@ drop the `poetry run` prefix.
 - [Matching Modes](#matching-modes)
 - [Format Support Matrix](#format-support-matrix)
 - [Machine-Readable Silence Contract](#machine-readable-silence-contract)
+- [Progress & Spinner Behavior](#progress--spinner-behavior)
 - [Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)
 - [Tracker Health](#tracker-health)
 - [Output Summaries](#output-summaries)
@@ -418,6 +419,77 @@ carries operational information (`healthy`/`warning`/`critical`/
 which is already conveyed without needing a silent mode. Adding `--quiet`
 to e.g. `torrents list` would mean "emit nothing and exit 0" with no
 further contract to build on — see `docs/DECISIONS.md` (2026-07-24).
+
+## Progress & Spinner Behavior
+
+Commands that may take noticeable time show **transient** progress
+feedback on stderr — a spinner or a progress bar, never both — when
+**all** of the following hold:
+
+* the command is human-readable (table for read-only commands; every
+  mutation command, which has no `--format` at all);
+* stderr is an interactive terminal;
+* `--quiet` is not active (`status` only);
+* the operation has a real, non-trivial collection or scan phase.
+
+Progress is disabled — silently, with no fallback text — whenever any of
+those does not hold: `--format json|jsonl|csv`, a non-interactive stderr
+(piped, redirected, CI, cron), or `--quiet`. This is decided once per
+command by `app.ui.progress_enabled()` and never re-implemented inline.
+
+Progress is always **transient**: it never survives in the final
+scrollback. Before a table, a mutation preview, a confirmation prompt, a
+cancellation message, an applied summary, or an error is shown, any
+active spinner or progress bar has already been fully torn down — not
+just visually cleared but stopped, so a confirmation prompt is never
+shown while a Rich live display is still active. This holds on normal
+completion, on a raised exception, and on `Ctrl+C`.
+
+### Spinner vs. progress bar
+
+* **Spinner** (`app.ui.transient_spinner`) — one pending remote request,
+  or a bounded collection fetched with a single call, where there is
+  nothing meaningful to count per item (`Loading torrents…`,
+  `Checking connection…`).
+* **Progress bar** (`app.ui.transient_progress`) — a collection has
+  already been fetched and is then processed item by item with a real,
+  known total, typically one extra API call per item
+  (`Scanning torrent trackers… 642/1105`).
+
+A progress bar is never shown with a fabricated or unknown total (no
+`0/?`) — that case uses a spinner instead.
+
+### Per-command decision
+
+| Command | Feedback | Why |
+| --- | --- | --- |
+| `status` | Spinner | Single bounded snapshot collection (4 fixed API calls). |
+| `connection check` | Spinner | One connection attempt. |
+| `config doctor` | Spinner | One connection attempt plus two version reads. |
+| `torrents list` (incl. `--category`/`--tracker`) | Progress bar | One `torrents_trackers()` call per torrent. |
+| `torrents categories` | Spinner | One bulk `torrents_info()` call, in-memory grouping only. |
+| `torrents inspect` (`--hash` or `--name`) | Spinner | Single-torrent lookup or one in-memory name search. |
+| `trackers list` | Progress bar | One `torrents_trackers()` call per torrent. |
+| `trackers health` | Progress bar | One `torrents_trackers()` call per torrent. |
+| `trackers inspect` | Progress bar | One `torrents_trackers()` call per torrent. |
+| `trackers export` | Progress bar | One `torrents_trackers()` call per torrent. |
+| `backup export` | Spinner | Composite of two per-torrent scans; a single spinner is simpler and more honest than two sequential fabricated-total bars. |
+| `backup diff` | None (deliberate) | Local JSON file reads plus an in-memory diff — effectively instantaneous, no network call. |
+| Bulk torrent actions (`pause`/`resume`/`start`/`reannounce`) | Progress bar | Real, known total from the already-fetched torrent list; a filtered `--tracker` scan does one `torrents_trackers()` call per torrent. |
+| `trackers add-if-present`/`remove`/`replace`/`replace-passkey` (planning) | Progress bar | One `torrents_trackers()` call per torrent while building the plan. |
+
+Every mutation command's progress only ever wraps **planning** (building
+the structured plan). There is deliberately no second, separate progress
+indicator around *applying* a plan: applying is either one bulk API call
+(nothing to show incremental progress for) or a handful of calls for the
+already-confirmed, already-known change set, where a second spinner
+would be pure decoration rather than real feedback.
+
+Progress is presentation-only: it never changes `matched`, `has_changes`,
+`modified`, `MutationStatus`, confirmation behavior, which mutation calls
+are made, or exit codes. The plan built while progress is showing is the
+exact same plan used for the preview and for the real application — see
+[Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy).
 
 ## Mutation Risk & Confirmation Policy
 

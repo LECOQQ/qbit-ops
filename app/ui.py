@@ -46,18 +46,76 @@ _HEALTH_STYLES: dict[Health, str] = {
 }
 
 
-@contextmanager
-def progress_bar(message: str) -> Generator[ProgressCallback]:
-    """Show a Rich progress bar on stderr while a per-item task runs.
+def progress_enabled(
+    *,
+    output_format: OutputFormat | None = None,
+    quiet: bool = False,
+    interactive: bool | None = None,
+) -> bool:
+    """Decide whether transient progress feedback should be shown.
 
-    Yields a callback usable as `on_progress(completed, total)`. No-ops
-    outside an interactive terminal so piped/JSON output and non-TTY logs
-    (CI, cron) stay clean. Fully transient: nothing is left behind in
-    scrollback once the block exits, so the caller's next output (a
-    preview, a confirmation prompt, a summary) starts on a clean line
-    instead of trailing a leftover "done" line.
+    Pure and Rich-free (besides reading `err_console.is_terminal` as a
+    default): takes `interactive` as a parameter so callers, and tests,
+    can simulate a TTY or a piped/non-TTY stream without depending on the
+    real console. `output_format=None` means "not applicable" (mutation
+    commands have no `--format`) and is treated like `table`.
+
+    Progress is enabled only when every condition holds: not `--quiet`,
+    output format is `table` or not applicable, and stderr is an
+    interactive terminal. This is the single source of truth for the
+    policy described in `docs/COMMANDS.md`
+    ("Progress & Spinner Behavior") — command bodies must not
+    re-implement this check inline.
     """
-    if not err_console.is_terminal:
+    if quiet:
+        return False
+
+    if output_format is not None and output_format is not OutputFormat.table:
+        return False
+
+    if interactive is None:
+        interactive = err_console.is_terminal
+
+    return interactive
+
+
+@contextmanager
+def transient_spinner(message: str, *, enabled: bool) -> Generator[None]:
+    """Show a transient spinner on stderr for one pending operation.
+
+    Use for a single remote request or a bounded collection call whose
+    size isn't known up front (`status`, `connection check`, a single
+    `torrents_info()` fetch). No-ops when `enabled` is False — callers
+    decide that via `progress_enabled()`. Rich's `Console.status()`
+    clears its live line on any exit path (normal completion, exception,
+    `KeyboardInterrupt`), so nothing is left in scrollback.
+    """
+    if not enabled:
+        yield
+        return
+
+    with err_console.status(message, spinner="dots"):
+        yield
+
+
+@contextmanager
+def transient_progress(
+    message: str,
+    *,
+    total: int | None = None,
+    enabled: bool,
+) -> Generator[ProgressCallback]:
+    """Show a transient Rich progress bar on stderr for a per-item task.
+
+    Use once a collection has already been fetched and items are
+    processed one by one with a real, known total (e.g. one
+    `torrents_trackers()` call per torrent). Yields a callback usable as
+    `advance(completed, total)`. No-ops when `enabled` is False.
+    `transient=True` plus the `with Progress(...)` block guarantee the
+    bar is cleared on normal completion, an exception, or a
+    `KeyboardInterrupt` — nothing is left behind in scrollback.
+    """
+    if not enabled:
 
         def _noop(_completed: int, _total: int) -> None:
             return
@@ -74,12 +132,12 @@ def progress_bar(message: str) -> Generator[ProgressCallback]:
         console=err_console,
         transient=True,
     ) as progress:
-        task_id = progress.add_task(message, total=None)
+        task_id = progress.add_task(message, total=total)
 
-        def _on_progress(completed: int, total: int) -> None:
+        def _advance(completed: int, total: int) -> None:
             progress.update(task_id, completed=completed, total=total)
 
-        yield _on_progress
+        yield _advance
 
 
 def confirm(prompt: str) -> bool:

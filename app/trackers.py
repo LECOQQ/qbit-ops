@@ -190,11 +190,19 @@ def has_tracker(
 def list_tracker_usage(
     client: Any,
     match_mode: TrackerMatchMode = "exact",
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """List normalized trackers and count torrents using each one."""
+    """List normalized trackers and count torrents using each one.
+
+    Calls `client.torrents_trackers()` once per torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     tracker_usage: dict[str, int] = {}
 
-    for torrent in client.torrents_info():
+    for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         trackers = _get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
@@ -216,6 +224,9 @@ def list_tracker_usage(
                 tracker_usage.get(normalized_tracker, 0) + 1
             )
 
+        if on_progress is not None:
+            on_progress(index, total)
+
     return dict(sorted(tracker_usage.items()))
 
 
@@ -223,13 +234,19 @@ def inspect_tracker(
     client: Any,
     tracker: str,
     match_mode: TrackerMatchMode = "exact",
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """List torrents using a tracker."""
-    scanned = 0
+    """List torrents using a tracker.
+
+    Calls `client.torrents_trackers()` once per scanned torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
-        scanned += 1
+    for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
@@ -241,26 +258,27 @@ def inspect_tracker(
             match_mode,
         )
 
-        if not matching_tracker_urls:
-            continue
+        if matching_tracker_urls:
+            torrents.append(
+                {
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "state": _get_field_as_string(torrent, "state"),
+                    "size": _get_field_as_int(torrent, "size"),
+                    "progress": _get_field_as_float(torrent, "progress"),
+                    "ratio": _get_field_as_float(torrent, "ratio"),
+                    "active_tracker_count": len(trackers),
+                    "matching_tracker_urls": matching_tracker_urls,
+                }
+            )
 
-        torrents.append(
-            {
-                "hash": torrent_hash,
-                "name": torrent_name,
-                "state": _get_field_as_string(torrent, "state"),
-                "size": _get_field_as_int(torrent, "size"),
-                "progress": _get_field_as_float(torrent, "progress"),
-                "ratio": _get_field_as_float(torrent, "ratio"),
-                "active_tracker_count": len(trackers),
-                "matching_tracker_urls": matching_tracker_urls,
-            }
-        )
+        if on_progress is not None:
+            on_progress(index, total)
 
     return {
         "tracker": tracker,
         "match": match_mode,
-        "scanned": scanned,
+        "scanned": total,
         "matched_tracker": len(torrents),
         "torrents": torrents,
     }
@@ -269,11 +287,19 @@ def inspect_tracker(
 def export_tracker_state(
     client: Any,
     match_mode: TrackerMatchMode = "exact",
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """Export active tracker state for every torrent."""
+    """Export active tracker state for every torrent.
+
+    Calls `client.torrents_trackers()` once per torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
 
-    for torrent in client.torrents_info():
+    for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         trackers = _get_active_tracker_urls(
@@ -301,6 +327,9 @@ def export_tracker_state(
             }
         )
 
+        if on_progress is not None:
+            on_progress(index, total)
+
     return {
         "summary": {
             "torrents": len(torrents),
@@ -310,9 +339,18 @@ def export_tracker_state(
     }
 
 
-def analyze_tracker_health(client: Any) -> dict[str, Any]:
-    """Analyze tracker health across all torrents."""
-    scanned = 0
+def analyze_tracker_health(
+    client: Any,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    """Analyze tracker health across all torrents.
+
+    Calls `client.torrents_trackers()` once per torrent, so
+    `on_progress(completed, total)` reports real, known progress through
+    that per-torrent work.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
     active_tracker_occurrences = 0
     disabled_tracker_occurrences = 0
     exact_trackers: set[str] = set()
@@ -320,8 +358,7 @@ def analyze_tracker_health(client: Any) -> dict[str, Any]:
     disabled_trackers: set[str] = set()
     query_variants: dict[str, dict[str, set[str]]] = {}
 
-    for torrent in client.torrents_info():
-        scanned += 1
+    for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
 
@@ -351,6 +388,9 @@ def analyze_tracker_health(client: Any) -> dict[str, Any]:
             group["variants"].add(exact_tracker)
             group["torrents"].add(f"{torrent_name} ({torrent_hash})")
 
+        if on_progress is not None:
+            on_progress(index, total)
+
     query_variant_groups = [
         {
             "tracker": tracker_url,
@@ -363,7 +403,7 @@ def analyze_tracker_health(client: Any) -> dict[str, Any]:
 
     return {
         "summary": {
-            "scanned": scanned,
+            "scanned": total,
             "active_tracker_occurrences": active_tracker_occurrences,
             "disabled_tracker_occurrences": disabled_tracker_occurrences,
             "unique_exact_trackers": len(exact_trackers),
