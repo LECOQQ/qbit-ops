@@ -10,7 +10,8 @@ drop the `poetry run` prefix.
 
 - [Status](#status)
 - [Status Watch Mode](#status-watch-mode)
-- [Connection & Config](#connection--config)
+- [Doctor](#doctor)
+- [Connection](#connection)
 - [Torrents](#torrents)
 - [Trackers](#trackers)
 - [Backup](#backup)
@@ -162,15 +163,158 @@ never stop the loop — so `--watch` uses an unrelated, small set of
 after the last complete JSONL line, restores the terminal, and never
 prints a traceback.
 
-## Connection & Config
+## Doctor
+
+```bash
+poetry run qbit-ops doctor
+poetry run qbit-ops doctor --format json
+poetry run qbit-ops doctor --format jsonl
+poetry run qbit-ops doctor --format csv
+```
+
+`doctor` is a root-level, read-only diagnostic command answering "is
+qbit-ops correctly configured, able to communicate with qBittorrent, and
+operating against a supported and coherent runtime environment?". It
+replaces the earlier `config doctor` entirely (removed, no alias — see
+`docs/DECISIONS.md`): pre-1.0, keeping two overlapping doctor commands
+had no justification once the root command covers everything `config
+doctor` did and more. `qbit-ops doctor` is unrelated to `make doctor`
+(the `Makefile` target that checks local Python/Poetry tooling before
+`make install`) — same word, two different things at two different
+layers.
+
+Like `status`, `doctor` performs a bounded, documented number of remote
+calls regardless of torrent count: **at most one authenticated login**
+(`auth_log_in()`) **plus up to four read calls** — `app_version()`,
+`app_web_api_version()`, `transfer_info()`, `torrents_info()` — never a
+per-torrent call (no `torrents_trackers()` scan, no filesystem, Docker,
+hardlink, or disk-space check — none of those are backed by any
+configuration this repository currently has, so none are invented here).
+
+### Check catalogue
+
+Every check has a stable code (safe for scripts and monitoring to key
+off), a section, one of four statuses, a human message, and optional
+`detail`/`remediation`. Checks always run and render in this fixed
+order:
+
+| Code | Section | Checks |
+| --- | --- | --- |
+| `CFG001` | configuration | Configuration (`.env`/environment) loaded successfully. |
+| `CFG002` | configuration | `QBIT_HOST` is a well-formed `http`/`https` URL. |
+| `CFG003` | configuration | `QBIT_HOST` does not embed `user:pass@` credentials (qbit-ops ignores them in favor of `QBIT_USER`/`QBIT_PASSWORD`, so this is a warning, not an error). |
+| `CONN001` | connectivity | qBittorrent host is reachable (a login attempt received a response — this also passes when authentication itself fails, since that proves reachability). |
+| `CONN002` | connectivity | Authentication succeeded. |
+| `CONN003` | connectivity | qBittorrent application version is readable (`app_version()`). |
+| `CONN004` | connectivity | Web API version is readable (`app_web_api_version()`). |
+| `COMPAT001` | compatibility | The qBittorrent version string is parsable. |
+| `COMPAT002` | compatibility | The qBittorrent major version (4 or 5) is one qbit-ops has been validated against. |
+| `RUNTIME001` | runtime | Torrent listing succeeds (`torrents_info()`). |
+| `RUNTIME002` | runtime | Global transfer info succeeds (`transfer_info()`). |
+| `RUNTIME003` | runtime | Every torrent's state is recognized (reuses `app.status.classify_torrent_state`, the exact same vocabulary `status`/`status --watch` use). |
+
+### Status vocabulary and skip semantics
+
+```text
+pass      the check succeeded
+warning   the check found something worth attention, but not incorrect
+fail      the check failed
+skipped   a prerequisite check already failed, so this one could not run
+```
+
+Checks are independent wherever the underlying data is: one API call
+failing does not erase unrelated diagnostics (e.g. a broken
+`torrents_info()` still lets `transfer_info()`, `app_version()`, and
+every configuration check report normally). A check is only ever
+`skipped` because a specific, identifiable prerequisite already failed
+— invalid configuration skips every connectivity/compatibility/runtime
+check; a failed connection skips authentication onward; a failed
+authentication skips the two version reads and everything depending on
+them; an unreadable version skips the supported-version-range check
+(never inventing a compatibility verdict for a version it never saw —
+an unparsable or unrecognized version string is a `warning`, never a
+`fail`, for the same reason). **`skipped` never independently
+influences the overall status** — it exists only downstream of a `fail`
+that already does.
+
+### Overall status and exit codes
+
+The report's `overall_status` is the most severe status among its
+checks (`fail` > `warning` > `pass`; `skipped` is never the most severe
+by construction):
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | All checks `pass`. |
+| `1` | One or more `warning`s, no `fail`. |
+| `2` | One or more `fail`s. |
+| `4` | Invalid CLI invocation preventing doctor from starting. Reserved, currently unreachable: `doctor` takes no option besides `--format`, and an invalid `--format` value is rejected by Click before the command body runs (Click's own usage-error exit code, not this one) — kept for a future doctor-specific flag rather than removed. |
+
+Unlike every other command, a configuration, connection, or
+authentication failure is not something `doctor` reports on stderr and
+aborts on: it is the diagnostic payload itself (a `fail` check in the
+report). **`doctor` never writes to stderr**, in any `--format`,
+regardless of how many checks fail — the non-zero exit code and the
+rendered report body carry the outcome. This is a deliberate difference
+from the [Machine-Readable Silence
+Contract](#machine-readable-silence-contract), extended here to table
+output and to failure, not just success.
+
+### Output formats
+
+* `table` — one grouped table per section (`Configuration`,
+  `Connectivity`, `Compatibility`, `Runtime`), each row showing code,
+  status, message, and remediation (blank when none applies), preceded
+  by an overall-status header line.
+* `json` — one document: `schema_version`, `generated_at`,
+  `overall_status`, and `checks` (a list of
+  `code`/`section`/`status`/`message`/`detail`/`remediation` objects).
+* `jsonl` — exactly **one** compact JSON document per invocation, the
+  same payload and schema as `--format json`, on one line. This
+  deliberately follows the project-wide jsonl contract (one document per
+  invocation, established for `status`/`status --watch` and every
+  collection-returning command in Phase 2.1 — see `docs/DECISIONS.md`)
+  rather than emitting one line per check, even though the latter is
+  also a reasonable contract for a checks collection.
+* `csv` — stable columns `section,code,status,message,detail,remediation`,
+  one row per check (12 rows plus a header for the current catalogue).
+
+### Security
+
+Every check's `message`/`detail`/`remediation` is redacted before
+reaching any renderer: passwords, cookies, authorization headers, and
+credentials embedded in a URL (`user:pass@host`) are never shown, in
+`table`, `json`, `jsonl`, `csv`, or (since doctor writes nothing there)
+stderr. `CFG003` reports that `QBIT_HOST` embeds credentials without
+ever printing the credentials themselves. A connection/authentication
+error's underlying exception text — which can otherwise carry the
+configured host verbatim — is passed through one redaction funnel
+(`app.doctor._redact`) that strips URL userinfo and the exact configured
+password before it becomes a check's `detail`.
+
+### Out of scope
+
+`doctor` does not perform any filesystem check (existing/readable/
+writable roots, hardlink support, free disk space), Docker/path-mapping
+check, tracker-quality check, or category-policy check: none of those
+are backed by configuration this repository currently reads, and
+inventing one would violate `docs/PHILOSOPHY.md` §9 ("a lack of
+certainty should produce a warning or refusal, not a guess"). `doctor`
+never modifies anything, never offers `--fix`, and never filters checks
+with `--only`/`--skip` (not needed at today's catalogue size; a future
+phase can add them without changing any existing check's code).
+
+## Connection
 
 ```bash
 poetry run qbit-ops connection check
 poetry run qbit-ops connection check --format json
-
-poetry run qbit-ops config doctor
-poetry run qbit-ops config doctor --format json
 ```
+
+`connection check` is a minimal reachability/authentication probe (one
+login attempt, one message, `ok`/error) — use `doctor` for a full,
+structured diagnostic report; `connection check` remains for a fast
+yes/no answer with no report to parse.
 
 ## Torrents
 
@@ -436,7 +580,7 @@ changes.
 
 ```bash
 poetry run qbit-ops connection check
-poetry run qbit-ops config doctor
+poetry run qbit-ops doctor
 poetry run qbit-ops torrents list
 poetry run qbit-ops torrents categories
 poetry run qbit-ops trackers list
@@ -473,7 +617,7 @@ a clear error instead of producing an ad hoc or lossy serialization.
 | --- | --- | --- | --- | --- | --- |
 | `status` | ✅ | ✅ | ✅ | ✅ | `section,key,value` rows |
 | `connection check` | ✅ | ✅ | ✅ | ✅ | `key,value` rows |
-| `config doctor` | ✅ | ✅ | ✅ | ✅ | `key,value` rows |
+| `doctor` | ✅ | ✅ | ✅ | ✅ | `section,code,status,message,detail,remediation` rows |
 | `torrents list` (incl. `--category`/`--tracker`) | ✅ | ✅ | ✅ | ✅ | one row per torrent |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ | `category,torrents` rows |
 | `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested tracker details for `--hash`) |
@@ -513,16 +657,26 @@ that the connection succeeded.
 Genuine errors are never silenced by this contract: configuration,
 connection, authentication, and validation failures are always printed to
 stderr and always produce a non-zero exit code, regardless of `--format`.
+**`doctor` is the one deliberate exception** — see [Doctor](#doctor):
+those same failures are the diagnostic payload it exists to report, so
+they appear as `fail` checks in the rendered report instead of on
+stderr, in every `--format` including `table`.
 
 ### `--quiet` scope
 
 `--quiet` exists only on `status`. It was deliberately not added to the
-other read-only commands: `status` is the only one whose exit code alone
-carries operational information (`healthy`/`warning`/`critical`/
-`unavailable`); the rest only distinguish success, no-match, and error,
-which is already conveyed without needing a silent mode. Adding `--quiet`
-to e.g. `torrents list` would mean "emit nothing and exit 0" with no
-further contract to build on — see `docs/DECISIONS.md` (2026-07-24).
+other read-only commands, including `doctor`: `status` is the only
+command whose exit code alone must stay silent to be useful as a
+healthchecker (`--quiet` suppresses the report and leaves only
+`healthy`/`warning`/`critical`/`unavailable` for a monitoring system to
+read). `doctor` also has a multi-value exit code
+(pass/warning/failure — see [Doctor](#doctor)), but its whole purpose is
+the human/machine-readable report itself; a silent `doctor` would defeat
+the command, so `--quiet` was not added to it. The remaining read-only
+commands only distinguish success, no-match, and error, which is already
+conveyed without needing a silent mode. Adding `--quiet` to e.g.
+`torrents list` would mean "emit nothing and exit 0" with no further
+contract to build on — see `docs/DECISIONS.md` (2026-07-24).
 
 ## Progress & Spinner Behavior
 
@@ -569,7 +723,7 @@ A progress bar is never shown with a fabricated or unknown total (no
 | --- | --- | --- |
 | `status` | Spinner | Single bounded snapshot collection (4 fixed API calls). `status --watch` uses a persistent `Live` display instead — see [Status Watch Mode](#status-watch-mode); the two are never combined. |
 | `connection check` | Spinner | One connection attempt. |
-| `config doctor` | Spinner | One connection attempt plus two version reads. |
+| `doctor` | Spinner | One login attempt plus up to four bounded read calls. |
 | `torrents list` (incl. `--category`/`--tracker`) | Progress bar | One `torrents_trackers()` call per torrent. |
 | `torrents categories` | Spinner | One bulk `torrents_info()` call, in-memory grouping only. |
 | `torrents inspect` (`--hash` or `--name`) | Spinner | Single-torrent lookup or one in-memory name search. |
@@ -796,7 +950,7 @@ what each `status` value means and when it appears.
 
 ## Exit Codes
 
-Every command except `status` uses:
+Every command except `status` and `doctor` uses:
 
 - `0`: success.
 - `1`: configuration, connection, authentication or API error — **also used
@@ -835,4 +989,19 @@ If both a warning and a critical condition are present, `status` reports
 This health-based mapping applies to **one-shot** `status` only.
 `status --watch` uses a separate, small set of process exit codes — see
 ["Exit codes differ from one-shot `status`"](#exit-codes-differ-from-one-shot-status)
+in [Status Watch Mode](#status-watch-mode).
+
+### `doctor` exit codes
+
+`doctor` also reports a severity, not success/failure, using its own
+codes (`app.doctor.doctor_exit_code`, mirrored by `app.main.DoctorExitCode`
+for readability at call sites — see [Doctor](#doctor) for the full check
+catalogue and [Exit codes](#overall-status-and-exit-codes) there for
+detail):
+
+- `0`: all checks `pass`.
+- `1`: one or more `warning`s, no `fail`.
+- `2`: one or more `fail`s.
+- `4`: invalid CLI invocation preventing doctor from starting (currently
+  unreachable — see [Doctor](#doctor)).
 in [Status Watch Mode](#status-watch-mode).

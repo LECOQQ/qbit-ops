@@ -29,6 +29,11 @@ qbit-ops trackers replace-passkey \
   table/JSON/JSONL/CSV.
 - 🔁 **`status --watch`** — live-refreshing status in place (table) or as a
   flushed JSONL stream, on the same snapshot model, until `Ctrl+C`.
+- 🩺 **`doctor`** — a bounded, read-only diagnostic report (configuration,
+  connectivity, compatibility, runtime) with stable pass/warning/failure
+  exit codes, in table/JSON/JSONL/CSV. Independent checks keep running
+  after an unrelated one fails; failures never leak secrets and are never
+  written to stderr — the report itself is the answer.
 - 🔍 **Audit** torrents, categories, trackers and connectivity — one shared
   `--format table|json|jsonl|csv` across every read-only command.
 - 🧭 **Bulk torrent control** — pause, resume, start, reannounce, targeted
@@ -79,7 +84,8 @@ qbit-ops trackers replace-passkey \
 
 Requires Python 3.12+, [Poetry](https://python-poetry.org), and a
 qBittorrent instance with the Web UI/API enabled. Run `make doctor` to
-check local tooling.
+check local tooling (Python/Poetry) — unrelated to `qbit-ops doctor`,
+which diagnoses the qBittorrent connection itself once installed.
 
 **Development:**
 
@@ -147,7 +153,8 @@ qbit-ops status --watch --interval 10
 qbit-ops status --watch --format jsonl | jq .  # one flushed JSON object per line
 
 qbit-ops connection check
-qbit-ops config doctor
+qbit-ops doctor
+qbit-ops doctor --format json; echo $?   # 0 pass, 1 warning, 2 failure
 
 qbit-ops torrents list
 qbit-ops torrents list --category sonarr
