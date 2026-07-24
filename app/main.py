@@ -22,7 +22,15 @@ from app.backup import (
     has_backup_diff,
     load_export_file,
 )
-from app.config import ConfigError, load_qbit_config
+from app.config import ConfigError, QbitConfig, load_qbit_config
+from app.doctor import (
+    ConnectionOutcome,
+    DoctorReport,
+    collect_doctor_report,
+    doctor_exit_code,
+    doctor_report_to_csv_rows,
+    doctor_report_to_json_dict,
+)
 from app.execution import (
     MUTATION_RISK,
     ExecutionDecision,
@@ -84,6 +92,7 @@ from app.ui import (
     print_summary,
     print_table,
     progress_enabled,
+    render_doctor_table,
     render_status_table,
     transient_progress,
     transient_spinner,
@@ -93,12 +102,10 @@ PROJECT_NAME = "qbit-ops"
 DEFAULT_STATUS_WATCH_INTERVAL_SECONDS = 5.0
 
 app = typer.Typer(add_completion=True, help="Administer qBittorrent.")
-config_app = typer.Typer(help="Inspect qbit-ops configuration.")
 connection_app = typer.Typer(help="Check qBittorrent connectivity.")
 backup_app = typer.Typer(help="Export qBittorrent state.")
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
-app.add_typer(config_app, name="config")
 app.add_typer(connection_app, name="connection")
 app.add_typer(backup_app, name="backup")
 app.add_typer(torrents_app, name="torrents")
@@ -142,6 +149,28 @@ class StatusExitCode(IntEnum):
     INVALID_USAGE = 4
 
 
+class DoctorExitCode(IntEnum):
+    """Define exit codes specific to the `doctor` command.
+
+    `0`/`1`/`2` mirror `app.doctor.doctor_exit_code`'s
+    pass/warning/failure mapping exactly (kept here only for readability
+    at call sites and in tests). `3` is intentionally unused: doctor has
+    no condition that needs a fourth severity tier. `4` is reserved for
+    invalid CLI invocation preventing doctor from starting — today
+    `doctor` takes no options besides `--format`, and an invalid
+    `--format` value is rejected by Click before the command body runs
+    (Click's own usage-error exit code, not this one), so `4` is
+    currently unreachable in practice. It is kept, not removed, so a
+    future doctor-specific flag has a documented code to use instead of
+    silently reusing `2` (already meaning "failure").
+    """
+
+    PASS = 0
+    WARNING = 1
+    FAILURE = 2
+    INVALID_USAGE = 4
+
+
 class TrackerMatchModeOption(StrEnum):
     """Expose tracker matching modes for Typer options."""
 
@@ -166,7 +195,7 @@ class QbitAuthenticationError(RuntimeError):
 FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "status": frozenset(OutputFormat),
     "connection_check": frozenset(OutputFormat),
-    "config_doctor": frozenset(OutputFormat),
+    "doctor": frozenset(OutputFormat),
     "torrents_list": frozenset(OutputFormat),
     "torrents_categories": frozenset(OutputFormat),
     "torrents_inspect": frozenset(
@@ -353,7 +382,7 @@ def check(
         )
 
 
-@config_app.command()
+@app.command()
 def doctor(
     output_format: Annotated[
         OutputFormat,
@@ -363,53 +392,25 @@ def doctor(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """Check qbit-ops configuration and qBittorrent API access."""
-    _validate_format_support("config_doctor", output_format)
+    """Diagnose configuration, connectivity, and compatibility issues.
+
+    Read-only: performs at most one authenticated login plus up to four
+    bounded read calls (`app_version`, `app_web_api_version`,
+    `transfer_info`, `torrents_info`), the same budget `status` uses,
+    never a per-torrent call. Every check runs independently: a failed
+    prerequisite (e.g. invalid configuration) produces `skipped`
+    downstream checks instead of aborting the whole report.
+    """
+    _validate_format_support("doctor", output_format)
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
-        config = load_qbit_config()
-        with transient_spinner("Checking configuration...", enabled=enabled):
-            client = _create_qbit_client()
-            qbit_version = _get_optional_client_value(client, "app_version")
-            web_api_version = _get_optional_client_value(
-                client,
-                "app_web_api_version",
-            )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
+    with transient_spinner("Running diagnostics...", enabled=enabled):
+        report = _collect_doctor_report()
 
-    report = {
-        "config": "ok",
-        "host": config.host,
-        "authentication": "ok",
-        "connection": "ok",
-        "qbittorrent_version": qbit_version,
-        "web_api_version": web_api_version,
-    }
-
-    if output_format == OutputFormat.table:
-        print_summary(report, title="Config Doctor")
-        return
-
-    if output_format == OutputFormat.json:
-        _print_json_output(report)
-        return
-
-    if output_format == OutputFormat.jsonl:
-        _print_jsonl_output(report)
-        return
-
-    _print_csv_rows(
-        ["key", "value"],
-        [(key, str(value)) for key, value in report.items()],
-    )
+    _render_doctor_report(report, output_format)
+    raise typer.Exit(code=doctor_exit_code(report.overall_status))
 
 
 @torrents_app.command(name="list")
@@ -1898,6 +1899,76 @@ def _create_qbit_client() -> Any:
         ) from error
 
     return client
+
+
+def _collect_doctor_report() -> DoctorReport:
+    """Collect a doctor report, classifying failures instead of aborting.
+
+    Unlike every other command, `doctor` never calls `_fail()` on a
+    configuration/connection/authentication error: the failure itself is
+    the payload the report exists to describe. Nothing is written to
+    stderr here (that contract is reserved for genuinely invalid CLI
+    invocation) — a `fail`/`warning` overall status and non-zero exit
+    code already carry the outcome, in every `--format`.
+    """
+    config: QbitConfig | None = None
+    config_error: Exception | None = None
+    try:
+        config = load_qbit_config()
+    except ConfigError as error:
+        config_error = error
+
+    connection_outcome: ConnectionOutcome | None = None
+    connection_error: Exception | None = None
+    client: Any | None = None
+
+    if config is not None:
+        try:
+            client = _create_qbit_client()
+            connection_outcome = ConnectionOutcome.OK
+        except QbitAuthenticationError as error:
+            connection_outcome = ConnectionOutcome.AUTHENTICATION_FAILED
+            connection_error = error
+        except Exception as error:
+            connection_outcome = ConnectionOutcome.CONNECTION_FAILED
+            connection_error = error
+
+    return collect_doctor_report(
+        config=config,
+        config_error=config_error,
+        connection_outcome=connection_outcome,
+        connection_error=connection_error,
+        client=client,
+    )
+
+
+def _render_doctor_report(
+    report: DoctorReport,
+    output_format: OutputFormat,
+) -> None:
+    """Render a doctor report in the requested output format."""
+    if output_format == OutputFormat.table:
+        render_doctor_table(report)
+        return
+
+    if output_format == OutputFormat.json:
+        _print_json_output(doctor_report_to_json_dict(report))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        # Deliberately one document per invocation, like every other
+        # command's `jsonl` (see docs/DECISIONS.md) rather than one line
+        # per check, even though a per-check stream would also be a
+        # reasonable contract for a checks collection.
+        typer.echo(
+            json.dumps(doctor_report_to_json_dict(report), sort_keys=True)
+        )
+        return
+
+    _print_csv_rows(
+        ["section", "code", "status", "message", "detail", "remediation"],
+        doctor_report_to_csv_rows(report),
+    )
 
 
 def _collect_status_snapshot_safely() -> StatusSnapshot:

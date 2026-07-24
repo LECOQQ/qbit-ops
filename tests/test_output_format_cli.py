@@ -16,10 +16,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from app.config import ConfigError
+from app.config import ConfigError, QbitConfig
 from app.main import FORMAT_SUPPORT, ExitCode, app
 from app.ui import OutputFormat
-from tests.support import FakeQbitClient, make_torrent
+from tests.support import FakeQbitClient, make_config, make_torrent
 
 COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -32,7 +32,7 @@ TRACKER_URL = "https://tracker.example/announce"
 COMMAND_ARGV: dict[str, list[str]] = {
     "status": ["status"],
     "connection_check": ["connection", "check"],
-    "config_doctor": ["config", "doctor"],
+    "doctor": ["doctor"],
     "torrents_list": ["torrents", "list"],
     "torrents_categories": ["torrents", "categories"],
     "torrents_inspect": ["torrents", "inspect", "--hash", TORRENT_HASH[:8]],
@@ -48,7 +48,7 @@ COMMAND_ARGV: dict[str, list[str]] = {
 COMMAND_PATH: dict[str, list[str]] = {
     "status": ["status"],
     "connection_check": ["connection", "check"],
-    "config_doctor": ["config", "doctor"],
+    "doctor": ["doctor"],
     "torrents_list": ["torrents", "list"],
     "torrents_categories": ["torrents", "categories"],
     "torrents_inspect": ["torrents", "inspect"],
@@ -73,6 +73,23 @@ CSV_UNSUPPORTED = sorted(
     for command_id in COMMAND_ARGV
     if OutputFormat.csv not in FORMAT_SUPPORT[command_id]
 )
+
+
+def _config_for(command_id: str) -> QbitConfig | None:
+    """Return the config each command_id should connect with.
+
+    `doctor` alone reacts to the shared default fixture's host
+    (`tests.support.make_config`'s `http://admin:secret-password@...`,
+    used deliberately elsewhere to exercise secret redaction): an
+    embedded-credential host is a genuine `warning`-level doctor finding
+    (`CFG003`), which would break this file's "successful run exits 0"
+    assumption for every other command. Give `doctor` alone a
+    credential-free host so its result here reflects the same
+    "everything is fine" scenario the other commands see.
+    """
+    if command_id == "doctor":
+        return make_config(host="http://localhost:8080")
+    return None
 
 
 def _make_client() -> FakeQbitClient:
@@ -128,7 +145,9 @@ def test_command_json_is_valid_and_ansi_free(
     command_id: str,
 ) -> None:
     """Ensure --format json is valid JSON with no ANSI escape sequences."""
-    configure_qbit_backend(client=_make_client())
+    configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(
         app,
@@ -147,7 +166,9 @@ def test_command_jsonl_is_one_valid_json_document(
     command_id: str,
 ) -> None:
     """Ensure --format jsonl emits exactly one parseable line."""
-    configure_qbit_backend(client=_make_client())
+    configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(
         app,
@@ -168,7 +189,9 @@ def test_command_csv_is_valid_where_supported(
     command_id: str,
 ) -> None:
     """Ensure --format csv produces parseable, ANSI-free CSV data."""
-    configure_qbit_backend(client=_make_client())
+    configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(
         app,
@@ -206,7 +229,9 @@ def test_machine_readable_success_has_no_connection_message(
     output_format: str,
 ) -> None:
     """Ensure a successful machine-readable run prints no connection banner."""
-    configure_qbit_backend(client=_make_client())
+    configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(
         app,
@@ -225,7 +250,9 @@ def test_table_success_also_has_no_connection_message(
     command_id: str,
 ) -> None:
     """Ensure the connection banner was removed from table output too."""
-    configure_qbit_backend(client=_make_client())
+    configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(app, COMMAND_ARGV[command_id])
 
@@ -246,7 +273,9 @@ def test_command_creates_client_exactly_once(
     (see `docs/DECISIONS.md`), so there is no `quiet` flag left to
     assert on; this instead pins down the call count itself.
     """
-    calls = configure_qbit_backend(client=_make_client())
+    calls = configure_qbit_backend(
+        client=_make_client(), config=_config_for(command_id)
+    )
 
     result = runner.invoke(app, COMMAND_ARGV[command_id])
 
@@ -254,14 +283,22 @@ def test_command_creates_client_exactly_once(
     assert calls == [{}]
 
 
-@pytest.mark.parametrize("command_id", sorted(COMMAND_ARGV))
+@pytest.mark.parametrize("command_id", sorted(set(COMMAND_ARGV) - {"doctor"}))
 def test_command_error_remains_visible_on_stderr(
     runner: CliRunner,
     configure_qbit_backend,
     command_id: str,
 ) -> None:
     """Ensure genuine errors are never silenced by the machine-readable
-    or table silence contract."""
+    or table silence contract.
+
+    `doctor` is deliberately excluded: unlike every other command, a
+    configuration/connection/authentication failure is not an error
+    doctor reports on stderr and aborts on — it is the diagnostic
+    payload itself (a `fail` check in the report), so stderr stays
+    empty and the non-zero exit code plus the report body carry the
+    outcome instead. See `tests/test_doctor_cli.py`.
+    """
     configure_qbit_backend(config_error=ConfigError("boom"))
 
     result = runner.invoke(

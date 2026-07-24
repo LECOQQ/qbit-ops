@@ -19,6 +19,7 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
+from app.doctor import CheckStatus, DoctorReport
 from app.execution import MutationStatus
 from app.selectors import ResolvedTorrent
 from app.status import Health, StatusSnapshot
@@ -45,6 +46,13 @@ _HEALTH_STYLES: dict[Health, str] = {
     Health.WARNING: "bold yellow",
     Health.CRITICAL: "bold red",
     Health.UNAVAILABLE: "bold red",
+}
+
+_CHECK_STATUS_STYLES: dict[CheckStatus, str] = {
+    CheckStatus.PASS: "bold green",
+    CheckStatus.WARNING: "bold yellow",
+    CheckStatus.FAIL: "bold red",
+    CheckStatus.SKIPPED: "dim",
 }
 
 
@@ -395,3 +403,44 @@ def live_status_display() -> (
             live.refresh()
 
         yield _update
+
+
+def render_doctor_table(report: DoctorReport) -> None:
+    """Render a doctor report as one table per section, grouped in order.
+
+    Sections are grouped in the order their checks first appear in
+    `report.checks` (already deterministic by construction in
+    `app.doctor.collect_doctor_report`) rather than by iterating a set or
+    dict, so table order never depends on hashing.
+    """
+    style = _CHECK_STATUS_STYLES[report.overall_status]
+    console.print(
+        f"[bold]qbit-ops doctor[/bold] · "
+        f"[{style}]{report.overall_status.value}[/{style}]"
+    )
+    console.print()
+
+    sections: list[str] = []
+    for check in report.checks:
+        if check.section not in sections:
+            sections.append(check.section)
+
+    for section in sections:
+        table = Table(title=section.capitalize(), show_lines=False)
+        table.add_column("Code")
+        table.add_column("Status")
+        table.add_column("Message")
+        table.add_column("Remediation")
+
+        for check in report.checks:
+            if check.section != section:
+                continue
+            check_style = _CHECK_STATUS_STYLES[check.status]
+            table.add_row(
+                check.code,
+                f"[{check_style}]{check.status.value}[/{check_style}]",
+                check.message,
+                check.remediation or "",
+            )
+
+        console.print(table)
