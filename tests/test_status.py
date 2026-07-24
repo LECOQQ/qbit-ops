@@ -1,5 +1,9 @@
 """Test the status snapshot collection service."""
 
+from datetime import UTC, datetime
+
+import pytest
+
 from app.status import (
     Health,
     StatusAlert,
@@ -12,9 +16,31 @@ from app.status import (
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
     status_exit_code,
+    watch_status,
 )
 from app.ui import format_byte_rate
 from tests.support import FakeQbitClient, make_torrent
+
+
+class _StopWatch(Exception):
+    """Sentinel raised by a fake `collect`/`sleep` to end a test's loop."""
+
+
+class _FakeClock:
+    """Deterministic monotonic clock + sleep, so tests never really wait."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleep_calls: list[float] = []
+
+    def monotonic(self) -> float:
+        """Return the current fake time."""
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        """Record the requested sleep and advance the fake clock by it."""
+        self.sleep_calls.append(seconds)
+        self.now += seconds
 
 
 def test_classify_torrent_state_groups_qbit4_and_qbit5_active_states() -> None:
@@ -247,3 +273,235 @@ def test_format_byte_rate_uses_binary_units() -> None:
     assert format_byte_rate(1536) == "1.5 KiB/s"
     assert format_byte_rate(13_002_342) == "12.4 MiB/s"
     assert format_byte_rate(5_368_709_120) == "5.0 GiB/s"
+
+
+# --- watch_status() loop -------------------------------------------------
+
+
+def _healthy_snapshot(**overrides: object) -> StatusSnapshot:
+    defaults: dict[str, object] = dict(
+        schema_version="1",
+        generated_at=None,
+        health=Health.HEALTHY,
+        connected=True,
+        host=None,
+        qbittorrent_version="5.0.1",
+        api_version="2.9.3",
+        counts=TransferCounts(1, 0, 1, 1, 0, 0, 0, 0),
+        rates=TransferRates(0, 0),
+        alerts=(),
+    )
+    defaults.update(overrides)
+    if defaults["generated_at"] is None:
+        defaults["generated_at"] = datetime.now(UTC)
+    return StatusSnapshot(**defaults)  # type: ignore[arg-type]
+
+
+def test_watch_status_reuses_the_injected_collector_every_iteration() -> None:
+    """Ensure each loop iteration calls the same injected `collect`."""
+    clock = _FakeClock()
+    call_count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal call_count
+        call_count += 1
+        if call_count > 4:
+            raise _StopWatch
+        return _healthy_snapshot()
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: None,
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert call_count == 5
+
+
+def test_watch_status_emits_snapshots_in_order() -> None:
+    """Ensure snapshots reach `emit` in the same order they were collected."""
+    clock = _FakeClock()
+    emitted: list[Health] = []
+    healths = [Health.HEALTHY, Health.WARNING, Health.CRITICAL]
+
+    def collect() -> StatusSnapshot:
+        if not healths:
+            raise _StopWatch
+        return _healthy_snapshot(health=healths.pop(0))
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: emitted.append(snapshot.health),
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert emitted == [Health.HEALTHY, Health.WARNING, Health.CRITICAL]
+
+
+def test_watch_status_uses_the_injected_sleep() -> None:
+    """Ensure the loop waits via the injected `sleep`, not a real delay."""
+    clock = _FakeClock()
+    count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal count
+        count += 1
+        if count > 2:
+            raise _StopWatch
+        return _healthy_snapshot()
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: None,
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert clock.sleep_calls
+    assert all(delay == pytest.approx(1.0) for delay in clock.sleep_calls)
+
+
+def test_watch_status_never_requests_a_negative_sleep() -> None:
+    """Ensure a slow collection never causes a negative sleep request."""
+    clock = _FakeClock()
+    count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal count
+        count += 1
+        clock.now += 5.0  # slower than the 1.0s interval
+        if count > 3:
+            raise _StopWatch
+        return _healthy_snapshot()
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: None,
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert clock.sleep_calls == []
+
+
+def test_watch_status_targets_cycle_start_to_avoid_drift() -> None:
+    """Ensure the sleep duration accounts for time already spent collecting."""
+    clock = _FakeClock()
+    count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal count
+        count += 1
+        clock.now += 0.4
+        if count > 1:
+            raise _StopWatch
+        return _healthy_snapshot()
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: None,
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert clock.sleep_calls == [pytest.approx(0.6)]
+
+
+def test_watch_status_never_overlaps_collection() -> None:
+    """Ensure a new collection never starts before the previous one finished.
+
+    The loop is a plain synchronous `while True`, so overlap is
+    structurally impossible; this pins that invariant down with an
+    explicit re-entrancy guard so a future change introducing real
+    concurrency would be caught here.
+    """
+    clock = _FakeClock()
+    in_progress = False
+    count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal in_progress, count
+        assert not in_progress, "collect() re-entered before it returned"
+        in_progress = True
+        count += 1
+        snapshot = _healthy_snapshot()
+        in_progress = False
+        if count > 3:
+            raise _StopWatch
+        return snapshot
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: None,
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+
+def test_watch_status_continues_through_unavailable_snapshots() -> None:
+    """Ensure repeated `unavailable` snapshots never stop the loop."""
+    clock = _FakeClock()
+    emitted: list[Health] = []
+    count = 0
+
+    def collect() -> StatusSnapshot:
+        nonlocal count
+        count += 1
+        if count > 4:
+            raise _StopWatch
+        return build_unavailable_snapshot(
+            code="qbittorrent_unavailable", message="temporary blip"
+        )
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: emitted.append(snapshot.health),
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert emitted == [Health.UNAVAILABLE] * 4
+
+
+def test_watch_status_recovers_to_healthy_after_unavailable() -> None:
+    """Ensure a later successful collection produces a healthy snapshot."""
+    clock = _FakeClock()
+    emitted: list[Health] = []
+    outcomes = [
+        build_unavailable_snapshot(
+            code="qbittorrent_unavailable", message="temporary blip"
+        ),
+        _healthy_snapshot(health=Health.HEALTHY),
+    ]
+
+    def collect() -> StatusSnapshot:
+        if not outcomes:
+            raise _StopWatch
+        return outcomes.pop(0)
+
+    with pytest.raises(_StopWatch):
+        watch_status(
+            collect=collect,
+            emit=lambda snapshot: emitted.append(snapshot.health),
+            interval=1.0,
+            sleep=clock.sleep,
+            now=clock.monotonic,
+        )
+
+    assert emitted == [Health.UNAVAILABLE, Health.HEALTHY]

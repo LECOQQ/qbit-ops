@@ -126,6 +126,41 @@ MUTATION_APPLY_ARGV: list[list[str]] = [
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["torrents", "pause", "--all"],
+        ["torrents", "resume", "--all"],
+        ["torrents", "start", "--all"],
+        ["torrents", "reannounce", "--all"],
+    ],
+    ids=lambda argv: " ".join(argv),
+)
+def test_filterless_bulk_actions_never_call_torrents_trackers_for_progress(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    """Ensure driving a progress bar never triggers a torrents_trackers() call.
+
+    Bulk torrent actions without `--tracker` have nothing that
+    legitimately calls `torrents_trackers()` — the progress bar's total
+    comes from the already-fetched torrent list, not a per-torrent
+    tracker lookup. This pins that down explicitly so a future change to
+    the progress plumbing cannot silently reintroduce an N+1 scan just
+    to compute a total or advance a bar. (`torrents list` and `trackers
+    *` legitimately call `torrents_trackers()` once per torrent — that
+    is real per-item work the progress bar reports on, not progress
+    overhead — see `test_read_only_command_calls_are_identical_*` below.)
+    """
+    client = _run_and_capture_calls(
+        runner, configure_qbit_backend, monkeypatch, argv, interactive=True
+    )
+
+    assert client.torrents_trackers_calls == 0
+
+
+@pytest.mark.parametrize(
     "argv", READ_ONLY_ARGV, ids=lambda argv: " ".join(argv)
 )
 def test_read_only_command_calls_are_identical_with_and_without_progress(

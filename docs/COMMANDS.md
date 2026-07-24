@@ -9,6 +9,7 @@ drop the `poetry run` prefix.
 ## Table of Contents
 
 - [Status](#status)
+- [Status Watch Mode](#status-watch-mode)
 - [Connection & Config](#connection--config)
 - [Torrents](#torrents)
 - [Trackers](#trackers)
@@ -57,6 +58,109 @@ with an explicit non-default `--format` is a validation error (exit `4`).
 `--quiet` is only available on `status`: it is the only read-only command
 whose exit code carries information beyond success/failure — see
 [`--quiet` scope](#quiet-scope) below.
+
+## Status Watch Mode
+
+```bash
+poetry run qbit-ops status --watch
+poetry run qbit-ops status --watch --interval 10
+poetry run qbit-ops status --watch --format jsonl
+```
+
+`--watch` repeatedly refreshes the same `status` snapshot until
+interrupted (`Ctrl+C`). It reuses `collect_status_snapshot()` and the
+existing health calculation unchanged, every refresh — there is no
+second status model and no duplicated health/alert logic; watch mode
+only adds a collect → render/serialize → wait loop around the exact
+same snapshot.
+
+**`--interval FLOAT`** — seconds between the *start* of one refresh and
+the start of the next (a monotonic clock is used, so a slow collection
+does not accumulate drift; a collection slower than the interval starts
+its next attempt immediately, never sleeping a negative amount).
+Defaults to `5.0`. Must be strictly positive and finite: `0`, negative,
+`nan`, and `inf`/`-inf` are all rejected before any qBittorrent API
+call. Only valid together with `--watch`; `--interval` without `--watch`
+is rejected as invalid usage.
+
+**Supported formats: `table` and `jsonl` only.** `--watch --format json`
+and `--watch --format csv` are rejected before connecting to
+qBittorrent — a repeated stream of snapshots cannot honestly masquerade
+as one JSON document or one CSV table, unlike one-shot `status`, which
+supports all four formats.
+
+**`--quiet` is rejected with `--watch`.** `--quiet` exists for one-shot
+healthchecks where only the exit code matters; a watch that runs
+indefinitely and prints nothing has no output contract left to have.
+One-shot `status --quiet` is unaffected.
+
+### Table watch
+
+Uses a persistent Rich `Live` display (`screen=False`: no full-screen
+alternate-buffer mode) that redraws the same view in place on every
+refresh, instead of appending a new table to scrollback each time. This
+is deliberately **not** the transient spinner/progress bar used
+elsewhere (`docs/COMMANDS.md#progress--spinner-behavior`) — that helper
+is for "working, briefly, then gone"; this display is intentionally
+persistent for the whole life of the watch loop. On top of the existing
+status view it shows the refresh interval, an iteration counter, and
+the snapshot's own `generated_at` timestamp as "last refresh":
+
+```text
+qbit-ops · healthy
+watching · refresh every 5s · iteration 12 · last refresh 2026-07-24 22:42:44 UTC
+
+  qBittorrent
+Version   5.0.1
+...
+```
+
+The first version simply replaces the displayed snapshot on each
+refresh — no diffing, no history, no charts or sparklines, no alert
+acknowledgement.
+
+### JSONL watch
+
+Each refresh writes exactly one compact JSON object (the same schema as
+one-shot `--format jsonl`, `schema_version: "1"`) followed by one
+newline, and the stream is flushed immediately after — safe to pipe into
+`jq`, `tail -f`, or a log collector. A successful iteration never writes
+anything to stderr and never emits ANSI/Rich decoration, identical to
+the machine-readable silence contract for one-shot commands (see
+[Machine-Readable Silence Contract](#machine-readable-silence-contract)).
+
+### Temporary failures and recovery
+
+A watch survives temporary qBittorrent trouble: connection loss,
+authentication failure, or API unavailability discovered *during* the
+loop produce an `unavailable` snapshot (same `build_unavailable_snapshot`
+used by one-shot `status`) and the loop keeps retrying at the configured
+interval — it never stops on the first blip, and later successful
+collections recover to a normal snapshot automatically. Local invalid
+configuration (a missing or malformed `.env`) is checked once, before
+the loop starts, and terminates immediately instead of retrying forever
+against a failure that cannot self-heal. An unexpected error that is
+**not** a recognized connection/authentication/API failure (i.e. a real
+bug, not a temporary remote condition) is never silently swallowed as
+"unavailable" forever: it stops the watch with a clear message.
+
+### Exit codes differ from one-shot `status`
+
+One-shot `status` exit codes report **health** (see [Exit
+Codes](#exit-codes)). A running watch cannot continuously update the
+process's exit code, and a warning/critical/unavailable snapshot must
+never stop the loop — so `--watch` uses an unrelated, small set of
+**process** exit codes instead:
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Clean, user-requested stop (`Ctrl+C`). |
+| `4` | Invalid CLI usage, or local configuration invalid before the loop started. |
+| `1` | Unexpected fatal error (not a temporary remote failure). |
+
+`Ctrl+C` stops the loop, closes the `Live` display (table mode) or ends
+after the last complete JSONL line, restores the terminal, and never
+prints a traceback.
 
 ## Connection & Config
 
@@ -463,7 +567,7 @@ A progress bar is never shown with a fabricated or unknown total (no
 
 | Command | Feedback | Why |
 | --- | --- | --- |
-| `status` | Spinner | Single bounded snapshot collection (4 fixed API calls). |
+| `status` | Spinner | Single bounded snapshot collection (4 fixed API calls). `status --watch` uses a persistent `Live` display instead — see [Status Watch Mode](#status-watch-mode); the two are never combined. |
 | `connection check` | Spinner | One connection attempt. |
 | `config doctor` | Spinner | One connection attempt plus two version reads. |
 | `torrents list` (incl. `--category`/`--tracker`) | Progress bar | One `torrents_trackers()` call per torrent. |
@@ -727,3 +831,8 @@ its own codes (documented in `docs/DECISIONS.md`, 2026-07-24):
 
 If both a warning and a critical condition are present, `status` reports
 `critical` (the most severe).
+
+This health-based mapping applies to **one-shot** `status` only.
+`status --watch` uses a separate, small set of process exit codes — see
+["Exit codes differ from one-shot `status`"](#exit-codes-differ-from-one-shot-status)
+in [Status Watch Mode](#status-watch-mode).

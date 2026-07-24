@@ -2,10 +2,12 @@
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from rich.console import Console
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -198,8 +200,8 @@ _MUTATION_STATUS_LABELS: dict[MutationStatus, str] = {
 }
 
 
-def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
-    """Print a modification summary, highlighting the mutation status.
+def _build_summary_table(rows: dict[str, Any], title: str = "Summary") -> Table:
+    """Build a two-column summary table, highlighting the mutation status.
 
     A `"status"` key, if present, must be a `MutationStatus` — see
     `docs/COMMANDS.md#mutation-risk--confirmation-policy` for what each
@@ -221,7 +223,12 @@ def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
     if status is not None:
         table.add_row("status", _MUTATION_STATUS_LABELS[status])
 
-    console.print(table)
+    return table
+
+
+def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
+    """Print a summary table built by `_build_summary_table`."""
+    console.print(_build_summary_table(rows, title))
 
 
 def print_table(
@@ -265,20 +272,54 @@ def format_byte_rate(bytes_per_second: int) -> str:
     return f"{value:.1f} {unit}/s"
 
 
-def render_status_table(snapshot: StatusSnapshot) -> None:
-    """Render a status snapshot as a concise Rich table view."""
+@dataclass(frozen=True)
+class WatchRenderContext:
+    """Presentation-only context for one `status --watch` table refresh.
+
+    Deliberately not part of `StatusSnapshot`: refresh interval and
+    iteration count are watch-loop bookkeeping, not part of the
+    one-shot status model. `StatusSnapshot.generated_at` already
+    carries the last-refresh timestamp, so it is not duplicated here.
+    """
+
+    interval: float
+    iteration: int
+
+
+def build_status_renderable(
+    snapshot: StatusSnapshot,
+    *,
+    watch: WatchRenderContext | None = None,
+) -> RenderableType:
+    """Build the status view as a single Rich renderable.
+
+    Shared by `render_status_table()` (one-shot, prints once) and
+    `live_status_display()` (`status --watch`, updates a persistent
+    `Live` region in place) so both render identically from the same
+    `StatusSnapshot` and never duplicate the health calculation.
+    """
     style = _HEALTH_STYLES[snapshot.health]
     health_label = f"[{style}]{snapshot.health.value}[/{style}]"
-    console.print(f"[bold]qbit-ops[/bold] · {health_label}")
-    console.print()
+    parts: list[RenderableType] = [f"[bold]qbit-ops[/bold] · {health_label}"]
 
-    print_summary(
-        {
-            "Version": snapshot.qbittorrent_version or "unknown",
-            "API": snapshot.api_version or "unknown",
-            "Connected": "yes" if snapshot.connected else "no",
-        },
-        title="qBittorrent",
+    if watch is not None:
+        refreshed_at = snapshot.generated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        parts.append(
+            f"[dim]watching · refresh every {watch.interval:g}s · "
+            f"iteration {watch.iteration} · last refresh {refreshed_at}"
+            "[/dim]"
+        )
+
+    parts.append("")
+    parts.append(
+        _build_summary_table(
+            {
+                "Version": snapshot.qbittorrent_version or "unknown",
+                "API": snapshot.api_version or "unknown",
+                "Connected": "yes" if snapshot.connected else "no",
+            },
+            title="qBittorrent",
+        )
     )
 
     transfer_rows: dict[str, Any] = {
@@ -292,20 +333,65 @@ def render_status_table(snapshot: StatusSnapshot) -> None:
     }
     if snapshot.counts.unknown:
         transfer_rows["Unknown"] = snapshot.counts.unknown
-    print_summary(transfer_rows, title="Transfers")
+    parts.append(_build_summary_table(transfer_rows, title="Transfers"))
 
-    print_summary(
-        {
-            "Download": format_byte_rate(
-                snapshot.rates.download_bytes_per_second
-            ),
-            "Upload": format_byte_rate(snapshot.rates.upload_bytes_per_second),
-        },
-        title="Rates",
+    parts.append(
+        _build_summary_table(
+            {
+                "Download": format_byte_rate(
+                    snapshot.rates.download_bytes_per_second
+                ),
+                "Upload": format_byte_rate(
+                    snapshot.rates.upload_bytes_per_second
+                ),
+            },
+            title="Rates",
+        )
     )
 
     if snapshot.alerts:
-        console.print()
-        console.print("[bold]Alerts[/bold]")
+        parts.append("")
+        parts.append("[bold]Alerts[/bold]")
         for alert in snapshot.alerts:
-            console.print(f"  {alert.message}")
+            parts.append(f"  {alert.message}")
+
+    return Group(*parts)
+
+
+def render_status_table(snapshot: StatusSnapshot) -> None:
+    """Render a status snapshot as a concise Rich table view."""
+    console.print(build_status_renderable(snapshot))
+
+
+@contextmanager
+def live_status_display() -> (
+    Generator[Callable[[StatusSnapshot, WatchRenderContext], None]]
+):
+    """Show a persistent, in-place status display for `status --watch`.
+
+    Uses Rich `Live` with `screen=False` — no full-screen alternate
+    buffer — so the terminal stays scrollable and remains usable after
+    exit; each refresh replaces the previous render in place instead of
+    appending a new table to scrollback. Distinct from
+    `transient_spinner`/`transient_progress`: this display is
+    intentionally persistent for the lifetime of the watch loop rather
+    than a transient "while working" indicator, and is never used
+    together with them. `Live.__exit__` always restores the cursor and
+    terminal state, on normal completion, an exception, or
+    `KeyboardInterrupt`.
+    """
+    with Live(
+        console=console,
+        screen=False,
+        transient=False,
+        auto_refresh=False,
+    ) as live:
+
+        def _update(
+            snapshot: StatusSnapshot,
+            watch: WatchRenderContext,
+        ) -> None:
+            live.update(build_status_renderable(snapshot, watch=watch))
+            live.refresh()
+
+        yield _update

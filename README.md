@@ -27,6 +27,8 @@ qbit-ops trackers replace-passkey \
 - 📊 **`status`** — a bounded, read-only operational snapshot (connection,
   transfer counts, alerts) with stable health-based exit codes, in
   table/JSON/JSONL/CSV.
+- 🔁 **`status --watch`** — live-refreshing status in place (table) or as a
+  flushed JSONL stream, on the same snapshot model, until `Ctrl+C`.
 - 🔍 **Audit** torrents, categories, trackers and connectivity — one shared
   `--format table|json|jsonl|csv` across every read-only command.
 - 🧭 **Bulk torrent control** — pause, resume, start, reannounce, targeted
@@ -139,6 +141,10 @@ qbit-ops status
 #   Connected     yes
 # ...
 qbit-ops status --quiet; echo $?   # healthchecks: 0 healthy, 1 warning, 2 critical, 3 unavailable
+
+qbit-ops status --watch                       # refresh in place every 5s until Ctrl+C
+qbit-ops status --watch --interval 10
+qbit-ops status --watch --format jsonl | jq .  # one flushed JSON object per line
 
 qbit-ops connection check
 qbit-ops config doctor

@@ -3,6 +3,9 @@
 import csv
 import io
 import json
+import math
+import sys
+import time
 from collections.abc import Callable
 from enum import IntEnum, StrEnum
 from pathlib import Path
@@ -36,6 +39,7 @@ from app.status import (
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
     status_exit_code,
+    watch_status,
 )
 from app.torrents import (
     BulkTorrentActionPlan,
@@ -70,7 +74,9 @@ from app.trackers import (
 )
 from app.ui import (
     OutputFormat,
+    WatchRenderContext,
     confirm,
+    live_status_display,
     print_ambiguous_hash_error,
     print_applied,
     print_cancelled,
@@ -84,6 +90,7 @@ from app.ui import (
 )
 
 PROJECT_NAME = "qbit-ops"
+DEFAULT_STATUS_WATCH_INTERVAL_SECONDS = 5.0
 
 app = typer.Typer(add_completion=True, help="Administer qBittorrent.")
 config_app = typer.Typer(help="Inspect qbit-ops configuration.")
@@ -118,6 +125,14 @@ class StatusExitCode(IntEnum):
     different semantics (0-3 map to `app.status.Health`; 4 is reserved
     for invalid local configuration or invalid CLI usage). Other
     commands keep `ExitCode` until a later consolidation decision.
+
+    `status --watch` does **not** use this health mapping: a running
+    watch cannot continuously update the process exit code, and
+    warning/critical/unavailable snapshots must never stop the loop. Its
+    process exit code instead reports how the *process* ended: `0` for
+    a clean user interrupt (`Ctrl+C`), `INVALID_USAGE` (4) for a
+    pre-loop CLI/configuration failure, and `ExitCode.ERROR` (1) for an
+    unexpected fatal error. See `docs/COMMANDS.md`.
     """
 
     HEALTHY = 0
@@ -223,14 +238,59 @@ def status(
             ),
         ),
     ] = False,
+    watch: Annotated[
+        bool,
+        typer.Option(
+            "--watch",
+            help="Repeatedly refresh the snapshot until interrupted.",
+        ),
+    ] = False,
+    interval: Annotated[
+        float | None,
+        typer.Option(
+            "--interval",
+            help=(
+                "Seconds between refreshes with --watch "
+                f"(default: {DEFAULT_STATUS_WATCH_INTERVAL_SECONDS:g})."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Show a bounded operational snapshot of the qBittorrent instance."""
     _validate_format_support("status", output_format)
+
+    if watch:
+        if quiet:
+            _fail_status_usage(
+                "--quiet cannot be combined with --watch: a watch that "
+                "never prints anything has no meaningful output contract."
+            )
+        if output_format not in (OutputFormat.table, OutputFormat.jsonl):
+            _fail_status_usage(
+                f"--format {output_format.value} is not supported with "
+                "--watch. Supported formats: jsonl, table."
+            )
+
+        resolved_interval = (
+            interval
+            if interval is not None
+            else DEFAULT_STATUS_WATCH_INTERVAL_SECONDS
+        )
+        if not (resolved_interval > 0) or math.isinf(resolved_interval):
+            _fail_status_usage(
+                "--interval must be a finite, positive number of seconds."
+            )
+
+        _run_status_watch(output_format, resolved_interval)
+        return
+
+    if interval is not None:
+        _fail_status_usage("--interval requires --watch.")
+
     if quiet and output_format != OutputFormat.table:
-        print_error(
+        _fail_status_usage(
             "Use --quiet on its own; it already suppresses --format output."
         )
-        raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
 
     enabled = progress_enabled(
         output_format=output_format,
@@ -1888,6 +1948,114 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
         )
 
 
+def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
+    """Collect one snapshot for `status --watch`.
+
+    Mirrors `_collect_status_snapshot_safely()`'s connection handling,
+    but only degrades to an `unavailable` snapshot for *recoverable*
+    failures: `RuntimeError` (covers `QbitAuthenticationError` and
+    `QbitConnectionError`, both defined as `RuntimeError` subclasses)
+    and `OSError` (covers every `qbittorrentapi` exception raised
+    directly from a post-login API call — `APIConnectionError` and
+    everything derived from it, e.g. `LoginFailed`, HTTP errors, are
+    themselves `OSError` subclasses). Never prints to stderr on this
+    path: the unavailable snapshot's own health/alert already carries
+    the failure, and repeating it there would spam stderr on every
+    retry — see docs/DECISIONS.md.
+
+    Any other exception is an unexpected programming error, not a
+    remote/temporary failure, and is deliberately left to propagate so
+    the watch loop stops instead of silently reporting "unavailable"
+    forever.
+    """
+    try:
+        client = _create_qbit_client()
+        return collect_status_snapshot(client, host=host)
+    except QbitAuthenticationError as error:
+        return build_unavailable_snapshot(
+            code="authentication_failed",
+            message=str(error),
+            host=host,
+        )
+    except (RuntimeError, OSError) as error:
+        return build_unavailable_snapshot(
+            code="qbittorrent_unavailable",
+            message=str(error),
+            host=host,
+        )
+
+
+def _emit_status_jsonl(snapshot: StatusSnapshot) -> None:
+    """Emit one status snapshot as a single, immediately flushed JSONL line."""
+    typer.echo(json.dumps(snapshot_to_json_dict(snapshot), sort_keys=True))
+    sys.stdout.flush()
+
+
+def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
+    """Run `status --watch`: repeatedly collect, then render or serialize.
+
+    Reuses `collect_status_snapshot`/`build_unavailable_snapshot`
+    unchanged via `watch_status()` (`app/status.py`) — no second status
+    model, no duplicated health calculation, no duplicated alerts or
+    rate formatting. Local invalid configuration is checked exactly
+    once, before the loop starts, and terminates immediately
+    (`StatusExitCode.INVALID_USAGE`); temporary remote failures
+    discovered *during* the loop instead produce an `unavailable`
+    snapshot each time and the loop keeps retrying — see
+    `_collect_status_snapshot_for_watch`.
+
+    Exit codes here are unrelated to `StatusExitCode`'s health mapping:
+    see `StatusExitCode`'s docstring. A clean `Ctrl+C` exits `0`; an
+    unexpected fatal error exits `ExitCode.ERROR` with a clear message
+    instead of a raw traceback.
+    """
+    try:
+        config = load_qbit_config()
+    except ConfigError as error:
+        _fail_status_usage(f"Configuration error: {error}")
+
+    host = config.host
+    iteration = 0
+
+    def _collect() -> StatusSnapshot:
+        return _collect_status_snapshot_for_watch(host)
+
+    try:
+        if output_format is OutputFormat.table:
+            with live_status_display() as update_display:
+
+                def _emit_table(snapshot: StatusSnapshot) -> None:
+                    nonlocal iteration
+                    iteration += 1
+                    update_display(
+                        snapshot,
+                        WatchRenderContext(
+                            interval=interval, iteration=iteration
+                        ),
+                    )
+
+                watch_status(
+                    collect=_collect,
+                    emit=_emit_table,
+                    interval=interval,
+                    sleep=time.sleep,
+                    now=time.monotonic,
+                )
+        else:
+            watch_status(
+                collect=_collect,
+                emit=_emit_status_jsonl,
+                interval=interval,
+                sleep=time.sleep,
+                now=time.monotonic,
+            )
+    except KeyboardInterrupt:
+        raise typer.Exit(code=ExitCode.SUCCESS) from None
+    except Exception as error:
+        print_error(f"Unexpected error in status --watch: {error}")
+        raise typer.Exit(code=ExitCode.ERROR) from error
+
+
 def _render_status(
     snapshot: StatusSnapshot,
     output_format: OutputFormat,
@@ -2302,6 +2470,17 @@ def _fail(message: str) -> NoReturn:
     """Print an actionable error and exit with a failure code."""
     print_error(message)
     raise typer.Exit(code=ExitCode.ERROR)
+
+
+def _fail_status_usage(message: str) -> NoReturn:
+    """Print an actionable error and exit with `status`'s invalid-usage code.
+
+    `status` (one-shot and `--watch`) uses `StatusExitCode`, not the
+    shared `ExitCode`, for local CLI/configuration validation failures —
+    see `StatusExitCode`'s docstring.
+    """
+    print_error(message)
+    raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
 
 
 def _fail_ambiguous_hash(error: AmbiguousTorrentHashError) -> NoReturn:
