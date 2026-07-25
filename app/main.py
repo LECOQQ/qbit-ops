@@ -630,7 +630,7 @@ def tui(
     search, and safe focused-torrent details -- no mutation is
     reachable. Requires the optional `tui` extra, installed from a
     repository checkout (`qbit-ops` is not published on PyPI --
-    `pipx install "qbit-ops[tui]"` alone will always fail); Textual is
+    `pipx install "qbit-ops\\[tui]"` alone will always fail); Textual is
     imported lazily here so no other command ever loads it. See
     docs/COMMANDS.md ("TUI") for controls and
     docs/TUI_ARCHITECTURE_REVIEW.md for the architecture.
@@ -644,14 +644,23 @@ def tui(
     try:
         import textual  # noqa: F401
     except ModuleNotFoundError:
+        # Deliberately no literal URL here: `_fail()` -> `print_error()`
+        # runs every message through `sanitize_tracker_text()`
+        # unconditionally (see docs/PHILOSOPHY.md §15), which redacts
+        # any URL-shaped text on sight, tracker or not -- a real
+        # `https://github.com/...` clone URL here was silently replaced
+        # with "<redacted-url>" in practice (found via the packaging
+        # verification in docs/DECISIONS.md, worker-hardening phase),
+        # defeating the remediation. Point at the README instead, which
+        # is never sanitized.
         _fail(
             "The TUI requires the optional 'tui' extra, which is not "
             "installed.\n\n"
             'qbit-ops is not published on PyPI, so "pipx install '
             'qbit-ops\\[tui]" alone will not work -- install from a '
-            "repository checkout instead:\n"
-            "  git clone https://github.com/LECOQQ/qbit-ops.git && "
-            "cd qbit-ops\n"
+            "repository checkout instead (see README.md, section "
+            '"Install", for the clone URL):\n'
+            "  cd <your qbit-ops checkout>\n"
             "  pipx uninstall qbit-ops  # only if already installed "
             "without the extra\n"
             r'  pipx install ".\[tui]"'

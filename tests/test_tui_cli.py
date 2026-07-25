@@ -62,7 +62,14 @@ def test_tui_missing_extra_fails_before_creating_a_client(
     # docs/DECISIONS.md, 2026-07-25 "pipx install qbit-ops[tui] échoue").
     assert "not published on PyPI" in result.stderr
     assert 'pipx install ".[tui]"' in result.stderr
-    assert "git clone" in result.stderr
+    # Deliberately no literal URL in the message: `print_error()` runs
+    # every message through `sanitize_tracker_text()` unconditionally,
+    # which redacts any URL-shaped text on sight -- a real clone URL
+    # here would silently become "<redacted-url>", defeating the
+    # remediation (found via packaging verification, see
+    # docs/DECISIONS.md, worker-hardening phase).
+    assert "redacted" not in result.stderr.lower()
+    assert "README.md" in result.stderr
 
 
 def test_tui_rejects_non_positive_interval(runner: CliRunner) -> None:
