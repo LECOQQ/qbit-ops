@@ -628,10 +628,12 @@ def tui(
 
     Read-only: status header, torrent table, shared filters, read-only
     search, and safe focused-torrent details -- no mutation is
-    reachable. Requires the optional `tui` extra (`pipx install
-    "qbit-ops[tui]"`); Textual is imported lazily here so no other
-    command ever loads it. See docs/COMMANDS.md ("TUI") for controls
-    and docs/TUI_ARCHITECTURE_REVIEW.md for the architecture.
+    reachable. Requires the optional `tui` extra, installed from a
+    repository checkout (`qbit-ops` is not published on PyPI --
+    `pipx install "qbit-ops[tui]"` alone will always fail); Textual is
+    imported lazily here so no other command ever loads it. See
+    docs/COMMANDS.md ("TUI") for controls and
+    docs/TUI_ARCHITECTURE_REVIEW.md for the architecture.
     """
     if not (interval > 0) or math.isinf(interval):
         _fail(
@@ -643,10 +645,17 @@ def tui(
         import textual  # noqa: F401
     except ModuleNotFoundError:
         _fail(
-            "The TUI requires the optional 'tui' extra.\n\n"
-            "Install it with:\n"
-            r'  pipx install "qbit-ops\[tui]"'
-            "\n"
+            "The TUI requires the optional 'tui' extra, which is not "
+            "installed.\n\n"
+            'qbit-ops is not published on PyPI, so "pipx install '
+            'qbit-ops\\[tui]" alone will not work -- install from a '
+            "repository checkout instead:\n"
+            "  git clone https://github.com/LECOQQ/qbit-ops.git && "
+            "cd qbit-ops\n"
+            "  pipx uninstall qbit-ops  # only if already installed "
+            "without the extra\n"
+            r'  pipx install ".\[tui]"'
+            "\n\n"
             "or, for local development:\n"
             "  poetry install --extras tui",
             ErrorCategory.CONFIGURATION,

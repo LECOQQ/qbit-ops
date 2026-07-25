@@ -55,9 +55,14 @@ def test_tui_missing_extra_fails_before_creating_a_client(
 
     assert result.exit_code == ExitCode.ERROR
     assert client_created["called"] is False
-    assert "pipx install" in result.stderr
-    assert "qbit-ops[tui]" in result.stderr
     assert "Traceback" not in result.stderr
+    # The remediation must not suggest a bare "pipx install qbit-ops[tui]"
+    # as something to actually run -- qbit-ops is not on PyPI, and that
+    # exact command was reported to fail in practice (see
+    # docs/DECISIONS.md, 2026-07-25 "pipx install qbit-ops[tui] échoue").
+    assert "not published on PyPI" in result.stderr
+    assert 'pipx install ".[tui]"' in result.stderr
+    assert "git clone" in result.stderr
 
 
 def test_tui_rejects_non_positive_interval(runner: CliRunner) -> None:

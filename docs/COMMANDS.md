@@ -331,13 +331,41 @@ not just a runtime one (`tests/test_tui_security.py`).
 
 ### Optional dependency
 
-The TUI requires the optional `tui` extra ([Install](../README.md#-install)):
+The TUI requires the optional `tui` extra. **`qbit-ops` is not
+published on PyPI** — every install form below is a *path*
+(`.`/`'.[tui]'`), run from inside a cloned repository checkout, never a
+bare package name. `pipx install "qbit-ops[tui]"` (no path) always
+fails with "No matching distribution found", since that syntax tells
+`pip`/`pipx` to look the package up on PyPI, where it does not exist.
 
 ```bash
-pipx install "qbit-ops[tui]"
-# or, for local development:
-poetry install --extras tui
+git clone https://github.com/LECOQQ/qbit-ops.git && cd qbit-ops
+
+# local development (short form of --extras)
+poetry install -E tui
+poetry run qbit-ops tui
+
+# a fresh pipx install
+pipx install '.[tui]'
+
+# an editable checkout, tracking the git clone instead of copying it
+pipx install --editable '.[tui]'
 ```
+
+**Upgrading an existing `pipx` install does not add the extra
+automatically.** If `qbit-ops` was originally installed with plain
+`pipx install .` (no `[tui]`), `pipx reinstall`/`pipx upgrade` will
+*not* retroactively pull in Textual — `pipx` remembers the package spec
+used at install time. Uninstall and reinstall with the extra instead
+(from the cloned repo):
+
+```bash
+pipx uninstall qbit-ops
+pipx install '.[tui]'
+```
+
+Quoting `'.[tui]'` is required in most shells (`zsh` in particular)
+since an unquoted `[tui]` is glob-expanded.
 
 Every other command works identically whether or not this extra is
 installed, and never imports Textual — `qbit-ops tui` imports it
@@ -348,10 +376,14 @@ traceback:
 
 ```console
 $ qbit-ops tui
-✗ ERROR The TUI requires the optional 'tui' extra.
+✗ ERROR The TUI requires the optional 'tui' extra, which is not installed.
 
-Install it with:
-  pipx install "qbit-ops[tui]"
+qbit-ops is not published on PyPI, so "pipx install qbit-ops[tui]" alone
+will not work -- install from a repository checkout instead:
+  git clone https://github.com/LECOQQ/qbit-ops.git && cd qbit-ops
+  pipx uninstall qbit-ops  # only if already installed without the extra
+  pipx install ".[tui]"
+
 or, for local development:
   poetry install --extras tui
 ```
@@ -360,13 +392,23 @@ or, for local development:
 
 ```text
 up/down, j/k   navigate torrents
-/              search by name (read-only, substring, case-insensitive)
-f              focus the filters panel
-enter          open/toggle the details panel (narrow terminals)
+/              open a search box (Enter to apply, Esc to close)
+f              open filters (inline at normal width, a modal when narrow)
+enter          open the focused torrent's details (narrow terminals only)
 r              refresh the focused torrent's tracker details
-?              toggle help
+esc            close a modal/help/search box, or return focus to the list
+?              open help (a real modal, listing only working bindings)
 q              quit
 ```
+
+`q` quits from the torrent list, the details panel, and any Checkbox —
+but while a text box (search, or a filter's category/state field) has
+focus, typing `q` inserts the literal character instead, exactly like
+any other letter (a category can legitimately be named "queue"); press
+`Esc` first to return to the torrent list, then `q`. This is standard
+text-editing behavior, not a bug — Textual's `Input` widget consumes
+every printable character itself, before any single-key binding (this
+project's or Textual's own) can intercept it.
 
 Filters use the exact same fields, tokens, and AND/OR combination rules
 as [Torrent Filters](#torrent-filters) (`--category`, `--state`,
@@ -377,6 +419,37 @@ on torrent name: it never resolves to a single mutation target the way
 `torrents inspect --name`'s fuzzy scoring does, and it never triggers a
 qBittorrent API call. Neither filters nor search ever call
 `torrents_trackers()`.
+
+The active filter and search are always shown as one concise line above
+the torrent table:
+
+```text
+146 shown / 1105 · stalled
+24 shown / 1105 · category: films · stalled · search: ubuntu
+```
+
+Textual's built-in command palette (`Ctrl+P`) is disabled — it has no
+qbit-ops commands yet and only added a confusing `^p palette` hint to
+the footer. It may return once there is something meaningful to put in
+it.
+
+### Narrow-terminal layout
+
+Below 100 columns, the Filters and Details panels are not shown inline
+(there is no room), but every read-only capability they provide stays
+reachable:
+
+* `f` opens Filters in a modal dialog instead of an inline panel —
+  the same fields, same live application, same `Esc` to close.
+* `enter` opens the currently focused torrent's Details in a modal
+  dialog.
+* `Esc` closes either modal and returns to the torrent list.
+
+Resizing between wide and narrow (and back) never loses your place: the
+torrent list, its scroll position, and the focused torrent are
+unaffected, no qBittorrent API call is triggered by a resize alone, and
+a widget that becomes hidden by the layout change is never left
+focused-but-invisible — focus moves back to the torrent list instead.
 
 ### Refresh model
 
@@ -393,9 +466,11 @@ calls.
 Focusing a torrent (via keyboard navigation) fetches that torrent's
 tracker details with **at most one** `torrents_trackers()` call — never
 a scan of every torrent, and never called again automatically on the
-next periodic tick. The Details panel shows when tracker details were
-last fetched; press `r` to refresh them manually without waiting for a
-new focus change.
+next periodic tick. The Details panel (inline or modal) shows when
+tracker details were last fetched; press `r` to refresh them manually
+without waiting for a new focus change. `r` is silently ignored when no
+torrent is focused (e.g. an empty filter result) — it never fabricates
+a request.
 
 ### Stale data and failure states
 
