@@ -300,6 +300,42 @@ def test_focus_hidden_by_filter_change_is_cleared() -> None:
     assert controller.state.focused_tracker_details is None
 
 
+def test_search_matches_full_hash_case_insensitively() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search(torrent_hash.upper())
+
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == ["Debian ISO"]
+
+
+def test_search_matches_leading_hash_prefix_only() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="deadbeef" + "0" * 32, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search("DEADBEEF")
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == ["Debian ISO"]
+
+    controller.set_search("eadbeef")  # not a leading prefix
+    assert controller.state.visible is not None
+    assert controller.state.visible.matched == ()
+
+
 def test_focus_hidden_by_search_is_cleared() -> None:
     torrent_hash = "a" * 40
     client = FakeQbitClient(

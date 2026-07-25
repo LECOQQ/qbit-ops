@@ -812,11 +812,25 @@ class QbitOpsTuiApp(App[None]):
         self._render_details_panels()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "search-input":
+            self._apply_search(event.value)
+            return
         try:
             panel = event.input.query_ancestor(FiltersPanel)
         except NoMatches:
             return
         self._apply_filters_from_panel(panel)
+
+    def _apply_search(self, text: str) -> None:
+        """Apply search text live, as it's typed -- no I/O, no debounce
+        needed since `TuiController.set_search` is pure in-memory
+        filtering. If this hides the currently focused torrent,
+        `set_search` itself clears focus/details/any pending detail
+        fetch (see `TuiController._reconcile_focus`/`clear_focus`)."""
+        self.controller.set_search(text)
+        self._render_filter_summary()
+        self._render_table()
+        self._render_details_panels()
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         try:
@@ -852,19 +866,23 @@ class QbitOpsTuiApp(App[None]):
             existing.first().focus()
             return
         search = Input(
-            placeholder="Search by name... (Enter to apply, Esc to close)",
+            placeholder="Search name or hash... (Enter/Esc to close)",
+            value=self.controller.state.search,
             id="search-input",
         )
         self.query_one("#status-header", StatusHeader).mount(search)
         search.focus()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "search-input":
-            self.controller.set_search(event.value)
-            self._render_filter_summary()
-            self._render_table()
-            self._render_details_panels()
-            self.query_one("#torrents", DataTable).focus()
+    # `Input.Submitted` (its `enter` -> `submit` binding) never actually
+    # fires for `#search-input`: the App's own `enter` binding
+    # (`action_open_details`) is `priority=True`, and Textual resolves
+    # priority App bindings *before* dispatching the key to the focused
+    # widget's own declarative bindings at all -- verified empirically.
+    # This differs from a printable character, which `Input._on_key`
+    # consumes directly (bypassing bindings resolution entirely, see the
+    # `escape` binding's comment above), so typing itself is unaffected.
+    # `action_open_details` below handles `enter` on the search input
+    # directly instead of relying on this handler.
 
     def action_open_filters(self) -> None:
         if self._is_narrow():
@@ -881,6 +899,21 @@ class QbitOpsTuiApp(App[None]):
         self.query_one("#torrents", DataTable).action_cursor_up()
 
     def action_open_details(self) -> None:
+        """Bound to `enter` with `priority=True` (see the `BINDINGS`
+        comment), so this always fires before any focused widget's own
+        `enter` binding -- including `#search-input`'s native
+        `submit`, which as a result never actually runs (see
+        `mount_search_input`'s neighboring comment). Handle that case
+        explicitly: search already applies live as the user types (see
+        `on_input_changed`/`_apply_search`), so `enter` here only needs
+        to keep the current text and return focus to the table, not
+        open Details.
+        """
+        focused = self.focused
+        if isinstance(focused, Input) and focused.id == "search-input":
+            self.query_one("#torrents", DataTable).focus()
+            return
+
         if self._is_narrow():
             self.push_screen(DetailsScreen())
         else:
@@ -930,7 +963,7 @@ class QbitOpsTuiApp(App[None]):
 
 _HELP_TEXT = """[bold]Keys[/bold]
 up/down, j/k   navigate torrents
-/              search by name (Enter to apply, Esc to close)
+/              search by name or hash, live as you type (Enter/Esc to close)
 f              open filters
 enter          open torrent details (narrow layout)
 r              refresh focused torrent's tracker details

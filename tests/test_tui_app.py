@@ -1255,3 +1255,346 @@ async def test_internal_error_shows_distinct_fatal_state() -> None:
         assert "unavailable" not in str(banner.content).lower()
         # Must not be classified as a recoverable connection issue.
         assert app.controller.state.connection != ConnectionState.RECONNECTING
+
+
+# --- 10. Search acceptance contract ------------------------------------------
+#
+# `/` used to mount a real `Input` but Enter never worked: the App's own
+# `enter` binding (`action_open_details`) is `priority=True`, which wins
+# key resolution *before* the focused `Input`'s own declarative `enter`
+# -> `submit` binding is ever considered (Textual dispatch order,
+# verified empirically -- see `action_open_details`'s docstring). Typed
+# characters were never affected (`Input._on_key` consumes printable
+# characters directly, bypassing bindings resolution), but the search
+# text was never actually applied because `on_input_submitted` -- the
+# only place that called `TuiController.set_search` -- was unreachable.
+# Fixed by filtering live on every keystroke (`on_input_changed`) and
+# having `action_open_details` special-case the search input's `enter`
+# to simply return focus to the table. See docs/DECISIONS.md.
+
+
+def _visible_names(app: QbitOpsTuiApp) -> list[str]:
+    visible = app.controller.state.visible
+    assert visible is not None
+    return [t.name for t in visible.matched]
+
+
+async def _type_into_search(pilot: Pilot[None], text: str) -> None:
+    await pilot.press("slash")
+    await pilot.pause()
+    for char in text:
+        await pilot.press(char)
+    await pilot.pause()
+
+
+async def test_slash_focuses_a_visible_editable_input_from_the_table() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+
+        await pilot.press("slash")
+        await pilot.pause()
+
+        search = app.query_one("#search-input", Input)
+        assert isinstance(search, Input)
+        assert search.has_focus
+
+
+async def test_typed_characters_appear_in_the_search_input() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "ubu")
+
+        search = app.query_one("#search-input", Input)
+        assert search.value == "ubu"
+
+
+async def test_search_matches_name_substring_case_insensitively() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "UBUNTU")
+
+        assert _visible_names(app) == ["Ubuntu ISO"]
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 1
+
+
+async def test_search_matches_full_infohash() -> None:
+    full_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=full_hash, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, full_hash.upper())
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_search_matches_leading_infohash_prefix() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="deadbeef" + "0" * 32, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "DEADBEEF")
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_search_ignores_non_leading_hash_substring() -> None:
+    """Hashes use leading-prefix matching only, never a full substring
+    scan -- typing a fragment from the middle of a hash must not match."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="00000000deadbeef" + "0" * 24, name="Alpha")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "deadbeef")
+
+        assert _visible_names(app) == []
+
+
+async def test_search_and_filters_combine_with_and_semantics() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO", category="films"),
+            make_torrent(hash="b" * 40, name="Debian Extra", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        category_input = app.query_one("FiltersPanel .f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("escape")  # back to the table before opening search
+        await pilot.pause()
+
+        await _type_into_search(pilot, "debian")
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_zero_result_search_does_not_crash() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Debian ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "nonexistent-torrent-name")
+
+        assert _visible_names(app) == []
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 0
+
+        # The app is still alive and processing input afterwards.
+        await pilot.press("j")
+        await pilot.pause()
+
+
+async def test_clearing_search_repopulates_rows() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "debian")
+        assert _visible_names(app) == ["Debian ISO"]
+
+        search = app.query_one("#search-input", Input)
+        search.focus()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+
+        assert search.value == ""
+        assert sorted(_visible_names(app)) == ["Debian ISO", "Ubuntu ISO"]
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 2
+
+
+async def test_search_performs_zero_qbittorrent_api_calls() -> None:
+    """Typing, applying, and clearing search must never itself call the
+    qBittorrent client -- `torrents_info`/`transfer_info`/`app_version`/
+    `app_web_api_version` (the periodic refresh budget) stay exactly as
+    they were. `torrents_trackers` is deliberately excluded from this
+    comparison: narrowing the table can move the row cursor, and
+    focus-change detail fetches are a separate, already-covered concern
+    (see `test_filter_and_search_changes_perform_zero_api_calls`).
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        scans_before = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+
+        await _type_into_search(pilot, "ubuntu")
+        await pilot.press("enter")
+        await pilot.pause()
+        search = app.query_one("#search-input", Input)
+        search.focus()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+
+        scans_after = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+        assert scans_after == scans_before
+
+
+async def test_global_bindings_ignore_keystrokes_while_search_is_focused() -> (
+    None
+):
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        search = app.query_one("#search-input", Input)
+
+        await pilot.press("q", "f", "r", "question_mark")
+        await pilot.pause()
+
+        assert search.value == "qfr?"
+        assert app._exit is False
+        assert len(app.screen_stack) == 1
+        assert search.has_focus
+
+
+async def test_search_remains_available_in_narrow_layout() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=NARROW_SIZE) as pilot:
+        await _settle(app, pilot)
+        assert "narrow" in app.screen.classes
+
+        await pilot.press("slash")
+        await pilot.pause()
+
+        search = app.query_one("#search-input", Input)
+        assert search.has_focus
+        await pilot.press("u", "b", "u")
+        await pilot.pause()
+
+        assert search.value == "ubu"
+        assert _visible_names(app) == ["Ubuntu ISO"]
+
+
+async def test_search_hiding_focused_torrent_clears_focus_and_details() -> None:
+    """Search narrows to zero matches, so the table stays empty and no
+    subsequent `RowHighlighted` re-focuses a different, still-visible
+    torrent -- isolates the invalidation itself from the DataTable's
+    own row-0-autoselect behavior (covered separately by
+    `test_zero_result_search_does_not_crash`)."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Debian ISO")],
+        trackers_by_hash={"a" * 40: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        table = app.query_one("#torrents", DataTable)
+        table.move_cursor(row=0)
+        await _settle(app, pilot)
+        assert app.controller.state.focused_hash == "a" * 40
+
+        await _type_into_search(pilot, "nonexistent-torrent-name")
+
+        assert app.controller.state.focused_hash is None
+        assert app.controller.state.focused_tracker_details is None
+        assert table.row_count == 0
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        assert "No torrent focused" in _static_text(details)
+
+
+async def test_enter_in_search_keeps_text_and_returns_focus_to_table() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "ubuntu")
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+        search = app.query_one("#search-input", Input)
+        assert search.value == "ubuntu"
+        assert app.controller.state.search == "ubuntu"
+        # Details never opened for the search's `enter`.
+        assert len(app.screen_stack) == 1
+
+
+async def test_escape_leaves_search_editing_without_crashing() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _type_into_search(pilot, "ubuntu")
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert len(app.query("#search-input")) == 0
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+        # App still alive and responsive afterwards.
+        await pilot.press("j")
+        await pilot.pause()

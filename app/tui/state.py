@@ -296,7 +296,17 @@ class TuiController:
         self._reconcile_focus()
 
     def set_search(self, text: str) -> None:
-        """Apply read-only substring search text. Zero qBittorrent API calls."""
+        """Apply read-only search text against name and hash.
+
+        Matches a torrent whose name contains `text` as a case-
+        insensitive substring, OR whose hash starts with `text`
+        case-insensitively (covers both a full hash and a leading
+        prefix) -- no fuzzy scoring, no ambiguity error, since this is a
+        read-only list filter, not a target-selection lookup. Zero
+        qBittorrent API calls. If the currently focused torrent no
+        longer matches, `_reconcile_focus()` clears focus (and any
+        pending detail fetch) for it -- see `clear_focus()`.
+        """
         self.state.search = text
         self._recompute_visible()
         self._reconcile_focus()
@@ -484,6 +494,7 @@ class TuiController:
                 torrent
                 for torrent in filtered.matched
                 if needle in torrent.name.casefold()
+                or torrent.hash.casefold().startswith(needle)
             )
         else:
             matched = filtered.matched
