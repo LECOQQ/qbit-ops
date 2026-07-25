@@ -95,9 +95,37 @@ def collect_status_snapshot(
     """
     qbittorrent_version = _get_optional_value(client, "app_version")
     api_version = _get_optional_value(client, "app_web_api_version")
-    rates = _collect_transfer_rates(client)
+    transfer_info_data = client.transfer_info()
     torrents = list(client.torrents_info())
 
+    return build_status_snapshot_from_data(
+        qbittorrent_version=qbittorrent_version,
+        api_version=api_version,
+        transfer_info_data=transfer_info_data,
+        torrents=torrents,
+        host=host,
+    )
+
+
+def build_status_snapshot_from_data(
+    *,
+    qbittorrent_version: str | None,
+    api_version: str | None,
+    transfer_info_data: Any,
+    torrents: list[Any],
+    host: str | None = None,
+) -> StatusSnapshot:
+    """Build a status snapshot from already-collected qBittorrent data.
+
+    Performs zero API calls itself: every value is derived from data the
+    caller already fetched. This is the seam a caller collecting a
+    torrent list for another purpose in the same cycle (e.g. a TUI's
+    periodic refresh, see `app.app_services`) uses to avoid a second,
+    redundant `torrents_info()`/`transfer_info()` call --
+    `collect_status_snapshot` itself is just this function plus the four
+    API calls that feed it.
+    """
+    rates = _transfer_rates_from_data(transfer_info_data)
     counts, unknown_states = _count_torrents(torrents)
     alerts = _build_alerts(counts, unknown_states)
     health = _compute_health(counts)
@@ -274,9 +302,8 @@ def snapshot_to_csv_rows(
     return rows
 
 
-def _collect_transfer_rates(client: Any) -> TransferRates:
-    """Read global transfer speeds from a single `transfer_info()` call."""
-    transfer_info = client.transfer_info()
+def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
+    """Build transfer rates from an already-fetched `transfer_info()` result."""
     return TransferRates(
         download_bytes_per_second=_as_int(
             transfer_info.get("dl_info_speed", 0)
