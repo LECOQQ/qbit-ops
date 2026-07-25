@@ -10,7 +10,11 @@ status`, `explain`) are covered by their own CLI test files; this file
 only asserts the shared contract layered on top of them.
 """
 
+import ast
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 import typer
@@ -366,3 +370,68 @@ def test_exit_code_table_matches_registered_commands() -> None:
             registered.add(f"{group.name} {command_name}")
 
     assert registered == set(EXIT_CODE_TABLE)
+
+
+# --- TUI readiness: app.errors is importable without Typer/Rich/app.main ---
+
+
+def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
+    """Ensure `app/errors.py` never imports Typer, Rich, or `app.main`.
+
+    A static source check, independent of what other test modules have
+    already imported into `sys.modules` in this process (see the
+    subprocess-based test below for the dynamic guarantee).
+    """
+    import app.errors
+
+    source = Path(app.errors.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+
+    forbidden_roots = {"typer", "rich", "click"}
+    assert not any(
+        module == root or module.startswith(f"{root}.")
+        for module in imported_modules
+        for root in forbidden_roots
+    )
+    assert "app.main" not in imported_modules
+
+
+def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
+    None
+):
+    """Ensure a minimal module can import `app.errors` without Typer/Rich.
+
+    Proves the dependency direction a future TUI relies on: `app.errors`
+    (domain/application error model) must never pull in the CLI layer
+    (`app.main`, Typer command registration) or a rendering library, so
+    a TUI can depend on it directly instead of on `app.main`. Runs in a
+    fresh subprocess so already-imported modules from the rest of this
+    test session cannot mask a real dependency.
+    """
+    script = (
+        "import sys\n"
+        "from app.errors import AppError, ErrorCategory\n"
+        "assert not any(\n"
+        "    name == 'typer' or name.startswith('typer.')\n"
+        "    or name == 'rich' or name.startswith('rich.')\n"
+        "    or name == 'click' or name.startswith('click.')\n"
+        "    or name == 'app.main'\n"
+        "    for name in sys.modules\n"
+        "), sorted(sys.modules)\n"
+        "print('ok', AppError, ErrorCategory)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parent.parent,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout
