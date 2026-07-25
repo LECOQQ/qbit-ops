@@ -34,75 +34,34 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from enum import StrEnum
-from re import compile as re_compile
 from typing import Any
 
-from app.qbit_fields import get_field, get_field_as_string
+from app.qbit_fields import get_field_as_string
 from app.torrents import TorrentFilter, select_torrents, torrent_filter_to_dict
-from app.trackers import normalize_tracker_host
+from app.trackers import (
+    TrackerHealth,
+    classify_raw_tracker_status,
+    get_raw_tracker_status,
+    normalize_tracker_host,
+    sanitize_tracker_text,
+)
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "TrackerHealth",
+    "classify_raw_tracker_status",
+    "TrackerEndpointObservation",
+    "TrackerAggregate",
+    "TrackerStatusReport",
+    "tracker_status_exit_code",
+    "collect_tracker_status",
+    "tracker_aggregate_to_dict",
+    "tracker_status_report_to_dict",
+    "TRACKER_STATUS_CSV_FIELDNAMES",
+    "tracker_status_report_to_csv_rows",
+]
 
 SCHEMA_VERSION = "1"
-
-_URL_PATTERN = re_compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://\S+")
-
-
-class TrackerHealth(StrEnum):
-    """Classify the health of one tracker endpoint or aggregate."""
-
-    HEALTHY = "healthy"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    DISABLED = "disabled"
-    UNKNOWN = "unknown"
-    UNAVAILABLE = "unavailable"
-
-
-# Maps qBittorrent's real `TrackerStatus` int codes (see
-# `qbittorrentapi.definitions.TrackerStatus`) to a `TrackerHealth`.
-# UPDATING is treated as HEALTHY, not WARNING: it means an announce is
-# actively in flight, the most transient state qBittorrent reports, and a
-# normal working instance can be caught mid-announce at any moment --
-# scoring it WARNING would make a healthy instance flap between exit
-# codes 0 and 1 for no operational reason. NOT_CONTACTED is WARNING
-# rather than UNKNOWN: it is a recognized, well-understood state (no
-# announce attempted yet), just not yet a confirmed-good one.
-_RAW_STATUS_HEALTH: dict[int, TrackerHealth] = {
-    0: TrackerHealth.DISABLED,  # DISABLED
-    1: TrackerHealth.WARNING,  # NOT_CONTACTED
-    2: TrackerHealth.HEALTHY,  # WORKING
-    3: TrackerHealth.HEALTHY,  # UPDATING
-    4: TrackerHealth.CRITICAL,  # NOT_WORKING
-    5: TrackerHealth.CRITICAL,  # TRACKER_ERROR
-    6: TrackerHealth.CRITICAL,  # UNREACHABLE
-}
-
-
-def classify_raw_tracker_status(
-    raw_status: int | str | None,
-) -> tuple[TrackerHealth, bool | None]:
-    """Map one raw qBittorrent tracker status to `(health, enabled)`.
-
-    `enabled` is `False` only when the endpoint is confirmed disabled,
-    `True` when it is confirmed active (any of the six non-disabled
-    codes), and `None` when the raw value could not be classified at
-    all -- never guessed. Unrecognized or unparsable values map to
-    `TrackerHealth.UNKNOWN` rather than inventing a severity: qbit-ops
-    only claims certainty it actually has.
-    """
-    if isinstance(raw_status, str) and raw_status.strip().lower() == "disabled":
-        return TrackerHealth.DISABLED, False
-
-    try:
-        code = int(raw_status)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return TrackerHealth.UNKNOWN, None
-
-    health = _RAW_STATUS_HEALTH.get(code, TrackerHealth.UNKNOWN)
-    if health is TrackerHealth.UNKNOWN:
-        return health, None
-
-    return health, health is not TrackerHealth.DISABLED
 
 
 @dataclass(frozen=True)
@@ -175,29 +134,6 @@ def _is_pseudo_tracker_url(url: str) -> bool:
     """
     stripped = url.strip()
     return stripped.startswith("**") and stripped.endswith("**")
-
-
-def _sanitize_tracker_message(message: str) -> str:
-    """Strip embedded URLs (and any passkey they carry) from a message.
-
-    The single funnel every observed `msg` field must pass through
-    before becoming a `representative_message`: qBittorrent's
-    tracker-reported error text can echo back the announce URL it tried,
-    which may contain a passkey in its path or query string.
-    """
-    return _URL_PATTERN.sub("[redacted-url]", message).strip()
-
-
-def _read_raw_status(raw_tracker: Any) -> int | str | None:
-    """Read a tracker's raw `status` field, preserving its original type."""
-    value = get_field(raw_tracker, "status", None)
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, int):
-        return value
-    return str(value)
 
 
 # Fallback order for `representative_message` when the aggregate's own
@@ -400,11 +336,11 @@ def collect_tracker_status(
                 continue
 
             identity = normalize_tracker_host(url)
-            raw_status = _read_raw_status(raw_tracker)
+            raw_status = get_raw_tracker_status(raw_tracker)
             health, enabled = classify_raw_tracker_status(raw_status)
             raw_message = get_field_as_string(raw_tracker, "msg")
             message = (
-                _sanitize_tracker_message(raw_message) if raw_message else None
+                sanitize_tracker_text(raw_message) if raw_message else None
             )
 
             observation = TrackerEndpointObservation(

@@ -26,7 +26,14 @@ from app.torrent_states import (
     is_completed_torrent,
     is_stopped_state,
 )
-from app.trackers import has_tracker_host, normalize_tracker_host
+from app.trackers import (
+    classify_raw_tracker_status,
+    describe_tracker_url,
+    get_raw_tracker_status,
+    has_tracker_host,
+    normalize_tracker_host,
+    sanitize_tracker_text,
+)
 
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce"]
 
@@ -757,11 +764,17 @@ def _build_torrent_details(
     torrent: Any,
     torrent_hash: str,
 ) -> dict[str, Any]:
-    """Build a detailed torrent report with tracker information."""
-    trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
-    active_tracker_count = sum(
-        1 for tracker in trackers if not tracker["disabled"]
-    )
+    """Build a detailed torrent report with tracker information.
+
+    Uses `_get_safe_tracker_details`, not `_get_tracker_details`: this
+    feeds `torrents inspect`, an ordinary read command, so trackers must
+    be reduced to secret-free structural fields the same way
+    `trackers inspect` does. Raw announce URLs are only ever returned by
+    `list_torrents_with_trackers`, which feeds the sensitive `backup
+    export` artifact.
+    """
+    trackers = _get_safe_tracker_details(client.torrents_trackers(torrent_hash))
+    active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])
 
     return {
         "hash": torrent_hash,
@@ -799,7 +812,13 @@ def _score_name_match(name: str, query: str) -> float:
 
 
 def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
-    """Extract tracker URLs and status from qBittorrent tracker objects."""
+    """Extract tracker URLs and status from qBittorrent tracker objects.
+
+    Returns the literal announce URL, so it is only safe for
+    `list_torrents_with_trackers` (the `backup export` artifact), never
+    for an ordinary command's rendered output. Use
+    `_get_safe_tracker_details` for anything user-facing.
+    """
     tracker_details: list[dict[str, Any]] = []
 
     for tracker in trackers:
@@ -812,6 +831,41 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
                 "url": tracker_url,
                 "status": get_field_as_string(tracker, "status"),
                 "disabled": _is_disabled_tracker(tracker),
+            }
+        )
+
+    return tracker_details
+
+
+def _get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
+    """Extract secret-free structural tracker details for display.
+
+    Mirrors the endpoint shape `inspect_tracker` in `app.trackers`
+    produces: a normalized identity plus structural URL fields, never a
+    raw announce URL, passkey, or query value.
+    """
+    tracker_details: list[dict[str, Any]] = []
+
+    for tracker in trackers:
+        tracker_url = get_field_as_string(tracker, "url")
+        if tracker_url == "":
+            continue
+
+        safe_identity = describe_tracker_url(tracker_url)
+        raw_status = get_raw_tracker_status(tracker)
+        health, enabled = classify_raw_tracker_status(raw_status)
+        raw_message = get_field_as_string(tracker, "msg")
+        message = sanitize_tracker_text(raw_message) if raw_message else None
+
+        tracker_details.append(
+            {
+                "tracker": safe_identity.identity,
+                "health": health.value,
+                "enabled": enabled,
+                "scheme": safe_identity.scheme,
+                "path_shape": safe_identity.path_shape,
+                "query_keys": list(safe_identity.query_keys),
+                "message": message,
             }
         )
 

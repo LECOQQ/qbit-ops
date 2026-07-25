@@ -373,7 +373,7 @@ def test_representative_message_strips_embedded_urls() -> None:
     message = report.trackers[0].representative_message
     assert message is not None
     assert "SUPERSECRETPASSKEY" not in message
-    assert "[redacted-url]" in message
+    assert "<redacted-url>" in message
 
 
 def test_representative_message_prefers_the_most_severe_endpoint() -> None:

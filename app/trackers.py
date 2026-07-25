@@ -1,11 +1,233 @@
-"""Manage qBittorrent trackers."""
+"""Manage qBittorrent trackers.
 
+Every tracker-facing surface in this project must route through the
+sanitization primitives defined here before rendering anything derived
+from a tracker announce URL or a tracker-provided message:
+`redact_tracker_identity` (scheme + host[:port], for mutation
+confirmation text), `normalize_tracker_host` (bare host[:port], the
+shared public identity used everywhere else), `describe_tracker_url` (a
+fuller structural breakdown for read-only inspection), and
+`sanitize_tracker_text` (strips URLs/userinfo out of free-form text such
+as upstream exception messages or qBittorrent-reported tracker
+messages). None of these ever rely on matching a specific configured
+password or a known passkey value -- sanitization here is always
+structural (strip anything shaped like a credential-bearing URL), never
+secret-value-specific, so it holds for credentials this project has
+never seen.
+"""
+
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 TrackerMatchMode = Literal["exact", "without-query"]
+
+# Matches a scheme-prefixed URL (`https://...`, `udp://...`) up to the
+# next whitespace -- the primary shape a raw announce URL takes inside
+# an otherwise-safe message (e.g. an upstream connection-error string
+# that echoes the request URL it failed to reach).
+_URL_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://\S+")
+
+# Matches the same shape but percent-encoded (as it would appear inside
+# a qBittorrent Web API request URL that itself embeds a tracker
+# announce URL as a query value, e.g.
+# `.../addTrackers?urls=https%3A%2F%2Ftracker.example%2FSECRET`) --
+# an HTTP client's own exception text can echo this verbatim.
+_PERCENT_ENCODED_URL_PATTERN = re.compile(r"[a-zA-Z0-9]*%3[Aa]%2[Ff]%2[Ff]\S+")
+
+# Matches a bare `userinfo@host[:port]` fragment with no scheme prefix
+# (e.g. a URL rendered without its scheme, or manually assembled error
+# text) -- deliberately narrower than a generic `\S+:\S+@\S+` so it
+# does not fire on ordinary prose containing a colon and an "@".
+_BARE_USERINFO_PATTERN = re.compile(
+    r"\b[\w.%+-]+:[\w.%+-]+@[\w.-]+(?::\d+)?\S*"
+)
+
+
+def sanitize_tracker_text(text: str) -> str:
+    """Strip URLs, percent-encoded URLs, and bare userinfo from free text.
+
+    The single funnel for any free-form text that might embed a tracker
+    announce URL or credentials before it reaches a user: upstream
+    `qbittorrentapi`/HTTP-client exception messages, qBittorrent's own
+    tracker-reported `msg` field, and configuration error text (a
+    misconfigured `QBIT_HOST` can itself carry userinfo). Purely
+    structural -- it recognizes URL/userinfo *shape*, never a specific
+    password or passkey value, so it also redacts secrets this project
+    has never seen.
+    """
+    sanitized = _URL_PATTERN.sub("<redacted-url>", text)
+    sanitized = _PERCENT_ENCODED_URL_PATTERN.sub("<redacted-url>", sanitized)
+    sanitized = _BARE_USERINFO_PATTERN.sub("<redacted-userinfo>", sanitized)
+    return sanitized.strip()
+
+
+@dataclass(frozen=True)
+class SafeTrackerIdentity:
+    """A tracker announce URL reduced to secret-free structural fields.
+
+    `identity` is always the shared public identity (`host` or
+    `host:port`, `normalize_tracker_host`'s output) or, for a DHT/PeX/LSD
+    pseudo-tracker, its bracketed label (`DHT`/`PeX`/`LSD`) with
+    `scheme`/`host`/`port` left `None`. `path_shape` never reveals path
+    content: every non-empty segment becomes a uniform `<secret>`
+    placeholder -- a segment is never allowlisted as safe merely because
+    it looks like a conventional literal (`announce`, `scrape`), since
+    qbit-ops cannot reliably distinguish a fixed path element from a
+    secret one. `query_keys` carries parameter *names* only, never
+    values.
+    """
+
+    identity: str
+    scheme: str | None
+    host: str | None
+    port: int | None
+    path_shape: str | None
+    query_keys: tuple[str, ...]
+
+
+_PSEUDO_TRACKER_PATTERN = re.compile(r"^\*\*\s*\[(.+?)\]\s*\*\*$")
+
+
+def describe_tracker_url(url: str) -> SafeTrackerIdentity:
+    """Reduce a tracker announce URL to a `SafeTrackerIdentity`.
+
+    Handles qBittorrent's DHT/PeX/LSD pseudo-tracker markers (e.g.
+    `"** [DHT] **"`) specially -- they are not URLs and
+    `normalize_tracker_host` cannot parse them. A malformed or otherwise
+    unparsable value degrades to `identity="unknown"` with every other
+    field `None`/empty rather than raising: this function exists to make
+    safe rendering possible even for data qbit-ops cannot fully make
+    sense of.
+    """
+    stripped = url.strip()
+
+    pseudo_match = _PSEUDO_TRACKER_PATTERN.match(stripped)
+    if pseudo_match is not None:
+        return SafeTrackerIdentity(
+            identity=pseudo_match.group(1).strip(),
+            scheme=None,
+            host=None,
+            port=None,
+            path_shape=None,
+            query_keys=(),
+        )
+
+    try:
+        identity = normalize_tracker_host(stripped)
+    except ValueError:
+        return SafeTrackerIdentity(
+            identity="unknown",
+            scheme=None,
+            host=None,
+            port=None,
+            path_shape=None,
+            query_keys=(),
+        )
+
+    parseable = stripped if "://" in stripped else f"//{stripped}"
+    try:
+        parsed = urlsplit(parseable)
+    except ValueError:
+        return SafeTrackerIdentity(
+            identity=identity,
+            scheme=None,
+            host=None,
+            port=None,
+            path_shape=None,
+            query_keys=(),
+        )
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    path_shape = (
+        "/" + "/".join("<secret>" for _ in segments) if segments else None
+    )
+    query_keys = tuple(
+        sorted(
+            {
+                key
+                for key, _value in parse_qsl(
+                    parsed.query, keep_blank_values=True
+                )
+            }
+        )
+    )
+
+    return SafeTrackerIdentity(
+        identity=identity,
+        scheme=parsed.scheme or None,
+        host=(parsed.hostname or "").lower() or None,
+        port=parsed.port,
+        path_shape=path_shape,
+        query_keys=query_keys,
+    )
+
+
+class TrackerHealth(StrEnum):
+    """Classify the health of one tracker endpoint or aggregate.
+
+    Shared between `inspect_tracker` (per-endpoint) and
+    `app.tracker_status` (per-endpoint and aggregated) so the two
+    read-only tracker views can never disagree about what a raw status
+    code means.
+    """
+
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    CRITICAL = "critical"
+    DISABLED = "disabled"
+    UNKNOWN = "unknown"
+    UNAVAILABLE = "unavailable"
+
+
+# Maps qBittorrent's real `TrackerStatus` int codes (see
+# `qbittorrentapi.definitions.TrackerStatus`) to a `TrackerHealth`.
+# UPDATING is treated as HEALTHY, not WARNING: it means an announce is
+# actively in flight, the most transient state qBittorrent reports, and a
+# normal working instance can be caught mid-announce at any moment --
+# scoring it WARNING would make a healthy instance flap between exit
+# codes 0 and 1 for no operational reason. NOT_CONTACTED is WARNING
+# rather than UNKNOWN: it is a recognized, well-understood state (no
+# announce attempted yet), just not yet a confirmed-good one.
+_RAW_STATUS_HEALTH: dict[int, TrackerHealth] = {
+    0: TrackerHealth.DISABLED,  # DISABLED
+    1: TrackerHealth.WARNING,  # NOT_CONTACTED
+    2: TrackerHealth.HEALTHY,  # WORKING
+    3: TrackerHealth.HEALTHY,  # UPDATING
+    4: TrackerHealth.CRITICAL,  # NOT_WORKING
+    5: TrackerHealth.CRITICAL,  # TRACKER_ERROR
+    6: TrackerHealth.CRITICAL,  # UNREACHABLE
+}
+
+
+def classify_raw_tracker_status(
+    raw_status: int | str | None,
+) -> tuple[TrackerHealth, bool | None]:
+    """Map one raw qBittorrent tracker status to `(health, enabled)`.
+
+    `enabled` is `False` only when the endpoint is confirmed disabled,
+    `True` when it is confirmed active (any of the six non-disabled
+    codes), and `None` when the raw value could not be classified at
+    all -- never guessed. Unrecognized or unparsable values map to
+    `TrackerHealth.UNKNOWN` rather than inventing a severity: qbit-ops
+    only claims certainty it actually has.
+    """
+    if isinstance(raw_status, str) and raw_status.strip().lower() == "disabled":
+        return TrackerHealth.DISABLED, False
+
+    try:
+        code = int(raw_status)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return TrackerHealth.UNKNOWN, None
+
+    health = _RAW_STATUS_HEALTH.get(code, TrackerHealth.UNKNOWN)
+    if health is TrackerHealth.UNKNOWN:
+        return health, None
+
+    return health, health is not TrackerHealth.DISABLED
 
 
 @dataclass(frozen=True)
@@ -133,17 +355,27 @@ class PasskeyReplacementPlan:
 
 
 def redact_tracker_identity(url: str) -> str:
-    """Return a tracker URL reduced to scheme and host for safe display.
+    """Return a tracker URL reduced to scheme and host[:port] for safe display.
 
     Private trackers commonly embed a passkey or other per-user secret
     in the path (e.g. `/announce/<passkey>`) or the query string (e.g.
     `?passkey=<value>`). Guessing which path segment is secret is
     unreliable, so any tracker identity shown in a confirmation prompt
-    or preview is reduced to scheme + host only; the raw URL is still
-    used for the actual API calls.
+    or preview is reduced to scheme + host[:port] only; the raw URL is
+    still used for the actual API calls.
+
+    Deliberately rebuilds `host[:port]` from `urlsplit().hostname`/`.port`
+    rather than using `.netloc` directly: `.netloc` includes any
+    userinfo (`user:pass@host`), which a tracker URL can carry, and
+    which must never reach a confirmation prompt regardless of whether
+    it happens to match the configured qBittorrent password.
     """
     parsed = urlsplit(url.strip())
-    return f"{parsed.scheme}://{parsed.netloc}"
+    host = (parsed.hostname or "").lower()
+    netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+    if parsed.scheme:
+        return f"{parsed.scheme}://{netloc}"
+    return netloc
 
 
 def normalize_tracker_host(value: str) -> str:
@@ -250,7 +482,17 @@ def list_tracker_usage(
     match_mode: TrackerMatchMode = "exact",
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
-    """List normalized trackers and count torrents using each one.
+    """List normalized-but-raw trackers and count torrents using each one.
+
+    Deliberately **not** safe for display: `match_mode="exact"` (the
+    default) preserves the full announce URL's query string, so a
+    result key can still carry a passkey. This exists only to back
+    `backup export`'s `tracker_usage` field -- the project's dedicated
+    restorable-backup artifact, which legitimately needs raw tracker
+    data (see docs/DECISIONS.md). No CLI command renders this
+    function's output directly; `trackers list` uses
+    `app.tracker_status.collect_tracker_status` instead, which is safe
+    by construction.
 
     Calls `client.torrents_trackers()` once per torrent, so
     `on_progress(completed, total)` reports real, known progress through
@@ -291,15 +533,28 @@ def list_tracker_usage(
 def inspect_tracker(
     client: Any,
     tracker: str,
-    match_mode: TrackerMatchMode = "exact",
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """List torrents using a tracker.
+    """List torrents using a tracker, matched by normalized host[:port].
+
+    Read-only, so unlike the mutating tracker commands this never needs
+    qBittorrent's literal stored URL to act on -- matching is always by
+    `normalize_tracker_host` identity, the same one `trackers status`
+    and `torrents list --tracker` use, and there is no `--match` mode to
+    choose. Every endpoint reported is reduced to secret-free structural
+    fields (`SafeTrackerIdentity`, `TrackerHealth`) -- a full announce
+    URL is never present in the returned data, so it can never reach a
+    table, JSON, JSONL, or CSV render. Considers every tracker entry,
+    including disabled ones (so a disabled matching endpoint is still
+    reported, with `enabled: false`), unlike `active_tracker_count`
+    (context only, unrelated to the match) which still counts active
+    endpoints alone.
 
     Calls `client.torrents_trackers()` once per scanned torrent, so
     `on_progress(completed, total)` reports real, known progress through
     that per-torrent work.
     """
+    normalized_identity = describe_tracker_url(tracker).identity
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
@@ -307,16 +562,39 @@ def inspect_tracker(
     for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
-        matching_tracker_urls = _get_matching_tracker_urls(
-            trackers,
-            tracker,
-            match_mode,
-        )
+        raw_trackers = list(client.torrents_trackers(torrent_hash))
+        active_tracker_count = len(_get_active_tracker_urls(raw_trackers))
 
-        if matching_tracker_urls:
+        matching_endpoints: list[dict[str, Any]] = []
+        for raw_tracker in raw_trackers:
+            url = _get_field_as_string(raw_tracker, "url")
+            if url == "":
+                continue
+
+            safe_identity = describe_tracker_url(url)
+            if safe_identity.identity != normalized_identity:
+                continue
+
+            raw_status = get_raw_tracker_status(raw_tracker)
+            health, enabled = classify_raw_tracker_status(raw_status)
+            raw_message = _get_field_as_string(raw_tracker, "msg")
+            message = (
+                sanitize_tracker_text(raw_message) if raw_message else None
+            )
+
+            matching_endpoints.append(
+                {
+                    "raw_status": raw_status,
+                    "health": health.value,
+                    "enabled": enabled,
+                    "message": message,
+                    "scheme": safe_identity.scheme,
+                    "path_shape": safe_identity.path_shape,
+                    "query_keys": list(safe_identity.query_keys),
+                }
+            )
+
+        if matching_endpoints:
             torrents.append(
                 {
                     "hash": torrent_hash,
@@ -325,8 +603,8 @@ def inspect_tracker(
                     "size": _get_field_as_int(torrent, "size"),
                     "progress": _get_field_as_float(torrent, "progress"),
                     "ratio": _get_field_as_float(torrent, "ratio"),
-                    "active_tracker_count": len(trackers),
-                    "matching_tracker_urls": matching_tracker_urls,
+                    "active_tracker_count": active_tracker_count,
+                    "matching_endpoints": matching_endpoints,
                 }
             )
 
@@ -334,8 +612,7 @@ def inspect_tracker(
             on_progress(index, total)
 
     return {
-        "tracker": tracker,
-        "match": match_mode,
+        "tracker": normalized_identity,
         "scanned": total,
         "matched_tracker": len(torrents),
         "torrents": torrents,
@@ -344,10 +621,17 @@ def inspect_tracker(
 
 def export_tracker_state(
     client: Any,
-    match_mode: TrackerMatchMode = "exact",
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """Export active tracker state for every torrent.
+    """Export normalized tracker identities for every torrent.
+
+    Safe by default: every torrent's trackers are reduced to
+    `host[:port]` identities (`describe_tracker_url`), never a full
+    announce URL or passkey. DHT/PeX/LSD pseudo-trackers and otherwise
+    unparsable entries are excluded (`describe_tracker_url(...).host is
+    None` for both). This is distinct from `backup export`, which is
+    this project's dedicated restorable-backup artifact and
+    legitimately carries raw announce URLs -- see docs/DECISIONS.md.
 
     Calls `client.torrents_trackers()` once per torrent, so
     `on_progress(completed, total)` reports real, known progress through
@@ -356,6 +640,7 @@ def export_tracker_state(
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
     torrents: list[dict[str, Any]] = []
+    all_identities: set[str] = set()
 
     for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
@@ -365,22 +650,16 @@ def export_tracker_state(
         )
         normalized_trackers = sorted(
             {
-                normalized_tracker
+                safe.identity
                 for tracker_url in trackers
-                if (
-                    normalized_tracker := normalize_tracker_url(
-                        tracker_url,
-                        match_mode,
-                    )
-                )
-                != ""
+                if (safe := describe_tracker_url(tracker_url)).host is not None
             }
         )
+        all_identities.update(normalized_trackers)
         torrents.append(
             {
                 "hash": torrent_hash,
                 "name": torrent_name,
-                "trackers": trackers,
                 "normalized_trackers": normalized_trackers,
             }
         )
@@ -391,7 +670,7 @@ def export_tracker_state(
     return {
         "summary": {
             "torrents": len(torrents),
-            "match": match_mode,
+            "unique_trackers": len(all_identities),
         },
         "torrents": torrents,
     }
@@ -457,7 +736,7 @@ def apply_tracker_addition(client: Any, plan: TrackerAdditionPlan) -> None:
         except Exception as error:
             raise RuntimeError(
                 f"Failed to add tracker to torrent '{change.name}' "
-                f"({change.hash}): {error}"
+                f"({change.hash}): {sanitize_tracker_text(str(error))}"
             ) from error
 
 
@@ -520,7 +799,7 @@ def apply_tracker_removal(client: Any, plan: TrackerRemovalPlan) -> None:
         except Exception as error:
             raise RuntimeError(
                 f"Failed to remove tracker from torrent '{change.name}' "
-                f"({change.hash}): {error}"
+                f"({change.hash}): {sanitize_tracker_text(str(error))}"
             ) from error
 
 
@@ -620,7 +899,7 @@ def apply_tracker_replacement(
         except Exception as error:
             raise RuntimeError(
                 f"Failed to replace tracker on torrent '{change.name}' "
-                f"({change.hash}): {error}"
+                f"({change.hash}): {sanitize_tracker_text(str(error))}"
             ) from error
 
 
@@ -897,7 +1176,8 @@ def apply_tracker_passkey_replacement(
         except Exception as error:
             raise RuntimeError(
                 "Failed to update tracker passkey on torrent "
-                f"'{change.name}' ({change.hash}): {error}"
+                f"'{change.name}' ({change.hash}): "
+                f"{sanitize_tracker_text(str(error))}"
             ) from error
 
 
@@ -930,6 +1210,26 @@ def _is_disabled_tracker(tracker: Any) -> bool:
     """Return whether qBittorrent reports a tracker as disabled."""
     status = _get_field_as_string(tracker, "status").strip().lower()
     return status in {"0", "disabled"}
+
+
+def get_raw_tracker_status(raw_tracker: Any) -> int | str | None:
+    """Read a tracker's raw `status` field, preserving its original type.
+
+    Shared by `inspect_tracker` and `app.tracker_status.collect_tracker_status`
+    so both feed `classify_raw_tracker_status` the exact same raw shape.
+    """
+    if isinstance(raw_tracker, Mapping):
+        value = raw_tracker.get("status")
+    else:
+        value = getattr(raw_tracker, "status", None)
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return value
+    return str(value)
 
 
 def _ensure_distinct_tracker_identity(

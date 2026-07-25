@@ -83,11 +83,29 @@ qbit-ops trackers replace-passkey \
 - **`--tracker` on `torrents list`/bulk mutations matches by host[:port]
   only** — never the full announce URL, so a passkey embedded in a
   tracker's path or query string is never required or rendered by a
-  filter. Tracker mutation commands (`trackers ...`) are unchanged: they
-  still compare full, normalized URLs (`--match exact|without-query`),
-  since qBittorrent's API needs the exact URL for those operations.
+  filter.
+- **No ordinary command displays a complete tracker announce URL or
+  credential by default.** `trackers list`, `trackers status`, `trackers
+  inspect`, and `trackers export` report only normalized `host[:port]`
+  identities and structural detail (scheme, path *shape*, query
+  parameter *names*) — never a passkey, query value, or userinfo — in
+  table, JSON, JSONL, or CSV. Only the four bulk tracker mutation
+  commands (`add-if-present`/`remove`/`replace`/`replace-passkey`) take
+  and act on a raw tracker URL (`--match exact|without-query`), because
+  qBittorrent's API requires the literal stored URL — and even they
+  never echo it back in a prompt, preview, or summary. The one
+  intentionally sensitive export is `backup export` (needed for a
+  restorable backup); treat its output as a secret, and use `backup diff
+  --reveal-sensitive` only when you explicitly need to see raw values.
+  See [docs/COMMANDS.md](docs/COMMANDS.md#trackers) and
+  [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for the full contract.
 - Credentials never live in `.env`-less environments or CLI arguments — only
   `.env` / environment variables.
+- **Reporting a bug?** Replace any real tracker announce URL, passkey, or
+  credential with a placeholder (`https://tracker.example/announce/
+  REDACTED`) before pasting output into an issue, chat, or log — even
+  though ordinary command output is safe by default, a raw `backup
+  export` file or a copy-pasted `.env` is not.
 
 ## 📦 Install
 
