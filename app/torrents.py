@@ -104,7 +104,11 @@ class SelectedTorrent:
     TUI consumers. `tracker_count` is `None` when tracker data was not
     collected for this selection (no `--tracker` filter was present) --
     distinct from `0`, which means tracker data *was* collected and the
-    torrent legitimately has no active trackers.
+    torrent legitimately has no active trackers. `download_rate`/
+    `upload_rate` (bytes/second, from qBittorrent's own `dlspeed`/
+    `upspeed` fields already present on every `torrents_info()` item --
+    no extra API call) were added for the TUI's per-row rate column
+    (pre-1.0 additive field, see docs/DECISIONS.md).
     """
 
     hash: str
@@ -115,6 +119,8 @@ class SelectedTorrent:
     progress: float
     ratio: float
     tracker_count: int | None
+    download_rate: int
+    upload_rate: int
 
 
 @dataclass(frozen=True)
@@ -210,44 +216,38 @@ def select_torrents(
     lookup otherwise.
     """
     all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
 
+    if not filters.requires_tracker_data:
+        selection = select_torrents_from_items(all_torrents, filters)
+        if on_progress is not None:
+            on_progress(selection.scanned, selection.scanned)
+        return selection
+
+    total = len(all_torrents)
     candidates = [
         torrent
         for torrent in all_torrents
         if _matches_cheap_filters(torrent, filters)
     ]
 
-    needs_tracker_data = filters.requires_tracker_data
     selected: list[SelectedTorrent] = []
-
-    if needs_tracker_data:
-        candidate_total = len(candidates)
-        for index, torrent in enumerate(candidates, start=1):
-            torrent_hash = get_field_as_string(torrent, "hash")
-            active_trackers = _get_active_tracker_urls(
-                client.torrents_trackers(torrent_hash)
-            )
-            if on_progress is not None:
-                on_progress(index, candidate_total)
-
-            # requires_tracker_data implies filters.tracker is not None
-            assert filters.tracker is not None
-            if not has_tracker_host(active_trackers, filters.tracker):
-                continue
-
-            selected.append(
-                _build_selected_torrent(
-                    torrent, tracker_count=len(active_trackers)
-                )
-            )
-    else:
+    candidate_total = len(candidates)
+    for index, torrent in enumerate(candidates, start=1):
+        torrent_hash = get_field_as_string(torrent, "hash")
+        active_trackers = _get_active_tracker_urls(
+            client.torrents_trackers(torrent_hash)
+        )
         if on_progress is not None:
-            on_progress(total, total)
-        selected = [
-            _build_selected_torrent(torrent, tracker_count=None)
-            for torrent in candidates
-        ]
+            on_progress(index, candidate_total)
+
+        # requires_tracker_data implies filters.tracker is not None
+        assert filters.tracker is not None
+        if not has_tracker_host(active_trackers, filters.tracker):
+            continue
+
+        selected.append(
+            _build_selected_torrent(torrent, tracker_count=len(active_trackers))
+        )
 
     selected.sort(key=lambda item: item.name.casefold())
 
@@ -255,7 +255,44 @@ def select_torrents(
         scanned=total,
         matched=tuple(selected),
         filters=filters,
-        tracker_data_collected=needs_tracker_data,
+        tracker_data_collected=True,
+    )
+
+
+def select_torrents_from_items(
+    torrents: Sequence[Any],
+    filters: TorrentFilter,
+) -> TorrentSelection:
+    """Apply only the cheap, `torrents_info()`-shaped filters in memory.
+
+    Never calls the qBittorrent API -- the caller has already fetched
+    `torrents` (typically once per refresh cycle, e.g. a TUI's periodic
+    tick, see `app.app_services`) and wants to (re-)apply filters to it
+    without a second `torrents_info()` round-trip. This never resolves a
+    `--tracker` filter, which needs a per-torrent `torrents_trackers()`
+    lookup this function deliberately cannot perform: pass a filter with
+    `tracker=None` here, and use `select_torrents` (with a client)
+    instead when a tracker filter is required.
+    """
+    if filters.requires_tracker_data:
+        raise ValueError(
+            "select_torrents_from_items cannot resolve a --tracker filter "
+            "without a qBittorrent client; use select_torrents instead."
+        )
+
+    total = len(torrents)
+    selected = [
+        _build_selected_torrent(torrent, tracker_count=None)
+        for torrent in torrents
+        if _matches_cheap_filters(torrent, filters)
+    ]
+    selected.sort(key=lambda item: item.name.casefold())
+
+    return TorrentSelection(
+        scanned=total,
+        matched=tuple(selected),
+        filters=filters,
+        tracker_data_collected=False,
     )
 
 
@@ -350,6 +387,8 @@ def _build_selected_torrent(
         progress=get_field_as_float(torrent, "progress"),
         ratio=get_field_as_float(torrent, "ratio"),
         tracker_count=tracker_count,
+        download_rate=get_field_as_int(torrent, "dlspeed"),
+        upload_rate=get_field_as_int(torrent, "upspeed"),
     )
 
 

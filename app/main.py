@@ -17,6 +17,10 @@ import qbittorrentapi
 import typer
 
 from app import __version__
+from app.app_services import (
+    classify_recoverable_qbit_failure,
+    create_qbit_client,
+)
 from app.backup import (
     BackupExportError,
     diff_backup_exports,
@@ -337,6 +341,7 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
 EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "status": StatusExitCode,
     "doctor": DoctorExitCode,
+    "tui": ExitCode,
     "connection check": ExitCode,
     "torrents list": ExitCode,
     "torrents categories": ExitCode,
@@ -603,6 +608,63 @@ def doctor(
 
     _render_doctor_report(report, output_format)
     raise typer.Exit(code=doctor_exit_code(report.overall_status))
+
+
+@app.command()
+@_catch_internal_errors
+def tui(
+    interval: Annotated[
+        float,
+        typer.Option(
+            "--interval",
+            help=(
+                "Seconds between refreshes (default: "
+                f"{DEFAULT_STATUS_WATCH_INTERVAL_SECONDS:g})."
+            ),
+        ),
+    ] = DEFAULT_STATUS_WATCH_INTERVAL_SECONDS,
+) -> None:
+    """Launch the read-only interactive TUI.
+
+    Read-only: status header, torrent table, shared filters, read-only
+    search, and safe focused-torrent details -- no mutation is
+    reachable. Requires the optional `tui` extra (`pipx install
+    "qbit-ops[tui]"`); Textual is imported lazily here so no other
+    command ever loads it. See docs/COMMANDS.md ("TUI") for controls
+    and docs/TUI_ARCHITECTURE_REVIEW.md for the architecture.
+    """
+    if not (interval > 0) or math.isinf(interval):
+        _fail(
+            "--interval must be a finite, positive number of seconds.",
+            ErrorCategory.INVALID_INPUT,
+        )
+
+    try:
+        import textual  # noqa: F401
+    except ModuleNotFoundError:
+        _fail(
+            "The TUI requires the optional 'tui' extra.\n\n"
+            "Install it with:\n"
+            r'  pipx install "qbit-ops\[tui]"'
+            "\n"
+            "or, for local development:\n"
+            "  poetry install --extras tui",
+            ErrorCategory.CONFIGURATION,
+        )
+
+    from app.tui.app import run_tui
+
+    host: str | None = None
+    try:
+        host = load_qbit_config().host
+    except ConfigError:
+        host = None
+
+    run_tui(
+        client_factory=_create_qbit_client,
+        host=host,
+        refresh_interval=interval,
+    )
 
 
 @torrents_app.command(name="list")
@@ -2354,39 +2416,17 @@ def _run_bulk_torrent_action(
     _exit_if_no_targeted_matches(plan.matched)
 
 
-def _create_qbit_client() -> Any:
-    """Create and authenticate a qBittorrent API client.
+_create_qbit_client = create_qbit_client
+"""Re-export `app.app_services.create_qbit_client` under its former name.
 
-    Never shows a connection spinner or banner: every command already
-    communicates its own progress (a scan spinner, a preview, a
-    summary), so a separate "Connected to qBittorrent" line would only
-    be redundant.
-    """
-    config = load_qbit_config()
-    client = qbittorrentapi.Client(
-        host=config.host,
-        username=config.username,
-        password=config.password,
-    )
-
-    try:
-        client.auth_log_in()
-    except Exception as error:
-        if _is_qbit_error(error, {"LoginFailed"}):
-            raise QbitAuthenticationError(
-                "Authentication to qBittorrent failed. Check QBIT_USER and "
-                "QBIT_PASSWORD."
-            ) from error
-        if _is_qbit_error(error, {"APIConnectionError"}):
-            raise QbitConnectionError(
-                f"Unable to connect to qBittorrent at {config.host}."
-            ) from error
-
-        raise QbitConnectionError(
-            f"Unable to initialize qBittorrent client: {error}"
-        ) from error
-
-    return client
+Moved to `app/app_services.py` in Phase 9's TUI work so a second
+interface (the TUI) can create a qBittorrent client without importing a
+CLI-private symbol from this module -- see docs/TUI_ARCHITECTURE_REVIEW.md,
+finding F2. Kept as a private, callable module attribute here (not just
+removed) so `tests/conftest.py::configure_qbit_backend`, which
+monkeypatches `"app.main._create_qbit_client"` by string path, and every
+existing call site in this module keep working unchanged.
+"""
 
 
 def _collect_doctor_report() -> DoctorReport:
@@ -2493,26 +2533,14 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
     try:
         client = _create_qbit_client()
         return collect_status_snapshot(client, host=host)
-    except QbitAuthenticationError as error:
-        print_error(str(error))
+    except Exception as error:
+        failure = classify_recoverable_qbit_failure(error)
+        if failure is None:
+            raise
+        print_error(failure.message)
         return build_unavailable_snapshot(
-            code="authentication_failed",
-            message=str(error),
-            host=host,
-        )
-    except QbitConnectionError as error:
-        print_error(str(error))
-        return build_unavailable_snapshot(
-            code="qbittorrent_unavailable",
-            message=str(error),
-            host=host,
-        )
-    except OSError as error:
-        message = f"qBittorrent API error: {error}"
-        print_error(message)
-        return build_unavailable_snapshot(
-            code="qbittorrent_unavailable",
-            message=message,
+            code=failure.code,
+            message=failure.message,
             host=host,
         )
 
@@ -2520,17 +2548,12 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
 def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
     """Collect one snapshot for `status --watch`.
 
-    Mirrors `_collect_status_snapshot_safely()`'s connection handling,
-    but only degrades to an `unavailable` snapshot for *recoverable*
-    failures: `RuntimeError` (covers `QbitAuthenticationError` and
-    `QbitConnectionError`, both defined as `RuntimeError` subclasses)
-    and `OSError` (covers every `qbittorrentapi` exception raised
-    directly from a post-login API call — `APIConnectionError` and
-    everything derived from it, e.g. `LoginFailed`, HTTP errors, are
-    themselves `OSError` subclasses). Never prints to stderr on this
-    path: the unavailable snapshot's own health/alert already carries
-    the failure, and repeating it there would spam stderr on every
-    retry — see docs/DECISIONS.md.
+    Mirrors `_collect_status_snapshot_safely()`'s connection handling via
+    the same shared `app.app_services.classify_recoverable_qbit_failure`
+    classifier, but never prints to stderr on this path: the unavailable
+    snapshot's own health/alert already carries the failure, and
+    repeating it there would spam stderr on every retry — see
+    docs/DECISIONS.md.
 
     Any other exception is an unexpected programming error, not a
     remote/temporary failure, and is deliberately left to propagate so
@@ -2540,16 +2563,13 @@ def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
     try:
         client = _create_qbit_client()
         return collect_status_snapshot(client, host=host)
-    except QbitAuthenticationError as error:
+    except Exception as error:
+        failure = classify_recoverable_qbit_failure(error)
+        if failure is None:
+            raise
         return build_unavailable_snapshot(
-            code="authentication_failed",
-            message=str(error),
-            host=host,
-        )
-    except (RuntimeError, OSError) as error:
-        return build_unavailable_snapshot(
-            code="qbittorrent_unavailable",
-            message=str(error),
+            code=failure.code,
+            message=failure.message,
             host=host,
         )
 
@@ -2762,7 +2782,16 @@ def _format_endpoint_summary(endpoint: dict[str, Any]) -> str:
 
 
 def _selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
-    """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict."""
+    """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict.
+
+    `download_rate`/`upload_rate` (bytes/second) are a pre-1.0 additive
+    field (see docs/DECISIONS.md): a new key in `json`/`jsonl` output,
+    never a removal or a change to an existing key's meaning. They are
+    deliberately not added to the `table`/`csv` renderers here -- those
+    were introduced for the TUI's per-row rate column (see
+    docs/TUI_ARCHITECTURE_REVIEW.md), and `torrents list`'s existing
+    table/CSV shape is left untouched.
+    """
     return {
         "hash": torrent.hash,
         "name": torrent.name,
@@ -2772,6 +2801,8 @@ def _selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
         "progress": torrent.progress,
         "ratio": torrent.ratio,
         "tracker_count": torrent.tracker_count,
+        "download_rate": torrent.download_rate,
+        "upload_rate": torrent.upload_rate,
     }
 
 
@@ -3221,11 +3252,6 @@ def _exit_if_backup_diff(report: dict[str, Any]) -> None:
     """Exit explicitly when two exports differ."""
     if has_backup_diff(report):
         raise typer.Exit(code=ExitCode.NO_MATCH)
-
-
-def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
-    """Return whether an exception matches expected qBittorrent errors."""
-    return type(error).__name__ in class_names
 
 
 def _bulk_torrent_summary_rows(
