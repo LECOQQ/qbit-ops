@@ -51,7 +51,9 @@ from app.app_services import (
 )
 from app.config import ConfigError
 from app.errors import AppError, ErrorCategory
+from app.qbit_fields import get_field_as_string
 from app.status import StatusSnapshot
+from app.torrent_states import is_stopped_state
 from app.torrents import (
     SelectedTorrent,
     TorrentFilter,
@@ -78,12 +80,26 @@ class ConnectionState(StrEnum):
     CONFIG_FAILED = "config_failed"
 
 
+class Workspace(StrEnum):
+    """The TUI's two top-level operator workspaces (Overview-first redesign).
+
+    Purely a UI-navigation concern -- switching never triggers a
+    qBittorrent call and never touches `filters`/`search`/`focused_hash`,
+    all of which are preserved across a switch by construction (nothing
+    in `set_workspace` resets them). See docs/DECISIONS.md (Overview
+    redesign phase).
+    """
+
+    OVERVIEW = "overview"
+    TORRENTS = "torrents"
+
+
 @dataclass
 class TuiState:
     """The TUI's complete state, split into three kinds of field.
 
     Authoritative (replaced wholesale by a successful refresh):
-        `status`, `torrent_snapshot`.
+        `status`, `torrent_snapshot`, `stopped_count`.
 
     Derived (recomputed locally from authoritative state + ephemeral UI
     state, never fetched):
@@ -97,6 +113,7 @@ class TuiState:
     connection: ConnectionState = ConnectionState.CONNECTING
     status: StatusSnapshot | None = None
     torrent_snapshot: TorrentSelection | None = None
+    stopped_count: int = 0
     filters: TorrentFilter = field(default_factory=TorrentFilter)
     search: str = ""
     visible: TorrentSelection | None = None
@@ -107,7 +124,7 @@ class TuiState:
     stale: bool = False
     last_successful_refresh: datetime | None = None
     last_error: AppError | None = None
-    active_panel: str = "torrents"
+    workspace: Workspace = Workspace.OVERVIEW
 
     def focused_torrent(self) -> SelectedTorrent | None:
         """Look up the focused torrent's live fields from `visible`.
@@ -196,6 +213,7 @@ class TuiController:
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
         self.state.torrent_snapshot = result.torrents
+        self.state.stopped_count = _count_stopped_torrents(result.raw_torrents)
         self.state.connection = ConnectionState.CONNECTED
         self.state.stale = False
         self.state.last_error = None
@@ -286,6 +304,20 @@ class TuiController:
         """
         self.state.connection = ConnectionState.CONFIG_FAILED
         self.state.last_error = error
+
+    # -- workspace navigation (always local, no I/O) ------------------------
+
+    def set_workspace(self, workspace: Workspace) -> None:
+        """Switch the active workspace. Zero qBittorrent API calls.
+
+        Deliberately touches nothing else: `filters`, `search`,
+        `focused_hash`, and `focused_tracker_details` all survive a
+        workspace switch untouched, per the Overview redesign's explicit
+        "preserves search and filter state" / "preserves the last
+        focused torrent" requirements. `app.tui.app` is responsible for
+        not leaving a widget from the now-hidden workspace focused.
+        """
+        self.state.workspace = workspace
 
     # -- filters / search (always local, no I/O) ---------------------------
 
@@ -506,3 +538,24 @@ class TuiController:
             return
         if self.state.focused_torrent() is None:
             self.clear_focus()
+
+
+def _count_stopped_torrents(raw_torrents: list[Any]) -> int:
+    """Count paused/stopped torrents using the existing state helper.
+
+    Deliberately *not* a new classifier and not folded into
+    `app.status.TransferCounts`: `classify_torrent_state` already
+    reports every paused/stopped torrent under `downloading` or
+    `seeding` (by direction), which is the classification `status`/
+    `torrents list` are built around and must not change. The Overview
+    wants this as an *additional*, overlapping breakdown for operators
+    ("how many of my torrents are just sitting paused"), reusing
+    `app.torrent_states.is_stopped_state` (already the single source of
+    truth for the qBittorrent 4 `paused*` vs 5 `stopped*` naming split)
+    rather than inventing a second state vocabulary.
+    """
+    return sum(
+        1
+        for torrent in raw_torrents
+        if is_stopped_state(get_field_as_string(torrent, "state"))
+    )

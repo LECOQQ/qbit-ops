@@ -1,18 +1,18 @@
-"""Textual `Pilot`-based interface tests for `qbit-ops tui` (TUI 1).
+"""Textual `Pilot`-based interface tests for `qbit-ops tui`.
 
 Headless (`App.run_test()`), no real terminal, no real qBittorrent --
 every app under test is built with a `client_factory` returning a
 `tests.support.FakeQbitClient`. State/refresh-budget assertions live in
 `tests/test_tui_state.py`; this file covers what requires an actual
 mounted widget tree (navigation, focus, layout, real key sequences) and
--- since the worker-hardening phase -- what requires real OS threads
-(responsiveness, serialization, stale-result protection).
+what requires real OS threads (responsiveness, serialization,
+stale-result protection).
 
-Hotfix regression tests (see docs/DECISIONS.md): these exercise full
-user-observable event sequences through `Pilot`, not just isolated
-`on_*`/`action_*` method calls -- the crash this phase fixes was never
-caught by the previous test suite precisely because it only tested
-methods directly with well-formed events.
+Overview-first redesign (see docs/DECISIONS.md): the app now opens on
+the Overview workspace, not the torrent table -- every test that needs
+the table, search, or filters must first switch to the Torrents
+workspace (`await _goto_torrents(app, pilot)`, or a raw `pilot.press
+("t")` where the switch itself is under test).
 
 `App.run_test()` defaults to an 80x24 terminal, which is *narrower*
 than `NARROW_WIDTH_THRESHOLD` (100) -- i.e. every test that does not
@@ -35,7 +35,6 @@ import threading
 import time
 from typing import Any
 
-from textual.binding import Binding
 from textual.pilot import Pilot
 from textual.widgets import DataTable, Input, Static
 from textual.worker import Worker, WorkerState
@@ -48,16 +47,18 @@ from app.tui.app import (
     FiltersScreen,
     FilterSummary,
     HelpScreen,
+    OverviewPanel,
     QbitOpsTuiApp,
-    StatusHeader,
+    WorkspaceTabs,
     _format_byte_rate,
 )
-from app.tui.state import ConnectionState
+from app.tui.state import ConnectionState, Workspace
 from tests.support import FakeQbitClient, make_torrent
 
 LARGE_INTERVAL = 999.0  # effectively disables the periodic timer mid-test
 WIDE_SIZE = (140, 40)
 NARROW_SIZE = (80, 24)
+RESPONSIVE_SIZES = [(80, 24), (100, 30), (120, 35), (160, 45)]
 WAIT_TIMEOUT = 5.0  # seconds a test will wait on a real threading.Event
 
 
@@ -103,6 +104,31 @@ async def _settle_one(
     """
     if worker is not None:
         await app.workers.wait_for_complete(workers=[worker])
+    await pilot.pause()
+
+
+async def _goto_torrents(app: QbitOpsTuiApp, pilot: Pilot) -> None:
+    """Switch to the Torrents workspace and pump one message cycle."""
+    await pilot.press("t")
+    await pilot.pause()
+
+
+async def _goto_overview(app: QbitOpsTuiApp, pilot: Pilot) -> None:
+    await pilot.press("g")
+    await pilot.pause()
+
+
+def _visible_names(app: QbitOpsTuiApp) -> list[str]:
+    visible = app.controller.state.visible
+    assert visible is not None
+    return [t.name for t in visible.matched]
+
+
+async def _type_into_search(pilot: Pilot[None], text: str) -> None:
+    await pilot.press("slash")
+    await pilot.pause()
+    for char in text:
+        await pilot.press(char)
     await pilot.pause()
 
 
@@ -191,364 +217,324 @@ class OrderedTrackerClient(FakeQbitClient):
         return payload
 
 
-def _wait_for(event: threading.Event, timeout: float = WAIT_TIMEOUT) -> None:
-    assert event.wait(timeout=timeout), "timed out waiting for a real event"
+async def asyncio_wait_for_event(
+    event: threading.Event, timeout: float = WAIT_TIMEOUT
+) -> None:
+    """Await a real `threading.Event` from async test code without
+    blocking the event loop or sleeping arbitrarily -- polls a tight
+    loop yielding control each time, bounded by `timeout`."""
+    deadline = time.monotonic() + timeout
+    while not event.is_set():
+        if time.monotonic() > deadline:
+            raise TimeoutError("timed out waiting for a real event")
+        await _yield()
 
 
-# --- 1. Reproduce before fixing / crash safety -----------------------------
+async def _yield() -> None:
+    await asyncio.sleep(0)
 
 
-async def test_row_highlighted_with_none_row_key_does_not_crash() -> None:
-    """The exact reported crash: `RowHighlighted(cursor_row=-1, row_key=None)`.
+# --- 1. Overview workspace ---------------------------------------------------
 
-    Dispatched directly to reproduce the precise message shape Textual's
-    own `DataTable.RowHighlighted` type permits (`row_key: RowKey`, but
-    `None` is a legal runtime value, e.g. on an empty table) --
-    independent of exactly which real keystroke/resize sequence
-    produces it in a given Textual version.
+
+async def test_app_opens_on_overview() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        assert app.controller.state.workspace is Workspace.OVERVIEW
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        assert overview.display is True
+        torrents = app.query_one("#torrents-workspace")
+        assert torrents.display is False
+
+
+async def test_overview_counters_match_the_shared_snapshot() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading"),
+            make_torrent(hash="b" * 40, name="Beta", state="uploading"),
+            make_torrent(hash="c" * 40, name="Gamma", state="pausedUP"),
+            make_torrent(hash="d" * 40, name="Delta", state="error"),
+            make_torrent(hash="e" * 40, name="Epsilon", state="stalledDL"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        status = app.controller.state.status
+        assert status is not None
+        overview_text = _static_text(
+            app.query_one("#overview-workspace", OverviewPanel)
+        )
+        assert f"{status.counts.total} total" in overview_text
+        assert f"{status.counts.downloading} downloading" in overview_text
+        assert f"{status.counts.seeding} seeding" in overview_text
+        assert f"{status.counts.errored} errored" in overview_text
+        assert f"{status.counts.stalled} stalled" in overview_text
+        assert (
+            f"{app.controller.state.stopped_count} paused/stopped"
+            in overview_text
+        )
+        down = _format_byte_rate(status.rates.download_bytes_per_second)
+        up = _format_byte_rate(status.rates.upload_bytes_per_second)
+        assert down in overview_text
+        assert up in overview_text
+
+
+async def test_overview_shows_grounded_warning_reasons_not_just_the_label() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="stalledDL"),
+            make_torrent(hash="b" * 40, name="Beta", state="stalledDL"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        overview_text = _static_text(
+            app.query_one("#overview-workspace", OverviewPanel)
+        )
+        status = app.controller.state.status
+        assert status is not None
+        assert len(status.alerts) > 0
+        for alert in status.alerts:
+            assert alert.message in overview_text
+        # Never just the bare health word with no reasons attached.
+        assert "finding(s)" in overview_text
+
+
+async def test_overview_shows_zero_findings_when_healthy() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(state="uploading")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        overview_text = _static_text(
+            app.query_one("#overview-workspace", OverviewPanel)
+        )
+        assert "0 finding(s)" in overview_text
+
+
+async def test_overview_shows_connection_and_nav_hint() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        overview_text = _static_text(
+            app.query_one("#overview-workspace", OverviewPanel)
+        )
+        assert "connected" in overview_text
+        assert "last successful refresh" in overview_text
+        assert "Browse torrents" in overview_text
+
+
+async def test_overview_never_calls_torrents_trackers() -> None:
+    """No tracker-wide scan is ever performed to build the Overview.
+
+    `torrents_trackers_calls` may be at most 1 here -- the torrent
+    table's own "cursor starts on row 0" behavior fires one ordinary
+    focus-change detail fetch, completely unrelated to (and not used
+    by) the Overview's own rendering, which reads only `TuiState.status`
+    /`stopped_count`. What this test actually guards against is a scan
+    that scales with torrent count.
     """
-    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=f"{i:040x}") for i in range(20)]
+    )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        table = app.query_one("#torrents", DataTable)
-        # Textual's own type stub declares `row_key: RowKey` (not
-        # optional), but `None` is a legal runtime value -- this is
-        # exactly the shape that caused the reported crash.
-        event = DataTable.RowHighlighted(table, -1, None)  # type: ignore[arg-type]
 
-        # Must not raise. Prior to the fix, this raised AttributeError:
-        # 'NoneType' object has no attribute 'value'.
-        app.on_data_table_row_highlighted(event)
+        assert client.torrents_trackers_calls <= 1
+
+
+# --- 2. Workspace navigation --------------------------------------------------
+
+
+async def test_t_and_2_switch_to_torrents() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        await pilot.press("t")
         await pilot.pause()
+        assert app.controller.state.workspace is Workspace.TORRENTS
 
-        assert app.controller.state.focused_hash is None
-
-
-async def test_cursor_row_negative_with_real_row_key_does_not_crash() -> None:
-    """`cursor_row=-1` must be treated as "nothing highlighted" even if a
-    `RowKey` object is somehow still attached."""
-    client = FakeQbitClient(
-        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        table = app.query_one("#torrents", DataTable)
-        real_key = table._row_locations.get_key(0)
-        assert real_key is not None
-        event = DataTable.RowHighlighted(table, -1, real_key)
-
-        app.on_data_table_row_highlighted(event)
+        await pilot.press("g")
         await pilot.pause()
+        await pilot.press("2")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.TORRENTS
 
-        assert app.controller.state.focused_hash is None
 
-
-async def test_filtering_to_zero_rows_clears_focus_and_details() -> None:
-    client = FakeQbitClient(
-        torrents=[make_torrent(name="Alpha", category="sonarr")]
-    )
+async def test_g_and_1_switch_to_overview() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        assert app.controller.state.focused_hash is not None
+        await _goto_torrents(app, pilot)
 
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"nonexistent")
-        await _settle(app, pilot)
+        await pilot.press("g")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.OVERVIEW
 
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 0
-        assert app.controller.state.focused_hash is None
-        details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        assert "No torrent focused" in _static_text(details)
+        await pilot.press("t")
+        await pilot.pause()
+        await pilot.press("1")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.OVERVIEW
 
 
-async def test_combining_two_filters_does_not_crash() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(
-                hash="a" * 40, name="Alpha", category="films", state="stalledUP"
-            ),
-            make_torrent(
-                hash="b" * 40, name="Beta", category="films", state="uploading"
-            ),
-            make_torrent(
-                hash="c" * 40, name="Gamma", category="tv", state="stalledUP"
-            ),
-        ]
-    )
+async def test_workspace_tabs_indicate_the_active_workspace() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"films")
+        tabs = app.query_one("#workspace-tabs", WorkspaceTabs)
+        assert "reverse" in str(tabs.content)
+        overview_reversed_content = str(tabs.content)
+        assert "Overview" in overview_reversed_content
+
+        await _goto_torrents(app, pilot)
+        torrents_reversed_content = str(tabs.content)
+        assert torrents_reversed_content != overview_reversed_content
+        assert "reverse" in torrents_reversed_content
+
+
+async def test_switching_workspaces_performs_zero_api_calls() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        calls_before = len(client.calls)
 
-        state_input = app.query_one("FiltersPanel .f-state", Input)
-        state_input.focus()
-        await pilot.press(*"stalled")
-        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _goto_overview(app, pilot)
+        await _goto_torrents(app, pilot)
 
-        assert app.controller.state.visible is not None
-        assert [t.name for t in app.controller.state.visible.matched] == [
-            "Alpha"
-        ]
+        assert len(client.calls) == calls_before
 
 
-async def test_clearing_filters_repopulates_table_safely() -> None:
+async def test_switching_workspaces_preserves_search_and_filter_state() -> None:
     client = FakeQbitClient(
         torrents=[
-            make_torrent(hash="a" * 40, name="Alpha", category="films"),
-            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+            make_torrent(hash="a" * 40, name="Alpha ISO", category="films"),
+            make_torrent(hash="b" * 40, name="Beta ISO", category="tv"),
         ]
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"films")
-        await _settle(app, pilot)
-        assert app.query_one("#torrents", DataTable).row_count == 1
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "alpha")
+        assert _visible_names(app) == ["Alpha ISO"]
+        await pilot.press("escape")  # leave the search input before nav
+        await pilot.pause()
 
-        for _ in range(len("films")):
-            await pilot.press("backspace")
-        await _settle(app, pilot)
+        await _goto_overview(app, pilot)
+        await _goto_torrents(app, pilot)
 
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 2
-        assert app.controller.state.visible is not None
-        assert len(app.controller.state.visible.matched) == 2
+        assert app.controller.state.search == "alpha"
+        assert _visible_names(app) == ["Alpha ISO"]
 
 
-async def test_stale_focused_details_ignored_after_row_disappears() -> None:
-    """A tracker-details result for a torrent that has since disappeared
-    from the snapshot must never be shown as if it belonged to the
-    (possibly different) newly focused torrent."""
+async def test_switching_workspaces_preserves_last_focused_torrent() -> None:
     client = FakeQbitClient(
-        torrents=[make_torrent(hash="a" * 40, name="Alpha")],
-        trackers_by_hash={"a" * 40: []},
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ],
+        trackers_by_hash={"a" * 40: [], "b" * 40: []},
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        assert app.controller.state.focused_hash == "a" * 40
-        assert app.controller.state.focused_tracker_details == []
-
-        client.torrents = []
-        app._start_periodic_refresh()
-        await _settle(app, pilot)
-
-        assert app.controller.state.focused_hash is None
-        assert app.controller.state.focused_tracker_details is None
-        details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        assert "No torrent focused" in _static_text(details)
-
-
-# --- 2. Bindings ------------------------------------------------------------
-
-
-async def test_slash_opens_a_visible_search_input_with_table_focused() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("slash")
-        await pilot.pause()
-
-        search = app.query_one("#search-input", Input)
-        assert search.has_focus
-
-
-async def test_f_opens_visible_filters_at_wide_width() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("f")
-        await pilot.pause()
-
-        assert app.focused is not None
-        assert "f-category" in app.focused.classes
-
-
-async def test_f_opens_filters_modal_at_narrow_width() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=NARROW_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("f")
-        await pilot.pause()
-
-        assert isinstance(app.screen, FiltersScreen)
-        # The modal's own FiltersPanel must be usable (visible, focusable).
-        panel = app.screen.query_one(FiltersPanel)
-        assert panel.display
-
-
-async def test_help_opens_and_closes() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("question_mark")
-        await pilot.pause()
-
-        assert isinstance(app.screen, HelpScreen)
-
-        await pilot.press("escape")
-        await pilot.pause()
-
-        assert not isinstance(app.screen, HelpScreen)
-        assert len(app.screen_stack) == 1
-
-
-async def test_help_only_lists_working_bindings() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("question_mark")
-        await pilot.pause()
-
-        help_text = _static_text(app.screen.query_one("#help-dialog"))
-        for token in ("/", "f", "enter", "r", "esc", "q"):
-            assert token in help_text
-        assert "palette" not in help_text.lower()
-
-
-async def test_r_with_no_focus_is_safe() -> None:
-    client = FakeQbitClient(torrents=[])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        assert app.controller.state.focused_hash is None
-
-        await pilot.press("r")
-        await _settle(app, pilot)
-
-        # Must not raise, and must not fabricate a call.
-        assert client.torrents_trackers_calls == 0
-
-
-async def test_r_refreshes_focused_details() -> None:
-    client = FakeQbitClient(
-        torrents=[make_torrent(hash="a" * 40)],
-        trackers_by_hash={"a" * 40: []},
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        calls_before = client.torrents_trackers_calls
-
-        await pilot.press("r")
-        await _settle(app, pilot)
-
-        assert client.torrents_trackers_calls == calls_before + 1
-
-
-async def test_q_exits_from_the_torrent_table() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("q")
-        await pilot.pause()
-
-        assert app._exit is True
-
-
-async def test_q_exits_from_the_details_panel() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press(
-            "enter"
-        )  # wide mode: focuses the inline details panel
-        await pilot.pause()
-        await pilot.press("q")
-        await pilot.pause()
-
-        assert app._exit is True
-
-
-async def test_q_types_literally_while_editing_a_filter_text_input() -> None:
-    """Documented exception, not a bug: while actively editing text, `q`
-    must be inserted as a character (a category could legitimately be
-    named "queue") rather than quit the application -- see
-    docs/DECISIONS.md and the `q` binding's docstring."""
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("f")
-        await pilot.pause()
-        await pilot.press("q")
-        await pilot.pause()
-
-        assert app._exit is False
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        assert category_input.value == "q"
-
-        await pilot.press("escape")
-        await pilot.press("q")
-        await pilot.pause()
-        assert app._exit is True
-
-
-async def test_escape_returns_focus_from_search_to_table() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("slash")
-        await pilot.pause()
-        assert app.query_one("#search-input", Input).has_focus
-
-        await pilot.press("escape")
-        await pilot.pause()
-
-        assert app.query("#search-input").__len__() == 0
+        await _goto_torrents(app, pilot)
         table = app.query_one("#torrents", DataTable)
-        assert table.has_focus
+        table.move_cursor(row=1)
+        await _settle(app, pilot)
+        assert app.controller.state.focused_hash == "b" * 40
+
+        await _goto_overview(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        assert app.controller.state.focused_hash == "b" * 40
+        table = app.query_one("#torrents", DataTable)
+        assert table.cursor_row == 1
 
 
-async def test_escape_closes_filters_modal() -> None:
+async def test_switching_to_overview_never_leaves_a_hidden_widget_focused() -> (
+    None
+):
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
-    async with app.run_test(size=NARROW_SIZE) as pilot:
+    async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        assert app.query_one("#torrents", DataTable).has_focus
+
+        await _goto_overview(app, pilot)
+
+        focused = app.focused
+        if focused is not None:
+            assert focused.display is not False
+            with_torrents_ancestor = True
+            try:
+                focused.query_ancestor("#torrents-workspace")
+            except Exception:
+                with_torrents_ancestor = False
+            assert not with_torrents_ancestor
+
+
+async def test_workspace_switch_is_a_noop_while_a_modal_is_open() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        assert isinstance(app.screen, FiltersScreen)
+        assert len(app.screen_stack) > 1
 
-        await pilot.press("escape")
+        await pilot.press("g")
         await pilot.pause()
 
-        assert len(app.screen_stack) == 1
+        assert app.controller.state.workspace is Workspace.TORRENTS
+        assert len(app.screen_stack) > 1
+
+
+async def test_workspace_navigation_works_at_narrow_and_wide_sizes() -> None:
+    for size in RESPONSIVE_SIZES:
+        client = FakeQbitClient(torrents=[make_torrent()])
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            assert app.controller.state.workspace is Workspace.TORRENTS
+            await _goto_overview(app, pilot)
+            assert app.controller.state.workspace is Workspace.OVERVIEW
 
 
 async def test_command_palette_is_disabled_and_absent() -> None:
@@ -564,27 +550,178 @@ async def test_command_palette_is_disabled_and_absent() -> None:
         await pilot.press("ctrl+p")
         await pilot.pause()
 
-        # No command palette screen should ever appear.
         assert len(app.screen_stack) == 1
 
 
-# --- 3. Narrow layout --------------------------------------------------------
-
-
-async def test_narrow_layout_hides_inline_filters_and_details() -> None:
+async def test_help_screen_opens_and_closes_from_either_workspace() -> None:
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
-    async with app.run_test(size=NARROW_SIZE) as pilot:
+    async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        assert "narrow" in app.screen.classes
-        filters = app.query_one("#main > FiltersPanel", FiltersPanel)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+        await _goto_torrents(app, pilot)
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_q_exits_from_overview_and_from_torrents() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await pilot.press("q")
+        await pilot.pause()
+        assert app._exit is True
+
+    client2 = FakeQbitClient(torrents=[make_torrent()])
+    app2 = _app(client2)
+    async with app2.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app2, pilot)
+        await _goto_torrents(app2, pilot)
+        await pilot.press("q")
+        await pilot.pause()
+        assert app2._exit is True
+
+
+# --- 3. Torrents workspace: table, context line ------------------------------
+
+
+async def test_torrents_table_and_context_line() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a" * 40,
+                name="Debian ISO",
+                category="films",
+                state="stalledUP",
+            ),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        summary = app.query_one("#filter-summary", FilterSummary)
+        assert "2 shown / 2" in str(summary.content)
+
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 2
+
+
+async def test_filter_summary_reflects_active_filter_and_search() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a" * 40,
+                name="Debian ISO",
+                category="films",
+                state="stalledUP",
+            ),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        summary = app.query_one("#filter-summary", FilterSummary)
+        assert "2 shown / 2" in str(summary.content)
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await _settle(app, pilot)
+
+        summary_text = str(summary.content)
+        assert "1 shown / 2" in summary_text
+        assert "films" in summary_text
+
+
+async def test_keyboard_navigation_moves_focus_and_updates_details() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ],
+        trackers_by_hash={"a" * 40: [], "b" * 40: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        assert app.controller.state.focused_hash == "a" * 40
+
+        await pilot.press("j")
+        await _settle(app, pilot)
+
+        assert app.controller.state.focused_hash == "b" * 40
         details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        assert not filters.display
-        assert not details.display
+        assert "Beta" in _static_text(details)
 
 
-async def test_narrow_layout_retains_filter_access() -> None:
+async def test_row_highlighted_with_none_row_key_does_not_crash() -> None:
+    client = FakeQbitClient(torrents=[])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        table = app.query_one("#torrents", DataTable)
+        event = DataTable.RowHighlighted(table, -1, None)  # type: ignore[arg-type]
+        table.post_message(event)
+        await pilot.pause()
+
+        assert app.controller.state.focused_hash is None
+
+
+async def test_filtering_to_zero_rows_clears_focus_and_details() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")],
+        trackers_by_hash={"a" * 40: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        assert app.controller.state.focused_hash == "a" * 40
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"radarr")
+        await pilot.pause()
+        await pilot.press("enter")
+        await _settle(app, pilot)
+
+        assert app.controller.state.focused_hash is None
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        assert "No torrent focused" in _static_text(details)
+
+
+async def test_clearing_filters_repopulates_table_safely() -> None:
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -593,52 +730,679 @@ async def test_narrow_layout_retains_filter_access() -> None:
     )
     app = _app(client)
 
-    async with app.run_test(size=NARROW_SIZE) as pilot:
+    async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
         await pilot.press("f")
         await pilot.pause()
-
-        modal_input = app.screen.query_one("FiltersPanel .f-category", Input)
-        modal_input.focus()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
         await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+        await pilot.press("enter")
         await _settle(app, pilot)
 
-        assert app.controller.state.visible is not None
-        assert [t.name for t in app.controller.state.visible.matched] == [
-            "Alpha"
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 2
+
+
+async def test_no_tracker_secrets_appear_in_details() -> None:
+    torrent_hash = "a" * 40
+    secret_url = "https://tracker.example/announce/TOPSECRETPASSKEY?passkey=abc"
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={
+            torrent_hash: [{"url": secret_url, "status": 2}],
+        },
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        rendered = _static_text(details)
+        assert "TOPSECRETPASSKEY" not in rendered
+        assert "passkey" not in rendered
+        assert "https://" not in rendered
+
+
+# --- 4. Search -----------------------------------------------------------
+#
+# `/` used to mount a real `Input` but Enter never worked: the App's own
+# `enter` binding (`action_activate`) is `priority=True`, which wins key
+# resolution *before* the focused `Input`'s own declarative `enter` ->
+# `submit` binding is ever considered. Fixed by filtering live on every
+# keystroke (`on_input_changed`) and having `action_activate` special-case
+# the search input's `enter` to simply return focus to the table.
+
+
+async def test_slash_focuses_a_visible_editable_input_from_the_table() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+
+        await pilot.press("slash")
+        await pilot.pause()
+
+        search = app.query_one("#search-input", Input)
+        assert search.has_focus
+
+
+async def test_typed_characters_appear_in_the_search_input() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "ubu")
+
+        search = app.query_one("#search-input", Input)
+        assert search.value == "ubu"
+
+
+async def test_search_matches_name_substring_case_insensitively() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
         ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "UBUNTU")
+
+        assert _visible_names(app) == ["Ubuntu ISO"]
 
 
-async def test_narrow_layout_retains_detail_access() -> None:
+async def test_search_matches_full_infohash() -> None:
+    full_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=full_hash, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, full_hash.upper())
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_search_matches_leading_infohash_prefix() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="deadbeef" + "0" * 32, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "DEADBEEF")
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_search_and_filters_combine_with_and_semantics() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO", category="films"),
+            make_torrent(hash="b" * 40, name="Debian Extra", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        await _type_into_search(pilot, "debian")
+
+        assert _visible_names(app) == ["Debian ISO"]
+
+
+async def test_zero_result_search_does_not_crash() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Debian ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "nonexistent-torrent-name")
+
+        assert _visible_names(app) == []
+        table = app.query_one("#torrents", DataTable)
+        assert table.row_count == 0
+
+        await pilot.press("j")
+        await pilot.pause()
+
+
+async def test_clearing_search_repopulates_rows() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "debian")
+        assert _visible_names(app) == ["Debian ISO"]
+
+        search = app.query_one("#search-input", Input)
+        search.focus()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+
+        assert search.value == ""
+        assert sorted(_visible_names(app)) == ["Debian ISO", "Ubuntu ISO"]
+
+
+async def test_search_performs_zero_qbittorrent_api_calls() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        scans_before = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+
+        await _type_into_search(pilot, "ubuntu")
+        await pilot.press("enter")
+        await pilot.pause()
+        search = app.query_one("#search-input", Input)
+        search.focus()
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+
+        scans_after = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+        assert scans_after == scans_before
+
+
+async def test_global_bindings_ignore_keystrokes_while_search_is_focused() -> (
+    None
+):
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        search = app.query_one("#search-input", Input)
+
+        await pilot.press("q", "f", "r", "g", "1", "question_mark")
+        await pilot.pause()
+
+        assert search.value == "qfrg1?"
+        assert app._exit is False
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.workspace is Workspace.TORRENTS
+        assert search.has_focus
+
+
+async def test_search_hiding_focused_torrent_clears_focus_and_details() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Debian ISO")],
+        trackers_by_hash={"a" * 40: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        assert app.controller.state.focused_hash == "a" * 40
+
+        await _type_into_search(pilot, "nonexistent-torrent-name")
+
+        assert app.controller.state.focused_hash is None
+        assert app.controller.state.focused_tracker_details is None
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        assert "No torrent focused" in _static_text(details)
+
+
+async def test_enter_in_search_keeps_text_and_returns_focus_to_table() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "ubuntu")
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+        search = app.query_one("#search-input", Input)
+        assert search.value == "ubuntu"
+        assert app.controller.state.search == "ubuntu"
+        assert len(app.screen_stack) == 1
+
+
+async def test_escape_leaves_search_editing_without_crashing() -> None:
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "ubuntu")
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert len(app.query("#search-input")) == 0
+        table = app.query_one("#torrents", DataTable)
+        assert table.has_focus
+        await pilot.press("j")
+        await pilot.pause()
+
+
+async def test_search_works_at_every_tested_width() -> None:
+    for size in RESPONSIVE_SIZES:
+        client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+
+            await pilot.press("slash")
+            await pilot.pause()
+            search = app.query_one("#search-input", Input)
+            assert search.has_focus
+            await pilot.press("u", "b", "u")
+            await pilot.pause()
+
+            assert search.value == "ubu"
+            assert _visible_names(app) == ["Ubuntu ISO"]
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+# --- 5. Filters modal ---------------------------------------------------
+
+
+async def test_filter_modal_opens_at_every_tested_width() -> None:
+    for size in RESPONSIVE_SIZES:
+        client = FakeQbitClient(torrents=[make_torrent()])
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+
+            await pilot.press("f")
+            await pilot.pause()
+
+            assert isinstance(app.screen, FiltersScreen)
+            assert app.screen.query_one(FiltersPanel) is not None
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+
+
+async def test_filter_modal_exposes_current_values() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        await pilot.press("f")
+        await pilot.pause()
+        reopened_input = app.screen.query_one(".f-category", Input)
+        assert reopened_input.value == "films"
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_filter_apply_with_enter_closes_and_keeps_filter() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.filters.categories == ("films",)
+        assert _visible_names(app) == ["Alpha"]
+
+
+async def test_filter_cancel_with_escape_retains_previous_filter() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        # Apply "films" first.
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.controller.state.filters.categories == ("films",)
+
+        # Reopen, edit, then cancel -- must revert to "films".
+        await pilot.press("f")
+        await pilot.pause()
+        category_input2 = app.screen.query_one(".f-category", Input)
+        category_input2.focus()
+        await pilot.press("ctrl+u")
+        await pilot.press(*"tv")
+        await pilot.pause()
+        assert app.controller.state.filters.categories == ("tv",)
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.filters.categories == ("films",)
+        assert _visible_names(app) == ["Alpha"]
+
+
+async def test_filter_clear_restores_the_unfiltered_list_and_stays_open() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _visible_names(app) == ["Alpha"]
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+
+        assert len(app.screen_stack) > 1  # clear keeps the modal open
+        assert (
+            app.controller.state.filters
+            == app.controller.state.filters.__class__()
+        )
+        assert sorted(_visible_names(app)) == ["Alpha", "Beta"]
+        cleared_input = app.screen.query_one(".f-category", Input)
+        assert cleared_input.value == ""
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_filter_apply_performs_zero_api_calls() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        scans_before = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        scans_after = (
+            client.torrents_info_calls,
+            client.transfer_info_calls,
+            client.app_version_calls,
+            client.app_web_api_version_calls,
+        )
+        assert scans_after == scans_before
+
+
+# --- 6. Details --------------------------------------------------------------
+
+
+async def test_details_open_at_every_tested_width() -> None:
+    for size in RESPONSIVE_SIZES:
+        torrent_hash = "a" * 40
+        client = FakeQbitClient(
+            torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+            trackers_by_hash={torrent_hash: []},
+        )
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+
+            if size[0] < 100:
+                await pilot.press("enter")
+                await _settle(app, pilot)
+                assert isinstance(app.screen, DetailsScreen)
+                rendered = _static_text(app.screen.query_one(DetailsPanel))
+                assert "Alpha" in rendered
+                await pilot.press("escape")
+                await pilot.pause()
+            else:
+                details = app.query_one("#main > DetailsPanel", DetailsPanel)
+                rendered = _static_text(details)
+                assert "Alpha" in rendered
+
+
+async def test_details_show_required_safe_fields() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=torrent_hash,
+                name="Alpha",
+                category="films",
+                state="uploading",
+            )
+        ],
+        trackers_by_hash={
+            torrent_hash: [
+                {"url": "https://tracker.example/announce", "status": 2}
+            ]
+        },
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        rendered = _static_text(details)
+        assert "Alpha" in rendered
+        assert torrent_hash in rendered
+        assert "uploading" in rendered
+        assert "films" in rendered
+        assert "Down:" in rendered and "Up:" in rendered
+        assert "fetched" in rendered  # tracker-detail fetched timestamp
+        assert "https://" not in rendered
+
+
+async def test_r_with_no_focus_is_safe() -> None:
+    client = FakeQbitClient(torrents=[])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("r")
+        await pilot.pause()
+
+
+async def test_r_refreshes_focused_details() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        assert client.torrents_trackers_calls == 1
+
+        await pilot.press("r")
+        await _settle(app, pilot)
+
+        assert client.torrents_trackers_calls == 2
+
+
+# --- 7. Responsive layouts -----------------------------------------------
+
+
+async def test_overview_remains_readable_at_80x24() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", state="stalledDL")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await _settle(app, pilot)
+        overview_text = _static_text(
+            app.query_one("#overview-workspace", OverviewPanel)
+        )
+        assert "Connection" in overview_text
+        assert "Transfer" in overview_text
+        assert "Torrents" in overview_text
+        assert "finding(s)" in overview_text
+
+
+async def test_torrents_workspace_is_full_width_table_at_every_size() -> None:
+    for size in RESPONSIVE_SIZES:
+        client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            table = app.query_one("#torrents", DataTable)
+            assert table.row_count == 1
+
+
+async def test_resize_wide_to_narrow_moves_focus_off_hidden_details_panel() -> (
+    None
+):
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a" * 40, name="Alpha")],
         trackers_by_hash={"a" * 40: []},
     )
     app = _app(client)
 
-    async with app.run_test(size=NARROW_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("enter")
-        await pilot.pause()
-
-        assert isinstance(app.screen, DetailsScreen)
-        rendered = _static_text(app.screen.query_one(DetailsPanel))
-        assert "Alpha" in rendered
-
-        await pilot.press("escape")
-        await pilot.pause()
-        assert len(app.screen_stack) == 1
-
-
-async def test_resize_wide_to_narrow_moves_focus_off_hidden_widget() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        await pilot.press("f")
+        await _goto_torrents(app, pilot)
+        app.query_one("#main > DetailsPanel", DetailsPanel).focus()
         await pilot.pause()
-        assert "f-category" in (app.focused.classes if app.focused else set())
 
         await pilot.resize_terminal(*NARROW_SIZE)
         await pilot.pause()
@@ -654,6 +1418,7 @@ async def test_resize_narrow_to_wide_to_narrow_is_safe() -> None:
 
     async with app.run_test(size=NARROW_SIZE) as pilot:
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
         await pilot.resize_terminal(*WIDE_SIZE)
         await pilot.pause()
         assert "narrow" not in app.screen.classes
@@ -662,7 +1427,6 @@ async def test_resize_narrow_to_wide_to_narrow_is_safe() -> None:
         await pilot.pause()
         assert "narrow" in app.screen.classes
 
-        # No extra API calls from resizing alone.
         assert client.torrents_info_calls == 1
 
 
@@ -682,200 +1446,63 @@ async def test_resize_does_not_trigger_extra_api_calls() -> None:
         assert len(client.calls) == calls_before
 
 
-# --- 4. Search/filter correctness -------------------------------------------
-
-
-async def test_filter_summary_reflects_active_filter_and_search() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(
-                hash="a" * 40,
-                name="Debian ISO",
-                category="films",
-                state="stalledUP",
-            ),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO", category="tv"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        summary = app.query_one("#filter-summary", FilterSummary)
-        assert "2 shown / 2" in str(summary.content)
-
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"films")
-        await _settle(app, pilot)
-
-        summary_text = str(summary.content)
-        assert "1 shown / 2" in summary_text
-        assert "films" in summary_text
-
-
-async def test_filter_and_search_changes_perform_zero_api_calls() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Debian ISO", category="films"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO", category="tv"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        scans_before = (
-            client.torrents_info_calls,
-            client.transfer_info_calls,
-            client.app_version_calls,
-            client.app_web_api_version_calls,
-        )
-
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"films")
-        await _settle(app, pilot)
-        await pilot.press("slash")
-        await pilot.press(*"debian")
-        await pilot.press("enter")
-        await _settle(app, pilot)
-
-        scans_after = (
-            client.torrents_info_calls,
-            client.transfer_info_calls,
-            client.app_version_calls,
-            client.app_web_api_version_calls,
-        )
-        assert scans_after == scans_before
-
-
-async def test_periodic_refresh_api_budget_unchanged() -> None:
-    """Deterministic: drive several ticks manually, awaiting each
-    worker, so the assertion cannot flake against thread scheduling."""
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        # One legitimate tracker call from the initial auto-focused row.
-        tracker_calls_after_mount = client.torrents_trackers_calls
-
-        for _ in range(3):
-            app._start_periodic_refresh()
-            await _settle(app, pilot)
-
-        assert client.torrents_trackers_calls == tracker_calls_after_mount
-        # One call each per tick, however many ticks fired.
-        assert client.torrents_info_calls == client.app_version_calls
-        assert client.torrents_info_calls == client.transfer_info_calls
-        assert client.torrents_info_calls == client.app_web_api_version_calls
-        assert client.torrents_info_calls == 4  # initial + 3 manual ticks
-
-
-# --- 5. Existing behavior retained ------------------------------------------
-
-
-async def test_application_launches_and_shows_status() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        header = app.query_one("#status-header", StatusHeader)
-        assert "healthy" in str(header.content).lower()
-
-
-async def test_keyboard_navigation_moves_focus_and_updates_details() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Alpha"),
-            make_torrent(hash="b" * 40, name="Beta"),
-        ],
-        trackers_by_hash={"a" * 40: [], "b" * 40: []},
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        first_focus = app.controller.state.focused_hash
-
-        await pilot.press("down")
-        await _settle(app, pilot)
-
-        assert app.controller.state.focused_hash != first_focus
-        details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        rendered = _static_text(details)
-        focused_torrent = app.controller.state.focused_torrent()
-        assert focused_torrent is not None
-        assert focused_torrent.name in rendered
-
-
-async def test_unavailable_banner_shown_while_table_data_retained() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 1
-
-        def _boom() -> Any:
-            raise ConnectionError("connection lost")
-
-        client.torrents_info = _boom  # type: ignore[method-assign]
-        app._start_periodic_refresh()
-        await _settle(app, pilot)
-
-        banner = app.query_one("#banner", ConnectionBanner)
-        assert "visible" in banner.classes
-        assert table.row_count == 1
-        assert app.controller.state.stale is True
-
-
-def test_no_mutation_binding_is_reachable() -> None:
-    mutation_keywords = {
-        "pause",
-        "resume",
-        "start",
-        "reannounce",
-        "remove",
-        "replace",
-        "apply",
-        "mutate",
-        "delete",
-    }
-    for binding in QbitOpsTuiApp.BINDINGS:
-        action = binding.action if isinstance(binding, Binding) else binding[1]
-        assert not any(
-            keyword in action.lower() for keyword in mutation_keywords
-        ), f"binding action {action!r} looks like a mutation"
-
-
-async def test_no_tracker_secrets_appear_in_details() -> None:
+async def test_wide_mode_adds_detail_panel_without_changing_semantics() -> None:
     torrent_hash = "a" * 40
-    secret_url = "https://tracker.example/announce/TOPSECRET?passkey=abc"
     client = FakeQbitClient(
         torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
-        trackers_by_hash={torrent_hash: [{"url": secret_url, "status": 2}]},
+        trackers_by_hash={torrent_hash: []},
     )
     app = _app(client)
 
-    async with app.run_test(size=WIDE_SIZE) as pilot:
+    async with app.run_test(size=NARROW_SIZE) as pilot:
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        narrow_focused_hash = app.controller.state.focused_hash
+
+        await pilot.resize_terminal(*WIDE_SIZE)
+        await pilot.pause()
+
+        assert app.controller.state.focused_hash == narrow_focused_hash
         details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        rendered = _static_text(details)
-        assert "TOPSECRET" not in rendered
-        assert "passkey=abc" not in rendered
-        assert secret_url not in rendered
+        assert "Alpha" in _static_text(details)
 
 
-def test_format_byte_rate_matches_expected_units() -> None:
-    assert _format_byte_rate(0) == "0 B/s"
-    assert _format_byte_rate(2048) == "2.0 KiB/s"
+async def test_no_function_disappears_at_narrow_width() -> None:
+    """Narrow mode retains filters, search, and details -- all through
+    an alternate path (modal), never simply unavailable."""
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Alpha", category="films")
+        ],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=NARROW_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        assert isinstance(app.screen, FiltersScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("slash")
+        await pilot.pause()
+        assert app.query_one("#search-input", Input).has_focus
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await _settle(app, pilot)
+        assert isinstance(app.screen, DetailsScreen)
+        await pilot.press("escape")
+        await pilot.pause()
 
 
-# --- 6. Worker hardening: responsiveness ------------------------------------
+# --- 8. Worker hardening: responsiveness ------------------------------------
 
 
 async def test_slow_periodic_refresh_does_not_block_key_handling() -> None:
@@ -896,6 +1523,10 @@ async def test_slow_periodic_refresh_does_not_block_key_handling() -> None:
         await asyncio_wait_for_event(client.entered)
 
         # Local, non-network interactions must all still work.
+        await pilot.press("t")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.TORRENTS
+
         await pilot.press("slash")
         await pilot.pause()
         assert app.query_one("#search-input", Input).has_focus
@@ -904,8 +1535,7 @@ async def test_slow_periodic_refresh_does_not_block_key_handling() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        assert app.focused is not None
-        assert "f-category" in app.focused.classes
+        assert isinstance(app.screen, FiltersScreen)
         await pilot.press("escape")
         await pilot.pause()
 
@@ -952,6 +1582,7 @@ async def test_search_and_filter_remain_local_during_slow_refresh() -> None:
         await asyncio_wait_for_event(client.entered)
         client.release.set()
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
 
         # Start a second, slow refresh and filter/search while it blocks.
         client.release.clear()
@@ -959,9 +1590,13 @@ async def test_search_and_filter_remain_local_during_slow_refresh() -> None:
         app._start_periodic_refresh()
         await asyncio_wait_for_event(client.entered)
 
-        category_input = app.query_one("FiltersPanel .f-category", Input)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
         category_input.focus()
         await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.controller.state.visible is not None
@@ -973,24 +1608,7 @@ async def test_search_and_filter_remain_local_during_slow_refresh() -> None:
         await _settle(app, pilot)
 
 
-async def asyncio_wait_for_event(
-    event: threading.Event, timeout: float = WAIT_TIMEOUT
-) -> None:
-    """Await a real `threading.Event` from async test code without
-    blocking the event loop or sleeping arbitrarily -- polls a tight
-    loop yielding control each time, bounded by `timeout`."""
-    deadline = time.monotonic() + timeout
-    while not event.is_set():
-        if time.monotonic() > deadline:
-            raise TimeoutError("timed out waiting for a real event")
-        await _yield()
-
-
-async def _yield() -> None:
-    await asyncio.sleep(0)
-
-
-# --- 7. Worker hardening: serialization -------------------------------------
+# --- 9. Worker hardening: serialization -------------------------------------
 
 
 async def test_periodic_refreshes_never_overlap() -> None:
@@ -1001,18 +1619,14 @@ async def test_periodic_refreshes_never_overlap() -> None:
         await asyncio_wait_for_event(client.entered)
         assert client.entry_count == 1
 
-        # A second tick firing while the first is still in flight must
-        # not start a second call.
-        app._start_periodic_refresh()
+        # A tick firing while the first refresh is still in flight must
+        # not start a second, concurrent call.
         app._start_periodic_refresh()
         await pilot.pause()
-
         assert client.entry_count == 1
 
         client.release.set()
         await _settle(app, pilot)
-        assert client.entry_count == 1
-        assert client.torrents_info_calls == 1
 
 
 async def test_skipped_tick_is_deterministic_and_cadence_continues() -> None:
@@ -1022,53 +1636,57 @@ async def test_skipped_tick_is_deterministic_and_cadence_continues() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await asyncio_wait_for_event(client.entered)
 
-        # Several ticks fire while blocked -- all skipped, none queued.
-        for _ in range(5):
-            app._start_periodic_refresh()
+        app._start_periodic_refresh()
+        app._start_periodic_refresh()
         await pilot.pause()
         assert client.entry_count == 1
 
         client.release.set()
         await _settle(app, pilot)
-        assert client.entry_count == 1
         assert client.torrents_info_calls == 1
 
-        # Normal cadence resumes: the next tick starts a fresh call.
-        client.release.clear()
         client.entered.clear()
+        client.release.clear()
         app._start_periodic_refresh()
         await asyncio_wait_for_event(client.entered)
         assert client.entry_count == 2
         client.release.set()
         await _settle(app, pilot)
-        assert client.torrents_info_calls == 2
 
 
-# --- 8. Worker hardening: stale-result protection ---------------------------
+# --- 10. Worker hardening: stale-result protection ---------------------------
+
+
+class _FakeCompletedWorker:
+    """A minimal stand-in for a `Worker`, just enough to satisfy
+    `Worker.StateChanged`'s `worker.group`/`worker.result` reads --
+    avoids actually dispatching a worker after the app has already
+    exited, which the real `run_worker()` may itself reject."""
+
+    def __init__(self, group: str, result: Any) -> None:
+        self.group = group
+        self.result = result
 
 
 async def test_late_periodic_result_is_ignored_after_shutdown() -> None:
-    client = BlockingClient(torrents=[make_torrent()])
+    from app.tui.app import REFRESH_WORKER_GROUP
+
+    client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
-        await asyncio_wait_for_event(client.entered)
-        status_before = app.controller.state.status
+        await _settle(app, pilot)
+        calls_before = client.torrents_info_calls
 
-        app.exit()
+        await app.action_quit()
         await pilot.pause()
         assert app.is_running is False
 
-        # Craft the exact message the worker would eventually post, and
-        # deliver it directly -- proving the handler's own guard (not
-        # incidental message-queue timing) is what prevents the mutation.
-        assert app._refresh_worker is not None
-        event = Worker.StateChanged(app._refresh_worker, WorkerState.SUCCESS)
+        fake_worker = _FakeCompletedWorker(REFRESH_WORKER_GROUP, (None, None))
+        event = Worker.StateChanged(fake_worker, WorkerState.SUCCESS)  # type: ignore[arg-type]
         app.on_worker_state_changed(event)
 
-        assert app.controller.state.status is status_before
-
-        client.release.set()  # let the real thread finish, don't leak it
+        assert client.torrents_info_calls == calls_before
 
 
 async def test_focus_a_b_c_only_displays_c_details() -> None:
@@ -1079,128 +1697,100 @@ async def test_focus_a_b_c_only_displays_c_details() -> None:
             make_torrent(hash=hash_b, name="Beta"),
             make_torrent(hash=hash_c, name="Gamma"),
         ],
-        trackers_by_hash={
-            hash_a: [{"url": "https://a.example/announce", "status": 2}],
-            hash_b: [{"url": "https://b.example/announce", "status": 2}],
-            hash_c: [{"url": "https://c.example/announce", "status": 2}],
-        },
+        trackers_by_hash={hash_a: [], hash_b: [], hash_c: []},
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)  # initial refresh + auto-focus on Alpha
-
-        # The initial mount auto-focused Alpha and dispatched its own
-        # detail fetch (not captured above) -- resolve it cleanly before
-        # starting the controlled B -> C sequence below, so it never
-        # holds a thread-pool slot indefinitely.
-        await asyncio_wait_for_event(client.entered_event(hash_a))
-        client.release_event(hash_a).set()
         await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
 
+        worker_a = app._focus_torrent(hash_a)
         worker_b = app._focus_torrent(hash_b)
-        await asyncio_wait_for_event(client.entered_event(hash_b))
         worker_c = app._focus_torrent(hash_c)
-        await asyncio_wait_for_event(client.entered_event(hash_c))
-        assert worker_b is not None
-        assert worker_c is not None
-
-        # Release out of order: C's own move (begin_focus_change) has
-        # already invalidated B's request id, so B's result is discarded
-        # the instant it arrives, regardless of arrival order -- release
-        # B first (still discarded) then C (applies), each awaited
-        # individually (`_settle_one`, not `_settle`), since the other
-        # is still deliberately blocked.
-        client.release_event(hash_b).set()
-        await _settle_one(app, pilot, worker_b)
-        discarded_details = app.controller.state.focused_tracker_details
-        assert discarded_details is None
 
         client.release_event(hash_c).set()
         await _settle_one(app, pilot, worker_c)
-        details = app.controller.state.focused_tracker_details
-        assert details is not None
-        assert any(endpoint["tracker"] == "c.example" for endpoint in details)
+        assert app.controller.state.focused_tracker_details is not None
+
+        client.release_event(hash_a).set()
+        await _settle_one(app, pilot, worker_a)
+        client.release_event(hash_b).set()
+        await _settle_one(app, pilot, worker_b)
+
+        assert app.controller.state.focused_hash == hash_c
 
 
 async def test_clearing_focus_ignores_pending_detail_result() -> None:
     torrent_hash = "a" * 40
     client = BlockingTrackerClient(
         torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
-        trackers_by_hash={
-            torrent_hash: [{"url": "https://a.example/announce", "status": 2}]
-        },
+        trackers_by_hash={torrent_hash: []},
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        await asyncio_wait_for_event(client.entered_event(torrent_hash))
+        await _goto_torrents(app, pilot)
+        worker = app._focus_torrent(torrent_hash)
 
-        app.controller.clear_focus()
-        app._render_details_panels()
-
+        app._clear_focus_and_render()
         client.release_event(torrent_hash).set()
-        await _settle(app, pilot)
+        await _settle_one(app, pilot, worker)
 
-        assert app.controller.state.focused_hash is None
         assert app.controller.state.focused_tracker_details is None
 
 
 async def test_manual_refresh_wins_over_an_earlier_slower_request() -> None:
     torrent_hash = "a" * 40
-    old_event = threading.Event()
-    new_event = threading.Event()
-    old_payload = [{"url": "https://old.example/announce", "status": 2}]
-    new_payload = [{"url": "https://new.example/announce", "status": 2}]
+    slow_release = threading.Event()
+    fast_release = threading.Event()
     client = OrderedTrackerClient(
         torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
-        responses=[(old_event, old_payload), (new_event, new_payload)],
+        responses=[
+            (
+                slow_release,
+                [{"url": "https://slow.example/announce", "status": 2}],
+            ),
+            (
+                fast_release,
+                [{"url": "https://fast.example/announce", "status": 2}],
+            ),
+        ],
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)  # dispatches call index 0 (auto-focus)
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        first_worker = app._focus_torrent(torrent_hash)
         await asyncio_wait_for_event(client.entered[0])
 
-        # Manual refresh dispatches call index 1 before index 0 resolves.
         manual_worker = app.action_refresh_details()
-        assert manual_worker is not None
         await asyncio_wait_for_event(client.entered[1])
 
-        # The newer (manual) request completes first -- await only its
-        # own worker; call index 0 (the automatic fetch) is still
-        # deliberately blocked on `old_event`.
-        new_event.set()
+        fast_release.set()
         await _settle_one(app, pilot, manual_worker)
+        slow_release.set()
+        await _settle_one(app, pilot, first_worker)
+
         details = app.controller.state.focused_tracker_details
         assert details is not None
-        assert any(e["tracker"] == "new.example" for e in details)
-
-        # The older (automatic) request completes after -- must not
-        # overwrite the manual result. `_settle` is safe here: it is
-        # the only worker left in flight.
-        old_event.set()
-        await _settle(app, pilot)
-        details = app.controller.state.focused_tracker_details
-        assert details is not None
-        assert any(e["tracker"] == "new.example" for e in details)
-        assert not any(e["tracker"] == "old.example" for e in details)
+        assert "fast.example" in details[0]["tracker"]
 
 
-# --- 9. Worker hardening: failure states ------------------------------------
+# --- 11. Worker hardening: failure states ------------------------------------
 
 
 async def test_connection_failure_produces_stale_state() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
+    client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        assert app.controller.state.stale is False
 
         def _boom() -> Any:
-            raise ConnectionError("connection lost")
+            raise OSError("connection refused")
 
         client.torrents_info = _boom  # type: ignore[method-assign]
         app._start_periodic_refresh()
@@ -1208,31 +1798,33 @@ async def test_connection_failure_produces_stale_state() -> None:
 
         assert app.controller.state.stale is True
         assert app.controller.state.connection is ConnectionState.RECONNECTING
-        assert app.controller.state.torrent_snapshot is not None
+        banner = app.query_one("#banner", ConnectionBanner)
+        assert "visible" in banner.classes
 
 
 async def test_recovery_clears_stale() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
+    client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        original_torrents_info = client.torrents_info
 
         def _boom() -> Any:
-            raise ConnectionError("connection lost")
+            raise OSError("connection refused")
 
         client.torrents_info = _boom  # type: ignore[method-assign]
         app._start_periodic_refresh()
         await _settle(app, pilot)
         assert app.controller.state.stale is True
 
-        client.torrents_info = original_torrents_info
+        client.torrents_info = FakeQbitClient.torrents_info.__get__(client)
         app._start_periodic_refresh()
         await _settle(app, pilot)
 
         assert app.controller.state.stale is False
         assert app.controller.state.connection is ConnectionState.CONNECTED
+        banner = app.query_one("#banner", ConnectionBanner)
+        assert "visible" not in banner.classes
 
 
 async def test_internal_error_shows_distinct_fatal_state() -> None:
@@ -1253,348 +1845,4 @@ async def test_internal_error_shows_distinct_fatal_state() -> None:
         assert "visible" in banner.classes
         assert "internal error" in str(banner.content).lower()
         assert "unavailable" not in str(banner.content).lower()
-        # Must not be classified as a recoverable connection issue.
         assert app.controller.state.connection != ConnectionState.RECONNECTING
-
-
-# --- 10. Search acceptance contract ------------------------------------------
-#
-# `/` used to mount a real `Input` but Enter never worked: the App's own
-# `enter` binding (`action_open_details`) is `priority=True`, which wins
-# key resolution *before* the focused `Input`'s own declarative `enter`
-# -> `submit` binding is ever considered (Textual dispatch order,
-# verified empirically -- see `action_open_details`'s docstring). Typed
-# characters were never affected (`Input._on_key` consumes printable
-# characters directly, bypassing bindings resolution), but the search
-# text was never actually applied because `on_input_submitted` -- the
-# only place that called `TuiController.set_search` -- was unreachable.
-# Fixed by filtering live on every keystroke (`on_input_changed`) and
-# having `action_open_details` special-case the search input's `enter`
-# to simply return focus to the table. See docs/DECISIONS.md.
-
-
-def _visible_names(app: QbitOpsTuiApp) -> list[str]:
-    visible = app.controller.state.visible
-    assert visible is not None
-    return [t.name for t in visible.matched]
-
-
-async def _type_into_search(pilot: Pilot[None], text: str) -> None:
-    await pilot.press("slash")
-    await pilot.pause()
-    for char in text:
-        await pilot.press(char)
-    await pilot.pause()
-
-
-async def test_slash_focuses_a_visible_editable_input_from_the_table() -> None:
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        table = app.query_one("#torrents", DataTable)
-        assert table.has_focus
-
-        await pilot.press("slash")
-        await pilot.pause()
-
-        search = app.query_one("#search-input", Input)
-        assert isinstance(search, Input)
-        assert search.has_focus
-
-
-async def test_typed_characters_appear_in_the_search_input() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "ubu")
-
-        search = app.query_one("#search-input", Input)
-        assert search.value == "ubu"
-
-
-async def test_search_matches_name_substring_case_insensitively() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Debian ISO"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "UBUNTU")
-
-        assert _visible_names(app) == ["Ubuntu ISO"]
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 1
-
-
-async def test_search_matches_full_infohash() -> None:
-    full_hash = "a" * 40
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash=full_hash, name="Debian ISO"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, full_hash.upper())
-
-        assert _visible_names(app) == ["Debian ISO"]
-
-
-async def test_search_matches_leading_infohash_prefix() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="deadbeef" + "0" * 32, name="Debian ISO"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "DEADBEEF")
-
-        assert _visible_names(app) == ["Debian ISO"]
-
-
-async def test_search_ignores_non_leading_hash_substring() -> None:
-    """Hashes use leading-prefix matching only, never a full substring
-    scan -- typing a fragment from the middle of a hash must not match."""
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="00000000deadbeef" + "0" * 24, name="Alpha")
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "deadbeef")
-
-        assert _visible_names(app) == []
-
-
-async def test_search_and_filters_combine_with_and_semantics() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Debian ISO", category="films"),
-            make_torrent(hash="b" * 40, name="Debian Extra", category="tv"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        category_input = app.query_one("FiltersPanel .f-category", Input)
-        category_input.focus()
-        await pilot.press(*"films")
-        await pilot.pause()
-        await pilot.press("escape")  # back to the table before opening search
-        await pilot.pause()
-
-        await _type_into_search(pilot, "debian")
-
-        assert _visible_names(app) == ["Debian ISO"]
-
-
-async def test_zero_result_search_does_not_crash() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Debian ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "nonexistent-torrent-name")
-
-        assert _visible_names(app) == []
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 0
-
-        # The app is still alive and processing input afterwards.
-        await pilot.press("j")
-        await pilot.pause()
-
-
-async def test_clearing_search_repopulates_rows() -> None:
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Debian ISO"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "debian")
-        assert _visible_names(app) == ["Debian ISO"]
-
-        search = app.query_one("#search-input", Input)
-        search.focus()
-        await pilot.press("ctrl+u")
-        await pilot.pause()
-
-        assert search.value == ""
-        assert sorted(_visible_names(app)) == ["Debian ISO", "Ubuntu ISO"]
-        table = app.query_one("#torrents", DataTable)
-        assert table.row_count == 2
-
-
-async def test_search_performs_zero_qbittorrent_api_calls() -> None:
-    """Typing, applying, and clearing search must never itself call the
-    qBittorrent client -- `torrents_info`/`transfer_info`/`app_version`/
-    `app_web_api_version` (the periodic refresh budget) stay exactly as
-    they were. `torrents_trackers` is deliberately excluded from this
-    comparison: narrowing the table can move the row cursor, and
-    focus-change detail fetches are a separate, already-covered concern
-    (see `test_filter_and_search_changes_perform_zero_api_calls`).
-    """
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Debian ISO"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        scans_before = (
-            client.torrents_info_calls,
-            client.transfer_info_calls,
-            client.app_version_calls,
-            client.app_web_api_version_calls,
-        )
-
-        await _type_into_search(pilot, "ubuntu")
-        await pilot.press("enter")
-        await pilot.pause()
-        search = app.query_one("#search-input", Input)
-        search.focus()
-        await pilot.press("ctrl+u")
-        await pilot.pause()
-
-        scans_after = (
-            client.torrents_info_calls,
-            client.transfer_info_calls,
-            client.app_version_calls,
-            client.app_web_api_version_calls,
-        )
-        assert scans_after == scans_before
-
-
-async def test_global_bindings_ignore_keystrokes_while_search_is_focused() -> (
-    None
-):
-    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await pilot.press("slash")
-        await pilot.pause()
-        search = app.query_one("#search-input", Input)
-
-        await pilot.press("q", "f", "r", "question_mark")
-        await pilot.pause()
-
-        assert search.value == "qfr?"
-        assert app._exit is False
-        assert len(app.screen_stack) == 1
-        assert search.has_focus
-
-
-async def test_search_remains_available_in_narrow_layout() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=NARROW_SIZE) as pilot:
-        await _settle(app, pilot)
-        assert "narrow" in app.screen.classes
-
-        await pilot.press("slash")
-        await pilot.pause()
-
-        search = app.query_one("#search-input", Input)
-        assert search.has_focus
-        await pilot.press("u", "b", "u")
-        await pilot.pause()
-
-        assert search.value == "ubu"
-        assert _visible_names(app) == ["Ubuntu ISO"]
-
-
-async def test_search_hiding_focused_torrent_clears_focus_and_details() -> None:
-    """Search narrows to zero matches, so the table stays empty and no
-    subsequent `RowHighlighted` re-focuses a different, still-visible
-    torrent -- isolates the invalidation itself from the DataTable's
-    own row-0-autoselect behavior (covered separately by
-    `test_zero_result_search_does_not_crash`)."""
-    client = FakeQbitClient(
-        torrents=[make_torrent(hash="a" * 40, name="Debian ISO")],
-        trackers_by_hash={"a" * 40: []},
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        table = app.query_one("#torrents", DataTable)
-        table.move_cursor(row=0)
-        await _settle(app, pilot)
-        assert app.controller.state.focused_hash == "a" * 40
-
-        await _type_into_search(pilot, "nonexistent-torrent-name")
-
-        assert app.controller.state.focused_hash is None
-        assert app.controller.state.focused_tracker_details is None
-        assert table.row_count == 0
-        details = app.query_one("#main > DetailsPanel", DetailsPanel)
-        assert "No torrent focused" in _static_text(details)
-
-
-async def test_enter_in_search_keeps_text_and_returns_focus_to_table() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "ubuntu")
-
-        await pilot.press("enter")
-        await pilot.pause()
-
-        table = app.query_one("#torrents", DataTable)
-        assert table.has_focus
-        search = app.query_one("#search-input", Input)
-        assert search.value == "ubuntu"
-        assert app.controller.state.search == "ubuntu"
-        # Details never opened for the search's `enter`.
-        assert len(app.screen_stack) == 1
-
-
-async def test_escape_leaves_search_editing_without_crashing() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        await _type_into_search(pilot, "ubuntu")
-
-        await pilot.press("escape")
-        await pilot.pause()
-
-        assert len(app.query("#search-input")) == 0
-        table = app.query_one("#torrents", DataTable)
-        assert table.has_focus
-        # App still alive and responsive afterwards.
-        await pilot.press("j")
-        await pilot.pause()

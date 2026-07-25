@@ -1,4 +1,4 @@
-"""Textual application for `qbit-ops tui` (TUI 1, read-only).
+"""Textual application for `qbit-ops tui` (Overview-first redesign).
 
 Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, enforced by
 `tests/test_tui_security.py`): this module and every other module under
@@ -35,19 +35,33 @@ level -- see docs/DECISIONS.md for the empirical basis of this
 statement and why it is accepted rather than "fixed" with a custom
 async HTTP client (out of scope for this phase).
 
-Hotfix phase (see docs/DECISIONS.md): the filters/details panels are
-reusable widgets with class-scoped (not id-scoped) internal children,
-so the exact same `FiltersPanel`/`DetailsPanel` classes can be mounted
-both inline (wide layout) and inside a modal screen (narrow layout).
-See `_apply_filters_from_panel`/`_render_details_panels`, which keep
-*every* mounted instance of each in sync, whichever is currently
-visible. The help screen (`?`) is always a separate modal
-(`HelpScreen`) at every width -- it no longer borrows the Details
-panel as a temporary display area.
+Overview-first redesign (see docs/DECISIONS.md): the TUI now opens on
+an Overview workspace (connection/transfer/counts/alerts, built
+entirely from the same periodic refresh result -- no extra API call)
+instead of a bare torrent table, and provides a second, explicit
+Torrents workspace for browsing/search/filtering/inspection.
+`TuiState.workspace` (see `app.tui.state.Workspace`) tracks which one
+is active; switching is a pure local operation (`TuiController.
+set_workspace`) -- see `_switch_workspace`. The two workspaces are two
+always-mounted containers (`#overview-workspace`/`#torrents-workspace`)
+whose `display` is toggled, not two Textual `Screen`s: this is what
+lets a switch preserve every widget's state (the torrent table's
+cursor, an in-progress search) for free, with the screen stack
+reserved for real modals (filters, details, help). The permanently
+visible filters sidebar from the previous design is gone -- `f` now
+always opens a `FiltersScreen` modal, at every terminal width, per the
+redesign's explicit "replace the sidebar" requirement.
+
+Hotfix phase (see docs/DECISIONS.md): `on_data_table_row_highlighted`
+checks `event.row_key is None`/`event.cursor_row < 0` before ever
+touching `.value`, with an explicit `_rebuilding_table` guard around
+table rebuilds. The help screen (`?`) is always a separate modal
+(`HelpScreen`) at every width.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from textual import events
@@ -72,6 +86,7 @@ from app.tui.state import (
     ConnectionState,
     TuiController,
     TuiState,
+    Workspace,
 )
 
 NARROW_WIDTH_THRESHOLD = 100
@@ -91,37 +106,149 @@ _HEALTH_STYLES: dict[Health, str] = {
     Health.UNAVAILABLE: "bold red",
 }
 
+_CONNECTION_LABELS: dict[ConnectionState, str] = {
+    ConnectionState.CONNECTING: "connecting",
+    ConnectionState.CONNECTED: "connected",
+    ConnectionState.RECONNECTING: "reconnecting",
+    ConnectionState.AUTH_FAILED: "unavailable (authentication failed)",
+    ConnectionState.CONFIG_FAILED: "unavailable (configuration invalid)",
+}
 
-class StatusHeader(Static):
-    """The top status bar: health, transfer rates, last refresh, staleness."""
+_OVERVIEW_NAV_HINT = "[bold]Enter[/bold] / [bold]t[/bold]   Browse torrents"
 
 
-class FilterSummary(Static):
-    """A concise, always-visible line describing the active filter/search.
+class WorkspaceTabs(Static):
+    """Always-visible indicator of which workspace is active.
 
-    e.g. "146 shown / 1105 · stalled" or
-    "24 shown / 1105 · category: films · stalled · search: ubuntu" --
-    see docs/COMMANDS.md ("TUI"). Purely presentational: derived from
-    `TuiState`, never fetched.
+    Purely presentational -- reflects `TuiState.workspace`, never
+    decides navigation itself (see `QbitOpsTuiApp._switch_workspace`).
     """
 
+    def render_state(self, workspace: Workspace) -> None:
+        overview = _tab_label(
+            "Overview", "1/g", workspace is Workspace.OVERVIEW
+        )
+        torrents = _tab_label(
+            "Torrents", "2/t", workspace is Workspace.TORRENTS
+        )
+        self.update(f"{overview}   {torrents}")
 
-class ConnectionBanner(Static):
-    """A dismissible-looking, non-blocking banner shown while reconnecting.
 
-    Never replaces the torrent table underneath it -- see
-    docs/TUI_ARCHITECTURE_REVIEW.md §5/§6 (stale data stays visible).
+def _tab_label(name: str, keys: str, active: bool) -> str:
+    text = f"{name} ({keys})"
+    return f"[reverse bold] {text} [/reverse bold]" if active else f" {text} "
+
+
+class OverviewPanel(VerticalScroll):
+    """The Overview workspace's content: connection, transfer, counts,
+    and grounded health alerts -- built entirely from the same
+    `TuiState` the periodic refresh already populates. No qBittorrent
+    call of its own, no tracker-wide scan, no invented recommendations
+    or confidence scores -- see the module docstring.
     """
+
+    def render_state(self, state: TuiState) -> None:
+        self.remove_children()
+
+        if state.status is None:
+            self.mount(
+                Static("Connecting to qBittorrent...", classes="ov-section")
+            )
+            self.mount(Static(_OVERVIEW_NAV_HINT, classes="ov-nav"))
+            return
+
+        self.mount(
+            Static(_overview_connection_text(state), classes="ov-section")
+        )
+        self.mount(Static(_overview_transfer_text(state), classes="ov-section"))
+        self.mount(Static(_overview_counts_text(state), classes="ov-section"))
+        self.mount(Static(_overview_alerts_text(state), classes="ov-section"))
+        self.mount(Static(_OVERVIEW_NAV_HINT, classes="ov-nav"))
+
+
+def _overview_connection_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    label = _CONNECTION_LABELS[state.connection]
+    lines = [f"[bold]Connection[/bold]: {label}"]
+    if state.last_successful_refresh is not None:
+        lines.append(
+            f"  last successful refresh: "
+            f"{_format_local_time(state.last_successful_refresh)}"
+        )
+    else:
+        lines.append("  last successful refresh: never")
+    if state.stale:
+        lines.append(
+            "  [bold yellow]STALE[/bold yellow] -- showing last-good data"
+        )
+    if status.qbittorrent_version:
+        version_line = f"  qBittorrent {status.qbittorrent_version}"
+        if status.api_version:
+            version_line += f" (API {status.api_version})"
+        lines.append(version_line)
+    return "\n".join(lines)
+
+
+def _overview_transfer_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    down = _format_byte_rate(status.rates.download_bytes_per_second)
+    up = _format_byte_rate(status.rates.upload_bytes_per_second)
+    return f"[bold]Transfer[/bold]\n  ↓ {down}   ↑ {up}"
+
+
+def _overview_counts_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    counts = status.counts
+    lines = [
+        "[bold]Torrents[/bold]",
+        f"  {counts.total} total",
+        f"  {counts.downloading} downloading · {counts.seeding} seeding"
+        f" · {counts.completed} completed",
+        f"  {state.stopped_count} paused/stopped · {counts.checking} checking"
+        f" · {counts.stalled} stalled · {counts.errored} errored"
+        f" · {counts.unknown} unknown",
+    ]
+    return "\n".join(lines)
+
+
+def _overview_alerts_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    style = _HEALTH_STYLES[status.health]
+    alerts = status.alerts
+    header = (
+        f"[{style}]{status.health.value.title()}[/{style}] · "
+        f"{len(alerts)} finding(s)"
+    )
+    lines = [header]
+    lines.extend(f"  {alert.message}" for alert in alerts)
+    return "\n".join(lines)
+
+
+def _format_local_time(moment: datetime) -> str:
+    """Format a timestamp in the local system timezone.
+
+    Overview-redesign requirement: refresh times default to local time,
+    not UTC, with the timezone label always shown so a UTC-configured
+    host is not silently ambiguous. `moment` is always timezone-aware
+    (`datetime.now(UTC)` upstream, see `app.status`), so `.astimezone()`
+    with no argument converts it to the system's local timezone.
+    """
+    local = moment.astimezone()
+    tz_label = local.tzname() or "local"
+    return f"{local:%H:%M:%S} {tz_label}"
 
 
 class FiltersPanel(Vertical):
     """The shared `TorrentFilter` vocabulary, applied entirely in memory.
 
-    No qBittorrent API call is ever triggered by a change here. Internal
-    children are identified by CSS *class*, not `id`, so more than one
-    `FiltersPanel` instance (the always-mounted inline one plus a modal
-    one opened by `f` in narrow layouts) can coexist in the DOM without
-    an id collision -- every query below is scoped to `self`.
+    Only ever mounted inside `FiltersScreen` (a modal, at every
+    terminal width, per the Overview redesign -- there is no more
+    permanently visible sidebar). No qBittorrent API call is ever
+    triggered by a change here.
     """
 
     def compose(self) -> ComposeResult:
@@ -161,11 +288,7 @@ class FiltersPanel(Vertical):
         )
 
     def sync_from(self, filters: TorrentFilter) -> None:
-        """Reflect an already-applied `TorrentFilter` in this panel's widgets.
-
-        Used when opening the narrow-layout filters modal, so it shows
-        the filter currently in effect rather than resetting it blank.
-        """
+        """Reflect an already-applied `TorrentFilter` in this panel."""
         self.query_one(".f-category", Input).value = ", ".join(
             filters.categories
         )
@@ -191,8 +314,7 @@ class DetailsPanel(VerticalScroll):
     Only ever renders `SelectedTorrent` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker
     fields -- never a raw announce URL, path, query value, userinfo, or
-    unsanitized message. No internal `id`s, for the same multi-instance
-    reason as `FiltersPanel`.
+    unsanitized message.
     """
 
     def render_state(self, state: TuiState) -> None:
@@ -223,7 +345,7 @@ class DetailsPanel(VerticalScroll):
         else:
             fetched_at = state.focused_details_fetched_at
             freshness = (
-                fetched_at.strftime("fetched %H:%M:%S UTC")
+                f"fetched {_format_local_time(fetched_at)}"
                 if fetched_at is not None
                 else ""
             )
@@ -247,7 +369,7 @@ class HelpScreen(ModalScreen[None]):
         align: center middle;
     }
     #help-dialog {
-        width: 60;
+        width: 64;
         height: auto;
         border: solid $accent;
         background: $surface;
@@ -264,11 +386,30 @@ class HelpScreen(ModalScreen[None]):
 
 
 class FiltersScreen(ModalScreen[None]):
-    """A modal Filters panel -- the narrow-layout's access path to
-    filters, since the inline `FiltersPanel` is hidden below
-    `NARROW_WIDTH_THRESHOLD`."""
+    """The sole access path to filters, at every terminal width -- the
+    previous design's permanently visible sidebar is gone.
 
-    BINDINGS = [Binding("escape", "dismiss", "Close", priority=True)]
+    Filters apply live, locally, as the user edits them (zero
+    qBittorrent calls -- see `QbitOpsTuiApp._apply_filters_from_panel`),
+    but `Enter`/`Escape`/clearing are three distinct, deterministic
+    interactions:
+
+    * `Enter` -- apply (already in effect) and close.
+    * `Escape` -- cancel: revert to the filter that was active when
+      this screen opened, then close.
+    * `ctrl+r` -- clear: reset to no filter at all, modal stays open so
+      the operator can keep adjusting.
+
+    `enter`/`escape` are deliberately *not* bound here: both are already
+    `priority=True` bindings on `QbitOpsTuiApp`, and Textual resolves an
+    App's own priority bindings before a Screen's -- even the Screen on
+    top of the stack -- so a same-key Screen-level binding here would
+    simply never fire (verified empirically). `action_activate`/
+    `action_dismiss_overlay` on the App special-case `FiltersScreen`
+    instead -- see their docstrings.
+    """
+
+    BINDINGS = [Binding("ctrl+r", "clear", "Clear")]
 
     CSS = """
     FiltersScreen {
@@ -285,18 +426,29 @@ class FiltersScreen(ModalScreen[None]):
 
     def __init__(self, current_filters: TorrentFilter) -> None:
         super().__init__()
-        self._current_filters = current_filters
+        self.original_filters = current_filters
+        """The filter in effect when this screen opened -- `escape`
+        (handled by `QbitOpsTuiApp.action_dismiss_overlay`) reverts to
+        exactly this value."""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="filters-dialog"):
             yield FiltersPanel()
-            yield Static("[dim]Esc to close[/dim]")
+            yield Static("[dim]Enter apply · Esc cancel · Ctrl+R clear[/dim]")
 
     def on_mount(self) -> None:
-        self.query_one(FiltersPanel).sync_from(self._current_filters)
+        self.query_one(FiltersPanel).sync_from(self.original_filters)
 
-    def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
-        self.dismiss()
+    def action_clear(self) -> None:
+        app = self.app
+        assert isinstance(app, QbitOpsTuiApp)
+        empty = TorrentFilter()
+        app.controller.set_filters(empty)
+        self.query_one(FiltersPanel).sync_from(empty)
+        self.query_one(FiltersPanel).show_error("")
+        app._render_filter_summary()
+        app._render_table()
+        app._render_details_panels()
 
 
 class DetailsScreen(ModalScreen[None]):
@@ -339,52 +491,46 @@ class MainScreen(Screen[None]):
     the *App* (`App._on_resize`/`Screen._on_resize` both call
     `event.stop()`, which stops the underlying event's public dispatch
     on the App node but not on the Screen node -- verified empirically).
-    An `App`-level `on_resize` override, as this project shipped
-    initially, silently never ran.
     """
 
     def on_resize(self, event: events.Resize) -> None:
         is_narrow = event.size.width < NARROW_WIDTH_THRESHOLD
         self.set_class(is_narrow, "narrow")
 
-        # Never leave a now-hidden inline Filters/Details widget focused
-        # -- an invisible focused widget can neither be seen nor
-        # meaningfully typed into. Skip while a modal is open: its own
-        # Filters/Details instance is a separate, still-visible widget
-        # on a different screen, and this screen's focus is irrelevant
-        # while it isn't on top.
+        # Never leave a now-hidden inline Details widget focused -- an
+        # invisible focused widget can neither be seen nor meaningfully
+        # interacted with. Skip while a modal is open: its own
+        # DetailsPanel instance is a separate, still-visible widget on a
+        # different screen, and this screen's focus is irrelevant while
+        # it isn't on top.
         app = self.app
         if not is_narrow or app.focused is None or len(app.screen_stack) > 1:
             return
 
         try:
-            app.focused.query_ancestor("FiltersPanel, DetailsPanel")
+            app.focused.query_ancestor("DetailsPanel")
         except NoMatches:
             return
         self.query_one("#torrents", DataTable).focus()
 
 
 class QbitOpsTuiApp(App[None]):
-    """The read-only TUI 1 vertical slice."""
+    """The Overview-first, read-only TUI."""
 
     # Textual's built-in Ctrl+P command palette has no qbit-ops commands
     # yet and only confused dogfooders ("^p palette" in the footer) --
-    # disabled until there is a meaningful palette to show.
+    # disabled until there is a meaningful palette to show. Workspace
+    # navigation is explicit bindings (1/g, 2/t), never the palette.
     ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     Screen {
         layout: vertical;
     }
-    #status-header {
-        height: 3;
-        padding: 0 1;
-        border: solid $accent;
-    }
-    #filter-summary {
+    #workspace-tabs {
         height: 1;
         padding: 0 1;
-        color: $text-muted;
+        background: $panel;
     }
     #banner {
         height: auto;
@@ -395,13 +541,23 @@ class QbitOpsTuiApp(App[None]):
     #banner.visible {
         display: block;
     }
+    #overview-workspace {
+        height: 1fr;
+        padding: 0 1;
+    }
+    .ov-section {
+        margin-bottom: 1;
+    }
+    .ov-nav {
+        color: $text-muted;
+    }
+    #filter-summary {
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+    }
     #main {
         height: 1fr;
-    }
-    #main > FiltersPanel {
-        width: 26;
-        border: solid $accent;
-        padding: 0 1;
     }
     DataTable {
         width: 1fr;
@@ -411,9 +567,6 @@ class QbitOpsTuiApp(App[None]):
         border: solid $accent;
         padding: 0 1;
     }
-    Screen.narrow #main > FiltersPanel {
-        display: none;
-    }
     Screen.narrow #main > DetailsPanel {
         display: none;
     }
@@ -421,6 +574,10 @@ class QbitOpsTuiApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("1", "show_overview", "Overview", show=False),
+        Binding("g", "show_overview", "Overview", show=False),
+        Binding("2", "show_torrents", "Torrents", show=True),
+        Binding("t", "show_torrents", "Torrents", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
@@ -430,20 +587,19 @@ class QbitOpsTuiApp(App[None]):
         # `priority=True`: `DataTable` binds its own `enter` to
         # `select_cursor` (a no-op `RowSelected` message we don't
         # handle) -- without priority, that binding wins while the
-        # table has focus and "open details" silently never fires.
-        # Verified empirically that priority *does* override a focused
-        # child widget's own declarative bindings (unlike `Input`'s
+        # table has focus and "activate" silently never fires. Verified
+        # empirically that priority *does* override a focused child
+        # widget's own declarative bindings (unlike `Input`'s
         # printable-character handling, which bypasses the bindings
-        # system entirely -- see the `escape` binding's comment above).
-        Binding("enter", "open_details", "Details", show=False, priority=True),
+        # system entirely -- see `action_activate`'s docstring).
+        Binding("enter", "activate", "Open", show=False, priority=True),
         Binding("r", "refresh_details", "Refresh details"),
         Binding("question_mark", "toggle_help", "Help"),
         # `escape` must win over whatever has focus (a filter/search
         # Input never binds it, but priority makes the intent explicit
-        # and future-proof) -- see docs/DECISIONS.md for why `/`/`f`/`?`
-        # cannot use `priority=True` the same way (Textual's `Input`
-        # consumes printable characters before bindings are resolved,
-        # regardless of priority; verified empirically).
+        # and future-proof) -- Textual's `Input` consumes printable
+        # characters before bindings are resolved, regardless of
+        # priority; verified empirically.
         Binding("escape", "dismiss_overlay", "Back", priority=True),
     ]
 
@@ -468,26 +624,24 @@ class QbitOpsTuiApp(App[None]):
         return MainScreen(id="_default")
 
     def compose(self) -> ComposeResult:
-        yield StatusHeader(id="status-header")
-        yield FilterSummary(id="filter-summary")
+        yield WorkspaceTabs(id="workspace-tabs")
         yield ConnectionBanner(id="banner")
-        with Horizontal(id="main"):
-            yield FiltersPanel()
-            yield DataTable(id="torrents", cursor_type="row")
-            yield DetailsPanel()
+        yield OverviewPanel(id="overview-workspace")
+        with Vertical(id="torrents-workspace"):
+            yield FilterSummary(id="filter-summary")
+            with Horizontal(id="main"):
+                yield DataTable(id="torrents", cursor_type="row")
+                yield DetailsPanel()
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.query_one("#torrents", DataTable)
         table.add_columns("Name", "State", "Progress", "Down", "Up", "Ratio")
-        # The torrent table is the primary panel: focus it by default so
-        # single-letter bindings (q, f, /, r, ?) reach the App instead of
-        # being consumed as text by whichever Input happens to be first
-        # in the DOM.
-        table.focus()
         # Render the initial (empty) state immediately -- pure, no I/O --
         # so the screen never sits blank while the first refresh worker
-        # is still in flight.
+        # is still in flight. The app opens on Overview; the Torrents
+        # workspace's table starts unfocused and hidden.
+        self._render_workspace_visibility()
         self._render_all()
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
         self._start_periodic_refresh()
@@ -580,36 +734,22 @@ class QbitOpsTuiApp(App[None]):
     # -- rendering -----------------------------------------------------
 
     def _render_all(self) -> None:
-        self._render_header()
+        self._render_workspace_tabs()
         self._render_banner()
+        self._render_overview()
         self._render_filter_summary()
         self._render_table()
         self._render_details_panels()
 
-    def _render_header(self) -> None:
-        header = self.query_one("#status-header", StatusHeader)
-        state = self.controller.state
-        status = state.status
-        if status is None:
-            header.update("Connecting...")
-            return
-
-        style = _HEALTH_STYLES[status.health]
-        parts = [
-            f"[bold]qbit-ops[/bold] · [{style}]{status.health.value}[/{style}]"
-        ]
-        parts.append(
-            f"↓ {_format_byte_rate(status.rates.download_bytes_per_second)}  "
-            f"↑ {_format_byte_rate(status.rates.upload_bytes_per_second)}"
+    def _render_workspace_tabs(self) -> None:
+        self.query_one("#workspace-tabs", WorkspaceTabs).render_state(
+            self.controller.state.workspace
         )
-        if state.last_successful_refresh is not None:
-            parts.append(
-                "last refresh "
-                f"{state.last_successful_refresh.strftime('%H:%M:%S UTC')}"
-            )
-        if state.stale:
-            parts.append("[bold yellow]STALE[/bold yellow]")
-        header.update("  ·  ".join(parts))
+
+    def _render_overview(self) -> None:
+        self.query_one("#overview-workspace", OverviewPanel).render_state(
+            self.controller.state
+        )
 
     def _render_banner(self) -> None:
         banner = self.query_one("#banner", ConnectionBanner)
@@ -684,6 +824,53 @@ class QbitOpsTuiApp(App[None]):
         state = self.controller.state
         for panel in self.query(DetailsPanel):
             panel.render_state(state)
+
+    # -- workspace navigation --------------------------------------------
+
+    def action_show_overview(self) -> None:
+        self._switch_workspace(Workspace.OVERVIEW)
+
+    def action_show_torrents(self) -> None:
+        self._switch_workspace(Workspace.TORRENTS)
+
+    def _switch_workspace(self, workspace: Workspace) -> None:
+        """Switch the active workspace.
+
+        Zero qBittorrent API calls (`TuiController.set_workspace` is a
+        pure state assignment). A no-op while a modal is on top of the
+        screen stack, so a stray workspace-switch keystroke never
+        switches the workspace underneath an open Filters/Details/Help
+        modal. Search/filter state and the focused torrent are
+        untouched by construction (`set_workspace` does not reset
+        them); only widget *focus* is actively managed here, so a
+        switch never leaves a now-hidden widget focused.
+        """
+        if len(self.screen_stack) > 1:
+            return
+        if self.controller.state.workspace is workspace:
+            if workspace is Workspace.TORRENTS:
+                self.query_one("#torrents", DataTable).focus()
+            return
+
+        self.controller.set_workspace(workspace)
+        self._render_workspace_visibility()
+        self._render_workspace_tabs()
+        if workspace is Workspace.TORRENTS:
+            self.query_one("#torrents", DataTable).focus()
+        else:
+            self.screen.set_focus(None)
+
+    def _render_workspace_visibility(self) -> None:
+        workspace = self.controller.state.workspace
+        self.query_one("#overview-workspace", OverviewPanel).display = (
+            workspace is Workspace.OVERVIEW
+        )
+        self.query_one("#torrents-workspace", Vertical).display = (
+            workspace is Workspace.TORRENTS
+        )
+
+    def _in_torrents_workspace(self) -> bool:
+        return self.controller.state.workspace is Workspace.TORRENTS
 
     # -- interaction -----------------------------------------------------
 
@@ -848,16 +1035,13 @@ class QbitOpsTuiApp(App[None]):
 
         panel.show_error("")
         self.controller.set_filters(filters)
-        # Keep every mounted FiltersPanel instance (inline + modal, if
-        # both happen to exist) showing the same, just-applied filter.
-        for other in self.query(FiltersPanel):
-            if other is not panel:
-                other.sync_from(filters)
         self._render_filter_summary()
         self._render_table()
         self._render_details_panels()
 
     def action_focus_search(self) -> None:
+        if not self._in_torrents_workspace():
+            return
         self.mount_search_input()
 
     def mount_search_input(self) -> None:
@@ -870,45 +1054,66 @@ class QbitOpsTuiApp(App[None]):
             value=self.controller.state.search,
             id="search-input",
         )
-        self.query_one("#status-header", StatusHeader).mount(search)
+        self.query_one("#torrents-workspace", Vertical).mount(search, before=0)
         search.focus()
 
     # `Input.Submitted` (its `enter` -> `submit` binding) never actually
     # fires for `#search-input`: the App's own `enter` binding
-    # (`action_open_details`) is `priority=True`, and Textual resolves
+    # (`action_activate`) is `priority=True`, and Textual resolves
     # priority App bindings *before* dispatching the key to the focused
     # widget's own declarative bindings at all -- verified empirically.
     # This differs from a printable character, which `Input._on_key`
     # consumes directly (bypassing bindings resolution entirely, see the
     # `escape` binding's comment above), so typing itself is unaffected.
-    # `action_open_details` below handles `enter` on the search input
+    # `action_activate` below handles `enter` on the search input
     # directly instead of relying on this handler.
 
     def action_open_filters(self) -> None:
-        if self._is_narrow():
-            self.push_screen(FiltersScreen(self.controller.state.filters))
-        else:
-            self.query_one("#main > FiltersPanel", FiltersPanel).query_one(
-                ".f-category", Input
-            ).focus()
+        if not self._in_torrents_workspace():
+            return
+        self.push_screen(FiltersScreen(self.controller.state.filters))
 
     def action_cursor_down(self) -> None:
+        if not self._in_torrents_workspace():
+            return
         self.query_one("#torrents", DataTable).action_cursor_down()
 
     def action_cursor_up(self) -> None:
+        if not self._in_torrents_workspace():
+            return
         self.query_one("#torrents", DataTable).action_cursor_up()
 
-    def action_open_details(self) -> None:
-        """Bound to `enter` with `priority=True` (see the `BINDINGS`
-        comment), so this always fires before any focused widget's own
-        `enter` binding -- including `#search-input`'s native
-        `submit`, which as a result never actually runs (see
-        `mount_search_input`'s neighboring comment). Handle that case
-        explicitly: search already applies live as the user types (see
+    def action_activate(self) -> None:
+        """Bound to `enter` with `priority=True` (see `BINDINGS`), so
+        this always fires before any focused widget's own `enter`
+        binding -- including `#search-input`'s native `submit`, which
+        as a result never actually runs (see `mount_search_input`'s
+        neighboring comment).
+
+        Also special-cases `FiltersScreen`: its filter edits already
+        apply live (see `on_input_changed`/`on_checkbox_changed`), so
+        `enter` there only needs to close the modal -- see
+        `FiltersScreen`'s docstring for why this can't just be a
+        Screen-level binding.
+
+        Otherwise dispatches by active workspace: from Overview, `enter`
+        is the documented "browse torrents" shortcut (same as `t`);
+        from Torrents, it opens the focused torrent's details -- unless
+        a text `Input` (search) currently has focus, in which case
+        search already applies live as the user types (see
         `on_input_changed`/`_apply_search`), so `enter` here only needs
         to keep the current text and return focus to the table, not
         open Details.
         """
+        if len(self.screen_stack) > 1:
+            if isinstance(self.screen, FiltersScreen):
+                self.pop_screen()
+            return
+
+        if self.controller.state.workspace is Workspace.OVERVIEW:
+            self._switch_workspace(Workspace.TORRENTS)
+            return
+
         focused = self.focused
         if isinstance(focused, Input) and focused.id == "search-input":
             self.query_one("#torrents", DataTable).focus()
@@ -930,6 +1135,8 @@ class QbitOpsTuiApp(App[None]):
         `None` if nothing is focused), for the same test-observability
         reason as `_focus_torrent`.
         """
+        if not self._in_torrents_workspace():
+            return None
         torrent_hash = self.controller.state.focused_hash
         if torrent_hash is None:
             return None
@@ -942,8 +1149,20 @@ class QbitOpsTuiApp(App[None]):
         self.push_screen(HelpScreen())
 
     def action_dismiss_overlay(self) -> None:
-        """Close a modal, or return focus from a text input to the table."""
+        """Close a modal, or return focus from a text input to the table.
+
+        Special-cases `FiltersScreen`: `escape` there means *cancel*,
+        i.e. revert to `FiltersScreen.original_filters` before closing
+        -- not a plain `Screen`-level binding, for the same App-priority
+        reason documented on `FiltersScreen`/`action_activate`.
+        """
         if len(self.screen_stack) > 1:
+            screen = self.screen
+            if isinstance(screen, FiltersScreen):
+                self.controller.set_filters(screen.original_filters)
+                self._render_filter_summary()
+                self._render_table()
+                self._render_details_panels()
             self.pop_screen()
             return
 
@@ -961,11 +1180,31 @@ class QbitOpsTuiApp(App[None]):
         return self.size.width < NARROW_WIDTH_THRESHOLD
 
 
+class ConnectionBanner(Static):
+    """A dismissible-looking, non-blocking banner shown while reconnecting.
+
+    Never replaces the workspace content underneath it -- stale data
+    stays visible (see docs/TUI_ARCHITECTURE_REVIEW.md §5/§6).
+    """
+
+
+class FilterSummary(Static):
+    """A concise, always-visible line describing the active filter/search.
+
+    e.g. "146 shown / 1105 · stalled" or
+    "24 shown / 1105 · category: films · stalled · search: ubuntu" --
+    see docs/COMMANDS.md ("TUI"). Purely presentational: derived from
+    `TuiState`, never fetched. Only shown in the Torrents workspace.
+    """
+
+
 _HELP_TEXT = """[bold]Keys[/bold]
-up/down, j/k   navigate torrents
-/              search by name or hash, live as you type (Enter/Esc to close)
-f              open filters
-enter          open torrent details (narrow layout)
+1, g           Overview
+2, t           Torrents
+up/down, j/k   navigate torrents (Torrents workspace)
+/              search by name or hash, live as you type (Torrents workspace)
+f              open filters (Torrents workspace)
+enter          browse torrents (Overview) / open details (Torrents)
 r              refresh focused torrent's tracker details
 esc            close a modal, or return focus to the torrent list
 q              quit
