@@ -11,6 +11,7 @@ drop the `poetry run` prefix.
 - [Status](#status)
 - [Status Watch Mode](#status-watch-mode)
 - [Doctor](#doctor)
+- [TUI](#tui)
 - [Connection](#connection)
 - [Torrents](#torrents)
   - [Torrent Filters](#torrent-filters)
@@ -306,6 +307,136 @@ certainty should produce a warning or refusal, not a guess"). `doctor`
 never modifies anything, never offers `--fix`, and never filters checks
 with `--only`/`--skip` (not needed at today's catalogue size; a future
 phase can add them without changing any existing check's code).
+
+## TUI
+
+```bash
+qbit-ops tui
+qbit-ops tui --interval 10
+```
+
+`qbit-ops tui` is a **read-only** interactive terminal UI (TUI 1, see
+[docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md)): a live
+status header, a browsable/filterable torrent table, read-only name
+search, and safe focused-torrent details. It adds interactive
+navigation and inspection that `status --watch` does not provide —
+`status --watch` is deliberately status-only, the TUI is not.
+
+**No mutation is reachable from the TUI.** It shares the exact same
+`TorrentFilter` vocabulary and safe torrent/tracker data as the rest of
+the CLI (`app.torrents`, `app.status`, `app.app_services`) but never
+imports any `plan_*`/`apply_*` mutation function, `app.main`, or any
+raw-tracker-URL-producing helper — enforced by a static (AST) test,
+not just a runtime one (`tests/test_tui_security.py`).
+
+### Optional dependency
+
+The TUI requires the optional `tui` extra ([Install](../README.md#-install)):
+
+```bash
+pipx install "qbit-ops[tui]"
+# or, for local development:
+poetry install --extras tui
+```
+
+Every other command works identically whether or not this extra is
+installed, and never imports Textual — `qbit-ops tui` imports it
+lazily, inside the command body, only when actually invoked. Running
+`qbit-ops tui` without the extra installed fails immediately, before
+any qBittorrent client is created, with one actionable message and no
+traceback:
+
+```console
+$ qbit-ops tui
+✗ ERROR The TUI requires the optional 'tui' extra.
+
+Install it with:
+  pipx install "qbit-ops[tui]"
+or, for local development:
+  poetry install --extras tui
+```
+
+### Controls
+
+```text
+up/down, j/k   navigate torrents
+/              search by name (read-only, substring, case-insensitive)
+f              focus the filters panel
+enter          open/toggle the details panel (narrow terminals)
+r              refresh the focused torrent's tracker details
+?              toggle help
+q              quit
+```
+
+Filters use the exact same fields, tokens, and AND/OR combination rules
+as [Torrent Filters](#torrent-filters) (`--category`, `--state`,
+`--completed`/`--incomplete`, `--active`/`--inactive`, `--stalled`,
+`--errored`) — entered as comma-separated values and checkboxes in the
+filters panel. Search is a separate, UI-only, read-only substring match
+on torrent name: it never resolves to a single mutation target the way
+`torrents inspect --name`'s fuzzy scoring does, and it never triggers a
+qBittorrent API call. Neither filters nor search ever call
+`torrents_trackers()`.
+
+### Refresh model
+
+`--interval SECONDS` (default `5.0`, same default as `status --watch`)
+sets how often the TUI refreshes the status header and torrent table.
+Each refresh performs exactly four qBittorrent API calls —
+`app_version()`, `app_web_api_version()`, `transfer_info()`, and one
+`torrents_info()` shared by both the status counters and the torrent
+table (never a second, redundant `torrents_info()` call) — the same
+bounded budget `status` uses. Filter and search changes are applied
+entirely in memory against the last fetched torrent list: zero API
+calls.
+
+Focusing a torrent (via keyboard navigation) fetches that torrent's
+tracker details with **at most one** `torrents_trackers()` call — never
+a scan of every torrent, and never called again automatically on the
+next periodic tick. The Details panel shows when tracker details were
+last fetched; press `r` to refresh them manually without waiting for a
+new focus change.
+
+### Stale data and failure states
+
+A temporary qBittorrent outage discovered during a periodic refresh
+does not clear the screen: the last successfully collected status and
+torrent list stay visible, marked stale, under a reconnecting banner,
+while the TUI keeps retrying at the configured interval. A later
+successful refresh clears the banner and the stale marker automatically
+— there is no manual "retry" action to take.
+
+Authentication failure and invalid local configuration (a missing or
+malformed `.env`) are **not** treated as temporary: the TUI shows a
+blocking screen and stops retrying, since neither can self-heal without
+fixing the underlying `.env`/credentials and restarting. An unexpected
+internal error (a real programming defect, not a remote/temporary
+failure) is never silently presented as "qBittorrent is temporarily
+unavailable": the TUI stops refreshing and shows a distinct fatal
+notice instead.
+
+### Security
+
+Every value the TUI renders is a safe, structured domain output — the
+same `StatusSnapshot`/`SelectedTorrent`/`inspect_torrent`-shaped data
+the rest of the CLI already uses. Tracker identities and messages are
+always the same structural, secret-free fields `trackers inspect`
+renders (`app.torrents.get_safe_tracker_details`): a normalized
+`host[:port]` identity, health, scheme, path *shape*, and query
+parameter *names* — never a raw announce URL, path value, query value,
+userinfo, or unsanitized tracker message. See
+[docs/PHILOSOPHY.md](PHILOSOPHY.md) §15 and
+[docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md) §10 for
+the full invariant and the tests that enforce it.
+
+### Scope
+
+Read-only. TUI 1 does not include torrent mutations, multi-selection,
+tracker-wide status/health views, a doctor workspace, an explanation
+view, filesystem features, persistent history, charts, or automatic
+remediation — see
+[docs/TUI_ARCHITECTURE_REVIEW.md §12](TUI_ARCHITECTURE_REVIEW.md#12-revised-roadmap)
+for the full phased roadmap (TUI 1.1 through TUI 5).
 
 ## Connection
 

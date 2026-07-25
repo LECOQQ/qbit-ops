@@ -16,7 +16,7 @@ PY := poetry run
 .PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint sync
 
 .sync-stamp: pyproject.toml poetry.lock
-	@poetry install --sync --no-interaction
+	@poetry install --sync --extras tui --no-interaction
 	@touch .sync-stamp
 
 sync: .sync-stamp ## Sync the virtualenv when pyproject.toml or poetry.lock changes
@@ -46,7 +46,7 @@ help: ## Show available commands
 	| awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
 
 install: doctor ## Install dependencies and configure Git hooks
-	@poetry install
+	@poetry install --extras tui
 	@touch .sync-stamp
 	@$(PY) pre-commit install --hook-type commit-msg
 
@@ -71,7 +71,7 @@ test: ## Run Python tests
 check: sync lint test ## Run all required quality checks
 
 ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
-	@poetry install --no-interaction --no-ansi
+	@poetry install --extras tui --no-interaction --no-ansi
 	@$(MAKE) check
 	@$(MAKE) ci-entrypoint
 

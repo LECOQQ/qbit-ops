@@ -29,6 +29,14 @@ qbit-ops trackers replace-passkey \
   table/JSON/JSONL/CSV.
 - 🔁 **`status --watch`** — live-refreshing status in place (table) or as a
   flushed JSONL stream, on the same snapshot model, until `Ctrl+C`.
+- 🖥️ **`tui`** *(optional `tui` extra)* — a read-only interactive terminal
+  UI: live status header, a browsable/filterable torrent table (the
+  same shared `TorrentFilter` vocabulary as `torrents list`), read-only
+  name search, and safe focused-torrent details with structural tracker
+  identities. No mutation is reachable from the TUI. See
+  [docs/COMMANDS.md](docs/COMMANDS.md#tui) for controls and
+  [docs/TUI_ARCHITECTURE_REVIEW.md](docs/TUI_ARCHITECTURE_REVIEW.md) for
+  the architecture and roadmap.
 - 🩺 **`doctor`** — a bounded, read-only diagnostic report (configuration,
   connectivity, compatibility, runtime) with stable pass/warning/failure
   exit codes, in table/JSON/JSONL/CSV. Independent checks keep running
@@ -129,6 +137,11 @@ make install
 poetry run qbit-ops --help
 ```
 
+`make install` (and `make check`) install the optional `tui` extra by
+default (`poetry install --extras tui`), since the test suite exercises
+it. To install only the core CLI dependencies for development, without
+Textual: `poetry install` (no `--extras`).
+
 **As a regular command, with [pipx](https://pipx.pypa.io):**
 
 ```bash
@@ -139,6 +152,19 @@ qbit-ops --help
 ```
 
 Update later with `pipx reinstall qbit-ops` (run from the repo).
+
+**With the optional TUI** (`qbit-ops tui`, see
+[docs/COMMANDS.md](docs/COMMANDS.md#tui)):
+
+```bash
+pipx install ".[tui]"
+# or, for local development:
+poetry install --extras tui
+```
+
+`qbit-ops tui` fails with an actionable message (no traceback) if run
+without this extra installed — every other command works identically
+either way, and none of them ever import Textual.
 
 Enable tab-completion for your shell (bash/zsh/fish):
 
@@ -183,6 +209,8 @@ qbit-ops status --quiet; echo $?   # healthchecks: 0 healthy, 1 warning, 2 criti
 
 qbit-ops status --watch                       # refresh in place every 5s until Ctrl+C
 qbit-ops status --watch --interval 10
+
+qbit-ops tui                                  # interactive: browse, filter, search, inspect (requires the `tui` extra)
 qbit-ops status --watch --format jsonl | jq .  # one flushed JSON object per line
 
 qbit-ops connection check

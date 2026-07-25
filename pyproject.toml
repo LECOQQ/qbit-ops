@@ -12,6 +12,10 @@ python-dotenv = "*"
 qbittorrent-api = "*"
 typer = "*"
 rich = "^15.0.0"
+textual = { version = ">=8.2.8", optional = true }
+
+[tool.poetry.extras]
+tui = ["textual"]
 
 [tool.poetry.scripts]
 qbit-ops = "app.main:app"
@@ -21,6 +25,7 @@ black = "*"
 ruff = "*"
 pytest = "*"
 pytest-cov = "*"
+pytest-asyncio = "*"
 pyright = "*"
 commitizen = "*"
 pre-commit = "*"
@@ -54,6 +59,7 @@ venv = ".venv"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q --maxfail=1 --disable-warnings"
+asyncio_mode = "auto"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
