@@ -157,14 +157,42 @@ Update later with `pipx reinstall qbit-ops` (run from the repo).
 [docs/COMMANDS.md](docs/COMMANDS.md#tui)):
 
 ```bash
-pipx install ".[tui]"
-# or, for local development:
-poetry install --extras tui
+# local development (run from the cloned repo)
+poetry install -E tui
+poetry run qbit-ops tui
+
+# a fresh pipx install (run from the cloned repo, like `pipx install .` above)
+pipx install '.[tui]'
+
+# an editable checkout, tracking the git clone instead of copying it
+pipx install --editable '.[tui]'
 ```
+
+**`qbit-ops` is not published on PyPI.** `pipx install "qbit-ops[tui]"`
+(a bare package name, no path) always fails with "No matching
+distribution found" — `pipx`/`pip` look that up on PyPI, where this
+project does not exist. Every install form above is a **path**
+(`.`/`'.[tui]'`), run from inside the cloned repository; there is no
+package-name-only install for this project.
 
 `qbit-ops tui` fails with an actionable message (no traceback) if run
 without this extra installed — every other command works identically
 either way, and none of them ever import Textual.
+
+**Upgrading an install that did not originally include the extra does
+not add it.** `pipx upgrade`/`pipx reinstall` reuse the package spec
+recorded at install time, so a plain `pipx install .` install stays
+without Textual even after upgrading. To add the TUI to an existing
+install, uninstall and reinstall with the extra (from the cloned repo):
+
+```bash
+git clone https://github.com/LECOQQ/qbit-ops.git && cd qbit-ops
+pipx uninstall qbit-ops
+pipx install '.[tui]'
+```
+
+Quote `'.[tui]'` — an unquoted `[tui]` is glob-expanded by `zsh` and
+some other shells.
 
 Enable tab-completion for your shell (bash/zsh/fish):
 
