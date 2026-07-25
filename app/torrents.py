@@ -175,9 +175,11 @@ def build_torrent_filter(
         if normalized_state not in normalized_states:
             normalized_states.append(normalized_state)  # type: ignore[arg-type]
 
-    normalized_tracker = (
-        normalize_tracker_host(tracker) if tracker is not None else None
-    )
+    normalized_tracker: str | None = None
+    if tracker is not None:
+        normalized_tracker = normalize_tracker_host(tracker)
+        if normalized_tracker == "":
+            raise ValueError("--tracker must not be empty or whitespace-only.")
 
     return TorrentFilter(
         categories=normalized_categories,

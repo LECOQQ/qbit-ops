@@ -1558,3 +1558,13 @@ own scheme — see [Exit codes](#exit-codes) under [Tracker
 Status](#tracker-status) and [`explain` exit
 codes](#explain-exit-codes) under [Explain](#explain) for the full
 mapping and the reasoning behind each one's non-obvious choices.
+
+### Internal error: exit code `70`
+
+Every command shares one additional code regardless of the scheme
+above: `70` reports an unexpected internal defect (a programming bug,
+not a remote/configuration failure or an operational finding) and is
+never reused for anything else. See
+[docs/ERRORS_AND_EXIT_CODES.md](ERRORS_AND_EXIT_CODES.md) for the full
+error-category model, local validation rules, and the stdout/stderr
+contract for fatal errors.
