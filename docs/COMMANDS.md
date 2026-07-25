@@ -492,18 +492,22 @@ poetry run qbit-ops torrents list \
 ```
 
 **Migration note** — before this phase, `torrents list --tracker` matched
-the **full** tracker URL (`--match exact|without-query`, like the
-`trackers` command group still does) and rendered every matching tracker
-URL verbatim, including any embedded passkey. Both `--match` and that
-rendering are gone from `torrents list` and the four bulk mutation
-commands (pre-1.0 breaking change; see `docs/DECISIONS.md`) — hostname
-matching is strictly safer and does not require knowing the exact
-normalized URL qBittorrent stores. `trackers inspect`/`trackers export`/
-etc. are unchanged: those commands are explicit, read-only tracker
-inspection where showing the full URL is exactly what was requested.
-`trackers status` (see [Tracker Status](#tracker-status)) is also
-hostname-only by construction — like `torrents list --tracker`, it never
-renders a full announce URL or passkey.
+the **full** tracker URL (`--match exact|without-query`) and rendered
+every matching tracker URL verbatim, including any embedded passkey.
+Both `--match` and that rendering are gone from `torrents list` and the
+four bulk mutation commands' filters (pre-1.0 breaking change; see
+`docs/DECISIONS.md`) — hostname matching is strictly safer and does not
+require knowing the exact normalized URL qBittorrent stores. A later
+tracker-security hardening phase (see `docs/DECISIONS.md`) extended the
+same principle to the whole `trackers` command group: `trackers list`,
+`trackers inspect`, and `trackers export` no longer have `--match`
+either and no longer render a full announce URL — only the four
+mutation commands (`add-if-present`/`remove`/`replace`/
+`replace-passkey`) still take and act on a raw URL, because qBittorrent's
+API requires it. `trackers status` (see [Tracker
+Status](#tracker-status)) has always been hostname-only by construction
+— like `torrents list --tracker`, it never renders a full announce URL
+or passkey.
 
 ### Bulk torrent actions
 
@@ -599,9 +603,21 @@ qbit-ops torrents reannounce --hash abc123
 
 ## Trackers
 
+**Safe by default**: `trackers list`, `trackers inspect`, `trackers
+status`, and `trackers export` never render a complete tracker announce
+URL, passkey, or query value, in any format (`table`/`json`/`jsonl`/
+`csv`). All four report the normalized `host[:port]` identity
+(`app.trackers.normalize_tracker_host`) plus, for `inspect`/`status`, a
+structural breakdown (scheme, path *shape*, query parameter *names* —
+never values). Only the four bulk mutation commands
+(`add-if-present`/`remove`/`replace`/`replace-passkey`) take a raw
+`--source`/`--target`/`--tracker` URL as input, because qBittorrent's API
+requires the literal stored URL to act on it — see [Matching
+Modes](#matching-modes) and the security invariant in
+`docs/PHILOSOPHY.md`.
+
 ```bash
 poetry run qbit-ops trackers list
-poetry run qbit-ops trackers list --match without-query
 poetry run qbit-ops trackers list --format json
 
 poetry run qbit-ops trackers status
@@ -609,14 +625,27 @@ poetry run qbit-ops trackers status --format json
 poetry run qbit-ops trackers status --tracker tracker.example
 poetry run qbit-ops trackers status --category films --state stalled
 
-poetry run qbit-ops trackers inspect \
-  --tracker "https://tracker-a.example/announce"
-poetry run qbit-ops trackers inspect \
-  --tracker "https://tracker-a.example/announce" \
+poetry run qbit-ops trackers inspect --tracker tracker.example
+poetry run qbit-ops trackers inspect --tracker tracker.example \
   --format json
 
 poetry run qbit-ops trackers export --format json
 ```
+
+`trackers list` is a lightweight identity inventory — `Tracker /
+Torrents / Endpoints` — always exits `0`, regardless of tracker health.
+`trackers status` covers the same identities plus health classification
+and exits based on the worst observed health (see [Tracker
+Status](#tracker-status)). The two commands are kept distinct
+deliberately, not merged: `list` is the cheap "what trackers exist"
+answer with no health semantics to reason about, `status` is the
+health-aware answer — see `docs/DECISIONS.md`.
+
+`trackers export` produces normalized identities only
+(`normalized_trackers`, `host[:port]` strings) — it has no raw-URL mode
+and no `--include-sensitive` escape hatch. The one place raw tracker
+URLs are ever exported is `backup export`, which exists specifically to
+produce a restorable backup — see [Backup](#backup).
 
 ### Add a tracker if another tracker is present
 
@@ -696,46 +725,80 @@ poetry run qbit-ops trackers replace-passkey \
 ### Handle dynamic tracker URLs
 
 Some trackers include dynamic query parameters such as `sig` or
-`announce_ts`. Use `--match without-query` to compare only the stable
-tracker identity.
+`announce_ts`. Use `--match without-query` (mutation commands only — see
+[Matching Modes](#matching-modes)) to compare only the stable tracker
+identity.
 
 ```bash
-poetry run qbit-ops trackers list --match without-query
-
 poetry run qbit-ops trackers add-if-present \
-  --source "http://connect.maxp2p.org:8080/passkey/announce" \
+  --source "http://tracker.example:8080/passkey/announce" \
   --target "https://tracker-b.example/announce" \
   --match without-query --dry-run --verbose
 
 poetry run qbit-ops trackers remove \
-  --tracker "http://connect.maxp2p.org:8080/passkey/announce" \
+  --tracker "http://tracker.example:8080/passkey/announce" \
   --match without-query --dry-run --verbose
 
 poetry run qbit-ops trackers replace \
-  --source "http://connect.maxp2p.org:8080/passkey/announce" \
+  --source "http://tracker.example:8080/passkey/announce" \
   --target "https://tracker-b.example/announce" \
   --match without-query --dry-run --verbose
 ```
 
 ## Backup
 
+`backup export` is the project's one deliberately sensitive export: a
+restorable backup needs qBittorrent's literal, raw tracker URLs (passkey
+included), so — unlike every other command — its `trackers` field is not
+redacted. Treat a backup file as a secret: do not paste its contents into
+a bug report, chat, or public issue; give it file permissions that match
+any other credential file on the host (e.g. `chmod 600`).
+
+`metadata.qbit_host` is the one field inside `backup export` that *is*
+redacted (scheme + `host[:port]` only, via `redact_tracker_identity`) —
+it is metadata about the qbit-ops connection, not part of the restorable
+torrent/tracker data, so it never needs to carry `QBIT_HOST`'s userinfo.
+
 ```bash
 poetry run qbit-ops backup export --format json > backup.json
 poetry run qbit-ops backup diff backup-before.json backup-after.json
 poetry run qbit-ops backup diff backup-before.json backup-after.json \
   --format json
+poetry run qbit-ops backup diff backup-before.json backup-after.json \
+  --reveal-sensitive
 ```
 
 `backup export --format json` produces:
 
-- export metadata (`exported_at`, qBittorrent versions, configured host);
-- torrent metadata and tracker details for every torrent;
-- normalized tracker identities;
+- export metadata (`exported_at`, qBittorrent versions,
+  `qbit_host` — redacted to `scheme://host[:port]`);
+- torrent metadata and raw tracker details for every torrent (sensitive);
+- normalized tracker identities (`host[:port]`, safe);
 - aggregated tracker usage counts.
 
 `backup diff` compares two exports from `backup export` or `trackers
 export` and reports torrents added/removed/changed and tracker usage
-changes.
+changes. Its default output is **redacted**: tracker identities in the
+diff are shown as `host[:port]`, never a raw URL, even though the input
+files may contain raw URLs. Pass `--reveal-sensitive` to see the diff
+computed against the raw values instead — an explicit, named opt-in
+(never a bare `--yes`), consistent with the rest of the project's
+mutation-confirmation naming.
+
+**Redaction limitation**: because redaction happens after the diff is
+computed on raw values, two raw URLs on the same host that differ only
+by passkey (e.g. after a passkey rotation) can appear in the *redacted*
+output as the same identity `added` **and** `removed` — visually a
+no-op, even though the diff's exit code still reports a real change. If
+a diff `changed`/`added`/`removed` reads like a no-op, re-run with
+`--reveal-sensitive` to see the actual (raw) difference before assuming
+it's a bug.
+
+`backup diff` does not refuse to print to an interactive terminal the
+way a sensitive-export mode might: `--reveal-sensitive` only affects
+*this project's own backup artifacts* (already opted into raw storage by
+running `backup export`), not a fresh credential exposure, so no
+additional refusal was added on top of the explicit flag.
 
 ## Use Cases
 
@@ -754,26 +817,28 @@ poetry run qbit-ops backup export --format json
 
 ## Matching Modes
 
-`--match exact|without-query` is a **`trackers` command group** concept
-only (`trackers list`/`inspect`/`export`/`add-if-present`/`remove`/
-`replace`/`replace-passkey`), where the exact, raw tracker URL matters
-for the API calls those commands make:
+`--match exact|without-query` is a **mutation-only** concept
+(`add-if-present`/`remove`/`replace`/`replace-passkey`), where the exact,
+raw tracker URL matters for the API calls those commands make:
 
 - `exact` (default): compares the full normalized tracker URL.
 - `without-query`: ignores query parameters when comparing trackers.
 
 Both modes preserve the raw qBittorrent URLs for API calls — this matters
-for `remove`, since qBittorrent expects the original tracker URL.
-`trackers status` does not have `--match`: its tracker identities are
-always `host[:port]` (`app.trackers.normalize_tracker_host`, the same
-function `torrents list --tracker` uses), never a raw URL, so there is no
-query-string comparison mode to pick — see [Tracker
-Status](#tracker-status).
+for `remove`, since qBittorrent expects the original tracker URL. A
+mutation cannot avoid taking a raw `--source`/`--target`/`--tracker` URL
+as input for this reason, but its confirmation prompts, previews, and
+summaries never echo it back — see [Mutation Risk & Confirmation
+Policy](#mutation-risk--confirmation-policy).
 
-`torrents list` and the four bulk mutation commands do **not** have
-`--match`: their `--tracker` filter matches by host[:port] instead (see
-[Torrent Filters](#torrent-filters)) and never needs a raw-URL comparison
-mode.
+Every **read-only** tracker command — `trackers list`, `trackers
+status`, `trackers inspect`, `trackers export`, and `torrents list
+--tracker` — has no `--match` and no raw-URL comparison mode at all:
+none of them need qBittorrent's literal stored URL to act on, so they
+always match by the normalized `host[:port]` identity
+(`app.trackers.normalize_tracker_host`), the same one everywhere. This
+is also why they can be safe by default: a command that never needs the
+raw URL never has one to accidentally render.
 
 ## Format Support Matrix
 
@@ -798,13 +863,13 @@ a clear error instead of producing an ad hoc or lossy serialization.
 | `doctor` | ✅ | ✅ | ✅ | ✅ | `section,code,status,message,detail,remediation` rows |
 | `torrents list` (any filter combination) | ✅ | ✅ | ✅ | ✅ | one row per torrent; JSON/JSONL also include a normalized `filters` object |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ | `category,torrents` rows |
-| `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested tracker details for `--hash`) |
-| `trackers list` | ✅ | ✅ | ✅ | ✅ | `tracker,torrents` rows |
+| `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested, sanitized tracker details for `--hash` — never a raw announce URL) |
+| `trackers list` | ✅ | ✅ | ✅ | ✅ | `tracker,torrents,endpoints` rows; normalized identities only, never a raw URL |
 | `trackers status` (any filter combination) | ✅ | ✅ | ✅ | ✅ | one row per tracker identity; `tracker,health,torrent_count,endpoint_count,healthy_count,warning_count,critical_count,disabled_count,unknown_count` (CSV omits `representative_message`) |
-| `trackers inspect` | ✅ | ✅ | ✅ | ✅ | one row per torrent, matching tracker URLs joined with `; ` |
-| `trackers export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
-| `backup export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
-| `backup diff` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (added/removed/changed, tracker usage) |
+| `trackers inspect` | ✅ | ✅ | ✅ | ✅ | one row per torrent, matching endpoints reduced to structural fields (health/scheme/path shape/query key names) joined with `; ` — never a raw URL |
+| `trackers export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists; normalized identities only, never a raw URL |
+| `backup export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists — **the one export with raw tracker URLs**, see [Backup](#backup) |
+| `backup diff` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (added/removed/changed, tracker usage); redacted by default, `--reveal-sensitive` shows raw values |
 
 Requesting an unsupported format fails fast, before any qBittorrent API
 call:
@@ -1071,12 +1136,11 @@ poetry run qbit-ops trackers status --verbose
 announce URLs that differ only by a dynamic query string) has no direct
 replacement — it is dropped, not renamed, since it doubled as this
 command's secret-exposure surface and `trackers status`'s `host[:port]`
-identity model cannot express it without reintroducing raw URLs. Use
-`trackers list --match without-query` for a redacted-adjacent view of the
-same grouping (it counts torrents per without-query URL, but does not
-enumerate the differing variants). `trackers list` itself still renders
-full tracker URLs — a known, pre-existing gap, out of scope for this
-phase.
+identity model cannot express it without reintroducing raw URLs.
+`trackers list` no longer has `--match` and, as of the tracker-security
+hardening phase, never renders a raw tracker URL either — it reports the
+same `host[:port]` identity model as `trackers status`, just without
+health classification.
 
 | Before | After |
 | --- | --- |

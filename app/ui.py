@@ -23,6 +23,7 @@ from app.doctor import CheckStatus, DoctorReport
 from app.execution import MutationStatus
 from app.selectors import ResolvedTorrent
 from app.status import Health, StatusSnapshot
+from app.trackers import sanitize_tracker_text
 
 console = Console()
 err_console = Console(stderr=True)
@@ -171,8 +172,18 @@ def print_applied() -> None:
 
 
 def print_error(message: str) -> None:
-    """Print an error message on stderr, styled consistently."""
-    err_console.print(f"[bold red]✗ ERROR[/bold red] {message}")
+    """Print an error message on stderr, styled consistently.
+
+    The single rendering funnel for every command's error output, so it
+    runs `sanitize_tracker_text` unconditionally: an upstream exception
+    (from `qbittorrentapi`, an HTTP client, or a misconfigured
+    `QBIT_HOST`) may embed a tracker announce URL, credentials, or
+    userinfo, and callers should not each have to remember to sanitize
+    before calling this.
+    """
+    err_console.print(
+        f"[bold red]✗ ERROR[/bold red] {sanitize_tracker_text(message)}"
+    )
 
 
 def print_ambiguous_hash_error(

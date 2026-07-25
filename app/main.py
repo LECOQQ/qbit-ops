@@ -21,6 +21,7 @@ from app.backup import (
     export_instance_state,
     has_backup_diff,
     load_export_file,
+    redact_backup_diff,
 )
 from app.config import ConfigError, QbitConfig, load_qbit_config
 from app.doctor import (
@@ -85,7 +86,6 @@ from app.trackers import (
     apply_tracker_replacement,
     export_tracker_state,
     inspect_tracker,
-    list_tracker_usage,
     plan_tracker_addition,
     plan_tracker_passkey_replacement,
     plan_tracker_removal,
@@ -1183,13 +1183,6 @@ def add_if_present(
 
 @trackers_app.command(name="list")
 def list_trackers(
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker grouping mode.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -1198,7 +1191,17 @@ def list_trackers(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """List trackers currently present on the qBittorrent instance."""
+    """List normalized tracker identities in use, with usage counts.
+
+    A lightweight inventory: tracker identity (`host[:port]`, never a
+    full announce URL), how many torrents use it, and how many tracker
+    endpoints that represents. Built on the same collection as `trackers
+    status` (see docs/COMMANDS.md, "Tracker Status") but always exits
+    `0` -- unlike `trackers status`, this is a plain inventory with no
+    health concept, so a script depending only on "what trackers exist"
+    is never broken by a degraded tracker elsewhere on the instance. Use
+    `trackers status` for endpoint health classification.
+    """
     _validate_format_support("trackers_list", output_format)
     enabled = progress_enabled(
         output_format=output_format,
@@ -1209,8 +1212,8 @@ def list_trackers(
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
-            tracker_usage = list_tracker_usage(
-                client, match_mode=match.value, on_progress=advance
+            report = collect_tracker_status(
+                client, build_torrent_filter(), on_progress=advance
             )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
@@ -1219,10 +1222,21 @@ def list_trackers(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
+    trackers = [
+        {
+            "identity": aggregate.identity,
+            "torrent_count": aggregate.torrent_count,
+            "endpoint_count": aggregate.endpoint_count,
+        }
+        for aggregate in report.trackers
+    ]
     payload = {
-        "match": match.value,
-        "summary": {"trackers": len(tracker_usage)},
-        "trackers": tracker_usage,
+        "schema_version": report.schema_version,
+        "summary": {
+            "trackers": len(trackers),
+            "torrents_scanned": report.scanned_torrents,
+        },
+        "trackers": trackers,
     }
 
     if output_format == OutputFormat.json:
@@ -1235,27 +1249,36 @@ def list_trackers(
 
     if output_format == OutputFormat.csv:
         _print_csv_rows(
-            ["tracker", "torrents"],
+            ["tracker", "torrents", "endpoints"],
             [
-                (tracker_url, str(torrent_count))
-                for tracker_url, torrent_count in tracker_usage.items()
+                (
+                    tracker["identity"],
+                    str(tracker["torrent_count"]),
+                    str(tracker["endpoint_count"]),
+                )
+                for tracker in trackers
             ],
         )
         return
 
-    if not tracker_usage:
+    if not trackers:
         typer.echo("No trackers found.")
         return
 
     print_table(
         "Trackers",
-        ["Tracker", "Torrents"],
+        ["Tracker", "Torrents", "Endpoints"],
         [
-            [tracker_url, str(torrent_count)]
-            for tracker_url, torrent_count in tracker_usage.items()
+            [
+                tracker["identity"],
+                str(tracker["torrent_count"]),
+                str(tracker["endpoint_count"]),
+            ]
+            for tracker in trackers
         ],
+        fold_columns={"Tracker"},
     )
-    print_summary({"trackers": len(tracker_usage)})
+    print_summary(payload["summary"])
 
 
 @trackers_app.command(name="status")
@@ -1379,16 +1402,9 @@ def inspect_tracker_usage(
         str,
         typer.Option(
             "--tracker",
-            help="Tracker used to find matching torrents.",
+            help=_TRACKER_FILTER_HELP,
         ),
     ],
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -1397,7 +1413,16 @@ def inspect_tracker_usage(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """Inspect torrents using a tracker."""
+    """Inspect torrents using a tracker.
+
+    Matches by normalized host[:port] (`--tracker
+    tracker.example`; a full announce URL is also accepted, only its
+    host and port are used) -- the same identity `trackers status` and
+    `torrents list --tracker` use. Every matching endpoint is reduced to
+    secret-free structural fields (raw status, health, enabled, a
+    sanitized message, scheme, path shape, query key names); a full
+    announce URL or passkey is never present in the output.
+    """
     _validate_format_support("trackers_inspect", output_format)
     enabled = progress_enabled(
         output_format=output_format,
@@ -1411,7 +1436,6 @@ def inspect_tracker_usage(
             report = inspect_tracker(
                 client=client,
                 tracker=tracker,
-                match_mode=match.value,
                 on_progress=advance,
             )
     except ConfigError as error:
@@ -1433,14 +1457,17 @@ def inspect_tracker_usage(
 
     if output_format == OutputFormat.csv:
         _print_csv_rows(
-            [*_TORRENT_CSV_FIELDNAMES, "matching_tracker_urls"],
+            [*_TORRENT_CSV_FIELDNAMES, "matching_endpoints"],
             [
                 (
                     *_torrent_csv_row(
                         torrent,
                         tracker_count_field="active_tracker_count",
                     ),
-                    "; ".join(torrent["matching_tracker_urls"]),
+                    "; ".join(
+                        _format_endpoint_summary(endpoint)
+                        for endpoint in torrent["matching_endpoints"]
+                    ),
                 )
                 for torrent in report["torrents"]
             ],
@@ -1461,7 +1488,7 @@ def inspect_tracker_usage(
                 "Progress",
                 "Ratio",
                 "Trackers",
-                "Matching Tracker URLs",
+                "Matching Endpoints",
             ],
             [
                 [
@@ -1469,7 +1496,10 @@ def inspect_tracker_usage(
                         torrent,
                         tracker_count_field="active_tracker_count",
                     ),
-                    "\n".join(torrent["matching_tracker_urls"]),
+                    "\n".join(
+                        _format_endpoint_summary(endpoint)
+                        for endpoint in torrent["matching_endpoints"]
+                    ),
                 ]
                 for torrent in report["torrents"]
             ],
@@ -1478,6 +1508,7 @@ def inspect_tracker_usage(
 
     print_summary(
         {
+            "tracker": report["tracker"],
             "scanned": report["scanned"],
             "matched_tracker": report["matched_tracker"],
         }
@@ -1749,8 +1780,25 @@ def diff_backup(
             help="Output format.",
         ),
     ] = OutputFormat.table,
+    reveal_sensitive: Annotated[
+        bool,
+        typer.Option(
+            "--reveal-sensitive",
+            help=(
+                "Show raw tracker announce URLs (including any passkey) "
+                "in the diff instead of redacted host[:port] identities."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Compare two backup or tracker export JSON files."""
+    """Compare two backup or tracker export JSON files.
+
+    Redacts tracker identities to `host[:port]` by default, in every
+    `--format` -- a backup export legitimately contains raw announce
+    URLs (see `backup export`), but a diff of two such files is
+    ordinary terminal/log output and must not echo them. Pass
+    `--reveal-sensitive` to show the raw URLs instead.
+    """
     _validate_format_support("backup_diff", output_format)
     try:
         baseline_export = load_export_file(baseline)
@@ -1764,12 +1812,14 @@ def diff_backup(
     except BackupExportError as error:
         _fail(str(error))
 
+    rendered_report = report if reveal_sensitive else redact_backup_diff(report)
+
     if output_format == OutputFormat.json:
-        _print_json_output(report)
+        _print_json_output(rendered_report)
     elif output_format == OutputFormat.jsonl:
-        _print_jsonl_output(report)
+        _print_jsonl_output(rendered_report)
     else:
-        _print_backup_diff(report)
+        _print_backup_diff(rendered_report)
 
     _exit_if_backup_diff(report)
 
@@ -1783,15 +1833,14 @@ def export_trackers(
             help="Output format.",
         ),
     ] = OutputFormat.table,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker normalization mode for exported identities.",
-        ),
-    ] = TrackerMatchModeOption.exact,
 ) -> None:
-    """Export active tracker state."""
+    """Export normalized tracker identities per torrent.
+
+    Safe by default: identities are always `host[:port]`, never a full
+    announce URL or passkey. For a restorable backup that legitimately
+    needs raw tracker URLs, use `backup export` instead (see
+    docs/COMMANDS.md, "Backup").
+    """
     _validate_format_support("trackers_export", output_format)
     enabled = progress_enabled(
         output_format=output_format,
@@ -1802,9 +1851,7 @@ def export_trackers(
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
-            state = export_tracker_state(
-                client=client, match_mode=match.value, on_progress=advance
-            )
+            state = export_tracker_state(client=client, on_progress=advance)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -2444,6 +2491,26 @@ def _torrent_csv_row(
     )
 
 
+def _format_endpoint_summary(endpoint: dict[str, Any]) -> str:
+    """Render one `trackers inspect` matching endpoint as a safe summary line.
+
+    Built entirely from `SafeTrackerIdentity`/`TrackerHealth` fields --
+    never a full announce URL, path value, or query value.
+    """
+    parts = [endpoint["health"]]
+    if not endpoint["enabled"]:
+        parts.append("disabled")
+    if endpoint["scheme"]:
+        parts.append(endpoint["scheme"])
+    if endpoint["path_shape"]:
+        parts.append(f"path={endpoint['path_shape']}")
+    if endpoint["query_keys"]:
+        parts.append(f"query={','.join(endpoint['query_keys'])}")
+    if endpoint["message"]:
+        parts.append(f"msg={endpoint['message']}")
+    return " ".join(parts)
+
+
 def _selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
     """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict."""
     return {
@@ -2624,13 +2691,9 @@ def _print_torrent_details(report: dict[str, Any]) -> None:
     if report["trackers"]:
         print_table(
             "Trackers",
-            ["URL", "Status"],
+            ["Tracker", "Details"],
             [
-                [
-                    tracker["url"],
-                    f"{tracker['status']} "
-                    f"({'disabled' if tracker['disabled'] else 'active'})",
-                ]
+                [tracker["tracker"], _format_endpoint_summary(tracker)]
                 for tracker in report["trackers"]
             ],
         )

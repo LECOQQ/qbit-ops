@@ -9,8 +9,10 @@ from app.config import QbitConfig
 from app.torrents import list_torrents_with_trackers
 from app.trackers import (
     TrackerMatchMode,
+    describe_tracker_url,
     list_tracker_usage,
     normalize_tracker_url,
+    redact_tracker_identity,
 )
 
 
@@ -26,7 +28,23 @@ def export_instance_state(
     web_api_version: str,
     match_mode: TrackerMatchMode = "exact",
 ) -> dict[str, Any]:
-    """Export torrents, trackers and metadata for backup or audit."""
+    """Export torrents, trackers and metadata for backup or audit.
+
+    This is qbit-ops's one deliberately sensitive export: unlike
+    `trackers list`/`inspect`/`status`/`export`, the backup artifact
+    legitimately needs raw tracker announce URLs (including any
+    passkey) to be useful for restoring trackers later -- see
+    docs/DECISIONS.md. Treat the resulting file as a credential: it must
+    never be echoed to a terminal summary (only counts are, see the CLI
+    layer) and should be stored with restrictive file permissions.
+
+    `metadata.qbit_host` is reduced to scheme + host[:port]
+    (`redact_tracker_identity`, reused here for the qBittorrent Web UI
+    host rather than a tracker URL -- the same "strip userinfo" need
+    applies): `QBIT_HOST` can itself embed the qBittorrent password as
+    userinfo, and the backup file does not need it to be useful, so it
+    is never written even into this sensitive artifact.
+    """
     torrents = _add_normalized_trackers(
         list_torrents_with_trackers(client),
         match_mode,
@@ -37,7 +55,7 @@ def export_instance_state(
         "metadata": {
             "exported_at": datetime.now(UTC).isoformat(),
             "qbit_ops_version": qbit_ops_version,
-            "qbit_host": config.host,
+            "qbit_host": redact_tracker_identity(config.host),
             "qbit_user": config.username,
             "qbittorrent_version": qbittorrent_version,
             "web_api_version": web_api_version,
@@ -177,6 +195,90 @@ def diff_backup_exports(
 def has_backup_diff(report: dict[str, Any]) -> bool:
     """Return whether a backup diff report contains any difference."""
     return not report["summary"]["identical"]
+
+
+def redact_backup_diff(report: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a diff report's tracker fields to safe `host[:port]` identities.
+
+    `backup diff`'s default rendering: the underlying `report` (from
+    `diff_backup_exports`) is computed against the raw, exact tracker
+    URLs in the export files (so an actual passkey rotation is still
+    correctly detected as a real difference), but nothing derived from
+    it reaches a terminal or a machine-readable payload without passing
+    through here first, in every `--format`. `--reveal-sensitive`
+    bypasses this and renders `report` directly -- see
+    docs/COMMANDS.md ("Backup").
+
+    Never mutates `report`. `summary`/`added_torrents`/`removed_torrents`
+    carry no raw tracker data already (hash/name/counts only) and are
+    passed through unchanged.
+    """
+    redacted_changed_torrents = [
+        {
+            "hash": torrent["hash"],
+            "name": torrent["name"],
+            "normalized_trackers": {
+                "added": _redact_identity_list(
+                    torrent["normalized_trackers"]["added"]
+                ),
+                "removed": _redact_identity_list(
+                    torrent["normalized_trackers"]["removed"]
+                ),
+            },
+        }
+        for torrent in report["changed_torrents"]
+    ]
+
+    tracker_usage = report["tracker_usage"]
+    redacted_usage = {
+        "added": _redact_usage_counts(tracker_usage["added"]),
+        "removed": _redact_usage_counts(tracker_usage["removed"]),
+        "changed": _redact_usage_changed(tracker_usage["changed"]),
+    }
+
+    return {
+        "summary": report["summary"],
+        "added_torrents": report["added_torrents"],
+        "removed_torrents": report["removed_torrents"],
+        "changed_torrents": redacted_changed_torrents,
+        "tracker_usage": redacted_usage,
+    }
+
+
+def _redact_identity_list(urls: list[str]) -> list[str]:
+    """Reduce a list of raw tracker URLs to sorted, deduplicated identities."""
+    return sorted({describe_tracker_url(url).identity for url in urls})
+
+
+def _redact_usage_counts(usage: dict[str, int]) -> dict[str, int]:
+    """Re-key a raw-URL-keyed usage dict by identity, summing collisions."""
+    redacted: dict[str, int] = {}
+    for tracker_url, count in usage.items():
+        identity = describe_tracker_url(tracker_url).identity
+        redacted[identity] = redacted.get(identity, 0) + count
+
+    return dict(sorted(redacted.items()))
+
+
+def _redact_usage_changed(
+    changed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Re-key raw-URL `tracker_usage.changed` entries by identity."""
+    merged: dict[str, dict[str, int]] = {}
+    for entry in changed:
+        identity = describe_tracker_url(entry["tracker"]).identity
+        bucket = merged.setdefault(identity, {"baseline": 0, "target": 0})
+        bucket["baseline"] += entry["baseline"]
+        bucket["target"] += entry["target"]
+
+    return [
+        {
+            "tracker": identity,
+            "baseline": counts["baseline"],
+            "target": counts["target"],
+        }
+        for identity, counts in sorted(merged.items())
+    ]
 
 
 def _index_torrents_by_hash(
