@@ -1,12 +1,14 @@
 """Provide the command-line application."""
 
 import csv
+import functools
 import io
 import json
 import math
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -31,6 +33,14 @@ from app.doctor import (
     doctor_exit_code,
     doctor_report_to_csv_rows,
     doctor_report_to_json_dict,
+)
+from app.errors import (
+    AppError,
+    ErrorCategory,
+    InvalidInputError,
+    QbitAuthenticationError,
+    QbitConnectionError,
+    require_non_blank,
 )
 from app.execution import (
     MUTATION_RISK,
@@ -158,11 +168,19 @@ class ExitCode(IntEnum):
 
     These remain the exit-code semantics for every command other than
     `status`, which documents its own health-based exit codes below.
+
+    `INTERNAL` (70) is shared by every command regardless of which exit
+    code enum it otherwise uses: an unexpected programming defect
+    (anything not explicitly classified as invalid input, not-found,
+    ambiguous, unavailable, authentication, configuration, or
+    cancellation) is never folded into a command's own scheme. See
+    `_catch_internal_errors` and docs/ERRORS_AND_EXIT_CODES.md.
     """
 
     SUCCESS = 0
     ERROR = 1
     NO_MATCH = 2
+    INTERNAL = 70
 
 
 class StatusExitCode(IntEnum):
@@ -272,20 +290,14 @@ class TrackerMatchModeOption(StrEnum):
     without_query = "without-query"
 
 
-class QbitConnectionError(RuntimeError):
-    """Report that qBittorrent could not be reached."""
-
-
-class QbitAuthenticationError(RuntimeError):
-    """Report that qBittorrent rejected the configured credentials."""
-
-
 # Every read-only command uses the same `app.ui.OutputFormat` enum and the
 # same `--format` option, but not every command can meaningfully render
 # every format (see docs/COMMANDS.md "Format Support Matrix" and
 # docs/DECISIONS.md, 2026-07-24). This table is the single source of truth:
 # both `_validate_format_support` and the CLI test suite read it, so the
 # implementation, its validation, and its tests cannot drift apart.
+# EXIT_CODE_TABLE below documents each registered command's own exit-code
+# scheme the same way -- see docs/ERRORS_AND_EXIT_CODES.md.
 FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "status": frozenset(OutputFormat),
     "connection_check": frozenset(OutputFormat),
@@ -315,6 +327,38 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     ),
 }
 
+# Documents which exit-code enum governs each registered command's *normal*
+# (non-internal) exit codes -- see docs/ERRORS_AND_EXIT_CODES.md for the
+# full per-command tables. Every command additionally shares
+# `ExitCode.INTERNAL` (70) for an unexpected programming defect via
+# `_catch_internal_errors`, regardless of which enum it is keyed to here.
+# Read by `test_errors.py` to assert this table stays in sync with the
+# commands actually registered on `app`.
+EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
+    "status": StatusExitCode,
+    "doctor": DoctorExitCode,
+    "connection check": ExitCode,
+    "torrents list": ExitCode,
+    "torrents categories": ExitCode,
+    "torrents inspect": ExitCode,
+    "torrents pause": ExitCode,
+    "torrents resume": ExitCode,
+    "torrents start": ExitCode,
+    "torrents reannounce": ExitCode,
+    "trackers add-if-present": ExitCode,
+    "trackers list": ExitCode,
+    "trackers status": TrackerStatusExitCode,
+    "trackers inspect": ExitCode,
+    "trackers replace": ExitCode,
+    "trackers replace-passkey": ExitCode,
+    "backup export": ExitCode,
+    "backup diff": ExitCode,
+    "trackers export": ExitCode,
+    "trackers remove": ExitCode,
+    "explain torrent": ExplainExitCode,
+    "explain tracker": ExplainExitCode,
+}
+
 
 def _validate_format_support(
     command_id: str,
@@ -339,6 +383,59 @@ def _validate_format_support(
     )
 
 
+def _validate_hash_option(
+    value: str | None, *, option_name: str = "--hash"
+) -> str | None:
+    """Reject a blank/whitespace-only `--hash` before any API call.
+
+    Returns `None` unchanged so callers can keep treating "not
+    provided" and "validated, non-blank value" as the only two cases.
+    """
+    if value is None:
+        return None
+    try:
+        return require_non_blank(value, field_name=option_name)
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
+
+
+def _catch_internal_errors(
+    command: Callable[..., None],
+) -> Callable[..., None]:
+    """Report an unexpected exception as an internal error, not a remote one.
+
+    The outermost boundary on every command: `typer.Exit` (Typer/Click's
+    own control-flow exception, itself a `RuntimeError` subclass) always
+    passes through untouched, as does `KeyboardInterrupt`. Anything else
+    reaching this point escaped `qbit_error_boundary()` or arose outside
+    it — a genuine programming defect — and is reported with a concise
+    message (no `repr()`, no traceback, no secret-bearing values) and
+    the shared `ExitCode.INTERNAL` (70), regardless of the wrapped
+    command's own exit-code scheme.
+    """
+
+    @functools.wraps(command)
+    def wrapper(*args: Any, **kwargs: Any) -> None:
+        try:
+            command(*args, **kwargs)
+        except typer.Exit:
+            raise
+        except KeyboardInterrupt:
+            raise
+        except Exception as error:
+            message = f"Internal error: {type(error).__name__}: {error}"
+            _record_app_error(
+                AppError(
+                    category=ErrorCategory.INTERNAL,
+                    code="internal_error",
+                    message=message,
+                )
+            )
+            raise typer.Exit(code=ExitCode.INTERNAL) from error
+
+    return wrapper
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Print the project name and version when no command is provided."""
@@ -348,6 +445,7 @@ def main(ctx: typer.Context) -> None:
 
 
 @app.command()
+@_catch_internal_errors
 def status(
     output_format: Annotated[
         OutputFormat,
@@ -434,6 +532,7 @@ def status(
 
 
 @connection_app.command()
+@_catch_internal_errors
 def check(
     output_format: Annotated[
         OutputFormat,
@@ -449,15 +548,9 @@ def check(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         with transient_spinner("Checking connection...", enabled=enabled):
             _create_qbit_client()
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     report = {
         "status": "ok",
@@ -481,6 +574,7 @@ def check(
 
 
 @app.command()
+@_catch_internal_errors
 def doctor(
     output_format: Annotated[
         OutputFormat,
@@ -512,6 +606,7 @@ def doctor(
 
 
 @torrents_app.command(name="list")
+@_catch_internal_errors
 def list_qbit_torrents(
     category: Annotated[
         list[str],
@@ -595,16 +690,10 @@ def list_qbit_torrents(
     else:
         progress_cm = transient_spinner("Loading torrents...", enabled=enabled)
 
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with progress_cm as advance:
             selection = select_torrents(client, filters, on_progress=advance)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     _print_torrent_selection(selection, output_format)
     if not filters.is_empty:
@@ -612,6 +701,7 @@ def list_qbit_torrents(
 
 
 @torrents_app.command(name="categories")
+@_catch_internal_errors
 def list_qbit_categories(
     output_format: Annotated[
         OutputFormat,
@@ -627,16 +717,10 @@ def list_qbit_categories(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_spinner("Loading torrents...", enabled=enabled):
             category_usage = list_category_usage(client)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     payload = {
         "summary": {"categories": len(category_usage)},
@@ -677,6 +761,7 @@ def list_qbit_categories(
 
 
 @torrents_app.command(name="inspect")
+@_catch_internal_errors
 def inspect_qbit_torrent(
     torrent_hash: Annotated[
         str | None,
@@ -712,6 +797,7 @@ def inspect_qbit_torrent(
 ) -> None:
     """Inspect a torrent by hash (or prefix) or search torrents by name."""
     _validate_format_support("torrents_inspect", output_format)
+    torrent_hash = _validate_hash_option(torrent_hash)
     if (torrent_hash is None) == (name is None):
         _fail("Provide exactly one of --hash or --name.")
 
@@ -720,24 +806,19 @@ def inspect_qbit_torrent(
         interactive=is_interactive_terminal(),
     )
     try:
-        client = _create_qbit_client()
-        if name is not None:
-            with transient_spinner("Loading torrents...", enabled=enabled):
-                report = search_torrents_by_name(client, name, limit=limit)
-            _print_torrent_name_search(report, output_format)
-            _exit_if_no_targeted_matches(report["summary"]["matched"])
-            return
+        with qbit_error_boundary():
+            client = _create_qbit_client()
+            if name is not None:
+                with transient_spinner("Loading torrents...", enabled=enabled):
+                    report = search_torrents_by_name(client, name, limit=limit)
+                _print_torrent_name_search(report, output_format)
+                _exit_if_no_targeted_matches(report["summary"]["matched"])
+                return
 
-        with transient_spinner("Loading torrent...", enabled=enabled):
-            report = inspect_torrent(client, torrent_hash or "")
+            with transient_spinner("Loading torrent...", enabled=enabled):
+                report = inspect_torrent(client, torrent_hash or "")
     except AmbiguousTorrentHashError as error:
         _fail_ambiguous_hash(error)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if report is None:
         if output_format == OutputFormat.json:
@@ -762,6 +843,7 @@ def inspect_qbit_torrent(
 
 
 @torrents_app.command()
+@_catch_internal_errors
 def pause(
     torrent_hash: Annotated[
         str | None,
@@ -856,6 +938,7 @@ def pause(
 
 
 @torrents_app.command()
+@_catch_internal_errors
 def resume(
     torrent_hash: Annotated[
         str | None,
@@ -950,6 +1033,7 @@ def resume(
 
 
 @torrents_app.command()
+@_catch_internal_errors
 def start(
     torrent_hash: Annotated[
         str | None,
@@ -1050,6 +1134,7 @@ def start(
 
 
 @torrents_app.command()
+@_catch_internal_errors
 def reannounce(
     torrent_hash: Annotated[
         str | None,
@@ -1144,6 +1229,7 @@ def reannounce(
 
 
 @trackers_app.command()
+@_catch_internal_errors
 def add_if_present(
     source: Annotated[
         str,
@@ -1189,8 +1275,13 @@ def add_if_present(
     ] = False,
 ) -> None:
     """Add a target tracker when a source tracker is already present."""
-    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
+        source = require_non_blank(source, field_name="--source")
+        target = require_non_blank(target, field_name="--target")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
+    enabled = progress_enabled(interactive=is_interactive_terminal())
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrents...", enabled=enabled
@@ -1202,12 +1293,6 @@ def add_if_present(
                 match_mode=match.value,
                 on_progress=advance,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     def _apply() -> None:
         try:
@@ -1232,6 +1317,7 @@ def add_if_present(
 
 
 @trackers_app.command(name="list")
+@_catch_internal_errors
 def list_trackers(
     output_format: Annotated[
         OutputFormat,
@@ -1257,7 +1343,7 @@ def list_trackers(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
@@ -1265,12 +1351,6 @@ def list_trackers(
             report = collect_tracker_status(
                 client, build_torrent_filter(), on_progress=advance
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     trackers = [
         {
@@ -1332,6 +1412,7 @@ def list_trackers(
 
 
 @trackers_app.command(name="status")
+@_catch_internal_errors
 def trackers_status_command(
     category: Annotated[
         list[str],
@@ -1427,7 +1508,7 @@ def trackers_status_command(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
@@ -1435,18 +1516,13 @@ def trackers_status_command(
             report = collect_tracker_status(
                 client, filters, on_progress=advance
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     _render_tracker_status(report, output_format, verbose=verbose)
     raise typer.Exit(code=tracker_status_exit_code(report.overall_health))
 
 
 @trackers_app.command(name="inspect")
+@_catch_internal_errors
 def inspect_tracker_usage(
     tracker: Annotated[
         str,
@@ -1474,11 +1550,15 @@ def inspect_tracker_usage(
     announce URL or passkey is never present in the output.
     """
     _validate_format_support("trackers_inspect", output_format)
+    try:
+        tracker = require_non_blank(tracker, field_name="--tracker")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
@@ -1488,12 +1568,6 @@ def inspect_tracker_usage(
                 tracker=tracker,
                 on_progress=advance,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormat.json:
         _print_json_output(report)
@@ -1567,6 +1641,7 @@ def inspect_tracker_usage(
 
 
 @trackers_app.command()
+@_catch_internal_errors
 def replace(
     source: Annotated[
         str,
@@ -1612,8 +1687,13 @@ def replace(
     ] = False,
 ) -> None:
     """Replace a tracker on every torrent using it."""
-    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
+        source = require_non_blank(source, field_name="--source")
+        target = require_non_blank(target, field_name="--target")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
+    enabled = progress_enabled(interactive=is_interactive_terminal())
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrents...", enabled=enabled
@@ -1625,12 +1705,6 @@ def replace(
                 match_mode=match.value,
                 on_progress=advance,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     def _apply() -> None:
         try:
@@ -1657,6 +1731,7 @@ def replace(
 
 
 @trackers_app.command(name="replace-passkey")
+@_catch_internal_errors
 def replace_tracker_passkey_command(
     tracker: Annotated[
         str,
@@ -1698,8 +1773,13 @@ def replace_tracker_passkey_command(
     ] = False,
 ) -> None:
     """Replace a tracker's passkey on every torrent using that tracker."""
-    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
+        tracker = require_non_blank(tracker, field_name="--tracker")
+        new_passkey = require_non_blank(new_passkey, field_name="--new-passkey")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
+    enabled = progress_enabled(interactive=is_interactive_terminal())
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrents...", enabled=enabled
@@ -1710,12 +1790,6 @@ def replace_tracker_passkey_command(
                 new_passkey=new_passkey,
                 on_progress=advance,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     def _apply() -> None:
         try:
@@ -1740,6 +1814,7 @@ def replace_tracker_passkey_command(
 
 
 @backup_app.command(name="export")
+@_catch_internal_errors
 def export_backup(
     output_format: Annotated[
         OutputFormat,
@@ -1762,7 +1837,7 @@ def export_backup(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         config = load_qbit_config()
         client = _create_qbit_client()
         with transient_spinner("Collecting backup data...", enabled=enabled):
@@ -1780,12 +1855,6 @@ def export_backup(
                 ),
                 match_mode=match.value,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormat.json:
         _print_json_output(state)
@@ -1810,6 +1879,7 @@ def export_backup(
 
 
 @backup_app.command(name="diff")
+@_catch_internal_errors
 def diff_backup(
     baseline: Annotated[
         Path,
@@ -1875,6 +1945,7 @@ def diff_backup(
 
 
 @trackers_app.command(name="export")
+@_catch_internal_errors
 def export_trackers(
     output_format: Annotated[
         OutputFormat,
@@ -1896,18 +1967,12 @@ def export_trackers(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
             state = export_tracker_state(client=client, on_progress=advance)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if output_format == OutputFormat.json:
         _print_json_output(state)
@@ -1922,6 +1987,7 @@ def export_trackers(
 
 
 @trackers_app.command()
+@_catch_internal_errors
 def remove(
     tracker: Annotated[
         str,
@@ -1960,8 +2026,12 @@ def remove(
     ] = False,
 ) -> None:
     """Remove a tracker from every torrent using it."""
-    enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
+        tracker = require_non_blank(tracker, field_name="--tracker")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
+    enabled = progress_enabled(interactive=is_interactive_terminal())
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrents...", enabled=enabled
@@ -1972,12 +2042,6 @@ def remove(
                 match_mode=match.value,
                 on_progress=advance,
             )
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     def _apply() -> None:
         try:
@@ -2002,6 +2066,7 @@ def remove(
 
 
 @explain_app.command(name="torrent")
+@_catch_internal_errors
 def explain_torrent_command(
     torrent_hash: Annotated[
         str,
@@ -2030,22 +2095,21 @@ def explain_torrent_command(
     --hash` uses.
     """
     _validate_format_support("explain_torrent", output_format)
+    try:
+        torrent_hash = require_non_blank(torrent_hash, field_name="--hash")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
     try:
-        client = _create_qbit_client()
-        with transient_spinner("Loading torrent...", enabled=enabled):
-            report = explain_torrent(client, torrent_hash)
+        with qbit_error_boundary():
+            client = _create_qbit_client()
+            with transient_spinner("Loading torrent...", enabled=enabled):
+                report = explain_torrent(client, torrent_hash)
     except AmbiguousTorrentHashError as error:
         _fail_ambiguous_hash(error)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if report is None:
         if output_format == OutputFormat.json:
@@ -2061,6 +2125,7 @@ def explain_torrent_command(
 
 
 @explain_app.command(name="tracker")
+@_catch_internal_errors
 def explain_tracker_command(
     tracker: Annotated[
         str,
@@ -2085,22 +2150,20 @@ def explain_tracker_command(
     -- no second collection pass.
     """
     _validate_format_support("explain_tracker", output_format)
+    try:
+        tracker = require_non_blank(tracker, field_name="--tracker")
+    except InvalidInputError as error:
+        _fail(str(error), ErrorCategory.INVALID_INPUT)
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
-    try:
+    with qbit_error_boundary():
         client = _create_qbit_client()
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
             report = explain_tracker(client, tracker, on_progress=advance)
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     if report is None:
         normalized = normalize_tracker_host(tracker)
@@ -2225,6 +2288,7 @@ def _run_bulk_torrent_action(
     verbose: bool,
 ) -> None:
     """Execute a bulk torrent action with shared validation and output."""
+    torrent_hash = _validate_hash_option(torrent_hash)
     try:
         filters = build_torrent_filter(
             categories=category,
@@ -2249,28 +2313,23 @@ def _run_bulk_torrent_action(
 
     enabled = progress_enabled(interactive=is_interactive_terminal())
     try:
-        client = _create_qbit_client()
-        with transient_progress(
-            f"Scanning torrents to {action}...", enabled=enabled
-        ) as advance:
-            plan = plan_bulk_torrent_action(
-                client=client,
-                action=action,
-                torrent_hash=torrent_hash,
-                select_all=select_all,
-                filters=filters,
-                on_progress=advance,
-            )
+        with qbit_error_boundary():
+            client = _create_qbit_client()
+            with transient_progress(
+                f"Scanning torrents to {action}...", enabled=enabled
+            ) as advance:
+                plan = plan_bulk_torrent_action(
+                    client=client,
+                    action=action,
+                    torrent_hash=torrent_hash,
+                    select_all=select_all,
+                    filters=filters,
+                    on_progress=advance,
+                )
     except AmbiguousTorrentHashError as error:
         _fail_ambiguous_hash(error)
     except ValueError as error:
         _fail(str(error))
-    except ConfigError as error:
-        _fail(f"Configuration error: {error}")
-    except RuntimeError as error:
-        _fail(str(error))
-    except Exception as error:
-        _fail(f"qBittorrent API error: {error}")
 
     def _apply() -> None:
         try:
@@ -2408,6 +2467,16 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
     output, never genuine failures. The connection spinner/banner is
     always suppressed (`quiet=True` below) since the rendered snapshot
     (or the error message above) already communicates the outcome.
+
+    Only degrades to `unavailable` for *recoverable* failures:
+    `QbitAuthenticationError`, `QbitConnectionError`, and `OSError`
+    (every `qbittorrentapi` exception raised directly from a post-login
+    API call — see `_collect_status_snapshot_for_watch`). Any other
+    exception is an unexpected programming error, not a remote
+    failure, and is deliberately left to propagate to
+    `_catch_internal_errors` instead of being silently relabelled as
+    "unavailable" (see docs/ERRORS_AND_EXIT_CODES.md, "Internal error
+    behavior").
     """
     try:
         config = load_qbit_config()
@@ -2431,14 +2500,14 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
             message=str(error),
             host=host,
         )
-    except RuntimeError as error:
+    except QbitConnectionError as error:
         print_error(str(error))
         return build_unavailable_snapshot(
             code="qbittorrent_unavailable",
             message=str(error),
             host=host,
         )
-    except Exception as error:
+    except OSError as error:
         message = f"qBittorrent API error: {error}"
         print_error(message)
         return build_unavailable_snapshot(
@@ -3021,20 +3090,71 @@ def _print_backup_diff(report: dict[str, Any]) -> None:
         )
 
 
-def _fail(message: str) -> NoReturn:
-    """Print an actionable error and exit with a failure code."""
-    print_error(message)
+last_app_error: AppError | None = None
+"""The most recently constructed `AppError`, for tests and future TUI reuse.
+
+Set by every `_fail*()` helper right before raising `typer.Exit`, so a
+caller can assert on structured fields (`category`, `code`, `target`)
+instead of parsing rendered stderr text — see
+docs/ERRORS_AND_EXIT_CODES.md, "TUI-ready mapping". Not read by any
+command itself; process-global state exists solely so the CLI keeps
+rendering through plain stderr today while the same data is already
+shaped for a future in-process consumer.
+"""
+
+
+def _record_app_error(app_error: AppError, *, render: bool = True) -> None:
+    """Record `app_error` as the last handled failure.
+
+    Prints `app_error.message` to stderr via `print_error()` unless
+    `render` is `False` — used by `_fail_ambiguous_hash()`, which
+    renders the candidate list itself instead of a plain message line.
+    """
+    global last_app_error
+    last_app_error = app_error
+    if render:
+        print_error(app_error.message)
+
+
+def _fail(
+    message: str,
+    category: ErrorCategory = ErrorCategory.DOMAIN_FAILURE,
+    *,
+    code: str | None = None,
+    target: str | None = None,
+) -> NoReturn:
+    """Build an `AppError`, print its message, and exit with a failure code.
+
+    `code` defaults to `category.value` when omitted. `target` is a
+    safe identity (a hash prefix, a normalized tracker host) — never a
+    raw tracker URL or credential.
+    """
+    _record_app_error(
+        AppError(
+            category=category,
+            code=code or category.value,
+            message=message,
+            target=target,
+        )
+    )
     raise typer.Exit(code=ExitCode.ERROR)
 
 
-def _fail_status_usage(message: str) -> NoReturn:
-    """Print an actionable error and exit with `status`'s invalid-usage code.
+def _fail_status_usage(
+    message: str,
+    category: ErrorCategory = ErrorCategory.INVALID_INPUT,
+) -> NoReturn:
+    """Build an `AppError` and exit with `status`'s invalid-usage code.
 
     `status` (one-shot and `--watch`) uses `StatusExitCode`, not the
     shared `ExitCode`, for local CLI/configuration validation failures —
-    see `StatusExitCode`'s docstring.
+    see `StatusExitCode`'s docstring. `category` defaults to
+    `INVALID_INPUT` (a rejected option combination); pass
+    `CONFIGURATION` for a `ConfigError`-driven failure.
     """
-    print_error(message)
+    _record_app_error(
+        AppError(category=category, code=category.value, message=message)
+    )
     raise typer.Exit(code=StatusExitCode.INVALID_USAGE)
 
 
@@ -3044,8 +3164,51 @@ def _fail_ambiguous_hash(error: AmbiguousTorrentHashError) -> NoReturn:
     Deliberately reuses `ExitCode.ERROR` rather than introducing a new
     ambiguity-specific exit code: see docs/DECISIONS.md.
     """
+    _record_app_error(
+        AppError(
+            category=ErrorCategory.AMBIGUOUS,
+            code="ambiguous_hash",
+            message=f"Hash prefix '{error.value}' matches multiple torrents.",
+            remediation="Use a longer prefix.",
+            target=error.value,
+        ),
+        render=False,
+    )
     print_ambiguous_hash_error(error.value, error.candidates)
     raise typer.Exit(code=ExitCode.ERROR)
+
+
+@contextmanager
+def qbit_error_boundary() -> Iterator[None]:
+    """Convert expected qBittorrent/config failures into a rendered CLI error.
+
+    Wraps client creation plus a domain call and reports the shared,
+    expected failure modes (invalid local configuration, authentication
+    rejection, connection/API unavailability) through `_fail()` with
+    the matching `ErrorCategory`. Anything else — a `TypeError`, an
+    `AssertionError`, a bare `RuntimeError` from a genuine bug — is
+    deliberately left to propagate to `_catch_internal_errors` instead
+    of being relabelled as a remote failure (see
+    docs/ERRORS_AND_EXIT_CODES.md, "Internal error behavior").
+
+    Keep the `with` block scoped to exactly the client-creation-plus-
+    domain-call span, never wider: widening it risks swallowing a
+    `typer.Exit` raised by rendering code further down the same
+    command (`typer.Exit` is a `RuntimeError` subclass, but is always
+    re-raised untouched here first).
+    """
+    try:
+        yield
+    except typer.Exit:
+        raise
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}", ErrorCategory.CONFIGURATION)
+    except QbitAuthenticationError as error:
+        _fail(str(error), ErrorCategory.AUTHENTICATION)
+    except QbitConnectionError as error:
+        _fail(str(error), ErrorCategory.UNAVAILABLE)
+    except (qbittorrentapi.APIError, OSError) as error:
+        _fail(f"qBittorrent API error: {error}", ErrorCategory.UNAVAILABLE)
 
 
 def _exit_if_no_targeted_matches(match_count: int) -> None:
@@ -3082,8 +3245,9 @@ def _bulk_torrent_summary_rows(
     elif plan.select_all:
         selector_kind, selector_value = "all", "*"
     else:
-        selector_kind, selector_value = "filter", describe_torrent_filter(
-            plan.filters
+        selector_kind, selector_value = (
+            "filter",
+            describe_torrent_filter(plan.filters),
         )
 
     return {

@@ -207,6 +207,9 @@ qbit-ops explain tracker --tracker tracker.example
 👉 Full command reference, use cases and output formats:
 **[docs/COMMANDS.md](docs/COMMANDS.md)**
 
+👉 Error categories, local validation rules and exit-code contracts for
+scripting: **[docs/ERRORS_AND_EXIT_CODES.md](docs/ERRORS_AND_EXIT_CODES.md)**
+
 ## 🧪 Development
 
 ```bash
