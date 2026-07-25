@@ -23,7 +23,7 @@ drop the `poetry run` prefix.
 - [Machine-Readable Silence Contract](#machine-readable-silence-contract)
 - [Progress & Spinner Behavior](#progress--spinner-behavior)
 - [Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)
-- [Tracker Health](#tracker-health)
+- [Tracker Status](#tracker-status)
 - [Output Summaries](#output-summaries)
 - [Exit Codes](#exit-codes)
 
@@ -498,9 +498,12 @@ URL verbatim, including any embedded passkey. Both `--match` and that
 rendering are gone from `torrents list` and the four bulk mutation
 commands (pre-1.0 breaking change; see `docs/DECISIONS.md`) — hostname
 matching is strictly safer and does not require knowing the exact
-normalized URL qBittorrent stores. `trackers inspect`/`trackers health`/
+normalized URL qBittorrent stores. `trackers inspect`/`trackers export`/
 etc. are unchanged: those commands are explicit, read-only tracker
 inspection where showing the full URL is exactly what was requested.
+`trackers status` (see [Tracker Status](#tracker-status)) is also
+hostname-only by construction — like `torrents list --tracker`, it never
+renders a full announce URL or passkey.
 
 ### Bulk torrent actions
 
@@ -601,8 +604,10 @@ poetry run qbit-ops trackers list
 poetry run qbit-ops trackers list --match without-query
 poetry run qbit-ops trackers list --format json
 
-poetry run qbit-ops trackers health
-poetry run qbit-ops trackers health --format json
+poetry run qbit-ops trackers status
+poetry run qbit-ops trackers status --format json
+poetry run qbit-ops trackers status --tracker tracker.example
+poetry run qbit-ops trackers status --category films --state stalled
 
 poetry run qbit-ops trackers inspect \
   --tracker "https://tracker-a.example/announce"
@@ -742,7 +747,7 @@ poetry run qbit-ops doctor
 poetry run qbit-ops torrents list
 poetry run qbit-ops torrents categories
 poetry run qbit-ops trackers list
-poetry run qbit-ops trackers health
+poetry run qbit-ops trackers status
 poetry run qbit-ops trackers export --format json
 poetry run qbit-ops backup export --format json
 ```
@@ -750,15 +755,20 @@ poetry run qbit-ops backup export --format json
 ## Matching Modes
 
 `--match exact|without-query` is a **`trackers` command group** concept
-only (`trackers list`/`health`/`inspect`/`export`/`add-if-present`/
-`remove`/`replace`/`replace-passkey`), where the exact, raw tracker URL
-matters for the API calls those commands make:
+only (`trackers list`/`inspect`/`export`/`add-if-present`/`remove`/
+`replace`/`replace-passkey`), where the exact, raw tracker URL matters
+for the API calls those commands make:
 
 - `exact` (default): compares the full normalized tracker URL.
 - `without-query`: ignores query parameters when comparing trackers.
 
 Both modes preserve the raw qBittorrent URLs for API calls — this matters
 for `remove`, since qBittorrent expects the original tracker URL.
+`trackers status` does not have `--match`: its tracker identities are
+always `host[:port]` (`app.trackers.normalize_tracker_host`, the same
+function `torrents list --tracker` uses), never a raw URL, so there is no
+query-string comparison mode to pick — see [Tracker
+Status](#tracker-status).
 
 `torrents list` and the four bulk mutation commands do **not** have
 `--match`: their `--tracker` filter matches by host[:port] instead (see
@@ -790,7 +800,7 @@ a clear error instead of producing an ad hoc or lossy serialization.
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ | `category,torrents` rows |
 | `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested tracker details for `--hash`) |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ | `tracker,torrents` rows |
-| `trackers health` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (variant groups, disabled trackers) |
+| `trackers status` (any filter combination) | ✅ | ✅ | ✅ | ✅ | one row per tracker identity; `tracker,health,torrent_count,endpoint_count,healthy_count,warning_count,critical_count,disabled_count,unknown_count` (CSV omits `representative_message`) |
 | `trackers inspect` | ✅ | ✅ | ✅ | ✅ | one row per torrent, matching tracker URLs joined with `; ` |
 | `trackers export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
 | `backup export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists |
@@ -800,7 +810,7 @@ Requesting an unsupported format fails fast, before any qBittorrent API
 call:
 
 ```console
-$ qbit-ops trackers health --format csv
+$ qbit-ops trackers export --format csv
 ✗ ERROR --format csv is not supported here (no stable representation).
 Supported formats: json, jsonl, table.
 ```
@@ -897,7 +907,7 @@ A progress bar is never shown with a fabricated or unknown total (no
 | `torrents categories` | Spinner | One bulk `torrents_info()` call, in-memory grouping only. |
 | `torrents inspect` (`--hash` or `--name`) | Spinner | Single-torrent lookup or one in-memory name search. |
 | `trackers list` | Progress bar | One `torrents_trackers()` call per torrent. |
-| `trackers health` | Progress bar | One `torrents_trackers()` call per torrent. |
+| `trackers status` | Progress bar | Cheap filters applied first via `torrents_info()`, then one `torrents_trackers()` call per torrent that survived them — same shape as `torrents list --tracker`, except a `--tracker` filter here still scans every survivor (see [Tracker Status](#tracker-status)). |
 | `trackers inspect` | Progress bar | One `torrents_trackers()` call per torrent. |
 | `trackers export` | Progress bar | One `torrents_trackers()` call per torrent. |
 | `backup export` | Spinner | Composite of two per-torrent scans; a single spinner is simpler and more honest than two sequential fabricated-total bars. |
@@ -1036,15 +1046,165 @@ old and new passkey values for `replace-passkey` are **never** rendered
 anywhere (prompt, preview, `--verbose`, stdout, stderr) — only counts (how
 many torrents, how many tracker URLs) are shown.
 
-## Tracker Health
+## Tracker Status
 
-`trackers health` reports: scanned torrents, active/disabled tracker
-occurrences, unique exact and logical tracker URLs, query variant groups,
-and disabled pseudo-trackers (DHT, PeX, LSD).
+`trackers status` aggregates per-torrent tracker observations into
+stable, redacted tracker identities and answers: which trackers are in
+use, how many torrents/endpoints depend on each, and whether each is
+healthy, degraded, failing, disabled, or unknown. It replaced `trackers
+health` (removed, not kept alongside this command — see **Migration
+note** below): `trackers health` never classified qBittorrent's real
+per-endpoint status codes (it only ever distinguished "disabled" from
+"everything else"), and its query-variant-detection output rendered raw,
+unredacted announce URLs — the same passkey-exposure class already fixed
+for `torrents list --tracker`.
 
 ```bash
-poetry run qbit-ops trackers health --format json
+poetry run qbit-ops trackers status
+poetry run qbit-ops trackers status --tracker tracker.example
+poetry run qbit-ops trackers status --category films --state stalled
+poetry run qbit-ops trackers status --format json
+poetry run qbit-ops trackers status --verbose
 ```
+
+**Migration note**: `trackers health`'s query-variant-detection (grouping
+announce URLs that differ only by a dynamic query string) has no direct
+replacement — it is dropped, not renamed, since it doubled as this
+command's secret-exposure surface and `trackers status`'s `host[:port]`
+identity model cannot express it without reintroducing raw URLs. Use
+`trackers list --match without-query` for a redacted-adjacent view of the
+same grouping (it counts torrents per without-query URL, but does not
+enumerate the differing variants). `trackers list` itself still renders
+full tracker URLs — a known, pre-existing gap, out of scope for this
+phase.
+
+| Before | After |
+| --- | --- |
+| `qbit-ops trackers health` | `qbit-ops trackers status` |
+| `qbit-ops trackers health --format json` | `qbit-ops trackers status --format json` |
+
+### Filters
+
+`trackers status` accepts the same shared torrent filters as `torrents
+list` (see [Torrent Filters](#torrent-filters)): `--category`, `--state`,
+`--completed`/`--incomplete`, `--active`/`--inactive`, `--stalled`,
+`--errored`. `--tracker` additionally restricts the *report* to one
+normalized identity: unlike `torrents list --tracker`, it does not
+narrow which torrents get scanned (the identity a torrent's trackers
+normalize to is not known until they are read) — every torrent surviving
+the cheaper filters is still scanned, and the resulting aggregates are
+filtered down to the one requested identity afterward. Combination
+semantics (repeated values OR, different filter types AND, the two
+locally-provable contradictions rejected before any API call) are
+identical to `torrents list`.
+
+### Tracker identity
+
+Every tracker is identified as `host` or `host:port`
+(`app.trackers.normalize_tracker_host`) — never a full announce URL. This
+is the exact same function `torrents list --tracker` and the bulk
+mutation commands use, so "the same tracker" always means the same thing
+across every command. Scheme, path, query string, and userinfo (where a
+passkey commonly lives) are always discarded before an identity is
+computed, rendered, or compared. Port numbers are preserved verbatim, not
+collapsed to a scheme's default (`https://host:443` and `https://host`
+are two distinct identities, `host:443` and `host`) — this keeps
+`normalize_tracker_host`'s behavior identical everywhere it is used
+rather than inventing a second, scheme-aware notion of "the same host".
+DHT/PeX/LSD pseudo-trackers (qBittorrent represents these as sentinel
+strings like `"** [DHT] **"`, not URLs) are excluded from the report
+entirely: they have no host to normalize and are not operationally
+meaningful trackers to report on.
+
+### Raw status mapping
+
+Each observed tracker endpoint's raw qBittorrent `status` (the real
+`qbittorrentapi.definitions.TrackerStatus` int enum) maps to one
+`TrackerHealth`:
+
+| Raw status | Meaning | `TrackerHealth` |
+| --- | --- | --- |
+| `0` (`DISABLED`) | Intentionally disabled | `disabled` |
+| `1` (`NOT_CONTACTED`) | No announce attempted yet | `warning` |
+| `2` (`WORKING`) | Last announce succeeded | `healthy` |
+| `3` (`UPDATING`) | Announce in flight | `healthy` |
+| `4` (`NOT_WORKING`) | Last announce failed | `critical` |
+| `5` (`TRACKER_ERROR`) | Tracker returned an error | `critical` |
+| `6` (`UNREACHABLE`) | Tracker could not be reached | `critical` |
+| anything else / unparsable | Not classifiable | `unknown` |
+
+`UPDATING` maps to `healthy`, not `warning`: it means an announce is
+actively in flight, the most transient state qBittorrent reports, and a
+normal working instance can be observed mid-announce at any moment —
+scoring it `warning` would make a healthy instance flap between exit
+codes `0` and `1` for no operational reason. Unknown or unrecognized
+values map to `unknown`, are counted, and are always visible — qbit-ops
+never invents a severity it cannot justify.
+
+### Aggregate health
+
+Each tracker identity's health is computed from its **enabled**
+endpoints only — disabled endpoints are excluded from every comparison
+below, so an intentionally-disabled tracker can never push a working
+tracker toward `warning`/`critical`:
+
+1. No enabled endpoints at all → `disabled` (every observation was an
+   intentional disable).
+2. Every enabled endpoint is `critical` → `critical`.
+3. Every enabled endpoint is `healthy` → `healthy`.
+4. Every enabled endpoint is `unknown` → `unknown`.
+5. Otherwise (a genuine mix) → `warning`.
+
+A tracker with some healthy and some failing endpoints is `warning`, not
+`critical`: one failing endpoint never drowns out others that are
+working. The report's `overall_health` is the most severe of: `critical`
+if any tracker is `critical`; `warning` if any tracker is `warning` or
+`unknown`, or if any (but not all) torrents failed tracker collection;
+`unavailable` if tracker collection failed for **every** matched torrent
+(and at least one torrent matched); `healthy` otherwise, including an
+empty selection (no torrents matched, or `--tracker` matched no observed
+identity) — a narrow filter matching nothing is not itself a finding.
+
+### Partial collection failures
+
+A single torrent's `torrents_trackers()` call failing does not discard
+already-collected observations from other torrents: `trackers status`
+continues past it, counts it in `collection_errors` (always present in
+every output format), and `overall_health` can never read fully
+`healthy` while `collection_errors > 0` — see the precedence above.
+
+### API-call behavior
+
+One `torrents_info()` call, then at most one `torrents_trackers()` call
+per torrent surviving the cheap filters (`--category`/`--state`/
+`--completed`/`--incomplete`/`--active`/`--inactive`/`--stalled`/
+`--errored`) — identical shape to `torrents list --tracker`'s budget,
+except `--tracker` here does not reduce the candidate set (see
+**Filters** above). Torrents excluded by a cheap filter are never
+scanned. Progress reporting never changes this call count (see
+[Progress & Spinner Behavior](#progress--spinner-behavior)).
+
+### Exit codes
+
+`trackers status` reports operational health, not success/failure, using
+its own codes (`app.tracker_status.tracker_status_exit_code`, mirrored by
+`app.main.TrackerStatusExitCode`):
+
+- `0`: `healthy` — includes an empty selection and a report where every
+  finding is `disabled`.
+- `1`: `warning` — at least one tracker is `warning`/`unknown`, or
+  tracker collection partially failed, and nothing is `critical`.
+- `2`: `critical` — at least one tracker is `critical`.
+- `3`: `unavailable` — tracker collection failed for every matched
+  torrent.
+- `4`: invalid CLI usage (e.g. `--completed --incomplete`), rejected
+  before any qBittorrent API call.
+
+Deliberately its own scheme, not `ExitCode.NO_MATCH` (`2`): here `2`
+means `critical`, so reusing the shared no-match code would collide with
+a real severity meaning. An empty selection is therefore `0`
+(`healthy`), diverging intentionally from `trackers inspect`'s no-match
+convention.
 
 ## Output Summaries
 

@@ -169,7 +169,7 @@ qbit-ops torrents list
 qbit-ops torrents list --category sonarr --category radarr --state stalled
 
 qbit-ops trackers list
-qbit-ops trackers health
+qbit-ops trackers status; echo $?   # 0 healthy, 1 warning, 2 critical, 3 unavailable
 
 qbit-ops torrents pause --category sonarr --dry-run --verbose
 

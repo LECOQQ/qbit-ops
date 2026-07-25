@@ -160,6 +160,19 @@ def normalize_tracker_host(value: str) -> str:
     the host and port from either form — the scheme, path, and query
     string (where a passkey would live) are always discarded and never
     reach a match, a log, or rendered output.
+
+    Also the tracker-identity function for `app.tracker_status`, so
+    `trackers status`'s aggregate identities and `--tracker` on any
+    command always agree on what "the same tracker" means. Deliberately
+    does not collapse a scheme's default port (`https://host:443` stays
+    `host:443`, distinct from `host`): the port is taken verbatim from
+    whatever the caller or qBittorrent supplied, matching this
+    function's existing, tested behavior (see `test_torrents.py`) rather
+    than inventing a second, scheme-aware notion of "the same host" that
+    could disagree with it. Does not accept qBittorrent's DHT/PeX/LSD
+    pseudo-tracker markers (e.g. `"** [DHT] **"`) — callers must filter
+    those out first, since they have no netloc to parse and this
+    function raises on them.
     """
     stripped = value.strip()
     parseable = stripped if "://" in stripped else f"//{stripped}"
@@ -381,82 +394,6 @@ def export_tracker_state(
             "match": match_mode,
         },
         "torrents": torrents,
-    }
-
-
-def analyze_tracker_health(
-    client: Any,
-    on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Analyze tracker health across all torrents.
-
-    Calls `client.torrents_trackers()` once per torrent, so
-    `on_progress(completed, total)` reports real, known progress through
-    that per-torrent work.
-    """
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    active_tracker_occurrences = 0
-    disabled_tracker_occurrences = 0
-    exact_trackers: set[str] = set()
-    logical_trackers: set[str] = set()
-    disabled_trackers: set[str] = set()
-    query_variants: dict[str, dict[str, set[str]]] = {}
-
-    for index, torrent in enumerate(all_torrents, start=1):
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-
-        for tracker in client.torrents_trackers(torrent_hash):
-            tracker_url = _get_field_as_string(tracker, "url")
-            if tracker_url == "":
-                continue
-
-            if _is_disabled_tracker(tracker):
-                disabled_tracker_occurrences += 1
-                disabled_trackers.add(tracker_url)
-                continue
-
-            active_tracker_occurrences += 1
-            exact_tracker = normalize_tracker_url(tracker_url)
-            logical_tracker = normalize_tracker_url(
-                tracker_url,
-                "without-query",
-            )
-            exact_trackers.add(exact_tracker)
-            logical_trackers.add(logical_tracker)
-
-            group = query_variants.setdefault(
-                logical_tracker,
-                {"variants": set(), "torrents": set()},
-            )
-            group["variants"].add(exact_tracker)
-            group["torrents"].add(f"{torrent_name} ({torrent_hash})")
-
-        if on_progress is not None:
-            on_progress(index, total)
-
-    query_variant_groups = [
-        {
-            "tracker": tracker_url,
-            "variants": sorted(group["variants"]),
-            "torrents": sorted(group["torrents"]),
-        }
-        for tracker_url, group in sorted(query_variants.items())
-        if len(group["variants"]) > 1
-    ]
-
-    return {
-        "summary": {
-            "scanned": total,
-            "active_tracker_occurrences": active_tracker_occurrences,
-            "disabled_tracker_occurrences": disabled_tracker_occurrences,
-            "unique_exact_trackers": len(exact_trackers),
-            "unique_logical_trackers": len(logical_trackers),
-            "query_variant_groups": len(query_variant_groups),
-        },
-        "disabled_trackers": sorted(disabled_trackers),
-        "query_variant_groups": query_variant_groups,
     }
 
 

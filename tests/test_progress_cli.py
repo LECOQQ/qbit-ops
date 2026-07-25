@@ -15,7 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 import app.main as m
-from app.main import ExitCode, app
+from app.main import ExitCode, TrackerStatusExitCode, app
 from app.ui import ProgressCallback
 from tests.support import FakeQbitClient, make_torrent
 
@@ -132,19 +132,19 @@ def test_torrents_list_json_emits_no_stderr(
     assert result.stderr == ""
 
 
-def test_trackers_health_progress_uses_the_real_torrent_total(
+def test_trackers_status_progress_uses_the_real_torrent_total(
     runner: CliRunner,
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure tracker-health progress reports the real scanned total."""
+    """Ensure tracker-status progress reports the real scanned total."""
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     configure_qbit_backend(client=_client_with_torrents(7))
 
-    result = runner.invoke(app, ["trackers", "health"])
+    result = runner.invoke(app, ["trackers", "status"])
 
-    assert result.exit_code == ExitCode.SUCCESS
+    assert result.exit_code == TrackerStatusExitCode.HEALTHY
     assert calls[-1] == (7, 7)
 
 
@@ -159,7 +159,7 @@ def test_unsupported_format_fails_before_any_progress(
     client = _client_with_torrents(3)
     configure_qbit_backend(client=client)
 
-    result = runner.invoke(app, ["trackers", "health", "--format", "csv"])
+    result = runner.invoke(app, ["trackers", "export", "--format", "csv"])
 
     assert result.exit_code == ExitCode.ERROR
     assert calls == []
@@ -173,7 +173,7 @@ def test_unsupported_format_fails_before_any_progress(
         ["torrents", "list"],
         ["torrents", "categories"],
         ["trackers", "list"],
-        ["trackers", "health"],
+        ["trackers", "status"],
     ],
 )
 def test_read_only_command_non_interactive_emits_no_stderr(
