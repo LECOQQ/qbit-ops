@@ -8,14 +8,32 @@ function, `app.torrents.list_torrents_with_trackers`, or
 structured domain outputs (`StatusSnapshot`, `SelectedTorrent`,
 `get_safe_tracker_details` output, `AppError`).
 
-Refresh is performed synchronously on Textual's event loop inside the
-periodic timer callback, not on a background thread worker -- a
-deliberate, documented simplification for TUI 1 (see the end-of-phase
-report): qBittorrent's API calls are typically sub-100ms on a homelab
-LAN, so a brief pause once per refresh interval is an acceptable
-trade-off against the added complexity of thread-safe state handoff for
-a first read-only slice. Revisit with `run_worker(thread=True)` if this
-proves noticeable in practice.
+Worker-hardening phase (see docs/DECISIONS.md): every qBittorrent API
+call runs on a Textual thread worker (`run_worker(thread=True)`), never
+on the UI thread -- the qBittorrent client is synchronous
+(`qbittorrentapi`/`requests`), so a slow or unreachable instance must
+never freeze key handling, filtering, search, or `q`. Two worker
+groups, `REFRESH_WORKER_GROUP` (periodic refresh, at most one in
+flight -- a tick that fires while the previous one is still running is
+skipped, not queued) and `DETAIL_WORKER_GROUP` (focused-torrent tracker
+details, guarded by `TuiController`'s monotonic `_detail_request_id` so
+rapid focus movement A -> B -> C only ever applies C's result). Every
+worker body is a plain function that never raises -- it returns a
+tagged `(..., error)` tuple instead -- and only ever calls
+`collect_*`/pure-network methods on `app.tui.state.TuiController`;
+`apply_*` (state-mutating) methods are only ever called from
+`on_worker_state_changed`, which Textual always delivers on the UI
+thread. See `_start_periodic_refresh`/`_focus_torrent`/
+`action_refresh_details` and `on_worker_state_changed`.
+
+A worker thread physically blocked inside `requests`/`qbittorrentapi`
+(e.g. an unreachable host with no response) cannot be forcibly killed
+by Python; quitting (`q`) stops the UI and restores the terminal
+immediately regardless, but the underlying OS process may not fully
+exit until that thread's call returns or times out at the transport
+level -- see docs/DECISIONS.md for the empirical basis of this
+statement and why it is accepted rather than "fixed" with a custom
+async HTTP client (out of scope for this phase).
 
 Hotfix phase (see docs/DECISIONS.md): the filters/details panels are
 reusable widgets with class-scoped (not id-scoped) internal children,
@@ -39,8 +57,9 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Checkbox, DataTable, Footer, Input, Static
+from textual.worker import Worker, WorkerState
 
-from app.app_services import create_qbit_client
+from app.app_services import TuiRefreshResult, create_qbit_client
 from app.status import Health
 from app.torrents import (
     SelectedTorrent,
@@ -56,6 +75,14 @@ from app.tui.state import (
 )
 
 NARROW_WIDTH_THRESHOLD = 100
+
+# Worker group names -- used to tell a periodic-refresh worker's
+# `Worker.StateChanged` message apart from a focused-detail worker's in
+# `on_worker_state_changed` (Textual delivers both through the same
+# handler). See docs/DECISIONS.md (worker hardening phase) for the full
+# threading design.
+REFRESH_WORKER_GROUP = "qbit-refresh"
+DETAIL_WORKER_GROUP = "qbit-detail"
 
 _HEALTH_STYLES: dict[Health, str] = {
     Health.HEALTHY: "bold green",
@@ -434,6 +461,8 @@ class QbitOpsTuiApp(App[None]):
         self.refresh_interval = refresh_interval
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
+        self._refresh_worker: Worker[Any] | None = None
+        self._last_detail_worker: Worker[Any] | None = None
 
     def get_default_screen(self) -> Screen[None]:
         return MainScreen(id="_default")
@@ -456,19 +485,88 @@ class QbitOpsTuiApp(App[None]):
         # being consumed as text by whichever Input happens to be first
         # in the DOM.
         table.focus()
-        self.set_interval(self.refresh_interval, self._on_tick)
-        self._on_tick()
+        # Render the initial (empty) state immediately -- pure, no I/O --
+        # so the screen never sits blank while the first refresh worker
+        # is still in flight.
+        self._render_all()
+        self.set_interval(self.refresh_interval, self._start_periodic_refresh)
+        self._start_periodic_refresh()
 
     # -- refresh -----------------------------------------------------
 
-    def _on_tick(self) -> None:
-        if self.controller.state.refreshing:
+    def _start_periodic_refresh(self) -> None:
+        """Start one periodic refresh tick, unless one is already running.
+
+        Deterministic coalescing, not queueing: a tick that fires while
+        the previous refresh's worker is still in flight is simply
+        skipped this cycle -- `set_interval` keeps firing at its normal
+        cadence regardless (this method itself never blocks), and the
+        very next tick tries again. This is also what guarantees at
+        most one `torrents_info()`/`transfer_info()`/`app_version()`/
+        `app_web_api_version()` set of calls is ever in flight at once
+        -- never two periodic refreshes hitting the client concurrently.
+        """
+        if (
+            self._refresh_worker is not None
+            and not self._refresh_worker.is_finished
+        ):
             return
+
+        self.controller.state.refreshing = True
+        self._refresh_worker = self.run_worker(
+            self._refresh_worker_body,
+            group=REFRESH_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _refresh_worker_body(
+        self,
+    ) -> tuple[TuiRefreshResult | None, Exception | None]:
+        """Run on a background thread: blocking I/O only, never state
+        mutation, and never raises -- the outcome (success or failure)
+        travels back as a plain tagged tuple so the UI-thread handler
+        (`_on_refresh_worker_state_changed`) does not need to depend on
+        Textual's `WorkerState.ERROR`/`exit_on_error` machinery to tell
+        them apart.
+        """
         try:
-            self.controller.refresh()
-        except Exception as error:  # a real internal defect, not remote failure
-            self._show_fatal(error)
+            return (self.controller.collect_refresh(), None)
+        except Exception as error:
+            return (None, error)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.worker.group == REFRESH_WORKER_GROUP:
+            self._on_refresh_worker_state_changed(event)
+        elif event.worker.group == DETAIL_WORKER_GROUP:
+            self._on_detail_worker_state_changed(event)
+
+    def _on_refresh_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS:
+            # PENDING/RUNNING: nothing to do yet. CANCELLED/ERROR: this
+            # worker's body never raises and is never explicitly
+            # cancelled, so these should not occur in practice; if they
+            # ever do, there is nothing safe to apply.
             return
+        if not self.is_running:
+            # The app is shutting down (or already stopped) -- a late
+            # result must never mutate state or touch a widget that may
+            # already be torn down.
+            return
+
+        assert event.worker.result is not None
+        result, error = event.worker.result
+        if error is not None:
+            try:
+                self.controller.apply_refresh_failure(error)
+            except Exception as internal_error:
+                self._show_fatal(internal_error)
+                return
+        else:
+            assert result is not None
+            self.controller.apply_refresh_success(result)
         self._render_all()
 
     def _show_fatal(self, error: Exception) -> None:
@@ -615,16 +713,102 @@ class QbitOpsTuiApp(App[None]):
             self._clear_focus_and_render()
             return
 
-        self.controller.set_focus(str(torrent_hash))
-        self._render_details_panels()
+        self._focus_torrent(str(torrent_hash))
 
     def _clear_focus_and_render(self) -> None:
         """Clear controller focus/details and render the empty state.
 
         Never calls `torrents_trackers()` -- `TuiController.clear_focus`
-        is a pure state mutation with no qBittorrent call.
+        is a pure state mutation with no qBittorrent call. Also
+        invalidates any focused-detail worker still in flight (via
+        `_detail_request_id`), so a late result for the torrent that was
+        just unfocused is discarded on arrival rather than applied.
         """
         self.controller.clear_focus()
+        self._render_details_panels()
+
+    def _focus_torrent(self, torrent_hash: str) -> Worker[Any] | None:
+        """Focus a torrent and, if needed, dispatch a background fetch
+        for its tracker details.
+
+        `begin_focus_change` itself performs no I/O (fast, UI-thread
+        safe): it updates `focused_hash` and clears any stale cached
+        details immediately, so the Details panel shows "loading..."
+        right away rather than stale data from a previously focused
+        torrent. The actual `torrents_trackers()` call -- at most one --
+        runs on a background worker. Returns the dispatched `Worker`, or
+        `None` if no fetch was needed (e.g. `torrent_hash` was already
+        focused) -- used only by tests wanting to await one specific
+        fetch rather than every in-flight worker; production code never
+        reads this return value.
+        """
+        request_id = self.controller.begin_focus_change(torrent_hash)
+        self._render_details_panels()
+        if request_id is None:
+            return None
+        return self._start_detail_fetch(torrent_hash, request_id)
+
+    def _start_detail_fetch(
+        self, torrent_hash: str, request_id: int
+    ) -> Worker[Any]:
+        """Dispatch one focused-detail fetch on a background thread.
+
+        Multiple detail workers may be in flight simultaneously (rapid
+        focus movement A -> B -> C never cancels A/B's workers -- they
+        are left to finish on their own thread, since a blocking network
+        call cannot be reliably interrupted). Correctness instead comes
+        entirely from `request_id`:
+        `TuiController.apply_tracker_details_success`/`_failure` silently
+        discard any result whose id no longer matches the controller's
+        current `_detail_request_id` -- see `app.tui.state` for the full
+        guarantee. Returns the `Worker`, for the same test-observability
+        reason as `_focus_torrent`.
+        """
+        worker = self.run_worker(
+            lambda: self._detail_worker_body(torrent_hash, request_id),
+            group=DETAIL_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+        self._last_detail_worker = worker
+        return worker
+
+    def _detail_worker_body(
+        self, torrent_hash: str, request_id: int
+    ) -> tuple[int, str, Any, Exception | None]:
+        """Run on a background thread: blocking I/O only, never state
+        mutation, and never raises -- see `_refresh_worker_body` for why
+        outcomes travel back as a plain tagged tuple rather than relying
+        on Textual's `WorkerState.ERROR`. `request_id`/`torrent_hash`
+        travel with the result since several of these can be in flight
+        for different torrents at once.
+        """
+        try:
+            raw_trackers = self.controller.collect_tracker_details(torrent_hash)
+            return (request_id, torrent_hash, raw_trackers, None)
+        except Exception as error:
+            return (request_id, torrent_hash, None, error)
+
+    def _on_detail_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS:
+            return
+        if not self.is_running:
+            return
+
+        assert event.worker.result is not None
+        request_id, torrent_hash, raw_trackers, error = event.worker.result
+        if error is not None:
+            try:
+                self.controller.apply_tracker_details_failure(request_id, error)
+            except Exception as internal_error:
+                self._show_fatal(internal_error)
+                return
+        else:
+            self.controller.apply_tracker_details_success(
+                request_id, torrent_hash, raw_trackers
+            )
         self._render_details_panels()
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -702,11 +886,24 @@ class QbitOpsTuiApp(App[None]):
         else:
             self.query_one("#main > DetailsPanel", DetailsPanel).focus()
 
-    def action_refresh_details(self) -> None:
-        if self.controller.state.focused_hash is None:
-            return
-        self.controller.refresh_focused_details()
-        self._render_details_panels()
+    def action_refresh_details(self) -> Worker[Any] | None:
+        """Manually refresh the focused torrent's tracker details.
+
+        `begin_manual_detail_refresh` always allocates a *new* request
+        id, even though the focused hash is unchanged -- this guarantees
+        this explicit request wins over a slower, already-in-flight
+        automatic fetch for the same torrent, regardless of which
+        happens to complete first. Returns the dispatched `Worker` (or
+        `None` if nothing is focused), for the same test-observability
+        reason as `_focus_torrent`.
+        """
+        torrent_hash = self.controller.state.focused_hash
+        if torrent_hash is None:
+            return None
+        request_id = self.controller.begin_manual_detail_refresh()
+        if request_id is None:
+            return None
+        return self._start_detail_fetch(torrent_hash, request_id)
 
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
