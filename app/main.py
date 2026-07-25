@@ -66,12 +66,19 @@ from app.torrents import (
     torrent_filter_to_dict,
     validate_torrent_selector,
 )
+from app.tracker_status import (
+    TRACKER_STATUS_CSV_FIELDNAMES,
+    TrackerStatusReport,
+    collect_tracker_status,
+    tracker_status_exit_code,
+    tracker_status_report_to_csv_rows,
+    tracker_status_report_to_dict,
+)
 from app.trackers import (
     PasskeyReplacementPlan,
     TrackerAdditionPlan,
     TrackerRemovalPlan,
     TrackerReplacementPlan,
-    analyze_tracker_health,
     apply_tracker_addition,
     apply_tracker_passkey_replacement,
     apply_tracker_removal,
@@ -192,6 +199,28 @@ class DoctorExitCode(IntEnum):
     INVALID_USAGE = 4
 
 
+class TrackerStatusExitCode(IntEnum):
+    """Define exit codes specific to the `trackers status` command.
+
+    Mirrors `app.tracker_status.tracker_status_exit_code`'s
+    healthy/warning/critical/unavailable mapping exactly (kept here only
+    for readability at call sites and in tests). Deliberately its own
+    scheme rather than `ExitCode`: `2` here means CRITICAL, not
+    `ExitCode.NO_MATCH` -- an empty selection (no torrents matched, or
+    `--tracker` matched no observed identity) is not an error condition
+    for this command and exits `0` via `HEALTHY`, not `2`, unlike
+    `trackers inspect`'s no-match convention. `4` is reserved for
+    invalid CLI invocation (e.g. contradictory filters), rejected before
+    any qBittorrent API call.
+    """
+
+    HEALTHY = 0
+    WARNING = 1
+    CRITICAL = 2
+    UNAVAILABLE = 3
+    INVALID_USAGE = 4
+
+
 class TrackerMatchModeOption(StrEnum):
     """Expose tracker matching modes for Typer options."""
 
@@ -223,9 +252,7 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
     ),
     "trackers_list": frozenset(OutputFormat),
-    "trackers_health": frozenset(
-        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
-    ),
+    "trackers_status": frozenset(OutputFormat),
     "trackers_inspect": frozenset(OutputFormat),
     "trackers_export": frozenset(
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
@@ -1231,8 +1258,62 @@ def list_trackers(
     print_summary({"trackers": len(tracker_usage)})
 
 
-@trackers_app.command()
-def health(
+@trackers_app.command(name="status")
+def trackers_status_command(
+    category: Annotated[
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
+    tracker: Annotated[
+        str | None,
+        typer.Option(
+            "--tracker",
+            help=(
+                "Restrict the report to one tracker, matched by "
+                "host[:port] (a full announce URL is also accepted; only "
+                "its host and port are used)."
+            ),
+        ),
+    ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Show each tracker's representative message in table output.",
+        ),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -1241,8 +1322,34 @@ def health(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """Analyze tracker health across the qBittorrent instance."""
-    _validate_format_support("trackers_health", output_format)
+    """Report aggregated tracker health across selected torrents.
+
+    Aggregates tracker observations into stable, redacted tracker
+    identities (`host` or `host:port` -- never a full announce URL or
+    passkey) and reports how many torrents/endpoints depend on each and
+    whether it is healthy, degraded, failing, disabled, or unknown.
+    Filters use the same shared vocabulary as `torrents list`; see
+    docs/COMMANDS.md ("Torrent Filters", "Tracker Status"). Exit code
+    reflects overall health (see `TrackerStatusExitCode`), not a plain
+    success/failure result.
+    """
+    _validate_format_support("trackers_status", output_format)
+    try:
+        filters = build_torrent_filter(
+            categories=category,
+            states=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+        )
+    except ValueError as error:
+        print_error(str(error))
+        raise typer.Exit(code=TrackerStatusExitCode.INVALID_USAGE) from None
+
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
@@ -1252,7 +1359,9 @@ def health(
         with transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
-            report = analyze_tracker_health(client, on_progress=advance)
+            report = collect_tracker_status(
+                client, filters, on_progress=advance
+            )
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -1260,32 +1369,8 @@ def health(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormat.json:
-        _print_json_output(report)
-        return
-
-    if output_format == OutputFormat.jsonl:
-        _print_jsonl_output(report)
-        return
-
-    print_summary(report["summary"], title="Tracker Health")
-
-    if report["query_variant_groups"]:
-        print_table(
-            "Query Variant Groups",
-            ["Tracker", "Variants"],
-            [
-                [group["tracker"], "\n".join(group["variants"])]
-                for group in report["query_variant_groups"]
-            ],
-        )
-
-    if report["disabled_trackers"]:
-        print_table(
-            "Disabled Trackers",
-            ["Tracker"],
-            [[tracker_url] for tracker_url in report["disabled_trackers"]],
-        )
+    _render_tracker_status(report, output_format, verbose=verbose)
+    raise typer.Exit(code=tracker_status_exit_code(report.overall_health))
 
 
 @trackers_app.command(name="inspect")
@@ -2437,6 +2522,86 @@ def _print_torrent_selection(
 
     print_summary(
         {"scanned": selection.scanned, "matched": len(selection.matched)}
+    )
+
+
+def _render_tracker_status(
+    report: TrackerStatusReport,
+    output_format: OutputFormat,
+    *,
+    verbose: bool,
+) -> None:
+    """Render a tracker status report in the requested format."""
+    if output_format == OutputFormat.json:
+        _print_json_output(tracker_status_report_to_dict(report))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(tracker_status_report_to_dict(report))
+        return
+
+    if output_format == OutputFormat.csv:
+        _print_csv_rows(
+            TRACKER_STATUS_CSV_FIELDNAMES,
+            tracker_status_report_to_csv_rows(report),
+        )
+        return
+
+    if not report.filters.is_empty:
+        typer.echo(f"Filter: {describe_torrent_filter(report.filters)}")
+
+    if not report.trackers:
+        typer.echo("No trackers found.")
+    else:
+        print_table(
+            "Trackers",
+            [
+                "Tracker",
+                "Health",
+                "Torrents",
+                "Endpts",
+                "Healthy",
+                "Warn",
+                "Crit",
+                "Disab",
+                "Unk",
+            ],
+            [
+                [
+                    aggregate.identity,
+                    aggregate.health.value,
+                    str(aggregate.torrent_count),
+                    str(aggregate.endpoint_count),
+                    str(aggregate.healthy_count),
+                    str(aggregate.warning_count),
+                    str(aggregate.critical_count),
+                    str(aggregate.disabled_count),
+                    str(aggregate.unknown_count),
+                ]
+                for aggregate in report.trackers
+            ],
+            fold_columns={"Tracker"},
+        )
+
+        if verbose:
+            messages = [
+                [aggregate.identity, aggregate.representative_message or ""]
+                for aggregate in report.trackers
+                if aggregate.representative_message
+            ]
+            if messages:
+                print_table(
+                    "Tracker Messages", ["Tracker", "Message"], messages
+                )
+
+    print_summary(
+        {
+            "scanned_torrents": report.scanned_torrents,
+            "matched_torrents": report.matched_torrents,
+            "trackers": len(report.trackers),
+            "collection_errors": report.collection_errors,
+            "overall_health": report.overall_health.value,
+        }
     )
 
 

@@ -27,14 +27,21 @@ class FakeQbitClient:
         *,
         torrents: list[dict[str, Any]] | None = None,
         trackers_by_hash: dict[str, list[dict[str, Any]]] | None = None,
+        tracker_error_hashes: set[str] | None = None,
         qbittorrent_version: str = "5.0.1",
         api_version: str = "2.9.3",
         download_speed: int = 0,
         upload_speed: int = 0,
     ) -> None:
-        """Store fake instance data returned to callers."""
+        """Store fake instance data returned to callers.
+
+        `tracker_error_hashes` names torrents whose `torrents_trackers()`
+        call raises instead of returning data, so tests can exercise
+        `trackers status`'s partial-collection-failure tolerance.
+        """
         self.torrents = torrents or []
         self.trackers_by_hash = trackers_by_hash or {}
+        self.tracker_error_hashes = tracker_error_hashes or set()
         self.qbittorrent_version = qbittorrent_version
         self.api_version = api_version
         self.download_speed = download_speed
@@ -88,6 +95,8 @@ class FakeQbitClient:
         """Record a per-torrent tracker call that `status` must avoid."""
         self.torrents_trackers_calls += 1
         self._record("torrents_trackers", torrent_hash)
+        if torrent_hash in self.tracker_error_hashes:
+            raise RuntimeError(f"tracker lookup failed for {torrent_hash}")
         return self.trackers_by_hash.get(torrent_hash, [])
 
     def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
