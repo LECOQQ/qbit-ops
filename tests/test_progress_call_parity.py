@@ -73,6 +73,8 @@ READ_ONLY_ARGV: list[list[str]] = [
     ["trackers", "inspect", "--tracker", TRACKER_URL],
     ["trackers", "export"],
     ["backup", "export"],
+    ["explain", "torrent", "--hash", "abc123"],
+    ["explain", "tracker", "--tracker", TRACKER_URL],
 ]
 
 # Mutation commands previewed (dry-run, the default): never prompts.

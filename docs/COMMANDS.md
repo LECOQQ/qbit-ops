@@ -24,6 +24,7 @@ drop the `poetry run` prefix.
 - [Progress & Spinner Behavior](#progress--spinner-behavior)
 - [Mutation Risk & Confirmation Policy](#mutation-risk--confirmation-policy)
 - [Tracker Status](#tracker-status)
+- [Explain](#explain)
 - [Output Summaries](#output-summaries)
 - [Exit Codes](#exit-codes)
 
@@ -815,6 +816,15 @@ poetry run qbit-ops trackers export --format json
 poetry run qbit-ops backup export --format json
 ```
 
+### Understand why a torrent or tracker looks off
+
+```bash
+poetry run qbit-ops torrents list --stalled
+poetry run qbit-ops explain torrent --hash abc123
+poetry run qbit-ops trackers status
+poetry run qbit-ops explain tracker --tracker tracker.example
+```
+
 ## Matching Modes
 
 `--match exact|without-query` is a **mutation-only** concept
@@ -870,6 +880,8 @@ a clear error instead of producing an ad hoc or lossy serialization.
 | `trackers export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists; normalized identities only, never a raw URL |
 | `backup export` | ✅ | ✅ | ✅ | ❌ | nested per-torrent tracker lists — **the one export with raw tracker URLs**, see [Backup](#backup) |
 | `backup diff` | ✅ | ✅ | ✅ | ❌ | heterogeneous nested sections (added/removed/changed, tracker usage); redacted by default, `--reveal-sensitive` shows raw values |
+| `explain torrent` | ✅ | ✅ | ✅ | ❌ | narrative report (summary + findings with evidence/limitations/next commands); no stable flattened row shape |
+| `explain tracker` | ✅ | ✅ | ✅ | ❌ | same narrative report shape as `explain torrent` |
 
 Requesting an unsupported format fails fast, before any qBittorrent API
 call:
@@ -1270,6 +1282,134 @@ a real severity meaning. An empty selection is therefore `0`
 (`healthy`), diverging intentionally from `trackers inspect`'s no-match
 convention.
 
+## Explain
+
+```bash
+poetry run qbit-ops explain torrent --hash abc123
+poetry run qbit-ops explain torrent --hash abc123 --format json
+
+poetry run qbit-ops explain tracker --tracker tracker.example
+poetry run qbit-ops explain tracker --tracker tracker.example --format json
+```
+
+`explain torrent`/`explain tracker` answer four questions from
+deterministic, already-collected evidence — never a generated or
+speculative explanation: what is currently observed, why qbit-ops
+classifies it that way, what evidence supports that classification, and
+what limitations or unknowns remain. Every finding also suggests safe,
+existing next commands to consider. This is read-only: it never mutates
+qBittorrent, never prompts, and a suggested mutation command is always
+shown with `--dry-run`, never `--no-dry-run` or `--yes`.
+
+There is no generic rule engine: a small, fixed catalogue of deterministic
+rules is evaluated over data other commands already collect (torrent
+state groups from `app.torrent_states`, tracker health from
+`app.trackers`/`app.tracker_status`). A finding never claims a cause its
+evidence does not support — where qbit-ops cannot classify something
+(an unrecognized torrent state or tracker status), the finding says so
+explicitly (`unknown` severity) rather than guessing. No confidence
+percentage is ever computed or shown (see `docs/PHILOSOPHY.md` §9).
+
+### `explain torrent`
+
+Resolves `--hash` with the same unique-prefix resolver every other
+hash-driven command uses (see [Torrents](#torrents)). Exactly one
+finding is produced per torrent, since `app.torrent_states`' state
+groups are mutually exclusive by construction:
+
+| Code | Trigger | Severity |
+| --- | --- | --- |
+| `TORRENT_ERROR_STATE` | qBittorrent reports an error state | `critical` |
+| `TORRENT_STALLED_DL` | Incomplete, no active download transfer | `warning` |
+| `TORRENT_STALLED_UP` | Complete, no active upload transfer | `warning` |
+| `TORRENT_CHECKING` | qBittorrent is validating torrent data | `info` |
+| `TORRENT_STOPPED` | Torrent is paused/stopped | `info` |
+| `TORRENT_HEALTHY_SEEDING` | Actively seeding, no issues observed | `info` |
+| `TORRENT_HEALTHY_DOWNLOADING` | Actively downloading, no issues observed | `info` |
+| `TORRENT_UNKNOWN_STATE` | Raw state not recognized by qbit-ops | `unknown` |
+
+A stalled-download finding distinguishes, from the torrent's own tracker
+endpoints only (never a wider scan): healthy trackers with no transfer,
+all relevant trackers failing, and unclassified/unknown observations —
+grounded in the same `TrackerHealth` model `trackers status` uses,
+computed only from the endpoints this one torrent already reported.
+
+### `explain tracker`
+
+Resolves `--tracker` to a normalized `host[:port]` identity the same way
+`trackers status --tracker` does, and reuses
+`app.tracker_status.collect_tracker_status` directly — no separate
+collection pass. Because that collector scans every torrent surviving
+the (here, absent) cheap filters, it never scopes API calls to the
+requested tracker alone, only the *report*.
+
+| Code | Trigger | Severity |
+| --- | --- | --- |
+| `TRACKER_ALL_ENDPOINTS_FAILING` | Every enabled endpoint is critical | `critical` |
+| `TRACKER_MIXED_ENDPOINT_HEALTH` | A genuine mix of endpoint health | `warning` |
+| `TRACKER_UNKNOWN_STATES` | Every enabled endpoint is unclassifiable | `unknown` |
+| `TRACKER_DISABLED_ONLY` | No enabled endpoint observed | `info` |
+| `TRACKER_HEALTHY` | Every enabled endpoint is healthy | `info` |
+| `TRACKER_PARTIAL_COLLECTION` | Collection failed for some torrents scanned | `warning` (secondary finding) |
+
+`TRACKER_PARTIAL_COLLECTION` is always a *secondary* finding, appended
+alongside whichever health finding above applies, whenever
+`collection_errors > 0` — mirrors `trackers status`'s own
+partial-failure handling. Its limitation is explicit that the failed
+torrents may or may not have used the requested tracker, so the reported
+endpoint counts may be incomplete.
+
+### Target unavailable
+
+Both commands return nothing to explain — no torrent hash resolves, or
+no observation exists at all for the requested tracker identity — the
+same way `app.torrents.inspect_torrent` signals "no match": internally,
+`None`. The CLI renders this distinctly from every severity-based
+finding:
+
+```console
+$ qbit-ops explain torrent --hash deadbeef
+No torrent found for hash prefix: deadbeef
+
+$ qbit-ops explain tracker --tracker unrelated.example
+No observations found for tracker: unrelated.example
+```
+
+`--format json`/`jsonl` render `{"explanation": null, "hash": "..."}` or
+`{"explanation": null, "tracker": "..."}` (the tracker value is always
+the normalized `host[:port]` identity, never the raw `--tracker`
+argument, even when a full announce URL with a passkey was passed). See
+[Exit codes](#explain-exit-codes) for why this uses its own exit code
+rather than a severity value or `ExitCode.NO_MATCH`.
+
+An ambiguous hash prefix does not reach this path at all: it is rejected
+the same way every other hash-driven command rejects it (candidate list
+on stderr, `ExitCode.ERROR`), before an explanation is ever computed.
+
+### `explain` exit codes
+
+`explain torrent`/`explain tracker` share one scheme
+(`app.explain.explanation_exit_code`, mirrored by
+`app.main.ExplainExitCode`):
+
+- `0`: `info` — no warning, critical, or unknown finding.
+- `1`: `warning` or `unknown` — at least one such finding, nothing
+  `critical`.
+- `2`: `critical` — at least one critical finding.
+- `3`: `TARGET_UNAVAILABLE` — nothing to explain at all (unresolved
+  torrent hash, or a tracker identity with zero observations).
+- `4`: invalid CLI usage. Currently unreachable in practice — neither
+  command has a combination of options that is locally contradictory
+  (see `DoctorExitCode` for the same pattern).
+
+`3` is deliberately its own value, not a reuse of `2`: this scheme's `2`
+already means `critical`, so a "nothing found" condition reusing it
+would be indistinguishable from a real critical finding — the same
+collision `TrackerStatusExitCode` avoids for an empty selection (see
+[Tracker Status](#tracker-status)). It also deliberately diverges from
+`ExitCode.NO_MATCH`/`trackers inspect`'s no-match convention (both `2`),
+for the same reason.
+
 ## Output Summaries
 
 Modifying commands print a final summary:
@@ -1410,4 +1550,11 @@ detail):
 - `2`: one or more `fail`s.
 - `4`: invalid CLI invocation preventing doctor from starting (currently
   unreachable — see [Doctor](#doctor)).
-in [Status Watch Mode](#status-watch-mode).
+
+### `trackers status` and `explain` exit codes
+
+Both also report a severity rather than success/failure, each using its
+own scheme — see [Exit codes](#exit-codes) under [Tracker
+Status](#tracker-status) and [`explain` exit
+codes](#explain-exit-codes) under [Explain](#explain) for the full
+mapping and the reasoning behind each one's non-obvious choices.

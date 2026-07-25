@@ -36,6 +36,12 @@ qbit-ops trackers replace-passkey \
   written to stderr — the report itself is the answer.
 - 🔍 **Audit** torrents, categories, trackers and connectivity — one shared
   `--format table|json|jsonl|csv` across every read-only command.
+- 🧠 **`explain torrent`/`explain tracker`** — a deterministic,
+  evidence-based explanation of why a torrent or tracker looks the way
+  it does: what's observed, why it's classified that way, the evidence
+  behind it, known limitations, and safe commands to consider next.
+  Read-only, no confidence scores, no generated prose beyond the fixed
+  rule catalogue.
 - 🧭 **Bulk torrent control** — pause, resume, start, reannounce, targeted
   by hash (complete or unique prefix), category, tracker, completed or all.
 - 🔗 **Bulk tracker management** — add conditionally, remove, replace, or
@@ -193,6 +199,9 @@ qbit-ops torrents pause --category sonarr --dry-run --verbose
 
 qbit-ops torrents inspect --name "debian"        # discover a hash
 qbit-ops torrents reannounce --hash abc123 --dry-run   # act on it
+
+qbit-ops explain torrent --hash abc123           # why does it look stalled/errored/...?
+qbit-ops explain tracker --tracker tracker.example
 ```
 
 👉 Full command reference, use cases and output formats:

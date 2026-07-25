@@ -40,6 +40,13 @@ from app.execution import (
     MutationStatus,
     is_interactive_terminal,
 )
+from app.explain import (
+    ExplanationReport,
+    explain_torrent,
+    explain_tracker,
+    explanation_exit_code,
+    explanation_report_to_dict,
+)
 from app.selectors import AmbiguousTorrentHashError
 from app.status import (
     StatusSnapshot,
@@ -86,6 +93,7 @@ from app.trackers import (
     apply_tracker_replacement,
     export_tracker_state,
     inspect_tracker,
+    normalize_tracker_host,
     plan_tracker_addition,
     plan_tracker_passkey_replacement,
     plan_tracker_removal,
@@ -105,6 +113,7 @@ from app.ui import (
     print_table,
     progress_enabled,
     render_doctor_table,
+    render_explanation,
     render_status_table,
     transient_progress,
     transient_spinner,
@@ -134,10 +143,14 @@ connection_app = typer.Typer(help="Check qBittorrent connectivity.")
 backup_app = typer.Typer(help="Export qBittorrent state.")
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
+explain_app = typer.Typer(
+    help="Explain torrent or tracker state using deterministic evidence."
+)
 app.add_typer(connection_app, name="connection")
 app.add_typer(backup_app, name="backup")
 app.add_typer(torrents_app, name="torrents")
 app.add_typer(trackers_app, name="trackers")
+app.add_typer(explain_app, name="explain")
 
 
 class ExitCode(IntEnum):
@@ -221,6 +234,37 @@ class TrackerStatusExitCode(IntEnum):
     INVALID_USAGE = 4
 
 
+class ExplainExitCode(IntEnum):
+    """Define exit codes specific to the `explain` command group.
+
+    `0`/`1`/`2` mirror `app.explain.explanation_exit_code`'s
+    info/warning-or-unknown/critical mapping exactly (kept here only for
+    readability at call sites and in tests). `3` (`TARGET_UNAVAILABLE`)
+    is used when there is nothing to explain at all -- an unresolved
+    torrent hash, or a tracker identity with zero observations -- and is
+    deliberately distinct from `ExplanationSeverity`-based `2`
+    (CRITICAL): reusing a plain "not found" `2` here would be
+    indistinguishable from a real critical finding, the same collision
+    `TrackerStatusExitCode` already avoids for an empty selection. This
+    also deliberately diverges from `ExitCode.NO_MATCH`/`trackers
+    inspect`'s no-match convention (both `2`) for the same reason. An
+    ambiguous hash prefix still reuses the shared `ExitCode.ERROR` (via
+    `_fail_ambiguous_hash`), consistent with every other hash-driven
+    command -- it is rejected before an explanation is ever computed, so
+    it never enters this scheme at all. `4` is reserved for invalid CLI
+    invocation; today `explain torrent`/`explain tracker` have no
+    combination of options that can be locally contradictory, so it is
+    currently unreachable in practice (see `DoctorExitCode` for the same
+    pattern).
+    """
+
+    INFO = 0
+    WARNING = 1
+    CRITICAL = 2
+    TARGET_UNAVAILABLE = 3
+    INVALID_USAGE = 4
+
+
 class TrackerMatchModeOption(StrEnum):
     """Expose tracker matching modes for Typer options."""
 
@@ -261,6 +305,12 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
     ),
     "backup_diff": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "explain_torrent": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
+    "explain_tracker": frozenset(
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
     ),
 }
@@ -1949,6 +1999,137 @@ def remove(
     if verbose:
         _print_removal_details(plan, applied=applied)
     _exit_if_no_targeted_matches(plan.matched_tracker)
+
+
+@explain_app.command(name="torrent")
+def explain_torrent_command(
+    torrent_hash: Annotated[
+        str,
+        typer.Option(
+            "--hash",
+            help=(
+                "Full infohash or unique leading prefix to explain "
+                "(case-insensitive)."
+            ),
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format.",
+        ),
+    ] = OutputFormat.table,
+) -> None:
+    """Explain one torrent's current state using deterministic evidence.
+
+    Read-only: never mutates qBittorrent, never prompts, and never
+    claims a cause the collected evidence does not support. Bounded to
+    `torrents_info()` once plus at most one `torrents_trackers()` call
+    for the resolved torrent -- the same budget `torrents inspect
+    --hash` uses.
+    """
+    _validate_format_support("explain_torrent", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
+    try:
+        client = _create_qbit_client()
+        with transient_spinner("Loading torrent...", enabled=enabled):
+            report = explain_torrent(client, torrent_hash)
+    except AmbiguousTorrentHashError as error:
+        _fail_ambiguous_hash(error)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if report is None:
+        if output_format == OutputFormat.json:
+            _print_json_output({"explanation": None, "hash": torrent_hash})
+        elif output_format == OutputFormat.jsonl:
+            _print_jsonl_output({"explanation": None, "hash": torrent_hash})
+        else:
+            typer.echo(f"No torrent found for hash prefix: {torrent_hash}")
+        raise typer.Exit(code=ExplainExitCode.TARGET_UNAVAILABLE)
+
+    _render_explanation_report(report, output_format)
+    raise typer.Exit(code=explanation_exit_code(report.overall_severity))
+
+
+@explain_app.command(name="tracker")
+def explain_tracker_command(
+    tracker: Annotated[
+        str,
+        typer.Option(
+            "--tracker",
+            help=_TRACKER_FILTER_HELP,
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format.",
+        ),
+    ] = OutputFormat.table,
+) -> None:
+    """Explain one tracker's aggregate health using deterministic evidence.
+
+    Read-only: reuses the same bounded `trackers status` collection
+    (`torrents_info()` once, at most one `torrents_trackers()` call per
+    surviving torrent), restricted to the requested identity afterward
+    -- no second collection pass.
+    """
+    _validate_format_support("explain_tracker", output_format)
+    enabled = progress_enabled(
+        output_format=output_format,
+        interactive=is_interactive_terminal(),
+    )
+    try:
+        client = _create_qbit_client()
+        with transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        ) as advance:
+            report = explain_tracker(client, tracker, on_progress=advance)
+    except ConfigError as error:
+        _fail(f"Configuration error: {error}")
+    except RuntimeError as error:
+        _fail(str(error))
+    except Exception as error:
+        _fail(f"qBittorrent API error: {error}")
+
+    if report is None:
+        normalized = normalize_tracker_host(tracker)
+        if output_format == OutputFormat.json:
+            _print_json_output({"explanation": None, "tracker": normalized})
+        elif output_format == OutputFormat.jsonl:
+            _print_jsonl_output({"explanation": None, "tracker": normalized})
+        else:
+            typer.echo(f"No observations found for tracker: {normalized}")
+        raise typer.Exit(code=ExplainExitCode.TARGET_UNAVAILABLE)
+
+    _render_explanation_report(report, output_format)
+    raise typer.Exit(code=explanation_exit_code(report.overall_severity))
+
+
+def _render_explanation_report(
+    report: ExplanationReport,
+    output_format: OutputFormat,
+) -> None:
+    """Render an explanation report in the requested format."""
+    if output_format == OutputFormat.json:
+        _print_json_output(explanation_report_to_dict(report))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        _print_jsonl_output(explanation_report_to_dict(report))
+        return
+
+    render_explanation(report)
 
 
 def _run_mutation(

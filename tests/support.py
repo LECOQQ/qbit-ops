@@ -167,6 +167,8 @@ def make_torrent(**overrides: Any) -> dict[str, Any]:
         "ratio": 1.0,
         "size": 1_000_000,
         "category": "",
+        "dlspeed": 0,
+        "upspeed": 0,
     }
     defaults.update(overrides)
     return defaults

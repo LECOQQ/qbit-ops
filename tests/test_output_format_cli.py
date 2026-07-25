@@ -41,6 +41,8 @@ COMMAND_ARGV: dict[str, list[str]] = {
     "trackers_inspect": ["trackers", "inspect", "--tracker", TRACKER_URL],
     "trackers_export": ["trackers", "export"],
     "backup_export": ["backup", "export"],
+    "explain_torrent": ["explain", "torrent", "--hash", TORRENT_HASH[:8]],
+    "explain_tracker": ["explain", "tracker", "--tracker", TRACKER_URL],
 }
 
 # Command path only (no options), valid for --help regardless of any
@@ -58,6 +60,8 @@ COMMAND_PATH: dict[str, list[str]] = {
     "trackers_export": ["trackers", "export"],
     "backup_export": ["backup", "export"],
     "backup_diff": ["backup", "diff"],
+    "explain_torrent": ["explain", "torrent"],
+    "explain_tracker": ["explain", "tracker"],
 }
 
 assert set(COMMAND_ARGV) == set(FORMAT_SUPPORT) - {"backup_diff"}

@@ -21,6 +21,7 @@ from rich.table import Table
 
 from app.doctor import CheckStatus, DoctorReport
 from app.execution import MutationStatus
+from app.explain import Evidence, ExplanationReport, ExplanationSeverity
 from app.selectors import ResolvedTorrent
 from app.status import Health, StatusSnapshot
 from app.trackers import sanitize_tracker_text
@@ -455,3 +456,80 @@ def render_doctor_table(report: DoctorReport) -> None:
             )
 
         console.print(table)
+
+
+_EXPLANATION_SEVERITY_STYLES: dict[ExplanationSeverity, str] = {
+    ExplanationSeverity.INFO: "bold green",
+    ExplanationSeverity.WARNING: "bold yellow",
+    ExplanationSeverity.CRITICAL: "bold red",
+    ExplanationSeverity.UNKNOWN: "dim",
+}
+
+_BYTE_RATE_EVIDENCE_CODES = {"download_rate", "upload_rate"}
+
+
+def _format_evidence_value(item: Evidence) -> str:
+    """Format one evidence value for table display.
+
+    JSON/JSONL keep `Evidence.value` raw (an int byte rate, a float
+    progress ratio, ...); only the table renderer applies a per-code
+    human formatting -- a narrow, explicit lookup, not a generic
+    formatting DSL.
+    """
+    if item.code in _BYTE_RATE_EVIDENCE_CODES and isinstance(item.value, int):
+        return format_byte_rate(item.value)
+    if item.code == "progress" and isinstance(item.value, float):
+        return f"{item.value * 100:.1f}%"
+    if item.value is None:
+        return ""
+    return str(item.value)
+
+
+def render_explanation(report: ExplanationReport) -> None:
+    """Render an explanation report as a concise, terminal-friendly narrative.
+
+    Deliberately not a table (`print_table`): a narrative report has no
+    stable tabular shape (see docs/COMMANDS.md, "Format Support
+    Matrix"), so this builds its own structured text layout instead.
+    Evidence/limitation/next-command text is already secret-free by
+    construction (`app.explain` only ever derives it from
+    `app.trackers`/`app.tracker_status`'s sanitized structural data), so
+    nothing here re-sanitizes it.
+    """
+    style = _EXPLANATION_SEVERITY_STYLES[report.overall_severity]
+    console.print(
+        f"[bold]{report.target_type.capitalize()}[/bold] · "
+        f"{report.target_identity}"
+    )
+    console.print(
+        f"Severity · [{style}]{report.overall_severity.value}[/{style}]"
+    )
+    console.print()
+    console.print("[bold]Summary[/bold]")
+    console.print(report.summary)
+
+    for finding in report.findings:
+        console.print()
+        finding_style = _EXPLANATION_SEVERITY_STYLES[finding.severity]
+        console.print(
+            f"[{finding_style}]{finding.severity.value.upper()}"
+            f"[/{finding_style}] · [bold]{finding.title}[/bold]"
+        )
+        console.print(f"  {finding.explanation}")
+
+        if finding.evidence:
+            console.print("  [bold]Evidence[/bold]")
+            for item in finding.evidence:
+                console.print(
+                    f"    {item.label:<20} {_format_evidence_value(item)}"
+                )
+
+        if finding.limitations:
+            console.print("  [bold]Limitations[/bold]")
+            for limitation in finding.limitations:
+                console.print(f"    {limitation}")
+
+        if finding.next_commands:
+            console.print("  [bold]Consider[/bold]")
+            for command in finding.next_commands:
+                console.print(f"    {command}")
