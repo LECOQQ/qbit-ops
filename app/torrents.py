@@ -1,6 +1,15 @@
-"""List qBittorrent torrents."""
+"""List and select qBittorrent torrents.
 
-from collections.abc import Callable
+Owns the shared, structured torrent-filter model (`TorrentFilter`,
+`SelectedTorrent`, `TorrentSelection`) and its one filtering pipeline
+(`select_torrents`), reused by every read command and bulk mutation that
+targets more than a single hash. Kept free of Typer and Rich so it can be
+reused by any future interface (CLI, TUI) without pulling in presentation
+concerns -- mirrors `app.selectors` for hash resolution and
+`app.status`/`app.doctor` for their own collection/render splits.
+"""
+
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Literal
@@ -11,103 +20,354 @@ from app.qbit_fields import (
     get_field_as_string,
 )
 from app.selectors import TorrentNotFoundError, resolve_torrent_hash
-from app.trackers import TrackerMatchMode, has_tracker
+from app.torrent_states import (
+    TorrentStateGroup,
+    classify_torrent_state,
+    is_completed_torrent,
+    is_stopped_state,
+)
+from app.trackers import has_tracker_host, normalize_tracker_host
 
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce"]
 
+UNCATEGORIZED_LABEL = "(uncategorized)"
+UNCATEGORIZED_FILTER_TOKEN = "uncategorized"
 
-@dataclass(frozen=True)
-class BulkTorrentChange:
-    """One torrent that a bulk action will act on."""
-
-    hash: str
-    name: str
-
-
-@dataclass(frozen=True)
-class BulkTorrentSkip:
-    """One torrent excluded from a bulk action because it would be a no-op."""
-
-    hash: str
-    name: str
-    reason: str
+# The public `--state` vocabulary: exactly the values `classify_torrent_state`
+# can return, so a filter value can never name a group the classifier
+# itself would never produce. `completed`/`active`/`inactive` are
+# deliberately NOT part of this vocabulary -- they have their own
+# dedicated `TorrentFilter` fields (and CLI flags) instead of a second,
+# overlapping spelling here.
+STATE_FILTER_VALUES: frozenset[TorrentStateGroup] = frozenset(
+    {"downloading", "seeding", "checking", "stalled", "errored", "unknown"}
+)
 
 
 @dataclass(frozen=True)
-class BulkTorrentActionPlan:
-    """The result of planning a bulk torrent action, before it is applied.
+class TorrentFilter:
+    """Structured, Typer/Rich-free torrent selection criteria.
 
-    `changes` and `skipped` are collected unconditionally (not gated by a
-    `verbose` flag) since the CLI layer needs full detail to render a
-    confirmation preview; whether to *print* that detail is a rendering
-    decision, not a planning one.
+    Repeated `--category`/`--state` values combine with OR within the
+    same field; different fields combine with AND. `tracker`, when set,
+    is always already normalized to `host` or `host:port`
+    (`app.trackers.normalize_tracker_host`) by `build_torrent_filter` --
+    never a full URL, so a passkey embedded in a tracker's path or query
+    string can never reach this model. `categories` holds the raw
+    requested tokens (not display-normalized); `states` holds only
+    values from `STATE_FILTER_VALUES`.
     """
 
-    action: TorrentBulkAction
-    selection: dict[str, str]
+    categories: tuple[str, ...] = ()
+    states: tuple[TorrentStateGroup, ...] = ()
+    tracker: str | None = None
+    completed: bool | None = None
+    active: bool | None = None
+    stalled: bool | None = None
+    errored: bool | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether this filter would select every torrent."""
+        return (
+            not self.categories
+            and not self.states
+            and self.tracker is None
+            and self.completed is None
+            and self.active is None
+            and self.stalled is None
+            and self.errored is None
+        )
+
+    @property
+    def requires_tracker_data(self) -> bool:
+        """Return whether this filter needs a per-torrent tracker lookup."""
+        return self.tracker is not None
+
+
+_EMPTY_TORRENT_FILTER = TorrentFilter()
+
+
+@dataclass(frozen=True)
+class SelectedTorrent:
+    """One torrent selected by `select_torrents`.
+
+    Carries the complete infohash (never truncated) plus enough fields
+    for list rendering, mutation plans, previews, and future `explain`/
+    TUI consumers. `tracker_count` is `None` when tracker data was not
+    collected for this selection (no `--tracker` filter was present) --
+    distinct from `0`, which means tracker data *was* collected and the
+    torrent legitimately has no active trackers.
+    """
+
+    hash: str
+    name: str
+    category: str
+    state: str
+    size: int
+    progress: float
+    ratio: float
+    tracker_count: int | None
+
+
+@dataclass(frozen=True)
+class TorrentSelection:
+    """The deterministic result of applying a `TorrentFilter`."""
+
     scanned: int
-    matched: int
-    changes: tuple[BulkTorrentChange, ...]
-    skipped: tuple[BulkTorrentSkip, ...]
+    matched: tuple[SelectedTorrent, ...]
+    filters: TorrentFilter
+    tracker_data_collected: bool
 
 
-def list_torrents(
+def build_torrent_filter(
+    *,
+    categories: Sequence[str] = (),
+    states: Sequence[str] = (),
+    tracker: str | None = None,
+    completed: bool = False,
+    incomplete: bool = False,
+    active: bool = False,
+    inactive: bool = False,
+    stalled: bool = False,
+    errored: bool = False,
+) -> TorrentFilter:
+    """Validate and build a `TorrentFilter` from raw CLI-style inputs.
+
+    The single seam between CLI options (independent boolean flags for
+    each polarity) and the structured tri-state model. Rejects the two
+    locally-provable contradictions (`--completed --incomplete`,
+    `--active --inactive`) and any unrecognized `--state` value before
+    any qBittorrent API call; every other combination is accepted and
+    combines with AND, even where it can never match anything (e.g.
+    `--state downloading --stalled`) -- not every combination that
+    yields zero matches is a contradiction worth rejecting.
+    """
+    if completed and incomplete:
+        raise ValueError("Use --completed or --incomplete, not both.")
+    if active and inactive:
+        raise ValueError("Use --active or --inactive, not both.")
+
+    normalized_categories = tuple(
+        dict.fromkeys(
+            category.strip()
+            for category in categories
+            if category.strip() != ""
+        )
+    )
+
+    normalized_states: list[TorrentStateGroup] = []
+    for state in states:
+        normalized_state = state.strip().lower()
+        if normalized_state not in STATE_FILTER_VALUES:
+            supported = ", ".join(sorted(STATE_FILTER_VALUES))
+            raise ValueError(
+                f"Unknown --state value '{state}'. Supported values: "
+                f"{supported}."
+            )
+        if normalized_state not in normalized_states:
+            normalized_states.append(normalized_state)  # type: ignore[arg-type]
+
+    normalized_tracker = (
+        normalize_tracker_host(tracker) if tracker is not None else None
+    )
+
+    return TorrentFilter(
+        categories=normalized_categories,
+        states=tuple(normalized_states),
+        tracker=normalized_tracker,
+        completed=True if completed else (False if incomplete else None),
+        active=True if active else (False if inactive else None),
+        stalled=True if stalled else None,
+        errored=True if errored else None,
+    )
+
+
+def select_torrents(
     client: Any,
+    filters: TorrentFilter,
     on_progress: Callable[[int, int], None] | None = None,
-) -> list[dict[str, Any]]:
-    """List torrents with useful audit fields.
+) -> TorrentSelection:
+    """Select torrents by structured filter criteria.
 
-    Calls `client.torrents_trackers()` once per torrent (to count active
-    trackers), so `on_progress(completed, total)` reports real, known
-    progress through that per-torrent work.
+    The shared filtering pipeline: load once via `torrents_info()`, apply
+    every cheap (torrent-info-only) filter first, and only then call
+    `client.torrents_trackers()` -- at most once per surviving candidate,
+    and only when `filters.tracker` is set. A filter-less or
+    non-tracker-filtered selection never calls `torrents_trackers()` at
+    all. `on_progress` reports real, known progress over exactly the
+    calls actually made: a single (total, total) completion when no
+    tracker lookup is needed, or one advance per candidate tracker
+    lookup otherwise.
     """
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
-    torrents: list[dict[str, Any]] = []
 
-    for index, torrent in enumerate(all_torrents, start=1):
-        torrents.append(_build_torrent_audit_entry(client, torrent))
+    candidates = [
+        torrent
+        for torrent in all_torrents
+        if _matches_cheap_filters(torrent, filters)
+    ]
+
+    needs_tracker_data = filters.requires_tracker_data
+    selected: list[SelectedTorrent] = []
+
+    if needs_tracker_data:
+        candidate_total = len(candidates)
+        for index, torrent in enumerate(candidates, start=1):
+            torrent_hash = get_field_as_string(torrent, "hash")
+            active_trackers = _get_active_tracker_urls(
+                client.torrents_trackers(torrent_hash)
+            )
+            if on_progress is not None:
+                on_progress(index, candidate_total)
+
+            # requires_tracker_data implies filters.tracker is not None
+            assert filters.tracker is not None
+            if not has_tracker_host(active_trackers, filters.tracker):
+                continue
+
+            selected.append(
+                _build_selected_torrent(
+                    torrent, tracker_count=len(active_trackers)
+                )
+            )
+    else:
         if on_progress is not None:
-            on_progress(index, total)
+            on_progress(total, total)
+        selected = [
+            _build_selected_torrent(torrent, tracker_count=None)
+            for torrent in candidates
+        ]
 
-    torrents.sort(key=lambda item: item["name"].casefold())
-    return torrents
+    selected.sort(key=lambda item: item.name.casefold())
+
+    return TorrentSelection(
+        scanned=total,
+        matched=tuple(selected),
+        filters=filters,
+        tracker_data_collected=needs_tracker_data,
+    )
 
 
-def list_torrents_by_category(
-    client: Any,
-    category: str,
-    on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """List torrents belonging to a category.
-
-    Calls `client.torrents_trackers()` once per scanned torrent, so
-    `on_progress(completed, total)` reports real, known progress through
-    that per-torrent work.
-    """
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    torrents: list[dict[str, Any]] = []
-    normalized_category = category.strip()
-
-    for index, torrent in enumerate(all_torrents, start=1):
-        if on_progress is not None:
-            on_progress(index, total)
-
-        torrent_category = get_field_as_string(torrent, "category")
-        if not _category_matches(torrent_category, normalized_category):
-            continue
-
-        torrents.append(_build_torrent_audit_entry(client, torrent))
-
-    torrents.sort(key=lambda item: item["name"].casefold())
-
+def torrent_filter_to_dict(filters: TorrentFilter) -> dict[str, Any]:
+    """Build a stable, JSON-safe representation of a torrent filter."""
     return {
-        "category": _format_category_label(normalized_category),
-        "scanned": total,
-        "matched": len(torrents),
-        "torrents": torrents,
+        "categories": list(filters.categories),
+        "states": list(filters.states),
+        "tracker": filters.tracker,
+        "completed": filters.completed,
+        "active": filters.active,
+        "stalled": filters.stalled,
+        "errored": filters.errored,
     }
+
+
+def describe_torrent_filter(filters: TorrentFilter) -> str:
+    """Build a concise, deterministic human description of a torrent filter.
+
+    Never renders anything beyond what `TorrentFilter` itself carries --
+    `tracker` is already host-only by construction, so this can never
+    leak a passkey.
+    """
+    parts: list[str] = []
+    if filters.categories:
+        parts.append("category=" + "|".join(filters.categories))
+    if filters.states:
+        parts.append("state=" + "|".join(filters.states))
+    if filters.tracker is not None:
+        parts.append(f"tracker={filters.tracker}")
+    if filters.completed is not None:
+        parts.append("completed" if filters.completed else "incomplete")
+    if filters.active is not None:
+        parts.append("active" if filters.active else "inactive")
+    if filters.stalled is not None:
+        parts.append("stalled")
+    if filters.errored is not None:
+        parts.append("errored")
+
+    return ", ".join(parts) if parts else "none"
+
+
+def _matches_cheap_filters(torrent: Any, filters: TorrentFilter) -> bool:
+    """Return whether a torrent matches every `torrents_info()`-only filter."""
+    if filters.categories:
+        torrent_category = get_field_as_string(torrent, "category")
+        if not any(
+            _category_matches(torrent_category, category)
+            for category in filters.categories
+        ):
+            return False
+
+    state = get_field_as_string(torrent, "state")
+
+    if filters.states and classify_torrent_state(state) not in filters.states:
+        return False
+
+    if (
+        filters.completed is not None
+        and is_completed_torrent(torrent) != filters.completed
+    ):
+        return False
+
+    if filters.active is not None and (not is_stopped_state(state)) != (
+        filters.active
+    ):
+        return False
+
+    if filters.stalled is not None:
+        if (classify_torrent_state(state) == "stalled") != filters.stalled:
+            return False
+
+    if filters.errored is not None:
+        if (classify_torrent_state(state) == "errored") != filters.errored:
+            return False
+
+    return True
+
+
+def _build_selected_torrent(
+    torrent: Any, *, tracker_count: int | None
+) -> SelectedTorrent:
+    """Build a `SelectedTorrent` from a raw qBittorrent torrent object."""
+    return SelectedTorrent(
+        hash=get_field_as_string(torrent, "hash"),
+        name=get_field_as_string(torrent, "name"),
+        category=_format_category_label(
+            get_field_as_string(torrent, "category")
+        ),
+        state=get_field_as_string(torrent, "state"),
+        size=get_field_as_int(torrent, "size"),
+        progress=get_field_as_float(torrent, "progress"),
+        ratio=get_field_as_float(torrent, "ratio"),
+        tracker_count=tracker_count,
+    )
+
+
+def _category_matches(torrent_category: str, requested_category: str) -> bool:
+    """Return whether a torrent category matches the requested filter.
+
+    Accepts either public uncategorized token: the bare word
+    (`uncategorized`, the filter value users type) or the display label
+    (`(uncategorized)`, what commands render) -- both are documented,
+    interchangeable ways to request uncategorized torrents.
+    """
+    normalized_request = requested_category.strip().casefold()
+    if normalized_request in {
+        UNCATEGORIZED_LABEL.casefold(),
+        UNCATEGORIZED_FILTER_TOKEN,
+    }:
+        return torrent_category.strip() == ""
+
+    return torrent_category.casefold() == normalized_request
+
+
+def _format_category_label(category: str) -> str:
+    """Normalize category labels for display and comparison."""
+    if category.strip() == "":
+        return UNCATEGORIZED_LABEL
+
+    return category.strip()
 
 
 def list_category_usage(client: Any) -> dict[str, int]:
@@ -121,44 +381,6 @@ def list_category_usage(client: Any) -> dict[str, int]:
         category_usage[category] = category_usage.get(category, 0) + 1
 
     return dict(sorted(category_usage.items()))
-
-
-UNCATEGORIZED_LABEL = "(uncategorized)"
-
-
-def _build_torrent_audit_entry(client: Any, torrent: Any) -> dict[str, Any]:
-    """Build standard audit fields for one torrent."""
-    torrent_hash = get_field_as_string(torrent, "hash")
-    trackers = _get_active_tracker_urls(client.torrents_trackers(torrent_hash))
-
-    return {
-        "hash": torrent_hash,
-        "name": get_field_as_string(torrent, "name"),
-        "category": _format_category_label(
-            get_field_as_string(torrent, "category")
-        ),
-        "state": get_field_as_string(torrent, "state"),
-        "size": get_field_as_int(torrent, "size"),
-        "progress": get_field_as_float(torrent, "progress"),
-        "ratio": get_field_as_float(torrent, "ratio"),
-        "tracker_count": len(trackers),
-    }
-
-
-def _category_matches(torrent_category: str, requested_category: str) -> bool:
-    """Return whether a torrent category matches the requested filter."""
-    if requested_category.casefold() == UNCATEGORIZED_LABEL.casefold():
-        return torrent_category.strip() == ""
-
-    return torrent_category.casefold() == requested_category.casefold()
-
-
-def _format_category_label(category: str) -> str:
-    """Normalize category labels for display and comparison."""
-    if category.strip() == "":
-        return UNCATEGORIZED_LABEL
-
-    return category.strip()
 
 
 def list_torrents_with_trackers(
@@ -270,16 +492,166 @@ def search_torrents_by_name(
     }
 
 
+@dataclass(frozen=True)
+class BulkTorrentChange:
+    """One torrent that a bulk action will act on."""
+
+    hash: str
+    name: str
+
+
+@dataclass(frozen=True)
+class BulkTorrentSkip:
+    """One torrent excluded from a bulk action because it would be a no-op."""
+
+    hash: str
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class BulkTorrentActionPlan:
+    """The result of planning a bulk torrent action, before it is applied.
+
+    `changes` and `skipped` are collected unconditionally (not gated by a
+    `verbose` flag) since the CLI layer needs full detail to render a
+    confirmation preview; whether to *print* that detail is a rendering
+    decision, not a planning one. `torrent_hash` is the resolved full
+    hash when `--hash` selected the target, always `None` otherwise;
+    `filters` is always the exact `TorrentFilter` used (empty when
+    `--hash` or `--all` was used instead).
+    """
+
+    action: TorrentBulkAction
+    torrent_hash: str | None
+    select_all: bool
+    filters: TorrentFilter
+    scanned: int
+    matched: int
+    changes: tuple[BulkTorrentChange, ...]
+    skipped: tuple[BulkTorrentSkip, ...]
+
+
+def validate_torrent_selector(
+    *,
+    torrent_hash: str | None,
+    select_all: bool,
+    filters: TorrentFilter,
+) -> None:
+    """Ensure a bulk torrent selector is safe and unambiguous.
+
+    `--hash` always resolves to a single torrent, so it never combines
+    with `--all` or any filter. `--all` is an explicit acknowledgement of
+    whole-instance scope, so it never combines with a filter either
+    (there is no validation-only meaning that would justify it). One or
+    more filters may otherwise define a bulk selection on their own --
+    but at least one of `--hash`, `--all`, or a filter is always
+    required, so no selector can ever silently mean the whole seedbox.
+    """
+    if torrent_hash is not None:
+        if select_all or not filters.is_empty:
+            raise ValueError(
+                "Use --hash alone, without --all or any other filter."
+            )
+        return
+
+    if select_all:
+        if not filters.is_empty:
+            raise ValueError("Use --all alone, without any other filter.")
+        return
+
+    if filters.is_empty:
+        raise ValueError(
+            "Provide --hash, --all, or at least one filter (--category, "
+            "--state, --tracker, --completed, --incomplete, --active, "
+            "--inactive, --stalled, --errored)."
+        )
+
+
+def select_torrents_for_mutation(
+    client: Any,
+    *,
+    torrent_hash: str | None,
+    select_all: bool,
+    filters: TorrentFilter,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[TorrentSelection, str | None]:
+    """Resolve a full bulk-mutation selector to a `TorrentSelection`.
+
+    Validates the selector first (see `validate_torrent_selector`), so an
+    unsafe combination is rejected before any qBittorrent API call.
+    Returns `(selection, resolved_hash)`: `resolved_hash` is the
+    complete infohash when `--hash` was used (even on a no-match), and
+    `None` for `--all` or filter-based selections.
+    """
+    validate_torrent_selector(
+        torrent_hash=torrent_hash, select_all=select_all, filters=filters
+    )
+
+    if torrent_hash is not None:
+        return _select_torrents_by_hash(client, torrent_hash, on_progress)
+
+    effective_filters = TorrentFilter() if select_all else filters
+    selection = select_torrents(
+        client, effective_filters, on_progress=on_progress
+    )
+    return selection, None
+
+
+def _select_torrents_by_hash(
+    client: Any,
+    torrent_hash: str,
+    on_progress: Callable[[int, int], None] | None,
+) -> tuple[TorrentSelection, str | None]:
+    """Resolve a hash selector to at most one torrent.
+
+    An unmatched hash resolves to zero selected torrents rather than
+    raising, so it flows through the same no-match path as any other
+    bulk selector. An ambiguous prefix raises `AmbiguousTorrentHashError`
+    so the caller can reject it before any mutation is attempted.
+    """
+    all_torrents = list(client.torrents_info())
+    total = len(all_torrents)
+    if on_progress is not None:
+        on_progress(total, total)
+
+    try:
+        resolved = resolve_torrent_hash(all_torrents, torrent_hash)
+    except TorrentNotFoundError:
+        return (
+            TorrentSelection(
+                scanned=total,
+                matched=(),
+                filters=TorrentFilter(),
+                tracker_data_collected=False,
+            ),
+            None,
+        )
+
+    matched = tuple(
+        _build_selected_torrent(torrent, tracker_count=None)
+        for torrent in all_torrents
+        if get_field_as_string(torrent, "hash").lower() == resolved.hash.lower()
+    )
+
+    return (
+        TorrentSelection(
+            scanned=total,
+            matched=matched,
+            filters=TorrentFilter(),
+            tracker_data_collected=False,
+        ),
+        resolved.hash,
+    )
+
+
 def plan_bulk_torrent_action(
     client: Any,
     action: TorrentBulkAction,
     *,
     torrent_hash: str | None = None,
-    category: str | None = None,
-    tracker: str | None = None,
-    match_mode: TrackerMatchMode = "exact",
     select_all: bool = False,
-    completed_only: bool = False,
+    filters: TorrentFilter = _EMPTY_TORRENT_FILTER,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> BulkTorrentActionPlan:
     """Plan a bulk torrent action against a filtered torrent selection.
@@ -291,40 +663,36 @@ def plan_bulk_torrent_action(
     is built; an unmatched hash resolves to zero selected torrents, same
     as any other filter that matches nothing.
     """
-    selection = select_torrents_for_bulk_action(
-        client=client,
+    selection, resolved_hash = select_torrents_for_mutation(
+        client,
         torrent_hash=torrent_hash,
-        category=category,
-        tracker=tracker,
-        match_mode=match_mode,
         select_all=select_all,
-        completed_only=completed_only,
+        filters=filters,
         on_progress=on_progress,
     )
+
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
 
-    for torrent in selection["torrents"]:
-        matched_hash = torrent["hash"]
-        torrent_name = torrent["name"]
-        torrent_state = torrent["state"]
-
-        skip_reason = _bulk_action_skip_reason(action, torrent_state)
+    for torrent in selection.matched:
+        skip_reason = _bulk_action_skip_reason(action, torrent.state)
         if skip_reason is not None:
             skips.append(
                 BulkTorrentSkip(
-                    hash=matched_hash, name=torrent_name, reason=skip_reason
+                    hash=torrent.hash, name=torrent.name, reason=skip_reason
                 )
             )
             continue
 
-        changes.append(BulkTorrentChange(hash=matched_hash, name=torrent_name))
+        changes.append(BulkTorrentChange(hash=torrent.hash, name=torrent.name))
 
     return BulkTorrentActionPlan(
         action=action,
-        selection=selection["selection"],
-        scanned=selection["scanned"],
-        matched=selection["matched"],
+        torrent_hash=resolved_hash,
+        select_all=select_all,
+        filters=filters,
+        scanned=selection.scanned,
+        matched=len(selection.matched),
         changes=tuple(changes),
         skipped=tuple(skips),
     )
@@ -346,226 +714,6 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
         raise RuntimeError(
             f"Failed to {plan.action} selected torrents: {error}"
         ) from error
-
-
-def select_torrents_for_bulk_action(
-    client: Any,
-    *,
-    torrent_hash: str | None = None,
-    category: str | None = None,
-    tracker: str | None = None,
-    match_mode: TrackerMatchMode = "exact",
-    select_all: bool = False,
-    completed_only: bool = False,
-    on_progress: Callable[[int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Select torrents for a bulk action using one filter."""
-    validate_bulk_torrent_selection(
-        torrent_hash=torrent_hash,
-        category=category,
-        tracker=tracker,
-        select_all=select_all,
-        completed_only=completed_only,
-    )
-
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-
-    if torrent_hash is not None:
-        return _select_torrents_by_hash(all_torrents, torrent_hash, on_progress)
-
-    selected_torrents: list[dict[str, Any]] = []
-    scanned = 0
-
-    for torrent in all_torrents:
-        scanned += 1
-        if on_progress is not None:
-            on_progress(scanned, total)
-
-        if completed_only and not is_completed_torrent(torrent):
-            continue
-
-        if select_all or (
-            completed_only and category is None and tracker is None
-        ):
-            selected_torrents.append(_build_bulk_torrent_entry(torrent))
-            continue
-
-        if not _torrent_matches_bulk_filter(
-            client=client,
-            torrent=torrent,
-            category=category,
-            tracker=tracker,
-            match_mode=match_mode,
-        ):
-            continue
-
-        selected_torrents.append(_build_bulk_torrent_entry(torrent))
-
-    selected_torrents.sort(key=lambda item: item["name"].casefold())
-
-    return {
-        "selection": _build_bulk_selection_metadata(
-            torrent_hash=None,
-            category=category,
-            tracker=tracker,
-            match_mode=match_mode,
-            select_all=select_all,
-            completed_only=completed_only,
-        ),
-        "scanned": scanned,
-        "matched": len(selected_torrents),
-        "torrents": selected_torrents,
-    }
-
-
-def _select_torrents_by_hash(
-    all_torrents: list[Any],
-    torrent_hash: str,
-    on_progress: Callable[[int, int], None] | None,
-) -> dict[str, Any]:
-    """Resolve a hash selector to at most one torrent.
-
-    An unmatched hash resolves to zero selected torrents rather than
-    raising, so it flows through the same no-match path as any other
-    bulk filter. An ambiguous prefix raises `AmbiguousTorrentHashError`
-    so the caller can reject it before any mutation is attempted.
-    """
-    total = len(all_torrents)
-    if on_progress is not None:
-        on_progress(total, total)
-
-    try:
-        resolved = resolve_torrent_hash(all_torrents, torrent_hash)
-    except TorrentNotFoundError:
-        return {
-            "selection": _build_bulk_selection_metadata(
-                torrent_hash=torrent_hash,
-                category=None,
-                tracker=None,
-                match_mode="exact",
-                select_all=False,
-                completed_only=False,
-            ),
-            "scanned": total,
-            "matched": 0,
-            "torrents": [],
-        }
-
-    selected_torrents = [
-        _build_bulk_torrent_entry(torrent)
-        for torrent in all_torrents
-        if get_field_as_string(torrent, "hash").lower() == resolved.hash.lower()
-    ]
-
-    return {
-        "selection": _build_bulk_selection_metadata(
-            torrent_hash=resolved.hash,
-            category=None,
-            tracker=None,
-            match_mode="exact",
-            select_all=False,
-            completed_only=False,
-        ),
-        "scanned": total,
-        "matched": len(selected_torrents),
-        "torrents": selected_torrents,
-    }
-
-
-def _build_bulk_torrent_entry(torrent: Any) -> dict[str, Any]:
-    """Build torrent fields used by bulk actions."""
-    return {
-        "hash": get_field_as_string(torrent, "hash"),
-        "name": get_field_as_string(torrent, "name"),
-        "state": get_field_as_string(torrent, "state"),
-        "category": _format_category_label(
-            get_field_as_string(torrent, "category")
-        ),
-    }
-
-
-def _build_bulk_selection_metadata(
-    *,
-    torrent_hash: str | None,
-    category: str | None,
-    tracker: str | None,
-    match_mode: TrackerMatchMode,
-    select_all: bool = False,
-    completed_only: bool = False,
-) -> dict[str, str]:
-    """Describe which filter was used for a bulk torrent action."""
-    if torrent_hash is not None:
-        return {
-            "filter": "hash",
-            "value": torrent_hash,
-        }
-
-    if select_all:
-        return {
-            "filter": "all",
-            "value": "*",
-        }
-
-    if completed_only:
-        if category is not None:
-            return {
-                "filter": "completed+category",
-                "value": _format_category_label(category.strip()),
-            }
-
-        if tracker is not None:
-            return {
-                "filter": "completed+tracker",
-                "value": tracker.strip(),
-                "match": match_mode,
-            }
-
-        return {
-            "filter": "completed",
-            "value": "*",
-        }
-
-    if category is not None:
-        return {
-            "filter": "category",
-            "value": _format_category_label(category.strip()),
-        }
-
-    if tracker is not None:
-        return {
-            "filter": "tracker",
-            "value": tracker.strip(),
-            "match": match_mode,
-        }
-
-    raise AssertionError(
-        "No bulk selection filter was provided; "
-        "validate_bulk_torrent_selection should have rejected this."
-    )
-
-
-def _torrent_matches_bulk_filter(
-    client: Any,
-    torrent: Any,
-    *,
-    category: str | None,
-    tracker: str | None,
-    match_mode: TrackerMatchMode,
-) -> bool:
-    """Return whether a torrent matches the requested bulk filter."""
-    if category is not None:
-        torrent_category = get_field_as_string(torrent, "category")
-        return _category_matches(torrent_category, category.strip())
-
-    if tracker is not None:
-        torrent_hash = get_field_as_string(torrent, "hash")
-        trackers = _get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
-        return has_tracker(trackers, tracker.strip(), match_mode)
-
-    return False
 
 
 def _call_bulk_torrent_action(
@@ -590,62 +738,6 @@ def _call_bulk_torrent_action(
     client.torrents_reannounce(torrent_hashes)
 
 
-def validate_bulk_torrent_selection(
-    *,
-    torrent_hash: str | None,
-    category: str | None,
-    tracker: str | None,
-    select_all: bool,
-    completed_only: bool,
-) -> None:
-    """Ensure bulk torrent filters are mutually consistent.
-
-    `--hash` is always exclusive: it resolves to a single torrent, so it
-    never combines with `--category`, `--tracker`, `--all`, or
-    `--completed`.
-    """
-    if torrent_hash is not None:
-        conflicts_with_hash = (
-            category is not None
-            or tracker is not None
-            or select_all
-            or completed_only
-        )
-        if conflicts_with_hash:
-            raise ValueError(
-                "Use --hash alone, without --category, --tracker, --all, "
-                "or --completed."
-            )
-        return
-
-    named_filters = sum(1 for value in (category, tracker) if value is not None)
-
-    if completed_only:
-        if select_all:
-            raise ValueError(
-                "Use --completed alone or with --category or --tracker."
-            )
-        if named_filters > 1:
-            raise ValueError(
-                "Provide at most one of --category or --tracker with "
-                "--completed."
-            )
-        return
-
-    if select_all:
-        if named_filters > 0:
-            raise ValueError(
-                "Use --all alone, without --category or --tracker."
-            )
-        return
-
-    if named_filters != 1:
-        raise ValueError(
-            "Provide exactly one of --hash, --category, --tracker, --all, "
-            "or --completed."
-        )
-
-
 def _bulk_action_skip_reason(
     action: TorrentBulkAction,
     state: str,
@@ -658,19 +750,6 @@ def _bulk_action_skip_reason(
         return "already_running"
 
     return None
-
-
-def is_stopped_state(state: str) -> bool:
-    """Return whether qBittorrent reports a torrent as stopped."""
-    normalized_state = state.casefold()
-    return normalized_state.startswith("paused") or normalized_state.startswith(
-        "stopped"
-    )
-
-
-def is_completed_torrent(torrent: Any) -> bool:
-    """Return whether qBittorrent reports a torrent as completed."""
-    return get_field_as_float(torrent, "progress") >= 1.0
 
 
 def _build_torrent_details(

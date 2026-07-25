@@ -146,6 +146,38 @@ def redact_tracker_identity(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def normalize_tracker_host(value: str) -> str:
+    """Normalize a tracker filter value to a bare `host` or `host:port`.
+
+    Used by the torrent-filter pipeline's `--tracker` option, which is
+    deliberately hostname-oriented rather than full-URL: a private
+    tracker's announce URL commonly embeds a passkey in its path or
+    query string, and a public filter must never require or display one
+    (see `redact_tracker_identity` above for the same reasoning applied
+    to mutation previews). Accepts either a bare host (`tracker.example`,
+    `tracker.example:6969`) or a full announce URL
+    (`https://tracker.example:6969/announce/PASSKEY`) and extracts only
+    the host and port from either form — the scheme, path, and query
+    string (where a passkey would live) are always discarded and never
+    reach a match, a log, or rendered output.
+    """
+    stripped = value.strip()
+    parseable = stripped if "://" in stripped else f"//{stripped}"
+    parsed = urlsplit(parseable)
+    host = (parsed.hostname or "").lower()
+
+    if host == "":
+        # Not parseable as a netloc at all (e.g. a bare word with no dot
+        # and no port) -- fall back to the raw value with any path
+        # dropped, so a plain hostname-looking string still matches.
+        return stripped.split("/", 1)[0].lower()
+
+    if parsed.port is not None:
+        return f"{host}:{parsed.port}"
+
+    return host
+
+
 def normalize_tracker_url(
     url: str,
     match_mode: TrackerMatchMode = "exact",
@@ -185,6 +217,19 @@ def has_tracker(
     }
 
     return normalized_tracker in normalized_trackers
+
+
+def has_tracker_host(tracker_urls: list[str], normalized_host: str) -> bool:
+    """Return whether any tracker URL's host[:port] matches a normalized host.
+
+    `normalized_host` must already be the output of
+    `normalize_tracker_host` (the torrent-filter pipeline normalizes the
+    `--tracker` filter value once, up front); each candidate URL is
+    normalized the same way before comparison.
+    """
+    return any(
+        normalize_tracker_host(url) == normalized_host for url in tracker_urls
+    )
 
 
 def list_tracker_usage(

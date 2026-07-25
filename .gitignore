@@ -4,6 +4,7 @@
 !.env.example
 .vscode
 AGENTS.md
+CLAUDE.md
 
 # Operating system files
 .DS_Store

@@ -67,16 +67,25 @@ qbit-ops trackers replace-passkey \
 - Confirmation prompts and `--verbose` output never show tracker query
   strings or passkeys — tracker identities are reduced to scheme + host,
   and `replace-passkey` never renders the old or new passkey anywhere.
-- Bulk torrent actions require exactly one targeting mode (`--hash`,
-  `--category`, `--tracker`, `--all`, or `--completed`).
+- Bulk torrent actions require `--hash`, `--all`, or one or more shared
+  filters (`--category`, `--state`, `--tracker`, `--completed`/
+  `--incomplete`, `--active`/`--inactive`, `--stalled`, `--errored`) —
+  never nothing at all, so a bulk mutation can never silently mean the
+  whole seedbox. `--hash` and `--all` are always used alone. See
+  [docs/COMMANDS.md](docs/COMMANDS.md#torrent-filters) for the full filter
+  vocabulary, shared by `torrents list` and every bulk mutation command.
 - **The infohash is the primary identifier for mutations.** `--hash` accepts
   a complete hash or an unambiguous prefix; an ambiguous prefix is rejected
   with the candidate list instead of guessing. Fuzzy name matching is
   read-only (`torrents inspect --name`) and is no longer accepted by
   `pause`, `resume`, `start`, or `reannounce` — see the migration note in
   [docs/COMMANDS.md](docs/COMMANDS.md#torrents).
-- Tracker URLs are normalized for comparison but raw URLs are preserved for
-  API calls.
+- **`--tracker` on `torrents list`/bulk mutations matches by host[:port]
+  only** — never the full announce URL, so a passkey embedded in a
+  tracker's path or query string is never required or rendered by a
+  filter. Tracker mutation commands (`trackers ...`) are unchanged: they
+  still compare full, normalized URLs (`--match exact|without-query`),
+  since qBittorrent's API needs the exact URL for those operations.
 - Credentials never live in `.env`-less environments or CLI arguments — only
   `.env` / environment variables.
 
@@ -157,7 +166,7 @@ qbit-ops doctor
 qbit-ops doctor --format json; echo $?   # 0 pass, 1 warning, 2 failure
 
 qbit-ops torrents list
-qbit-ops torrents list --category sonarr
+qbit-ops torrents list --category sonarr --category radarr --state stalled
 
 qbit-ops trackers list
 qbit-ops trackers health

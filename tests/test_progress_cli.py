@@ -75,17 +75,42 @@ def _client_with_torrents(count: int) -> FakeQbitClient:
 # --- Read-only commands ----------------------------------------------------
 
 
-def test_torrents_list_table_enables_configured_progress(
+def test_torrents_list_unfiltered_uses_a_spinner_not_a_progress_bar(
     runner: CliRunner,
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `torrents list --format table` drives progress on a real TTY."""
+    """Ensure unfiltered `torrents list` never drives a progress bar.
+
+    Since this phase, a filter-less (or non-tracker-filtered) listing
+    never calls `torrents_trackers()`, so there is nothing with a real
+    per-item total to report -- it uses a spinner instead (see
+    `test_progress.py` and docs/COMMANDS.md, "Progress & Spinner
+    Behavior").
+    """
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     configure_qbit_backend(client=_client_with_torrents(5))
 
     result = runner.invoke(app, ["torrents", "list"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert calls == []
+
+
+def test_torrents_list_with_tracker_filter_enables_configured_progress(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure `torrents list --tracker ...` still drives a real progress bar."""
+    _make_interactive(monkeypatch)
+    calls = _spy_on_progress_calls(monkeypatch)
+    configure_qbit_backend(client=_client_with_torrents(5))
+
+    result = runner.invoke(
+        app, ["torrents", "list", "--tracker", "tracker.example"]
+    )
 
     assert result.exit_code == ExitCode.SUCCESS
     assert calls, "expected at least one progress advance call"
