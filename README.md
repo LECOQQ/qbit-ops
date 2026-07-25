@@ -30,10 +30,14 @@ qbit-ops trackers replace-passkey \
 - 🔁 **`status --watch`** — live-refreshing status in place (table) or as a
   flushed JSONL stream, on the same snapshot model, until `Ctrl+C`.
 - 🖥️ **`tui`** *(optional `tui` extra)* — a read-only interactive terminal
-  UI: live status header, a browsable/filterable torrent table (the
-  same shared `TorrentFilter` vocabulary as `torrents list`), read-only
-  name search, and safe focused-torrent details with structural tracker
-  identities. No mutation is reachable from the TUI. See
+  UI, Overview-first: it opens on an Overview workspace (connection,
+  transfer rates, torrent counts, and grounded health findings, all
+  from the same periodic refresh — no extra API call), with a second
+  Torrents workspace (`t`/`2`) for browsing, filtering, and safe
+  inspection (the same shared `TorrentFilter` vocabulary as `torrents
+  list`, read-only name/hash search, structural tracker identities).
+  Switching workspaces, filtering, and search are all local — zero
+  qBittorrent calls. No mutation is reachable from the TUI. See
   [docs/COMMANDS.md](docs/COMMANDS.md#tui) for controls and
   [docs/TUI_ARCHITECTURE_REVIEW.md](docs/TUI_ARCHITECTURE_REVIEW.md) for
   the architecture and roadmap.
@@ -238,7 +242,7 @@ qbit-ops status --quiet; echo $?   # healthchecks: 0 healthy, 1 warning, 2 criti
 qbit-ops status --watch                       # refresh in place every 5s until Ctrl+C
 qbit-ops status --watch --interval 10
 
-qbit-ops tui                                  # interactive: browse, filter, search, inspect (requires the `tui` extra)
+qbit-ops tui                                  # interactive: Overview dashboard, then Torrents (t/2) to browse/filter/search/inspect (requires the `tui` extra)
 qbit-ops status --watch --format jsonl | jq .  # one flushed JSON object per line
 
 qbit-ops connection check

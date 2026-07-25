@@ -18,7 +18,7 @@ from app.errors import (
     QbitConnectionError,
 )
 from app.torrents import build_torrent_filter
-from app.tui.state import ConnectionState, TuiController
+from app.tui.state import ConnectionState, TuiController, Workspace
 from tests.support import FakeQbitClient, make_torrent
 
 
@@ -438,3 +438,51 @@ def test_auth_failure_never_retries() -> None:
 
     assert controller.state.connection is ConnectionState.AUTH_FAILED
     assert client.torrents_info_calls == calls_before
+
+
+def test_default_workspace_is_overview() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    controller = _controller(client)
+
+    assert controller.state.workspace is Workspace.OVERVIEW
+
+
+def test_set_workspace_performs_zero_api_calls_and_preserves_state() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")],
+        trackers_by_hash={"a" * 40: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.set_search("alpha")
+    controller.set_focus("a" * 40)
+    calls_before = len(client.calls)
+
+    controller.set_workspace(Workspace.TORRENTS)
+
+    assert controller.state.workspace is Workspace.TORRENTS
+    assert controller.state.search == "alpha"
+    assert controller.state.focused_hash == "a" * 40
+    assert len(client.calls) == calls_before
+
+    controller.set_workspace(Workspace.OVERVIEW)
+
+    assert controller.state.workspace is Workspace.OVERVIEW
+    assert controller.state.search == "alpha"
+    assert controller.state.focused_hash == "a" * 40
+    assert len(client.calls) == calls_before
+
+
+def test_stopped_count_reflects_paused_and_stopped_torrents() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="pausedUP"),
+            make_torrent(hash="b" * 40, name="Beta", state="stoppedDL"),
+            make_torrent(hash="c" * 40, name="Gamma", state="downloading"),
+        ]
+    )
+    controller = _controller(client)
+
+    controller.refresh()
+
+    assert controller.state.stopped_count == 2

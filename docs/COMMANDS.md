@@ -315,12 +315,14 @@ qbit-ops tui
 qbit-ops tui --interval 10
 ```
 
-`qbit-ops tui` is a **read-only** interactive terminal UI (TUI 1, see
-[docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md)): a live
-status header, a browsable/filterable torrent table, read-only name
-search, and safe focused-torrent details. It adds interactive
-navigation and inspection that `status --watch` does not provide —
-`status --watch` is deliberately status-only, the TUI is not.
+`qbit-ops tui` is a **read-only**, Overview-first interactive terminal
+UI (see [docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md)):
+it opens on an **Overview** workspace explaining the current condition
+of the qBittorrent instance, with a second **Torrents** workspace for
+browsing, filtering, searching, and inspecting individual torrents. It
+adds interactive navigation and inspection that `status --watch` does
+not provide — `status --watch` is deliberately status-only, the TUI is
+not.
 
 **No mutation is reachable from the TUI.** It shares the exact same
 `TorrentFilter` vocabulary and safe torrent/tracker data as the rest of
@@ -379,8 +381,9 @@ $ qbit-ops tui
 ✗ ERROR The TUI requires the optional 'tui' extra, which is not installed.
 
 qbit-ops is not published on PyPI, so "pipx install qbit-ops[tui]" alone
-will not work -- install from a repository checkout instead:
-  git clone https://github.com/LECOQQ/qbit-ops.git && cd qbit-ops
+will not work -- install from a repository checkout instead (see
+README.md, section "Install", for the clone URL):
+  cd <your qbit-ops checkout>
   pipx uninstall qbit-ops  # only if already installed without the extra
   pipx install ".[tui]"
 
@@ -388,37 +391,91 @@ or, for local development:
   poetry install --extras tui
 ```
 
+(This message deliberately never prints a literal URL — every message
+routed through `print_error()` is passed through a tracker-secret
+redaction filter that would silently replace a real URL with
+`<redacted-url>`. It points at `README.md` instead.)
+
+### Workspaces
+
+```text
+1, g   Overview
+2, t   Torrents
+```
+
+**Overview** (the default, landing workspace) explains the current
+condition of the instance, built entirely from the same periodic
+refresh already used everywhere else in the TUI — no extra API call,
+no tracker-wide scan:
+
+* **Connection** — connected / reconnecting / unavailable, the last
+  successful refresh time (local time, timezone labeled), a `STALE`
+  flag when showing last-good data after a failed refresh, and the
+  qBittorrent/API version where available.
+* **Transfer** — current download/upload rates.
+* **Torrents** — total, downloading, seeding, completed, paused/
+  stopped, checking, stalled, errored, unknown — the same
+  classification `status`/`torrents list` already use, not a second
+  one.
+* **Health and alerts** — the overall health plus every grounded
+  reason behind it (e.g. "3 stalled torrent(s)", "1 torrent(s)
+  reporting an error"), the same `StatusAlert` data `status` reports —
+  never a bare "warning" with no explanation, never an invented
+  recommendation or confidence score.
+* A visible `Enter` / `t` hint to jump to Torrents.
+
+**Torrents** is the detailed browsing workspace: the table, search,
+filters, and focused-torrent details described below. Switching
+workspaces is purely local (zero qBittorrent calls) and preserves
+search/filter state and the last-focused torrent — it never leaves a
+widget from the now-hidden workspace focused.
+
 ### Controls
 
 ```text
-up/down, j/k   navigate torrents
+1, g           Overview
+2, t           Torrents
+up/down, j/k   navigate torrents (Torrents workspace)
 /              open a search box (Enter to apply, Esc to close)
-f              open filters (inline at normal width, a modal when narrow)
-enter          open the focused torrent's details (narrow terminals only)
+f              open filters (a modal, at every terminal width)
+enter          Overview: browse torrents: Torrents: open focused details
 r              refresh the focused torrent's tracker details
 esc            close a modal/help/search box, or return focus to the list
 ?              open help (a real modal, listing only working bindings)
 q              quit
 ```
 
-`q` quits from the torrent list, the details panel, and any Checkbox —
-but while a text box (search, or a filter's category/state field) has
-focus, typing `q` inserts the literal character instead, exactly like
-any other letter (a category can legitimately be named "queue"); press
-`Esc` first to return to the torrent list, then `q`. This is standard
-text-editing behavior, not a bug — Textual's `Input` widget consumes
-every printable character itself, before any single-key binding (this
-project's or Textual's own) can intercept it.
+`q` quits from anywhere — the torrent list, the details panel, any
+Checkbox — but while a text box (search, or a filter's category/state
+field) has focus, typing `q` inserts the literal character instead,
+exactly like any other letter (a category can legitimately be named
+"queue"); press `Esc` first to return to the torrent list, then `q`.
+This is standard text-editing behavior, not a bug — Textual's `Input`
+widget consumes every printable character itself, before any
+single-key binding (this project's or Textual's own) can intercept it.
 
-Filters use the exact same fields, tokens, and AND/OR combination rules
-as [Torrent Filters](#torrent-filters) (`--category`, `--state`,
-`--completed`/`--incomplete`, `--active`/`--inactive`, `--stalled`,
-`--errored`) — entered as comma-separated values and checkboxes in the
-filters panel. Search is a separate, UI-only, read-only substring match
-on torrent name: it never resolves to a single mutation target the way
-`torrents inspect --name`'s fuzzy scoring does, and it never triggers a
-qBittorrent API call. Neither filters nor search ever call
-`torrents_trackers()`.
+Filters open as a modal at **every** terminal width (there is no more
+permanently visible sidebar) and use the exact same fields, tokens, and
+AND/OR combination rules as [Torrent Filters](#torrent-filters)
+(`--category`, `--state`, `--completed`/`--incomplete`,
+`--active`/`--inactive`, `--stalled`, `--errored`) — entered as
+comma-separated values and checkboxes. Filter edits apply live, but
+`Enter`/`Esc`/`Ctrl+R` are three distinct, deterministic actions:
+
+```text
+enter    apply (already in effect) and close the modal
+esc      cancel: revert to the filter that was active when the modal
+         opened, then close
+ctrl+r   clear: reset to no filter at all; the modal stays open
+```
+
+Search is a separate, UI-only, read-only match, live as you type: a
+case-insensitive substring match on torrent **name**, OR a
+case-insensitive leading-prefix match on torrent **hash** (covers both
+a full hash and a shortened prefix) — no fuzzy scoring, no ambiguity
+error (this is a list filter, not `torrents inspect --name`'s
+single-target resolution), and never a qBittorrent API call. Neither
+filters nor search ever call `torrents_trackers()`.
 
 The active filter and search are always shown as one concise line above
 the torrent table:
@@ -428,10 +485,17 @@ the torrent table:
 24 shown / 1105 · category: films · stalled · search: ubuntu
 ```
 
+Details are always reachable, at every terminal width: an inline side
+panel when the terminal is wide enough, a dedicated modal (opened by
+`Enter`) otherwise — narrow terminals never simply lose access to safe
+torrent details. Details show name, hash, state, progress, category,
+rates, safe structural tracker identities, and the tracker-detail
+fetch timestamp (local time) — never a raw tracker URL or passkey.
+
 Textual's built-in command palette (`Ctrl+P`) is disabled — it has no
 qbit-ops commands yet and only added a confusing `^p palette` hint to
-the footer. It may return once there is something meaningful to put in
-it.
+the footer. Workspace navigation is always the explicit `1`/`g`/`2`/`t`
+bindings above, never the palette.
 
 ### Narrow-terminal layout
 
