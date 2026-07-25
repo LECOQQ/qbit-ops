@@ -766,14 +766,14 @@ def _build_torrent_details(
 ) -> dict[str, Any]:
     """Build a detailed torrent report with tracker information.
 
-    Uses `_get_safe_tracker_details`, not `_get_tracker_details`: this
+    Uses `get_safe_tracker_details`, not `_get_tracker_details`: this
     feeds `torrents inspect`, an ordinary read command, so trackers must
     be reduced to secret-free structural fields the same way
     `trackers inspect` does. Raw announce URLs are only ever returned by
     `list_torrents_with_trackers`, which feeds the sensitive `backup
     export` artifact.
     """
-    trackers = _get_safe_tracker_details(client.torrents_trackers(torrent_hash))
+    trackers = get_safe_tracker_details(client.torrents_trackers(torrent_hash))
     active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])
 
     return {
@@ -817,7 +817,7 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     Returns the literal announce URL, so it is only safe for
     `list_torrents_with_trackers` (the `backup export` artifact), never
     for an ordinary command's rendered output. Use
-    `_get_safe_tracker_details` for anything user-facing.
+    `get_safe_tracker_details` for anything user-facing.
     """
     tracker_details: list[dict[str, Any]] = []
 
@@ -837,7 +837,7 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     return tracker_details
 
 
-def _get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
+def get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     """Extract secret-free structural tracker details for display.
 
     Mirrors the endpoint shape `inspect_tracker` in `app.trackers`

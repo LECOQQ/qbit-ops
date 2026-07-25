@@ -41,6 +41,7 @@ from app.torrents import TorrentFilter, select_torrents, torrent_filter_to_dict
 from app.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
+    compute_tracker_aggregate_health,
     get_raw_tracker_status,
     normalize_tracker_host,
     sanitize_tracker_text,
@@ -187,7 +188,7 @@ class _AggregateBuilder:
 
     def finalize(self) -> TrackerAggregate:
         """Build the frozen `TrackerAggregate` for this identity."""
-        health = _compute_tracker_health(
+        health = compute_tracker_aggregate_health(
             healthy=self.healthy,
             warning=self.warning,
             critical=self.critical,
@@ -222,43 +223,6 @@ class _AggregateBuilder:
             unknown_count=self.unknown,
             representative_message=representative,
         )
-
-
-def _compute_tracker_health(
-    *,
-    healthy: int,
-    warning: int,
-    critical: int,
-    disabled: int,
-    unknown: int,
-) -> TrackerHealth:
-    """Compute one tracker identity's aggregate health.
-
-    Precedence, evaluated in order (disabled endpoints are excluded from
-    every comparison below -- an intentionally-disabled tracker must
-    never push a working tracker's health toward WARNING/CRITICAL):
-
-    1. No enabled (non-disabled) endpoints at all -> DISABLED: every
-       observation for this identity was an intentional disable.
-    2. Every enabled endpoint is CRITICAL -> CRITICAL: a mixed
-       critical/healthy identity is WARNING, not CRITICAL -- one failing
-       endpoint must never drown out others that are working.
-    3. Every enabled endpoint is HEALTHY -> HEALTHY.
-    4. Every enabled endpoint is UNKNOWN -> UNKNOWN: nothing classifiable
-       was observed, so no stronger claim is made.
-    5. Otherwise -> WARNING: a genuine mix (e.g. some healthy, some
-       failing, or some unknown) is a degraded-but-not-fatal condition.
-    """
-    enabled_total = healthy + warning + critical + unknown
-    if enabled_total == 0:
-        return TrackerHealth.DISABLED
-    if critical == enabled_total:
-        return TrackerHealth.CRITICAL
-    if healthy == enabled_total:
-        return TrackerHealth.HEALTHY
-    if unknown == enabled_total:
-        return TrackerHealth.UNKNOWN
-    return TrackerHealth.WARNING
 
 
 def _compute_overall_health(
