@@ -13,6 +13,8 @@ drop the `poetry run` prefix.
 - [Doctor](#doctor)
 - [Connection](#connection)
 - [Torrents](#torrents)
+  - [Torrent Filters](#torrent-filters)
+  - [Bulk Torrent Actions](#bulk-torrent-actions)
 - [Trackers](#trackers)
 - [Backup](#backup)
 - [Use Cases](#use-cases)
@@ -325,16 +327,6 @@ poetry run qbit-ops torrents list --format json
 poetry run qbit-ops torrents categories
 poetry run qbit-ops torrents categories --format json
 
-poetry run qbit-ops torrents list --category sonarr
-poetry run qbit-ops torrents list --category "(uncategorized)"
-
-poetry run qbit-ops torrents list \
-  --tracker "https://tracker-a.example/announce"
-
-poetry run qbit-ops torrents list \
-  --tracker "http://tracker-port.example:8080/passkey/announce" \
-  --match without-query
-
 poetry run qbit-ops torrents inspect --hash "TORRENT_HASH_OR_PREFIX"
 poetry run qbit-ops torrents inspect --hash "abc123" --format json
 
@@ -349,31 +341,204 @@ match, substring match, then fuzzy similarity. It is **read-only discovery
 only** — a way to find a hash, not a way to target a mutation. `torrents
 inspect --hash` accepts a full infohash or a unique leading prefix (matched
 case-insensitively); an ambiguous prefix fails with the candidate list
-instead of guessing.
+instead of guessing. `torrents categories` aggregates over the whole
+instance and does not take a filter.
+
+### Torrent Filters
+
+One structured, Typer/Rich-free filter model (`app.torrents.TorrentFilter`)
+and one filtering pipeline (`app.torrents.select_torrents`) back `torrents
+list` and all four bulk mutation commands (`pause`/`resume`/`start`/
+`reannounce`) — filter semantics can never drift between listing and
+mutating.
+
+```text
+--category VALUE   (repeatable)
+--state VALUE       (repeatable)
+--tracker VALUE
+--completed / --incomplete
+--active / --inactive
+--stalled
+--errored
+```
+
+**Combination semantics**: repeated values of the same filter combine with
+**OR**; different filter types combine with **AND**.
+
+```bash
+poetry run qbit-ops torrents list \
+  --category movies --category series \
+  --state stalled \
+  --tracker tracker.example
+# (category == movies OR category == series) AND stalled AND tracker == tracker.example
+```
+
+A combination that is not *locally provable* as contradictory (e.g.
+`--state downloading --stalled`) is accepted and simply matches nothing —
+qbit-ops does not try to build a full contradiction matrix across `--state`
+and the activity flags. Only the two combinations that are always
+impossible are rejected before any qBittorrent API call:
+
+```text
+--completed --incomplete
+--active --inactive
+```
+
+#### API-call behavior
+
+The filtering pipeline (`app.torrents.select_torrents`) always loads
+torrents with exactly one `torrents_info()` call, then applies every
+cheap, torrent-info-only filter first:
+
+```text
+--category / --state / --completed / --incomplete
+--active / --inactive / --stalled / --errored
+  → torrents_info() only, no per-torrent call
+
+--tracker
+  → torrents_info(), then at most one torrents_trackers() call
+    per torrent that survived every cheaper filter above
+```
+
+A `--tracker` filter never scans torrents already excluded by a cheaper
+filter — e.g. `--category sonarr --tracker tracker.example` on a 1105-
+torrent instance where 50 are in `sonarr` calls `torrents_trackers()` at
+most 50 times, never 1105. A selection with no `--tracker` filter never
+calls `torrents_trackers()` at all — including plain `torrents list`,
+which no longer does so by default (see the migration note below).
+On `torrents list`, progress reflects this directly: no `--tracker` filter
+shows a spinner (one bulk `torrents_info()` call, nothing to count per
+item), and a `--tracker` filter shows a real progress bar over exactly the
+narrowed candidate set. The four bulk mutation commands always show a
+progress bar (see [Progress & Spinner Behavior](#progress--spinner-behavior)),
+which completes in a single step when there is no per-item remote work to
+report.
+
+**Migration note** — before this phase, plain `torrents list` (and
+`torrents list --category`) always called `torrents_trackers()` once per
+torrent to populate a `Trackers` count column, regardless of whether any
+tracker filter was requested. That per-torrent scan is gone, and so is the
+column whenever it wasn't run: `table` output **omits the `Trackers`
+column entirely** when tracker data was not collected for the selection,
+rather than filling it with a placeholder that could read as "zero
+trackers". `json`/`jsonl` render `tracker_count: null` (explicitly absent,
+not measured); `csv` renders an empty cell in the still-present
+`tracker_count` column (a stable header is a firmer contract than a table
+column, which is presentation only). In every format, `null`/omitted is
+distinct from `0`, a torrent whose trackers were actually scanned and
+found empty. Populate it by adding `--tracker`.
+
+#### `--category`
+
+Repeatable; OR'd together. The public token for torrents without a
+category is the bare word `uncategorized`; the display label
+`(uncategorized)` (what `torrents list` renders) is also accepted, so
+copy-pasting a category shown by qbit-ops always works as a filter value
+too:
+
+```bash
+poetry run qbit-ops torrents list --category sonarr
+poetry run qbit-ops torrents list --category uncategorized
+poetry run qbit-ops torrents list --category "(uncategorized)"
+```
+
+#### `--state`
+
+A stable public vocabulary, not raw qBittorrent state strings — reuses the
+same classification `status`/`status --watch`/`doctor` already use
+(`app.torrent_states.classify_torrent_state`), so a torrent's group can
+never disagree between commands:
+
+```text
+downloading  seeding  checking  stalled  errored  unknown
+```
+
+`unknown` covers any remote state qBittorrent reports that qbit-ops does
+not yet recognize — states are never silently discarded, and `--state
+unknown` is how to find them. `completed`/`active`/`inactive` are
+deliberately **not** part of this vocabulary: they have their own
+dedicated flags below instead of a second, overlapping spelling.
+
+```bash
+poetry run qbit-ops torrents list --state stalled --state errored
+```
+
+#### `--completed` / `--incomplete` / `--active` / `--inactive` / `--stalled` / `--errored`
+
+Independent boolean filters. `--completed`/`--incomplete` restrict by
+progress (`>= 100%`); `--active`/`--inactive` restrict by whether the
+torrent is currently stopped (`paused*`/`stopped*`, covering both
+qBittorrent 4 and 5); `--stalled`/`--errored` restrict to those two state
+groups directly, as a convenient alternative to `--state stalled`/`--state
+errored`.
+
+```bash
+poetry run qbit-ops torrents list --completed
+poetry run qbit-ops torrents pause --active   # dry-run preview only
+```
+
+#### `--tracker`
+
+Matches by **host, or host:port** — never the full announce URL. A private
+tracker's URL commonly embeds a passkey in its path or query string, and a
+public filter must never require or display one. Pass either a bare host
+or a full announce URL; only the host and port are ever used or rendered:
+
+```bash
+poetry run qbit-ops torrents list --tracker tracker.example
+poetry run qbit-ops torrents list --tracker tracker.example:6969
+poetry run qbit-ops torrents list \
+  --tracker "https://tracker.example:6969/announce/PASSKEY"   # host:port extracted, PASSKEY discarded
+```
+
+**Migration note** — before this phase, `torrents list --tracker` matched
+the **full** tracker URL (`--match exact|without-query`, like the
+`trackers` command group still does) and rendered every matching tracker
+URL verbatim, including any embedded passkey. Both `--match` and that
+rendering are gone from `torrents list` and the four bulk mutation
+commands (pre-1.0 breaking change; see `docs/DECISIONS.md`) — hostname
+matching is strictly safer and does not require knowing the exact
+normalized URL qBittorrent stores. `trackers inspect`/`trackers health`/
+etc. are unchanged: those commands are explicit, read-only tracker
+inspection where showing the full URL is exactly what was requested.
 
 ### Bulk torrent actions
 
-`pause`, `resume`, `start` and `reannounce` act on torrents targeted by
-`--hash`, `--category`, `--tracker`, `--all`, or `--completed` (`start`
-only). Exactly one targeting mode is required. `--hash` is always used
-alone: it resolves to a single torrent, so it cannot combine with
-`--category`, `--tracker`, `--all`, or `--completed`. `--completed` is the
-only mode that can still combine with `--category` or `--tracker`.
+`pause`, `resume`, `start`, and `reannounce` act on torrents targeted by
+`--hash`, `--all`, or one or more of the filters above. Selection safety
+rules:
 
-**`--hash` is the safe, canonical way to target one torrent** — a full
-infohash or a unique leading prefix, resolved case-insensitively. A unique
-prefix is the shortest leading sequence of hex characters that currently
-matches exactly one torrent on the connected instance; there is no fixed
-required length, and the same prefix can stop being unique as torrents are
-added or removed.
+- **`--hash` is always used alone** — a full infohash or a unique leading
+  prefix (case-insensitive), resolving to exactly one torrent. It cannot
+  combine with `--all` or any filter.
+- **`--all` is always used alone** — an explicit acknowledgement of
+  whole-instance scope. It cannot combine with any filter either: there is
+  no meaningful "confirm scope with a narrower filter" reading.
+- **One or more filters may define a bulk selection on their own, without
+  `--all`.** Combined filters use the same AND/OR rules as `torrents list`.
+- **No selector at all is rejected before any qBittorrent API call** — a
+  bulk mutation can never silently mean the whole seedbox by omission;
+  `--all` is the only way to say that.
 
 ```bash
 poetry run qbit-ops torrents inspect --name "debian"      # 1. discover
 poetry run qbit-ops torrents reannounce --hash abc123 --dry-run   # 2. act
 poetry run qbit-ops torrents reannounce --hash abc123 --no-dry-run
+
+poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
+poetry run qbit-ops torrents resume --category sonarr --no-dry-run
+poetry run qbit-ops torrents resume --all --no-dry-run
+poetry run qbit-ops torrents resume --tracker tracker.example --no-dry-run
+
+poetry run qbit-ops torrents pause \
+  --category sonarr --state stalled --no-dry-run
+
+poetry run qbit-ops torrents start --completed --dry-run --verbose
+poetry run qbit-ops torrents start --completed --no-dry-run
+poetry run qbit-ops torrents start --completed --all --no-dry-run  # Web UI "Start All"
 ```
 
-Resolution rules (identical in dry-run and real execution):
+Hash resolution rules (identical in dry-run and real execution):
 
 1. **No torrent matches the hash or prefix** → the command matches nothing
    and exits with the existing no-match exit code (`2`); no mutation is
@@ -402,9 +567,11 @@ Resolution rules (identical in dry-run and real execution):
    capped at 10 entries, with a count of any omitted candidates.
 
 **Migration note** — fuzzy `--name` targeting was removed from mutating
-commands (pre-1.0 breaking change; see `docs/DECISIONS.md`). It never
-guaranteed a single target and could silently affect several torrents that
-happened to share part of their name:
+commands in an earlier phase (pre-1.0 breaking change; see
+`docs/DECISIONS.md`) and remains removed: it never guaranteed a single
+target and could silently affect several torrents that happened to share
+part of their name. It is not reintroduced by this phase's shared filter
+model either.
 
 ```text
 Before:
@@ -415,26 +582,17 @@ qbit-ops torrents inspect --name "debian"
 qbit-ops torrents reannounce --hash abc123
 ```
 
-Other examples:
-
-```bash
-poetry run qbit-ops torrents pause --category sonarr --dry-run --verbose
-poetry run qbit-ops torrents resume --category sonarr --no-dry-run
-poetry run qbit-ops torrents resume --all --no-dry-run
-poetry run qbit-ops torrents resume \
-  --tracker "https://tracker-a.example/announce" \
-  --no-dry-run
-
-poetry run qbit-ops torrents start --completed --dry-run --verbose
-poetry run qbit-ops torrents start --completed --no-dry-run
-```
-
 `pause`, `resume` and `start` are idempotent:
 
 - `pause` skips torrents already stopped (`paused*` or `stopped*` states).
 - `resume`/`start` skip torrents that are not stopped; active torrents are
   never restarted.
-- `start --completed` only targets torrents with `progress=100%`.
+- `start --completed` (with or without `--all`) only targets torrents with
+  `progress=100%`. **Migration note**: `--completed` was previously a
+  `start`-only flag with bespoke selection logic; it is now the same
+  general `TorrentFilter.completed` filter available on all four bulk
+  commands, combinable with any other filter — `pause --completed`,
+  `resume --completed`, and `reannounce --completed` are now valid too.
 
 ## Trackers
 
@@ -591,11 +749,21 @@ poetry run qbit-ops backup export --format json
 
 ## Matching Modes
 
+`--match exact|without-query` is a **`trackers` command group** concept
+only (`trackers list`/`health`/`inspect`/`export`/`add-if-present`/
+`remove`/`replace`/`replace-passkey`), where the exact, raw tracker URL
+matters for the API calls those commands make:
+
 - `exact` (default): compares the full normalized tracker URL.
 - `without-query`: ignores query parameters when comparing trackers.
 
 Both modes preserve the raw qBittorrent URLs for API calls — this matters
 for `remove`, since qBittorrent expects the original tracker URL.
+
+`torrents list` and the four bulk mutation commands do **not** have
+`--match`: their `--tracker` filter matches by host[:port] instead (see
+[Torrent Filters](#torrent-filters)) and never needs a raw-URL comparison
+mode.
 
 ## Format Support Matrix
 
@@ -618,7 +786,7 @@ a clear error instead of producing an ad hoc or lossy serialization.
 | `status` | ✅ | ✅ | ✅ | ✅ | `section,key,value` rows |
 | `connection check` | ✅ | ✅ | ✅ | ✅ | `key,value` rows |
 | `doctor` | ✅ | ✅ | ✅ | ✅ | `section,code,status,message,detail,remediation` rows |
-| `torrents list` (incl. `--category`/`--tracker`) | ✅ | ✅ | ✅ | ✅ | one row per torrent |
+| `torrents list` (any filter combination) | ✅ | ✅ | ✅ | ✅ | one row per torrent; JSON/JSONL also include a normalized `filters` object |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ | `category,torrents` rows |
 | `torrents inspect` (`--hash` or `--name`) | ✅ | ✅ | ✅ | ❌ | no stable tabular shape across both modes (nested tracker details for `--hash`) |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ | `tracker,torrents` rows |
@@ -724,7 +892,8 @@ A progress bar is never shown with a fabricated or unknown total (no
 | `status` | Spinner | Single bounded snapshot collection (4 fixed API calls). `status --watch` uses a persistent `Live` display instead — see [Status Watch Mode](#status-watch-mode); the two are never combined. |
 | `connection check` | Spinner | One connection attempt. |
 | `doctor` | Spinner | One login attempt plus up to four bounded read calls. |
-| `torrents list` (incl. `--category`/`--tracker`) | Progress bar | One `torrents_trackers()` call per torrent. |
+| `torrents list` (no `--tracker`) | Spinner | One bulk `torrents_info()` call; every other filter is applied in memory. |
+| `torrents list --tracker ...` | Progress bar | One `torrents_trackers()` call per candidate surviving cheaper filters. |
 | `torrents categories` | Spinner | One bulk `torrents_info()` call, in-memory grouping only. |
 | `torrents inspect` (`--hash` or `--name`) | Spinner | Single-torrent lookup or one in-memory name search. |
 | `trackers list` | Progress bar | One `torrents_trackers()` call per torrent. |
@@ -733,7 +902,7 @@ A progress bar is never shown with a fabricated or unknown total (no
 | `trackers export` | Progress bar | One `torrents_trackers()` call per torrent. |
 | `backup export` | Spinner | Composite of two per-torrent scans; a single spinner is simpler and more honest than two sequential fabricated-total bars. |
 | `backup diff` | None (deliberate) | Local JSON file reads plus an in-memory diff — effectively instantaneous, no network call. |
-| Bulk torrent actions (`pause`/`resume`/`start`/`reannounce`) | Progress bar | Real, known total from the already-fetched torrent list; a filtered `--tracker` scan does one `torrents_trackers()` call per torrent. |
+| Bulk torrent actions (`pause`/`resume`/`start`/`reannounce`) | Progress bar | A `--tracker` filter advances once per candidate surviving cheaper filters; every other selector (`--hash`, `--all`, or any combination of the other filters) has no per-item remote work and completes the bar in a single step. |
 | `trackers add-if-present`/`remove`/`replace`/`replace-passkey` (planning) | Progress bar | One `torrents_trackers()` call per torrent while building the plan. |
 
 Every mutation command's progress only ever wraps **planning** (building
@@ -932,15 +1101,26 @@ Bulk torrent actions use a dedicated summary:
 ```text
 Summary:
 - action: pause|resume|start|reannounce
-- filter: hash|category|tracker|completed|all
-- value: ...    (the resolved full hash when filter is "hash")
-- match: exact|without-query
+- filter: hash|all|filter
+- value: ...    (the resolved full hash, "*" for --all, or a concise
+                 description of every combined filter, e.g.
+                 "category=sonarr, state=stalled")
 - scanned: X
 - matched: X
 - modified: X
 - skipped: X
 - status: PREVIEW|APPLIED|CANCELLED|NO_MATCH|NO_CHANGES
 ```
+
+**Migration note** — `filter`/`value` used to name exactly one selector
+(`category`, `tracker`, `completed`, …) with a matching raw value, plus a
+`match: exact|without-query` row when `--tracker` was used. Since bulk
+mutations can now combine multiple filters, `filter` collapses to three
+cases (`hash`/`all`/`filter`) and `value` renders every active filter via
+the same concise, secret-free description used by `torrents list`'s
+`Filter:` line (`app.torrents.describe_torrent_filter`) — never a raw
+tracker URL. `match` is gone entirely: `--tracker` is hostname-matched now,
+so there is no comparison mode left to report.
 
 Pass `--verbose` on any bulk modification command to print impacted
 torrents after the summary.
@@ -961,9 +1141,11 @@ Every command except `status` and `doctor` uses:
   unresolvable `--hash` (or, for `backup diff`, the two exports differ).
 
 Commands using exit code `2` on no match: `torrents inspect`, `torrents
-list --tracker`, `torrents list --category`, `torrents pause`, `torrents
-resume`, `torrents start`, `torrents reannounce`, `trackers inspect`,
-`trackers add-if-present`, `trackers remove`, `trackers replace`, `trackers
+list` with any filter applied (plain, unfiltered `torrents list` never
+uses `2` for an empty instance — see [Torrent
+Filters](#torrent-filters)), `torrents pause`, `torrents resume`, `torrents
+start`, `torrents reannounce`, `trackers inspect`, `trackers
+add-if-present`, `trackers remove`, `trackers replace`, `trackers
 replace-passkey`.
 
 `torrents inspect --hash`, `torrents pause --hash`, `torrents resume

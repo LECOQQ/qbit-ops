@@ -50,16 +50,21 @@ from app.status import (
     watch_status,
 )
 from app.torrents import (
+    STATE_FILTER_VALUES,
     BulkTorrentActionPlan,
+    SelectedTorrent,
     TorrentBulkAction,
+    TorrentSelection,
     apply_bulk_torrent_action,
+    build_torrent_filter,
+    describe_torrent_filter,
     inspect_torrent,
     list_category_usage,
-    list_torrents,
-    list_torrents_by_category,
     plan_bulk_torrent_action,
     search_torrents_by_name,
-    validate_bulk_torrent_selection,
+    select_torrents,
+    torrent_filter_to_dict,
+    validate_torrent_selector,
 )
 from app.trackers import (
     PasskeyReplacementPlan,
@@ -100,6 +105,22 @@ from app.ui import (
 
 PROJECT_NAME = "qbit-ops"
 DEFAULT_STATUS_WATCH_INTERVAL_SECONDS = 5.0
+
+# Shared help text for the torrent-filter options common to `torrents list`
+# and every bulk mutation command, so wording cannot silently drift between
+# them (see docs/COMMANDS.md, "Torrent Filters").
+_CATEGORY_FILTER_HELP = (
+    "Restrict to a category (repeatable; combines with OR). Use "
+    "'uncategorized' for torrents without a category."
+)
+_STATE_FILTER_HELP = (
+    "Restrict to a state group (repeatable; combines with OR). Supported: "
+    f"{', '.join(sorted(STATE_FILTER_VALUES))}."
+)
+_TRACKER_FILTER_HELP = (
+    "Restrict to torrents using a tracker, matched by host[:port] (a full "
+    "announce URL is also accepted; only its host and port are used)."
+)
 
 app = typer.Typer(add_completion=True, help="Administer qBittorrent.")
 connection_app = typer.Typer(help="Check qBittorrent connectivity.")
@@ -415,27 +436,46 @@ def doctor(
 
 @torrents_app.command(name="list")
 def list_qbit_torrents(
+    category: Annotated[
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
     tracker: Annotated[
         str | None,
-        typer.Option(
-            "--tracker",
-            help="List torrents using a specific tracker.",
-        ),
+        typer.Option("--tracker", help=_TRACKER_FILTER_HELP),
     ] = None,
-    category: Annotated[
-        str | None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
         typer.Option(
-            "--category",
-            help="List torrents in a specific category.",
+            "--active", help="Restrict to torrents that are not stopped."
         ),
-    ] = None,
-    match: Annotated[
-        TrackerMatchModeOption,
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
         typer.Option(
-            "--match",
-            help="Tracker comparison mode when --tracker is used.",
+            "--errored", help="Restrict to torrents reporting an error."
         ),
-    ] = TrackerMatchModeOption.exact,
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -444,46 +484,44 @@ def list_qbit_torrents(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """List torrents with useful audit fields."""
+    """List torrents, optionally restricted by one or more filters.
+
+    Different filter types combine with AND; repeated `--category`/
+    `--state` values combine with OR. No filter means every torrent, as
+    before. See docs/COMMANDS.md ("Torrent Filters") for the full
+    vocabulary and combination rules.
+    """
     _validate_format_support("torrents_list", output_format)
-    if tracker is not None and category is not None:
-        _fail("Use either --tracker or --category, not both.")
+    try:
+        filters = build_torrent_filter(
+            categories=category,
+            states=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+        )
+    except ValueError as error:
+        _fail(str(error))
 
     enabled = progress_enabled(
         output_format=output_format,
         interactive=is_interactive_terminal(),
     )
+    if filters.requires_tracker_data:
+        progress_cm = transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        )
+    else:
+        progress_cm = transient_spinner("Loading torrents...", enabled=enabled)
+
     try:
         client = _create_qbit_client()
-        if tracker is not None:
-            with transient_progress(
-                "Scanning torrent trackers...", enabled=enabled
-            ) as advance:
-                report = inspect_tracker(
-                    client=client,
-                    tracker=tracker,
-                    match_mode=match.value,
-                    on_progress=advance,
-                )
-            _print_torrents_for_tracker(report, output_format)
-            _exit_if_no_targeted_matches(report["matched_tracker"])
-            return
-
-        if category is not None:
-            with transient_progress(
-                "Scanning torrent trackers...", enabled=enabled
-            ) as advance:
-                report = list_torrents_by_category(
-                    client, category, on_progress=advance
-                )
-            _print_torrents_for_category(report, output_format)
-            _exit_if_no_targeted_matches(report["matched"])
-            return
-
-        with transient_progress(
-            "Scanning torrent trackers...", enabled=enabled
-        ) as advance:
-            torrents = list_torrents(client, on_progress=advance)
+        with progress_cm as advance:
+            selection = select_torrents(client, filters, on_progress=advance)
     except ConfigError as error:
         _fail(f"Configuration error: {error}")
     except RuntimeError as error:
@@ -491,42 +529,9 @@ def list_qbit_torrents(
     except Exception as error:
         _fail(f"qBittorrent API error: {error}")
 
-    if output_format == OutputFormat.json:
-        _print_json_output(
-            {
-                "summary": {"torrents": len(torrents)},
-                "torrents": torrents,
-            }
-        )
-        return
-
-    if output_format == OutputFormat.jsonl:
-        _print_jsonl_output(
-            {
-                "summary": {"torrents": len(torrents)},
-                "torrents": torrents,
-            }
-        )
-        return
-
-    if output_format == OutputFormat.csv:
-        _print_csv_rows(
-            _TORRENT_CSV_FIELDNAMES,
-            [_torrent_csv_row(torrent) for torrent in torrents],
-        )
-        return
-
-    if not torrents:
-        typer.echo("No torrents found.")
-        return
-
-    print_table(
-        "Torrents",
-        ["Name", "Hash", "Category", "State", "Progress", "Ratio", "Trackers"],
-        [_torrent_audit_row(torrent) for torrent in torrents],
-        fold_columns={"Hash"},
-    )
-    print_summary({"torrents": len(torrents)})
+    _print_torrent_selection(selection, output_format)
+    if not filters.is_empty:
+        _exit_if_no_targeted_matches(len(selection.matched))
 
 
 @torrents_app.command(name="categories")
@@ -692,19 +697,45 @@ def pause(
         ),
     ] = None,
     category: Annotated[
-        str | None,
-        typer.Option(
-            "--category",
-            help="Pause torrents in a specific category.",
-        ),
-    ] = None,
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
     tracker: Annotated[
         str | None,
-        typer.Option(
-            "--tracker",
-            help="Pause torrents using a specific tracker.",
-        ),
+        typer.Option("--tracker", help=_TRACKER_FILTER_HELP),
     ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
     select_all: Annotated[
         bool,
         typer.Option(
@@ -719,13 +750,6 @@ def pause(
             help="Apply changes instead of previewing them.",
         ),
     ] = True,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode when --tracker is used.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -734,15 +758,21 @@ def pause(
         ),
     ] = False,
 ) -> None:
-    """Pause torrents matching a hash, category, tracker, or all."""
+    """Pause torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_PAUSE,
         action="pause",
         torrent_hash=torrent_hash,
         category=category,
+        state=state,
         tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
         select_all=select_all,
-        match=match,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -761,19 +791,45 @@ def resume(
         ),
     ] = None,
     category: Annotated[
-        str | None,
-        typer.Option(
-            "--category",
-            help="Resume torrents in a specific category.",
-        ),
-    ] = None,
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
     tracker: Annotated[
         str | None,
-        typer.Option(
-            "--tracker",
-            help="Resume torrents using a specific tracker.",
-        ),
+        typer.Option("--tracker", help=_TRACKER_FILTER_HELP),
     ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
     select_all: Annotated[
         bool,
         typer.Option(
@@ -788,13 +844,6 @@ def resume(
             help="Apply changes instead of previewing them.",
         ),
     ] = True,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode when --tracker is used.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -803,15 +852,21 @@ def resume(
         ),
     ] = False,
 ) -> None:
-    """Resume torrents matching a hash, category, tracker, or all."""
+    """Resume torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_RESUME,
         action="resume",
         torrent_hash=torrent_hash,
         category=category,
+        state=state,
         tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
         select_all=select_all,
-        match=match,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -830,31 +885,56 @@ def start(
         ),
     ] = None,
     category: Annotated[
-        str | None,
-        typer.Option(
-            "--category",
-            help="Start stopped torrents in a specific category.",
-        ),
-    ] = None,
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
     tracker: Annotated[
         str | None,
-        typer.Option(
-            "--tracker",
-            help="Start stopped torrents using a specific tracker.",
-        ),
+        typer.Option("--tracker", help=_TRACKER_FILTER_HELP),
     ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option(
+            "--completed",
+            help=(
+                "Restrict to completed torrents (Web UI 'Start All' is "
+                "--completed --all)."
+            ),
+        ),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
     select_all: Annotated[
         bool,
         typer.Option(
             "--all",
             help="Start all stopped torrents.",
-        ),
-    ] = False,
-    completed_only: Annotated[
-        bool,
-        typer.Option(
-            "--completed",
-            help="Start stopped completed torrents (Web UI Start All).",
         ),
     ] = False,
     dry_run: Annotated[
@@ -864,13 +944,6 @@ def start(
             help="Apply changes instead of previewing them.",
         ),
     ] = True,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode when --tracker is used.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -879,16 +952,21 @@ def start(
         ),
     ] = False,
 ) -> None:
-    """Start stopped torrents, including completed ones with --completed."""
+    """Start stopped torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_START,
         action="start",
         torrent_hash=torrent_hash,
         category=category,
+        state=state,
         tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
         select_all=select_all,
-        completed_only=completed_only,
-        match=match,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -907,19 +985,45 @@ def reannounce(
         ),
     ] = None,
     category: Annotated[
-        str | None,
-        typer.Option(
-            "--category",
-            help="Reannounce torrents in a specific category.",
-        ),
-    ] = None,
+        list[str],
+        typer.Option("--category", help=_CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=_STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
     tracker: Annotated[
         str | None,
-        typer.Option(
-            "--tracker",
-            help="Reannounce torrents using a specific tracker.",
-        ),
+        typer.Option("--tracker", help=_TRACKER_FILTER_HELP),
     ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
     select_all: Annotated[
         bool,
         typer.Option(
@@ -934,13 +1038,6 @@ def reannounce(
             help="Apply changes instead of previewing them.",
         ),
     ] = True,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode when --tracker is used.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -949,15 +1046,21 @@ def reannounce(
         ),
     ] = False,
 ) -> None:
-    """Reannounce torrents matching a hash, category, tracker, or all."""
+    """Reannounce torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_REANNOUNCE,
         action="reannounce",
         torrent_hash=torrent_hash,
         category=category,
+        state=state,
         tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
         select_all=select_all,
-        match=match,
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -1795,22 +1898,38 @@ def _run_bulk_torrent_action(
     operation: MutationOperation,
     action: TorrentBulkAction,
     torrent_hash: str | None,
-    category: str | None,
+    category: list[str],
+    state: list[str],
     tracker: str | None,
+    completed: bool,
+    incomplete: bool,
+    active: bool,
+    inactive: bool,
+    stalled: bool,
+    errored: bool,
     select_all: bool,
-    match: TrackerMatchModeOption,
     dry_run: bool,
     verbose: bool,
-    completed_only: bool = False,
 ) -> None:
     """Execute a bulk torrent action with shared validation and output."""
     try:
-        validate_bulk_torrent_selection(
-            torrent_hash=torrent_hash,
-            category=category,
+        filters = build_torrent_filter(
+            categories=category,
+            states=state,
             tracker=tracker,
-            select_all=select_all,
-            completed_only=completed_only,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+        )
+    except ValueError as error:
+        _fail(str(error))
+
+    try:
+        validate_torrent_selector(
+            torrent_hash=torrent_hash, select_all=select_all, filters=filters
         )
     except ValueError as error:
         _fail(str(error))
@@ -1825,11 +1944,8 @@ def _run_bulk_torrent_action(
                 client=client,
                 action=action,
                 torrent_hash=torrent_hash,
-                category=category,
-                tracker=tracker,
-                match_mode=match.value,
                 select_all=select_all,
-                completed_only=completed_only,
+                filters=filters,
                 on_progress=advance,
             )
     except AmbiguousTorrentHashError as error:
@@ -2189,21 +2305,29 @@ def _torrent_audit_row(
     torrent: dict[str, Any],
     *,
     tracker_count_field: str = "tracker_count",
+    include_tracker_count: bool = True,
 ) -> list[str]:
-    """Build one torrent audit table row."""
-    tracker_count = torrent.get(
-        tracker_count_field,
-        torrent.get("tracker_count", 0),
-    )
-    return [
+    """Build one torrent audit table row.
+
+    `include_tracker_count=False` omits the trailing column entirely
+    rather than rendering a placeholder: a whole selection either
+    collected tracker data for every matched torrent or for none of
+    them (`TorrentSelection.tracker_data_collected`), so "not
+    collected" is a property of the table, not of one cell -- showing a
+    bare `-` per row reads too easily as "zero trackers" instead of
+    "not measured".
+    """
+    row = [
         torrent["name"],
         torrent["hash"],
         torrent.get("category", "(uncategorized)"),
         torrent["state"],
         _format_percentage(torrent["progress"]),
         f"{torrent['ratio']:.2f}",
-        str(tracker_count),
     ]
+    if include_tracker_count:
+        row.append(str(torrent[tracker_count_field]))
+    return row
 
 
 _TORRENT_CSV_FIELDNAMES = [
@@ -2223,10 +2347,7 @@ def _torrent_csv_row(
     tracker_count_field: str = "tracker_count",
 ) -> tuple[str, ...]:
     """Build one torrent CSV row with numeric fields left unformatted."""
-    tracker_count = torrent.get(
-        tracker_count_field,
-        torrent.get("tracker_count", 0),
-    )
+    tracker_count = torrent.get(tracker_count_field)
     return (
         torrent["name"],
         torrent["hash"],
@@ -2234,22 +2355,46 @@ def _torrent_csv_row(
         torrent["state"],
         str(torrent["progress"]),
         str(torrent["ratio"]),
-        str(tracker_count),
+        "" if tracker_count is None else str(tracker_count),
     )
 
 
-def _print_torrents_for_category(
-    report: dict[str, Any],
+def _selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
+    """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict."""
+    return {
+        "hash": torrent.hash,
+        "name": torrent.name,
+        "category": torrent.category,
+        "state": torrent.state,
+        "size": torrent.size,
+        "progress": torrent.progress,
+        "ratio": torrent.ratio,
+        "tracker_count": torrent.tracker_count,
+    }
+
+
+def _print_torrent_selection(
+    selection: TorrentSelection,
     output_format: OutputFormat,
 ) -> None:
-    """Print torrents filtered by category."""
+    """Print a torrent selection, one shared shape for every filter.
+
+    JSON/JSONL always include a normalized `filters` representation
+    (`app.torrents.torrent_filter_to_dict`) alongside the usual
+    `summary`/`torrents` -- a schema addition, not a removal, over the
+    previous filter-specific payloads (see docs/DECISIONS.md for the
+    unification this replaces).
+    """
+    torrents = [
+        _selected_torrent_to_dict(torrent) for torrent in selection.matched
+    ]
     payload = {
-        "category": report["category"],
+        "filters": torrent_filter_to_dict(selection.filters),
         "summary": {
-            "scanned": report["scanned"],
-            "matched": report["matched"],
+            "scanned": selection.scanned,
+            "matched": len(selection.matched),
         },
-        "torrents": report["torrents"],
+        "torrents": torrents,
     }
 
     if output_format == OutputFormat.json:
@@ -2263,105 +2408,35 @@ def _print_torrents_for_category(
     if output_format == OutputFormat.csv:
         _print_csv_rows(
             _TORRENT_CSV_FIELDNAMES,
-            [_torrent_csv_row(torrent) for torrent in report["torrents"]],
+            [_torrent_csv_row(torrent) for torrent in torrents],
         )
         return
 
-    typer.echo(f"Category filter: {report['category']}")
+    if not selection.filters.is_empty:
+        typer.echo(f"Filter: {describe_torrent_filter(selection.filters)}")
 
-    if not report["torrents"]:
-        typer.echo("No matching torrents found.")
+    if not torrents:
+        typer.echo("No torrents found.")
     else:
+        columns = ["Name", "Hash", "Category", "State", "Progress", "Ratio"]
+        if selection.tracker_data_collected:
+            columns.append("Trackers")
+
         print_table(
             "Torrents",
+            columns,
             [
-                "Name",
-                "Hash",
-                "Category",
-                "State",
-                "Progress",
-                "Ratio",
-                "Trackers",
-            ],
-            [_torrent_audit_row(torrent) for torrent in report["torrents"]],
-            fold_columns={"Hash"},
-        )
-
-    print_summary({"scanned": report["scanned"], "matched": report["matched"]})
-
-
-def _print_torrents_for_tracker(
-    report: dict[str, Any],
-    output_format: OutputFormat,
-) -> None:
-    """Print torrents filtered by tracker."""
-    payload = {
-        "tracker": report["tracker"],
-        "match": report["match"],
-        "summary": {
-            "scanned": report["scanned"],
-            "matched": report["matched_tracker"],
-        },
-        "torrents": report["torrents"],
-    }
-
-    if output_format == OutputFormat.json:
-        _print_json_output(payload)
-        return
-
-    if output_format == OutputFormat.jsonl:
-        _print_jsonl_output(payload)
-        return
-
-    if output_format == OutputFormat.csv:
-        _print_csv_rows(
-            [*_TORRENT_CSV_FIELDNAMES, "matching_tracker_urls"],
-            [
-                (
-                    *_torrent_csv_row(
-                        torrent,
-                        tracker_count_field="active_tracker_count",
-                    ),
-                    "; ".join(torrent["matching_tracker_urls"]),
+                _torrent_audit_row(
+                    torrent,
+                    include_tracker_count=selection.tracker_data_collected,
                 )
-                for torrent in report["torrents"]
-            ],
-        )
-        return
-
-    typer.echo(f"Tracker filter: {report['tracker']}")
-    typer.echo(f"- match: {report['match']}")
-
-    if not report["torrents"]:
-        typer.echo("No matching torrents found.")
-    else:
-        print_table(
-            "Torrents",
-            [
-                "Name",
-                "Hash",
-                "Category",
-                "State",
-                "Progress",
-                "Ratio",
-                "Trackers",
-                "Matching Tracker URLs",
-            ],
-            [
-                [
-                    *_torrent_audit_row(
-                        torrent,
-                        tracker_count_field="active_tracker_count",
-                    ),
-                    "\n".join(torrent["matching_tracker_urls"]),
-                ]
-                for torrent in report["torrents"]
+                for torrent in torrents
             ],
             fold_columns={"Hash"},
         )
 
     print_summary(
-        {"scanned": report["scanned"], "matched": report["matched_tracker"]}
+        {"scanned": selection.scanned, "matched": len(selection.matched)}
     )
 
 
@@ -2586,20 +2661,32 @@ def _bulk_torrent_summary_rows(
     *,
     status: MutationStatus,
 ) -> dict[str, Any]:
-    """Build `print_summary` rows for a bulk torrent action plan."""
-    rows: dict[str, Any] = {
+    """Build `print_summary` rows for a bulk torrent action plan.
+
+    `filter`/`value` describe whichever selector was actually used
+    (`--hash`, `--all`, or one or more combined filters, rendered by
+    `describe_torrent_filter` -- never a raw tracker URL, so a passkey
+    can never reach this summary).
+    """
+    if plan.torrent_hash is not None:
+        selector_kind, selector_value = "hash", plan.torrent_hash
+    elif plan.select_all:
+        selector_kind, selector_value = "all", "*"
+    else:
+        selector_kind, selector_value = "filter", describe_torrent_filter(
+            plan.filters
+        )
+
+    return {
         "action": plan.action,
-        "filter": plan.selection["filter"],
-        "value": plan.selection["value"],
+        "filter": selector_kind,
+        "value": selector_value,
+        "scanned": plan.scanned,
+        "matched": plan.matched,
+        "modified": len(plan.changes),
+        "skipped": len(plan.skipped),
+        "status": status,
     }
-    if plan.selection.get("match") is not None:
-        rows["match"] = plan.selection["match"]
-    rows["scanned"] = plan.scanned
-    rows["matched"] = plan.matched
-    rows["modified"] = len(plan.changes)
-    rows["skipped"] = len(plan.skipped)
-    rows["status"] = status
-    return rows
 
 
 def _print_bulk_torrent_details(

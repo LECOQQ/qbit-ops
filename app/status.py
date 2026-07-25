@@ -11,38 +11,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from app.torrents import (
-    get_field_as_string,
+from app.qbit_fields import get_field_as_string
+from app.torrent_states import (
+    TorrentStateGroup,
+    classify_torrent_state,
     is_completed_torrent,
-    is_stopped_state,
 )
 
 SCHEMA_VERSION = "1"
-
-TorrentStateGroup = Literal[
-    "downloading",
-    "seeding",
-    "stalled",
-    "checking",
-    "errored",
-    "unknown",
-]
-
-# States that are unambiguous regardless of qBittorrent 4 vs 5 naming.
-_ERRORED_STATES = {"error", "missingFiles"}
-_CHECKING_STATES = {
-    "checkingDL",
-    "checkingUP",
-    "checkingResumeData",
-    "allocating",
-    "moving",
-}
-_STALLED_STATES = {"stalledDL", "stalledUP"}
-_SEEDING_ACTIVE_STATES = {"uploading", "forcedUP", "queuedUP"}
-_DOWNLOADING_ACTIVE_STATES = {"downloading", "metaDL", "forcedDL", "queuedDL"}
 
 
 class Health(StrEnum):
@@ -100,33 +79,6 @@ class StatusSnapshot:
     counts: TransferCounts
     rates: TransferRates
     alerts: tuple[StatusAlert, ...]
-
-
-def classify_torrent_state(state: str) -> TorrentStateGroup:
-    """Classify a raw qBittorrent torrent state into a status group.
-
-    Handles the qBittorrent 4 (`paused*`) vs 5 (`stopped*`) naming split
-    by reusing `app.torrents.is_stopped_state` instead of re-deriving
-    that rule, then disambiguating direction from the `DL`/`UP` suffix.
-    """
-    if state in _ERRORED_STATES:
-        return "errored"
-    if state in _CHECKING_STATES:
-        return "checking"
-    if state in _STALLED_STATES:
-        return "stalled"
-    if state in _SEEDING_ACTIVE_STATES:
-        return "seeding"
-    if state in _DOWNLOADING_ACTIVE_STATES:
-        return "downloading"
-
-    if is_stopped_state(state):
-        if state.endswith("UP"):
-            return "seeding"
-        if state.endswith("DL"):
-            return "downloading"
-
-    return "unknown"
 
 
 def collect_status_snapshot(

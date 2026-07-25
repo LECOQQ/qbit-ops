@@ -58,9 +58,11 @@ def _run_and_capture_calls(
 READ_ONLY_ARGV: list[list[str]] = [
     ["status"],
     ["connection", "check"],
-    ["config", "doctor"],
+    ["doctor"],
     ["torrents", "list"],
     ["torrents", "list", "--category", "movies"],
+    ["torrents", "list", "--state", "seeding"],
+    ["torrents", "list", "--category", "movies", "--stalled"],
     ["torrents", "list", "--tracker", TRACKER_URL],
     ["torrents", "categories"],
     ["torrents", "inspect", "--hash", "abc123"],
@@ -78,6 +80,8 @@ MUTATION_PREVIEW_ARGV: list[list[str]] = [
     ["torrents", "resume", "--all"],
     ["torrents", "start", "--all"],
     ["torrents", "reannounce", "--all"],
+    ["torrents", "pause", "--category", "movies"],
+    ["torrents", "reannounce", "--tracker", TRACKER_URL],
     [
         "trackers",
         "add-if-present",
