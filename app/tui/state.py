@@ -51,6 +51,7 @@ from app.app_services import (
 )
 from app.config import ConfigError
 from app.errors import AppError, ErrorCategory
+from app.explain import ExplanationReport, build_torrent_explanation
 from app.qbit_fields import get_field_as_string
 from app.status import StatusSnapshot
 from app.torrent_states import is_stopped_state
@@ -395,6 +396,58 @@ class TuiController:
         self.state.focused_tracker_details = None
         self.state.focused_details_fetched_at = None
         self._detail_request_id += 1
+
+    @property
+    def detail_request_id(self) -> int:
+        """The current monotonic detail-fetch generation.
+
+        Read-only outside this module -- `app.tui.app` uses it only to
+        confirm, at the moment a deferred Explain result is about to be
+        applied, that no newer focus change or manual refresh has
+        superseded the request it was waiting for (see
+        `QbitOpsTuiApp.action_explain`/`_on_detail_worker_state_changed`).
+        """
+        return self._detail_request_id
+
+    def raw_torrent_by_hash(self, torrent_hash: str) -> Any | None:
+        """Look up one already-fetched raw `torrents_info()` item by hash.
+
+        Pure, no I/O -- reads the same cached `_raw_torrents` list
+        `_recompute_visible()` re-filters from. Returns `None` if the
+        torrent is no longer present in the latest snapshot (e.g. it was
+        removed from qBittorrent since it was focused).
+        """
+        for item in self._raw_torrents:
+            if (
+                get_field_as_string(item, "hash").lower()
+                == torrent_hash.lower()
+            ):
+                return item
+        return None
+
+    def build_explanation(self) -> ExplanationReport | None:
+        """Build an `ExplanationReport` for the focused torrent -- zero
+        API calls, deterministic.
+
+        Delegates every rule-evaluation decision to
+        `app.explain.build_torrent_explanation`, the exact same pure
+        builder `app.explain.explain_torrent` (the CLI's entry point)
+        uses -- there is no second, TUI-only explanation catalogue.
+        Returns `None` when nothing is focused, or when the focused
+        torrent is no longer present in the latest raw snapshot (it
+        disappeared) -- the caller must treat that as "not found", never
+        open a modal, and notify instead.
+        """
+        if self.state.focused_hash is None:
+            return None
+        raw_torrent = self.raw_torrent_by_hash(self.state.focused_hash)
+        if raw_torrent is None:
+            return None
+        return build_torrent_explanation(
+            raw_torrent,
+            self.state.focused_tracker_details,
+            generated_at=datetime.now(UTC),
+        )
 
     def collect_tracker_details(self, torrent_hash: str) -> Any:
         """Perform the blocking `torrents_trackers()` call only.

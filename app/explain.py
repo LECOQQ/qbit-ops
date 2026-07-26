@@ -160,6 +160,13 @@ def explain_torrent(
     `app.torrents.inspect_torrent`); propagates
     `AmbiguousTorrentHashError`/`InvalidTorrentSelectorError` so the
     caller can present candidates instead of guessing.
+
+    Fetches, then delegates every actual rule-evaluation decision to
+    `build_torrent_explanation` -- the pure builder is the single
+    catalogue; this function's only job is the ambiguity-aware hash
+    resolution a bare hash string requires (a TUI caller that already
+    has one exact, already-focused torrent skips straight to the
+    builder -- see `app.tui.state`).
     """
     all_torrents = list(client.torrents_info())
 
@@ -174,21 +181,46 @@ def explain_torrent(
         if get_field_as_string(item, "hash").lower() == resolved.hash.lower()
     )
 
-    state = get_field_as_string(torrent, "state")
-    group = classify_torrent_state(state)
-    progress = get_field_as_float(torrent, "progress")
-    download_rate = get_field_as_int(torrent, "dlspeed")
-    upload_rate = get_field_as_int(torrent, "upspeed")
-    category = get_field_as_string(torrent, "category")
-
     try:
         raw_trackers = list(client.torrents_trackers(resolved.hash))
-        tracker_collection_failed = False
+        safe_tracker_details: list[dict[str, Any]] | None = (
+            get_safe_tracker_details(raw_trackers)
+        )
     except Exception:
-        raw_trackers = []
-        tracker_collection_failed = True
+        safe_tracker_details = None
 
-    endpoints = get_safe_tracker_details(raw_trackers)
+    return build_torrent_explanation(torrent, safe_tracker_details)
+
+
+def build_torrent_explanation(
+    torrent_item: Any,
+    safe_tracker_details: list[dict[str, Any]] | None,
+    *,
+    generated_at: datetime | None = None,
+) -> ExplanationReport:
+    """Pure, deterministic torrent explanation builder -- zero API calls.
+
+    The single rule catalogue behind `explain_torrent`: takes an
+    already-fetched raw `torrents_info()` item and already-computed safe
+    tracker details (`app.torrents.get_safe_tracker_details`'s output,
+    or `None` when a `torrents_trackers()` attempt failed or was never
+    made) and evaluates exactly the same findings `explain_torrent`
+    would for the same torrent -- there is no second, TUI-only
+    explanation catalogue. `None` and `[]` are deliberately distinct:
+    `None` means tracker data could not be obtained at all (an explicit
+    limitation is attached); `[]` means it was obtained and the torrent
+    simply has no tracker endpoints.
+    """
+    resolved = ResolvedTorrent(
+        hash=get_field_as_string(torrent_item, "hash"),
+        name=get_field_as_string(torrent_item, "name"),
+    )
+    state = get_field_as_string(torrent_item, "state")
+    group = classify_torrent_state(state)
+    progress = get_field_as_float(torrent_item, "progress")
+    download_rate = get_field_as_int(torrent_item, "dlspeed")
+    upload_rate = get_field_as_int(torrent_item, "upspeed")
+    category = get_field_as_string(torrent_item, "category")
 
     finding = _build_torrent_finding(
         resolved=resolved,
@@ -198,13 +230,15 @@ def explain_torrent(
         download_rate=download_rate,
         upload_rate=upload_rate,
         category=category,
-        endpoints=endpoints,
-        tracker_collection_failed=tracker_collection_failed,
+        endpoints=(
+            safe_tracker_details if safe_tracker_details is not None else []
+        ),
+        tracker_collection_failed=safe_tracker_details is None,
     )
 
     return ExplanationReport(
         schema_version=SCHEMA_VERSION,
-        generated_at=datetime.now(UTC),
+        generated_at=generated_at or datetime.now(UTC),
         target_type="torrent",
         target_identity=resolved.hash,
         summary=finding.explanation,

@@ -486,3 +486,76 @@ def test_stopped_count_reflects_paused_and_stopped_torrents() -> None:
     controller.refresh()
 
     assert controller.state.stopped_count == 2
+
+
+def test_build_explanation_zero_api_calls_when_details_loaded() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Alpha", state="uploading")
+        ],
+        trackers_by_hash={torrent_hash: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.set_focus(torrent_hash)
+    calls_before = len(client.calls)
+
+    report = controller.build_explanation()
+
+    assert report is not None
+    assert report.target_identity == torrent_hash
+    assert len(client.calls) == calls_before
+
+
+def test_build_explanation_none_when_nothing_focused() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    controller = _controller(client)
+    controller.refresh()
+
+    assert controller.build_explanation() is None
+
+
+def test_build_explanation_none_when_torrent_disappeared() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={torrent_hash: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.set_focus(torrent_hash)
+    # Simulate the torrent vanishing from the raw snapshot without going
+    # through a full refresh (defensive edge case).
+    controller._raw_torrents = []
+
+    assert controller.build_explanation() is None
+
+
+def test_detail_request_id_bumps_on_focus_change() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ],
+        trackers_by_hash={"a" * 40: [], "b" * 40: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    before = controller.detail_request_id
+    controller.begin_focus_change("b" * 40)
+
+    assert controller.detail_request_id == before + 1
+
+
+def test_raw_torrent_by_hash_is_case_insensitive() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    found = controller.raw_torrent_by_hash("A" * 40)
+
+    assert found is not None
