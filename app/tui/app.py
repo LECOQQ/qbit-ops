@@ -73,8 +73,7 @@ table rebuilds. The help screen (`?`) is always a separate modal
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import Any
 
 from textual import events
@@ -297,16 +296,22 @@ def _overview_alerts_text(state: TuiState) -> str:
     return "\n".join(lines)
 
 
-def _format_local_time(moment: datetime) -> str:
+def _format_local_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
     """Format a timestamp in the local system timezone.
 
     Refresh times default to local time, not UTC, with the timezone
     label always shown so a UTC-configured host is not silently
     ambiguous. `moment` is always timezone-aware (`datetime.now(UTC)`
-    upstream, see `app.status`), so `.astimezone()` with no argument
-    converts it to the system's local timezone.
+    upstream, see `app.status`), so `.astimezone()` with no `tz`
+    converts it to the system's local timezone -- exactly what
+    `datetime.astimezone(tz=None)` already means. `tz` exists purely
+    for deterministic tests: passing a fixed `tzinfo` (e.g. a
+    `zoneinfo.ZoneInfo` or a fixed-offset `timezone`) verifies the
+    conversion/label logic without depending on the CI machine's own
+    system timezone (which may legitimately be UTC, making a bug and
+    a UTC host indistinguishable by output alone).
     """
-    local = moment.astimezone()
+    local = moment.astimezone(tz)
     tz_label = local.tzname() or "local"
     return f"{local:%H:%M:%S} {tz_label}"
 
@@ -503,7 +508,7 @@ class HelpScreen(ModalScreen[None]):
     }
     #help-dialog {
         width: 64;
-        height: auto;
+        max-height: 90%;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
@@ -511,7 +516,7 @@ class HelpScreen(ModalScreen[None]):
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="help-dialog"):
+        with VerticalScroll(id="help-dialog"):
             yield Static(_HELP_TEXT)
 
     def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
@@ -572,6 +577,22 @@ class FiltersScreen(ModalScreen[None]):
     .f-actions Button {
         margin-right: 1;
     }
+    /* Selected (on) vs focused vs both must be distinguishable without
+       relying on color alone: RadioButton's own "( )"/"(x)" glyph
+       already encodes selection non-color; `:focus` additionally gets
+       an explicit border and bold text so keyboard focus position is
+       visible even on a color-blind or monochrome terminal. */
+    RadioSet {
+        border: round $panel;
+        height: auto;
+    }
+    RadioSet:focus-within {
+        border: round $accent;
+    }
+    RadioButton:focus {
+        text-style: bold underline;
+        border: tall $accent;
+    }
     """
 
     def __init__(self, current_filters: TorrentFilter) -> None:
@@ -589,6 +610,17 @@ class FiltersScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.query_one(FiltersPanel).sync_from(self.original_filters)
+        # Textual's default `AUTO_FOCUS = "*"` auto-focuses the *first*
+        # focusable widget on the screen in DOM order -- which is
+        # `#filters-dialog` itself (a `VerticalScroll`, and therefore
+        # focusable) since it comes before any of its children,
+        # including the category `Input`. Left alone, every keystroke
+        # right after opening Filters goes to the scroll container
+        # (which only understands up/down/page keys) instead of any
+        # actual field -- verified empirically; this is what made
+        # Filters look entirely unresponsive to the keyboard. Focus the
+        # category `Input` explicitly instead.
+        self.query_one(".f-category", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         app = self.app
@@ -793,13 +825,14 @@ class QbitOpsTuiApp(App[None]):
     #overview-workspace.grid {
         layout: grid;
         grid-size: 2;
-        grid-gutter: 1 2;
+        grid-gutter: 1 1;
         grid-rows: auto;
     }
     .ov-card {
         border: round $accent;
         padding: 0 1;
         height: auto;
+        min-height: 5;
     }
     .ov-card.ov-attention {
         border: round $warning;
@@ -807,6 +840,7 @@ class QbitOpsTuiApp(App[None]):
     .ov-nav {
         color: $text-muted;
         padding: 0 1;
+        height: 1;
     }
     #filter-summary {
         height: 1;
@@ -834,10 +868,14 @@ class QbitOpsTuiApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        # `show=True` on both directions of each nav pair: `check_action`
+        # below hides whichever one is not applicable to the *current*
+        # workspace, so only one of "Overview"/"Torrents" ever actually
+        # appears in the footer at a time -- see `check_action`.
         Binding("1", "show_overview", "Overview", show=False),
-        Binding("g", "show_overview", "Overview", show=False),
-        Binding("2", "show_torrents", "Torrents", show=True),
-        Binding("t", "show_torrents", "Torrents", show=False),
+        Binding("g", "show_overview", "Overview", show=True),
+        Binding("2", "show_torrents", "Torrents", show=False),
+        Binding("t", "show_torrents", "Torrents", show=True),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
@@ -853,16 +891,16 @@ class QbitOpsTuiApp(App[None]):
         # printable-character handling, which bypasses the bindings
         # system entirely -- see `action_activate`'s docstring).
         Binding("enter", "activate", "Open", show=False, priority=True),
-        Binding("c", "copy_hash", "Copy hash"),
+        Binding("c", "copy_hash", "Copy"),
         Binding("e", "explain", "Explain"),
-        Binding("r", "refresh_details", "Refresh details"),
+        Binding("r", "refresh_details", "Refresh"),
         Binding("question_mark", "toggle_help", "Help"),
         # `escape` must win over whatever has focus (a filter/search
         # Input never binds it, but priority makes the intent explicit
         # and future-proof) -- Textual's `Input` consumes printable
         # characters before bindings are resolved, regardless of
         # priority; verified empirically.
-        Binding("escape", "dismiss_overlay", "Back", priority=True),
+        Binding("escape", "dismiss_overlay", "Back", show=False, priority=True),
     ]
 
     def __init__(
@@ -905,6 +943,7 @@ class QbitOpsTuiApp(App[None]):
         # workspace's table starts unfocused and hidden.
         self._render_workspace_visibility()
         self._render_all()
+        self.refresh_bindings()
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
         self._start_periodic_refresh()
 
@@ -1093,6 +1132,72 @@ class QbitOpsTuiApp(App[None]):
         for panel in self.query(DetailsPanel):
             panel.render_state(state)
 
+    # -- context-aware footer ---------------------------------------------
+
+    def check_action(
+        self, action: str, parameters: tuple[object, ...]
+    ) -> bool | None:
+        """Hide (and disable) footer/help-panel actions that are not
+        meaningful in the current context.
+
+        Textual consults this both to decide what the `Footer` widget
+        shows and whether a key press actually dispatches -- so this is
+        also what keeps, say, `c`/`e` from doing anything while on
+        Overview, not just from being *advertised* there. `refresh_bindings()`
+        is called wherever workspace or focus changes (see
+        `_switch_workspace`/`_focus_torrent`/`_clear_focus_and_render`)
+        so the `Footer` actually redraws when the answer here changes.
+
+        Always-available actions (`quit`, `toggle_help`, and the
+        internal `activate`/`dismiss_overlay`/`cursor_up`/`cursor_down`,
+        all `show=False` regardless) return `True` unconditionally.
+        Anything else is unavailable while a modal is on top of the
+        stack (non-priority App bindings cannot fire there anyway --
+        see docs/MEMORY.md -- so this is a defensive, not load-bearing,
+        guard). `show_overview`/`show_torrents` are each hidden while
+        already on that workspace, so only the one meaningful direction
+        ever appears. `focus_search`/`open_filters` require the
+        Torrents workspace. `copy_hash`/`explain`/`refresh_details`
+        additionally require a focused torrent.
+        """
+        if action in (
+            "quit",
+            "toggle_help",
+            "activate",
+            "dismiss_overlay",
+            "cursor_up",
+            "cursor_down",
+            # `Tab`/`Shift+Tab` are declared on Textual's own `Screen`
+            # base class as `Binding(key="tab", action="app.focus_next",
+            # ...)` (and `focus_previous`), namespaced to the App --
+            # `check_action` is consulted for every such action
+            # regardless of which class's BINDINGS declared it, so the
+            # blanket "any modal open -> False" rule below silently
+            # broke in-modal Tab navigation between fields (e.g.
+            # FiltersScreen's category/state Inputs, checkboxes, radio
+            # sets) -- verified empirically. These must always be
+            # allowed, modal or not.
+            "focus_next",
+            "focus_previous",
+        ):
+            return True
+        if len(self.screen_stack) > 1:
+            return False
+
+        state = self.controller.state
+        if action == "show_overview":
+            return state.workspace is Workspace.TORRENTS
+        if action == "show_torrents":
+            return state.workspace is Workspace.OVERVIEW
+        if action in ("focus_search", "open_filters"):
+            return state.workspace is Workspace.TORRENTS
+        if action in ("copy_hash", "explain", "refresh_details"):
+            return (
+                state.workspace is Workspace.TORRENTS
+                and state.focused_hash is not None
+            )
+        return True
+
     # -- workspace navigation --------------------------------------------
 
     def action_show_overview(self) -> None:
@@ -1127,6 +1232,7 @@ class QbitOpsTuiApp(App[None]):
             self.query_one("#torrents", DataTable).focus()
         else:
             self.screen.set_focus(None)
+        self.refresh_bindings()
 
     def _render_workspace_visibility(self) -> None:
         workspace = self.controller.state.workspace
@@ -1181,6 +1287,7 @@ class QbitOpsTuiApp(App[None]):
         """
         self.controller.clear_focus()
         self._render_details_panels()
+        self.refresh_bindings()
 
     def _focus_torrent(self, torrent_hash: str) -> Worker[Any] | None:
         """Focus a torrent and, if needed, dispatch a background fetch
@@ -1199,6 +1306,7 @@ class QbitOpsTuiApp(App[None]):
         """
         request_id = self.controller.begin_focus_change(torrent_hash)
         self._render_details_panels()
+        self.refresh_bindings()
         if request_id is None:
             return None
         return self._start_detail_fetch(torrent_hash, request_id)
@@ -1383,6 +1491,7 @@ class QbitOpsTuiApp(App[None]):
         if not self._in_torrents_workspace():
             return
         self.push_screen(FiltersScreen(self.controller.state.filters))
+        self.refresh_bindings()
 
     def action_cursor_down(self) -> None:
         if not self._in_torrents_workspace():
@@ -1420,6 +1529,7 @@ class QbitOpsTuiApp(App[None]):
         if len(self.screen_stack) > 1:
             if isinstance(self.screen, FiltersScreen):
                 self.pop_screen()
+                self.refresh_bindings()
             return
 
         if self.controller.state.workspace is Workspace.OVERVIEW:
@@ -1433,6 +1543,7 @@ class QbitOpsTuiApp(App[None]):
 
         if self._is_narrow():
             self.push_screen(DetailsScreen())
+            self.refresh_bindings()
         else:
             self.query_one("#main > DetailsPanel", DetailsPanel).focus()
 
@@ -1533,9 +1644,11 @@ class QbitOpsTuiApp(App[None]):
         screen = ExplainScreen(torrent_name, report)
         self._explain_screen = screen
         self.push_screen(screen)
+        self.refresh_bindings()
 
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
+        self.refresh_bindings()
 
     def action_dismiss_overlay(self) -> None:
         """Close a modal, or return focus from a text input to the table.
@@ -1553,6 +1666,7 @@ class QbitOpsTuiApp(App[None]):
                 self._render_table()
                 self._render_details_panels()
             self.pop_screen()
+            self.refresh_bindings()
             return
 
         was_editing_text = isinstance(self.focused, Input)
@@ -1587,18 +1701,21 @@ class FilterSummary(Static):
     """
 
 
-_HELP_TEXT = """[bold]Keys[/bold]
-1, g           Overview
-2, t           Torrents
-up/down, j/k   navigate torrents (Torrents workspace)
-/              search by name or hash, live as you type (Torrents workspace)
-f              open filters (Torrents workspace)
-enter          browse torrents (Overview) / open details (Torrents)
-c              copy the focused torrent's full hash
-e              explain the focused torrent's state
-r              refresh focused torrent's tracker details
-esc            close a modal, or return focus to the torrent list
-q              quit
+_HELP_TEXT = """[bold]Global[/bold]
+1, g       Overview
+2, t       Torrents
+?          Help
+esc        Close modal / back
+q          Quit
+
+[bold]Torrents workspace[/bold]
+j/k, ↑/↓   Navigate
+/          Search (name or hash)
+f          Filters
+enter      Details
+c          Copy hash
+e          Explain
+r          Refresh tracker details
 """
 
 
@@ -1702,12 +1819,6 @@ def _format_endpoint(endpoint: dict[str, Any]) -> str:
     return line
 
 
-@dataclass(frozen=True)
-class _ExplainSection:
-    title: str
-    lines: tuple[str, ...]
-
-
 def _format_explain_text(
     torrent_name: str,
     report: ExplanationReport | None,
@@ -1737,7 +1848,7 @@ def _format_explain_text(
             "unreachable; this explanation uses last-known data."
         )
 
-    header = [f"[bold]Explain[/bold] · {torrent_name}"]
+    header = [f"[bold]Explain[/bold] · {_truncate(torrent_name, 60)}"]
     header.extend(freshness_lines)
 
     if report is None:
@@ -1747,8 +1858,15 @@ def _format_explain_text(
 
     style = _SEVERITY_STYLES[report.overall_severity]
     header.append(f"[{style}]{report.overall_severity.value.title()}[/{style}]")
-    header.append("")
-    header.append(report.summary)
+
+    # A single-finding report's summary is, by construction
+    # (`app.explain.build_torrent_explanation`), always the finding's
+    # own `explanation` -- printing both would show the same sentence
+    # twice. Only show the summary here when it says something the
+    # first finding block does not already say.
+    if not report.findings or report.summary != report.findings[0].explanation:
+        header.append("")
+        header.append(report.summary)
 
     blocks = ["\n".join(header)]
 
@@ -1756,6 +1874,13 @@ def _format_explain_text(
         blocks.append(_format_finding(finding))
 
     return "\n\n".join(blocks)
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Truncate a display string safely, e.g. for a long torrent title."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 
 def _format_finding(finding: ExplanationFinding) -> str:
@@ -1784,9 +1909,37 @@ def _format_finding(finding: ExplanationFinding) -> str:
     return "\n".join(lines)
 
 
+# Evidence codes that carry a raw byte-per-second rate, per
+# `app.explain._build_torrent_finding`'s `common_evidence` tuple.
+_RATE_EVIDENCE_CODES = frozenset({"download_rate", "upload_rate"})
+
+
 def _format_evidence(evidence: Evidence) -> str:
+    """Render one evidence row with a humanized value where possible.
+
+    Never changes the underlying `Evidence`/JSON model (`app.explain`'s
+    `evidence_to_dict` is untouched) and never invents a value this
+    formatting doesn't already have -- purely cosmetic, keyed off
+    `evidence.code` (a stable identifier `app.explain` already assigns,
+    not inferred from the label text).
+    """
     label = f"{evidence.label}:"
-    return f"  {label:<15} {evidence.value}"
+    return f"  {label:<15} {_format_evidence_value(evidence)}"
+
+
+def _format_evidence_value(evidence: Evidence) -> str:
+    value = evidence.value
+    if evidence.code == "progress" and isinstance(value, int | float):
+        return f"{value * 100:.1f}%"
+    if evidence.code in _RATE_EVIDENCE_CODES and isinstance(value, int | float):
+        return _format_byte_rate(int(value))
+    if evidence.code == "tracker_health" and isinstance(value, str):
+        return value.title()
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if value is None:
+        return "(none)"
+    return str(value)
 
 
 def run_tui(

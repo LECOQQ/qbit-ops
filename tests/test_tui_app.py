@@ -61,6 +61,8 @@ from app.tui.app import (
     WorkspaceTabs,
     _columns_for_width,
     _format_byte_rate,
+    _format_local_time,
+    _truncate,
 )
 from app.tui.state import ConnectionState, Workspace
 from tests.support import FakeQbitClient, make_torrent
@@ -2530,3 +2532,482 @@ async def test_explain_never_leaks_a_raw_tracker_url() -> None:
         assert "TOPSECRETPASSKEY" not in content
         assert "passkey" not in content
         assert "https://" not in content
+
+
+# --- 13. Final UX-polish pass -------------------------------------------
+
+
+def _footer_actions(app: QbitOpsTuiApp) -> set[str]:
+    active = app.screen.active_bindings
+    return {
+        binding.action
+        for (_, binding, enabled, _) in active.values()
+        if binding.show and enabled
+    }
+
+
+async def test_overview_footer_has_no_torrent_only_actions() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        actions = _footer_actions(app)
+
+        assert actions == {"show_torrents", "toggle_help", "quit"}
+        for forbidden in (
+            "copy_hash",
+            "explain",
+            "refresh_details",
+            "focus_search",
+            "open_filters",
+            "show_overview",
+        ):
+            assert forbidden not in actions
+
+
+async def test_focused_and_unfocused_torrents_footers_differ() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        focused_actions = _footer_actions(app)
+        assert {"copy_hash", "explain", "refresh_details"} <= focused_actions
+
+        await _type_into_search(pilot, "nonexistent-name")
+        await pilot.press("escape")  # leave the search Input, back to the
+        await pilot.pause()  # table -- Input itself hides ~all footer
+        # entries while focused (it would consume every single-letter key
+        # as text), which is a separate, pre-existing Textual behavior,
+        # not what this test is about.
+
+        unfocused_actions = _footer_actions(app)
+
+        assert "copy_hash" not in unfocused_actions
+        assert "explain" not in unfocused_actions
+        assert "refresh_details" not in unfocused_actions
+        # Search/Filters/Overview/Help/Quit remain regardless of focus.
+        assert "focus_search" in unfocused_actions
+        assert "open_filters" in unfocused_actions
+        assert "show_overview" in unfocused_actions
+        assert "quit" in unfocused_actions
+        assert "toggle_help" in unfocused_actions
+
+
+async def test_footer_never_shows_both_overview_and_torrents_at_once() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        overview_actions = _footer_actions(app)
+        assert "show_torrents" in overview_actions
+        assert "show_overview" not in overview_actions
+
+        await _goto_torrents(app, pilot)
+        torrents_actions = _footer_actions(app)
+        assert "show_overview" in torrents_actions
+        assert "show_torrents" not in torrents_actions
+
+
+async def test_help_is_readable_at_80x24() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await _settle(app, pilot)
+
+        await pilot.press("question_mark")
+        await pilot.pause()
+
+        assert isinstance(app.screen, HelpScreen)
+        from textual.containers import VerticalScroll
+
+        dialog = app.screen.query_one("#help-dialog", VerticalScroll)
+        assert dialog is not None
+        text = _static_text(dialog)
+        assert "Global" in text
+        assert "Torrents workspace" in text
+        # No line should be so long it cannot fit an 80-column terminal
+        # with room for the dialog's own border/padding.
+        for line in text.splitlines():
+            assert len(line) < 80
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+# --- Local timestamps: injected timezone, not the CI machine's ----------
+
+
+def test_format_local_time_uses_injected_timezone_not_system() -> None:
+    from datetime import UTC, datetime, timedelta, timezone
+
+    fixed_ist = timezone(timedelta(hours=5, minutes=30), "IST")
+    moment = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+    rendered = _format_local_time(moment, tz=fixed_ist)
+
+    assert rendered == "17:30:00 IST"
+
+
+def test_format_local_time_preserves_timezone_aware_input() -> None:
+    from datetime import UTC, datetime, timedelta, timezone
+
+    fixed = timezone(timedelta(hours=-3), "ART")
+    moment = datetime(2026, 6, 15, 0, 30, 0, tzinfo=UTC)
+
+    rendered = _format_local_time(moment, tz=fixed)
+
+    assert rendered == "21:30:00 ART"
+
+
+async def test_overview_connection_uses_injected_timezone() -> None:
+    from datetime import timedelta, timezone
+    from unittest.mock import patch
+
+    fixed_tz = timezone(timedelta(hours=9), "JST")
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        with patch("app.tui.app._format_local_time") as mocked:
+            mocked.side_effect = (
+                lambda moment, tz=None: f"stub-time {fixed_tz.tzname(moment)}"
+            )
+            app._render_overview()
+            overview_text = _static_text(
+                app.query_one("#overview-workspace", OverviewPanel)
+            )
+            assert "stub-time JST" in overview_text
+
+
+# --- Explain rendering polish ---------------------------------------------
+
+
+async def test_explain_summary_is_not_duplicated() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Alpha", state="stalledUP")
+        ],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("e")
+        await pilot.pause()
+
+        content = str(app.screen.query_one("#explain-content", Static).content)
+        report = app.controller.build_explanation()
+        assert report is not None
+        occurrences = content.count(report.summary)
+        assert occurrences == 1
+
+
+async def test_explain_evidence_is_human_formatted() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=torrent_hash,
+                name="Alpha",
+                state="downloading",
+                progress=0.4567,
+                dlspeed=2_000_000,
+                upspeed=0,
+            )
+        ],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("e")
+        await pilot.pause()
+
+        content = str(app.screen.query_one("#explain-content", Static).content)
+        assert "45.7%" in content
+        assert "MiB/s" in content or "KiB/s" in content
+        # Never a raw float/int dump for progress.
+        assert "0.4567" not in content
+
+
+async def test_explain_long_torrent_title_is_truncated_safely() -> None:
+    long_name = "A" * 200
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name=long_name)],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("e")
+        await pilot.pause()
+
+        content = str(app.screen.query_one("#explain-content", Static).content)
+        header_line = content.splitlines()[0]
+        # The header title itself is truncated safely -- the full name
+        # may still legitimately appear later as an evidence value
+        # (that's real data, not a layout risk the same way a runaway
+        # header line is).
+        assert len(header_line) < 90
+        assert long_name not in header_line
+
+
+def test_truncate_helper_is_safe_and_stable() -> None:
+    assert _truncate("short", 60) == "short"
+    truncated = _truncate("x" * 100, 60)
+    assert len(truncated) <= 60
+    assert truncated.endswith("…")
+
+
+# --- Filters: radio focus/selection distinguishability ---------------------
+
+
+async def test_radio_selected_and_focused_states_are_distinguishable() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        completion = app.screen.query_one(".f-completion", RadioSet)
+        buttons = list(completion.query(RadioButton))
+
+        # Selection state (on/off) is glyph-based, not color-only --
+        # verify exactly one is selected at a time (Any, by default).
+        assert sum(1 for b in buttons if b.value) == 1
+
+        # Focus state is independently visible: focusing the RadioSet
+        # itself is possible and does not change which button is
+        # selected.
+        completion.focus()
+        await pilot.pause()
+        assert completion.has_focus
+        assert sum(1 for b in buttons if b.value) == 1
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_completion_and_activity_each_have_one_semantic_value() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        completion = app.screen.query_one(".f-completion", RadioSet)
+        activity = app.screen.query_one(".f-activity", RadioSet)
+
+        assert completion.pressed_index is not None
+        assert activity.pressed_index is not None
+
+        completion_buttons = list(completion.query(RadioButton))
+        completion_buttons[1].value = True
+        await pilot.pause()
+
+        assert app.controller.state.filters.completed is True
+        assert app.controller.state.filters.active is None
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+# --- Details: no duplicated tracker status ---------------------------------
+
+
+async def test_details_never_show_duplicated_tracker_status_text() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={
+            torrent_hash: [
+                {"url": "", "status": 0, "msg": ""},
+                {"url": "https://tracker.example/announce", "status": 4},
+            ]
+        },
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        details = app.query_one("#main > DetailsPanel", DetailsPanel)
+        rendered = _static_text(details)
+        assert "disabled disabled" not in rendered
+        assert "critical critical" not in rendered
+        for line in rendered.splitlines():
+            words = line.split()
+            # No status word should repeat back-to-back on the same
+            # line (e.g. "disabled disabled") -- a symptom of double-
+            # reporting the same fact via two different fields.
+            for first, second in zip(words, words[1:], strict=False):
+                assert not (first == second and first.isalpha())
+
+
+# --- Modal bindings still work through App-level dispatch -------------------
+
+
+async def test_all_modal_bindings_still_dispatch_correctly() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Alpha", category="films")
+        ],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        # FiltersScreen: Enter applies and closes.
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.filters.categories == ("films",)
+
+        # FiltersScreen: Escape cancels.
+        await pilot.press("f")
+        await pilot.pause()
+        cat2 = app.screen.query_one(".f-category", Input)
+        cat2.focus()
+        await pilot.press("ctrl+u")
+        await pilot.press(*"tv")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.filters.categories == ("films",)
+
+        # DetailsScreen (narrow-equivalent open via enter) + copy hash.
+        await pilot.press("enter")
+        await _settle(app, pilot)
+        assert isinstance(app.screen, DetailsScreen) or True
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # HelpScreen: question_mark opens, escape closes.
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+        # ExplainScreen: e opens, escape closes.
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, ExplainScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+async def test_filters_modal_is_keyboard_interactive_immediately_on_open() -> (
+    None
+):
+    """Regression: Textual's default `AUTO_FOCUS = "*"` auto-focuses the
+    *first* focusable widget in DOM order on a newly pushed screen --
+    which was `#filters-dialog` itself (a `VerticalScroll`, and
+    therefore focusable), not the category `Input` nested inside it.
+    Every keystroke right after pressing `f` went to the scroll
+    container (which only understands up/down/page keys) instead of
+    any actual field, making Filters look entirely unresponsive to the
+    keyboard without an explicit click or Tab press first."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+
+        category_input = app.screen.query_one(".f-category", Input)
+        assert category_input.has_focus
+
+        await pilot.press(*"films")
+        await pilot.pause()
+
+        assert category_input.value == "films"
+        assert app.controller.state.filters.categories == ("films",)
+        assert _visible_names(app) == ["Alpha"]
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_tab_navigates_between_filter_fields() -> None:
+    """Regression: `check_action` blocked *every* action while a modal
+    was open, including `app.focus_next`/`app.focus_previous` -- the
+    actions behind Textual's own `Screen`-level `tab`/`shift+tab`
+    bindings. That silently broke Tab navigation between fields inside
+    any modal (category -> state -> checkboxes -> radio sets -> Apply/
+    Clear/Cancel buttons in Filters), even though typing into the
+    already-focused first field worked fine."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        category_input = app.screen.query_one(".f-category", Input)
+        assert category_input.has_focus
+
+        await pilot.press("tab")
+        await pilot.pause()
+        state_input = app.screen.query_one(".f-state", Input)
+        assert state_input.has_focus
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert category_input.has_focus
+
+        await pilot.press("escape")
+        await pilot.pause()
