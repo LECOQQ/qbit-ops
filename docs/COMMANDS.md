@@ -406,29 +406,42 @@ redaction filter that would silently replace a real URL with
 **Overview** (the default, landing workspace) explains the current
 condition of the instance, built entirely from the same periodic
 refresh already used everywhere else in the TUI — no extra API call,
-no tracker-wide scan:
+no tracker-wide scan. It is grouped into distinct cards, deliberately
+kept separate rather than merged into one block of counters that could
+read like a single mutually exclusive partition (a torrent can be
+completed, seeding, *and* stopped, all at once — those are three
+different dimensions, not three slices of one total):
 
-* **Connection** — connected / reconnecting / unavailable, the last
-  successful refresh time (local time, timezone labeled), a `STALE`
-  flag when showing last-good data after a failed refresh, and the
-  qBittorrent/API version where available.
-* **Transfer** — current download/upload rates.
-* **Torrents** — total, downloading, seeding, completed, paused/
-  stopped, checking, stalled, errored, unknown — the same
-  classification `status`/`torrents list` already use, not a second
-  one.
-* **Health and alerts** — the overall health plus every grounded
-  reason behind it (e.g. "3 stalled torrent(s)", "1 torrent(s)
-  reporting an error"), the same `StatusAlert` data `status` reports —
-  never a bare "warning" with no explanation, never an invented
-  recommendation or confidence score.
+* **Connection** — connected / reconnecting / unavailable /
+  authentication failed, the last successful refresh time (local time,
+  timezone labeled), a `STALE` flag when showing last-good data after a
+  failed refresh, and the qBittorrent/Web API version where available.
+* **Transfer** — current download/upload rates, compact human-readable
+  formatting.
+* **Activity** — total, downloading, seeding, stopped, checking — a
+  torrent's current transfer state, reusing the existing
+  `app.torrent_states` classifier (no second one).
+* **Completion** — completed / incomplete, by progress — independent of
+  Activity: a completed torrent can be seeding *or* stopped.
+* **Attention** — stalled, errored, unknown — conditions worth an
+  operator's attention, given stronger visual weight (a distinct card
+  border color), independent of Activity/Completion.
+* **Health and alerts** — the overall health plus every grounded reason
+  behind it (e.g. "3 stalled torrent(s)", "1 torrent(s) reporting an
+  error"), the same `StatusAlert` data `status` reports — never a bare
+  "warning" with no explanation, never an invented recommendation or
+  confidence score. When nothing is wrong: "Healthy · 0 finding(s)".
 * A visible `Enter` / `t` hint to jump to Torrents.
 
+At wide terminal sizes the cards lay out in a compact two-column grid;
+below 100 columns they stack vertically — the same content either way.
+
 **Torrents** is the detailed browsing workspace: the table, search,
-filters, and focused-torrent details described below. Switching
-workspaces is purely local (zero qBittorrent calls) and preserves
-search/filter state and the last-focused torrent — it never leaves a
-widget from the now-hidden workspace focused.
+filters, and focused-torrent details/copy/explain described below.
+Switching workspaces is purely local (zero qBittorrent calls) and
+preserves search/filter state and the last-focused torrent — it never
+leaves a widget from the now-hidden workspace focused, and is blocked
+while any modal (Filters/Details/Help/Explain) is open.
 
 ### Controls
 
@@ -438,35 +451,59 @@ widget from the now-hidden workspace focused.
 up/down, j/k   navigate torrents (Torrents workspace)
 /              open a search box (Enter to apply, Esc to close)
 f              open filters (a modal, at every terminal width)
-enter          Overview: browse torrents: Torrents: open focused details
+enter          Overview: browse torrents · Torrents: open focused details
+c              copy the focused torrent's full hash
+e              explain the focused torrent's current state
 r              refresh the focused torrent's tracker details
 esc            close a modal/help/search box, or return focus to the list
 ?              open help (a real modal, listing only working bindings)
 q              quit
 ```
 
-`q` quits from anywhere — the torrent list, the details panel, any
-Checkbox — but while a text box (search, or a filter's category/state
-field) has focus, typing `q` inserts the literal character instead,
-exactly like any other letter (a category can legitimately be named
-"queue"); press `Esc` first to return to the torrent list, then `q`.
-This is standard text-editing behavior, not a bug — Textual's `Input`
-widget consumes every printable character itself, before any
-single-key binding (this project's or Textual's own) can intercept it.
+`q` quits from anywhere the App's own bindings are reachable — the
+torrent list, the details panel, any Checkbox — but while a text box
+(search, or a filter's category/state field) has focus, typing `q`
+inserts the literal character instead, exactly like any other letter (a
+category can legitimately be named "queue"); press `Esc` first to
+return to the torrent list, then `q`. This is standard text-editing
+behavior, not a bug — Textual's `Input` widget consumes every printable
+character itself, before any single-key binding (this project's or
+Textual's own) can intercept it. `c`/`e`/`r`/`q` are also silently
+inert while a modal is on top *and hasn't explicitly re-declared them*
+(a distinct Textual behavior from the `Input`-consumes-characters case
+above — see docs/MEMORY.md); Copy hash is the one action re-declared on
+the Details modal specifically, since it is a documented Details-view
+action.
 
-Filters open as a modal at **every** terminal width (there is no more
+The torrent table shows, in this order: **Name** (gets the remaining
+width), **State**, **Progress** always; **Down**/**Up** once the
+terminal is 100 columns or wider; **Ratio**/**Category** once it is 130
+columns or wider. Row identity (which torrent a row refers to) is
+always the full hash internally regardless of which columns are
+visible — narrower terminals never lose the ability to select, focus,
+copy, or explain a torrent, only the number of visible columns changes.
+
+Filters open as a modal at **every** terminal width (there is no
 permanently visible sidebar) and use the exact same fields, tokens, and
 AND/OR combination rules as [Torrent Filters](#torrent-filters)
 (`--category`, `--state`, `--completed`/`--incomplete`,
-`--active`/`--inactive`, `--stalled`, `--errored`) — entered as
-comma-separated values and checkboxes. Filter edits apply live, but
-`Enter`/`Esc`/`Ctrl+R` are three distinct, deterministic actions:
+`--active`/`--inactive`, `--stalled`, `--errored`). Category and state
+are comma-separated text inputs; Completion (Any/Completed/Incomplete)
+and Activity (Any/Active/Inactive) are each an exclusive choice (a
+`RadioSet`), so a contradictory pair (both Completed and Incomplete) is
+structurally impossible through the UI — `torrents list`'s own
+`--completed --incomplete` rejection remains as defense in depth, never
+actually reachable from here; Stalled/Errored remain independent
+checkboxes since they are not opposites of anything. Filter edits apply
+live, but Apply/Cancel/Clear are three distinct, deterministic actions,
+each reachable both by a binding and by a visible button in the modal:
 
 ```text
-enter    apply (already in effect) and close the modal
-esc      cancel: revert to the filter that was active when the modal
-         opened, then close
-ctrl+r   clear: reset to no filter at all; the modal stays open
+enter / Apply button    apply (already in effect) and close the modal
+esc / Cancel button     cancel: revert to the filter that was active
+                        when the modal opened, then close
+ctrl+r / Clear button   clear: reset to no filter at all; the modal
+                        stays open
 ```
 
 Search is a separate, UI-only, read-only match, live as you type: a
@@ -481,16 +518,88 @@ The active filter and search are always shown as one concise line above
 the torrent table:
 
 ```text
-146 shown / 1105 · stalled
-24 shown / 1105 · category: films · stalled · search: ubuntu
+146 shown / 1,105
+stalled · category: films · search: ubuntu
 ```
 
 Details are always reachable, at every terminal width: an inline side
 panel when the terminal is wide enough, a dedicated modal (opened by
 `Enter`) otherwise — narrow terminals never simply lose access to safe
-torrent details. Details show name, hash, state, progress, category,
-rates, safe structural tracker identities, and the tracker-detail
-fetch timestamp (local time) — never a raw tracker URL or passkey.
+torrent details. Details are grouped into three sections:
+
+* **Identity** — name, a *shortened* hash (e.g.
+  `8ac34f89…f95704b8`), category. The full hash is never wrapped or
+  dumped inline; use `c` (Copy hash) to get it.
+* **Transfer** — state, progress, ratio, download/upload rate, live
+  from the current periodic torrent snapshot.
+* **Trackers** — one line per endpoint, identity and health/status as
+  clearly separate columns, a sanitized message only when one exists
+  (never a bare status word with nothing identifying which tracker it
+  belongs to, and never a duplicated "disabled disabled"), plus the
+  fetch timestamp (local time) — never a raw announce URL, path
+  segment, query value, userinfo, or passkey.
+
+### Copy hash
+
+```text
+c   Copy hash
+```
+
+Copies the focused torrent's **full, canonical** hash (never the
+shortened display value, never tracker data) to the clipboard, from
+either the Torrents table or the Details view (inline or modal), and
+shows a concise confirmation: `Copied hash 8ac34f89…f95704b8`. A safe,
+non-crashing notification ("No torrent focused.") when nothing is
+focused. Performs no qBittorrent API call.
+
+Uses Textual's own `App.copy_to_clipboard` (an OSC 52 terminal escape
+sequence). **Some terminal emulators do not support OSC 52** — notably
+macOS's built-in Terminal.app — and will silently not receive the
+copied value. This is a terminal capability limitation qbit-ops cannot
+detect or work around from inside the TUI; if `c` shows a confirmation
+but pasting elsewhere does not produce the hash, the terminal emulator
+in use is the likely cause, not a qbit-ops defect.
+
+### Explain
+
+```text
+e   Explain
+```
+
+Opens a modal, evidence-based explanation of the focused torrent's
+current state — the exact same rule catalogue, finding codes,
+severities, and evidence/limitation semantics `explain torrent` uses on
+the CLI (`app.explain.build_torrent_explanation`, shared by both
+interfaces; there is no second, TUI-only explanation catalogue). Only
+meaningful in the Torrents workspace; a safe notification ("No torrent
+focused.") when nothing is focused, never a crash.
+
+**API-call budget**: if the focused torrent's tracker details are
+already loaded (the common case — focusing a torrent already triggers
+one background fetch), `e` performs **zero** additional API calls. If
+they are not yet loaded (still fetching, or an earlier fetch failed),
+`e` reuses the already in-flight fetch if there is one, or starts
+**at most one** `torrents_trackers()` call otherwise — never a second,
+redundant call, and never `torrents_info()`. There is no tracker-wide
+scan.
+
+The modal shows a header (torrent name, overall severity), when the
+torrent snapshot was refreshed and tracker details were fetched (both
+local time), a summary, each finding's severity/title/explanation/
+evidence/limitations, and safe CLI commands to consider (display-only
+text — `e` never executes anything, and suggested commands never
+include `--no-dry-run`/`--yes`). If the TUI's own data is currently
+stale (qBittorrent unreachable), the modal says so explicitly rather
+than presenting a stale explanation as current. Closes with `Esc`,
+scrolls at every tested terminal size, and blocks workspace switching
+while open, exactly like Filters/Details/Help.
+
+**Race safety**: if focus moves to a different torrent while a fetch
+Explain triggered is still in flight, the stale result is discarded —
+it never populates a modal for the wrong torrent. If the modal is
+closed before the result arrives, it is never reopened automatically.
+If the focused torrent disappears before the explanation can be built,
+a not-found notification is shown instead of an empty or broken modal.
 
 Textual's built-in command palette (`Ctrl+P`) is disabled — it has no
 qbit-ops commands yet and only added a confusing `^p palette` hint to
@@ -504,10 +613,11 @@ Below 100 columns, the Filters and Details panels are not shown inline
 reachable:
 
 * `f` opens Filters in a modal dialog instead of an inline panel —
-  the same fields, same live application, same `Esc` to close.
+  the same fields, same live application, same Apply/Cancel/Clear.
 * `enter` opens the currently focused torrent's Details in a modal
-  dialog.
-* `Esc` closes either modal and returns to the torrent list.
+  dialog; `c` (Copy hash) works there too.
+* `e` (Explain) opens the same modal regardless of width.
+* `Esc` closes any modal and returns to the torrent list.
 
 Resizing between wide and narrow (and back) never loses your place: the
 torrent list, its scroll position, and the focused torrent are
@@ -518,23 +628,24 @@ focused-but-invisible — focus moves back to the torrent list instead.
 ### Refresh model
 
 `--interval SECONDS` (default `5.0`, same default as `status --watch`)
-sets how often the TUI refreshes the status header and torrent table.
-Each refresh performs exactly four qBittorrent API calls —
+sets how often the TUI refreshes the Overview and torrent table. Each
+refresh performs exactly four qBittorrent API calls —
 `app_version()`, `app_web_api_version()`, `transfer_info()`, and one
-`torrents_info()` shared by both the status counters and the torrent
-table (never a second, redundant `torrents_info()` call) — the same
-bounded budget `status` uses. Filter and search changes are applied
-entirely in memory against the last fetched torrent list: zero API
-calls.
+`torrents_info()` shared by both the Overview's counters and the
+torrent table (never a second, redundant `torrents_info()` call) — the
+same bounded budget `status` uses. Filter and search changes are
+applied entirely in memory against the last fetched torrent list: zero
+API calls.
 
 Focusing a torrent (via keyboard navigation) fetches that torrent's
 tracker details with **at most one** `torrents_trackers()` call — never
 a scan of every torrent, and never called again automatically on the
 next periodic tick. The Details panel (inline or modal) shows when
 tracker details were last fetched; press `r` to refresh them manually
-without waiting for a new focus change. `r` is silently ignored when no
-torrent is focused (e.g. an empty filter result) — it never fabricates
-a request.
+without waiting for a new focus change, or `e` to explain using
+whatever is currently available. `r`/`e`/`c` are silently ignored (with
+a notification for `e`/`c`) when no torrent is focused (e.g. an empty
+filter result) — none of them ever fabricates a request.
 
 ### Stale data and failure states
 
@@ -557,14 +668,19 @@ notice instead.
 ### Security
 
 Every value the TUI renders is a safe, structured domain output — the
-same `StatusSnapshot`/`SelectedTorrent`/`inspect_torrent`-shaped data
-the rest of the CLI already uses. Tracker identities and messages are
-always the same structural, secret-free fields `trackers inspect`
-renders (`app.torrents.get_safe_tracker_details`): a normalized
-`host[:port]` identity, health, scheme, path *shape*, and query
-parameter *names* — never a raw announce URL, path value, query value,
-userinfo, or unsanitized tracker message. See
-[docs/PHILOSOPHY.md](PHILOSOPHY.md) §15 and
+same `StatusSnapshot`/`SelectedTorrent`/`inspect_torrent`/
+`ExplanationReport`-shaped data the rest of the CLI already uses.
+Tracker identities and messages are always the same structural,
+secret-free fields `trackers inspect` renders
+(`app.torrents.get_safe_tracker_details`): a normalized `host[:port]`
+identity, health, scheme, path *shape*, and query parameter *names* —
+never a raw announce URL, path value, query value, userinfo, or
+unsanitized tracker message. Explain's evidence and suggested commands
+are built from that same safe data (and already-classified torrent
+state) — a suggested command is always a display-only, dry-run-safe
+string, never `--no-dry-run`/`--yes`, and is never executed by the TUI.
+Copy hash copies only the full canonical hash string, never a details
+block or tracker data. See [docs/PHILOSOPHY.md](PHILOSOPHY.md) §15 and
 [docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md) §10 for
 the full invariant and the tests that enforce it.
 

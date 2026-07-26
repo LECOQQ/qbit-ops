@@ -1,4 +1,4 @@
-"""Textual application for `qbit-ops tui` (Overview-first redesign).
+"""Textual application for `qbit-ops tui` (read-only V1, visual polish).
 
 Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, enforced by
 `tests/test_tui_security.py`): this module and every other module under
@@ -6,7 +6,7 @@ Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, enforced by
 function, `app.torrents.list_torrents_with_trackers`, or
 `app.torrents._get_tracker_details`. Widgets only ever render safe,
 structured domain outputs (`StatusSnapshot`, `SelectedTorrent`,
-`get_safe_tracker_details` output, `AppError`).
+`get_safe_tracker_details` output, `ExplanationReport`, `AppError`).
 
 Worker-hardening phase (see docs/DECISIONS.md): every qBittorrent API
 call runs on a Textual thread worker (`run_worker(thread=True)`), never
@@ -35,22 +35,34 @@ level -- see docs/DECISIONS.md for the empirical basis of this
 statement and why it is accepted rather than "fixed" with a custom
 async HTTP client (out of scope for this phase).
 
-Overview-first redesign (see docs/DECISIONS.md): the TUI now opens on
-an Overview workspace (connection/transfer/counts/alerts, built
-entirely from the same periodic refresh result -- no extra API call)
-instead of a bare torrent table, and provides a second, explicit
-Torrents workspace for browsing/search/filtering/inspection.
-`TuiState.workspace` (see `app.tui.state.Workspace`) tracks which one
-is active; switching is a pure local operation (`TuiController.
-set_workspace`) -- see `_switch_workspace`. The two workspaces are two
-always-mounted containers (`#overview-workspace`/`#torrents-workspace`)
-whose `display` is toggled, not two Textual `Screen`s: this is what
-lets a switch preserve every widget's state (the torrent table's
-cursor, an in-progress search) for free, with the screen stack
-reserved for real modals (filters, details, help). The permanently
-visible filters sidebar from the previous design is gone -- `f` now
-always opens a `FiltersScreen` modal, at every terminal width, per the
-redesign's explicit "replace the sidebar" requirement.
+Overview-first redesign (see docs/DECISIONS.md): the TUI opens on an
+Overview workspace (built entirely from the same periodic refresh
+result -- no extra API call) instead of a bare torrent table, with a
+second, explicit Torrents workspace for browsing/search/filtering/
+inspection. `TuiState.workspace` tracks which one is active; switching
+is a pure local operation (`TuiController.set_workspace`) -- see
+`_switch_workspace`. The two workspaces are two always-mounted
+containers (`#overview-workspace`/`#torrents-workspace`) whose
+`display` is toggled, not two Textual `Screen`s, so a switch preserves
+every widget's state for free. The screen stack is reserved for real
+modals (filters, details, help, explain).
+
+Visual-polish + Explain phase (see docs/DECISIONS.md): Overview is
+grouped into distinct, non-overlapping conceptual cards (Connection,
+Transfer, Activity, Completion, Attention, Health/alerts) instead of
+one long block of counters that could look like a single mutually
+exclusive partition. The Torrents table gained a `Category` column and
+responsive column disclosure (`_columns_for_width`). Details is grouped
+into Identity/Transfer/Trackers sections, shows a shortened hash, and
+`c` copies the full canonical hash via `App.copy_to_clipboard` (a
+terminal-support limitation, not a qbit-ops bug -- see
+`action_copy_hash`). The Filters modal replaced two contradictory
+Checkbox pairs (Completed+Incomplete, Active+Inactive) with exclusive
+`RadioSet`s, and gained visible Apply/Clear/Cancel buttons alongside
+the existing bindings. `e` opens an Explain modal for the focused
+torrent, built by the same pure, zero-API `app.explain.
+build_torrent_explanation` the CLI's `explain torrent` delegates to --
+see `TuiController.build_explanation` and `action_explain`.
 
 Hotfix phase (see docs/DECISIONS.md): `on_data_table_row_highlighted`
 checks `event.row_key is None`/`event.cursor_row < 0` before ever
@@ -61,6 +73,7 @@ table rebuilds. The help screen (`?`) is always a separate modal
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -70,10 +83,21 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Checkbox, DataTable, Footer, Input, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Footer,
+    Input,
+    RadioButton,
+    RadioSet,
+    Static,
+)
 from textual.worker import Worker, WorkerState
 
 from app.app_services import TuiRefreshResult, create_qbit_client
+from app.explain import Evidence, ExplanationFinding, ExplanationReport
+from app.explain import ExplanationSeverity as Severity
 from app.status import Health
 from app.torrents import (
     SelectedTorrent,
@@ -90,6 +114,7 @@ from app.tui.state import (
 )
 
 NARROW_WIDTH_THRESHOLD = 100
+WIDE_WIDTH_THRESHOLD = 130
 
 # Worker group names -- used to tell a periodic-refresh worker's
 # `Worker.StateChanged` message apart from a focused-detail worker's in
@@ -104,6 +129,13 @@ _HEALTH_STYLES: dict[Health, str] = {
     Health.WARNING: "bold yellow",
     Health.CRITICAL: "bold red",
     Health.UNAVAILABLE: "bold red",
+}
+
+_SEVERITY_STYLES: dict[Severity, str] = {
+    Severity.INFO: "bold green",
+    Severity.WARNING: "bold yellow",
+    Severity.CRITICAL: "bold red",
+    Severity.UNKNOWN: "bold magenta",
 }
 
 _CONNECTION_LABELS: dict[ConnectionState, str] = {
@@ -140,11 +172,21 @@ def _tab_label(name: str, keys: str, active: bool) -> str:
 
 
 class OverviewPanel(VerticalScroll):
-    """The Overview workspace's content: connection, transfer, counts,
-    and grounded health alerts -- built entirely from the same
-    `TuiState` the periodic refresh already populates. No qBittorrent
-    call of its own, no tracker-wide scan, no invented recommendations
-    or confidence scores -- see the module docstring.
+    """The Overview workspace's content, grouped into distinct conceptual
+    cards -- built entirely from the same `TuiState` the periodic
+    refresh already populates. No qBittorrent call of its own, no
+    tracker-wide scan, no invented recommendations or confidence
+    scores.
+
+    Grouping deliberately keeps three dimensions separate rather than
+    presenting them as one partition of "total": Activity (downloading/
+    seeding/stopped/checking -- a torrent's current transfer state),
+    Completion (completed/incomplete -- a torrent's progress, which a
+    seeding *and* completed *and* stopped torrent all satisfy at once),
+    and Attention (stalled/errored/unknown -- conditions worth an
+    operator's attention, again independent of the other two). Every
+    count reuses `app.status`/`app.torrent_states`'s existing
+    classifiers -- see the module docstring.
     """
 
     def render_state(self, state: TuiState) -> None:
@@ -152,17 +194,27 @@ class OverviewPanel(VerticalScroll):
 
         if state.status is None:
             self.mount(
-                Static("Connecting to qBittorrent...", classes="ov-section")
+                Static("Connecting to qBittorrent...", classes="ov-card")
             )
             self.mount(Static(_OVERVIEW_NAV_HINT, classes="ov-nav"))
             return
 
+        self.mount(Static(_overview_connection_text(state), classes="ov-card"))
+        self.mount(Static(_overview_transfer_text(state), classes="ov-card"))
+        self.mount(Static(_overview_activity_text(state), classes="ov-card"))
+        self.mount(Static(_overview_completion_text(state), classes="ov-card"))
         self.mount(
-            Static(_overview_connection_text(state), classes="ov-section")
+            Static(
+                _overview_attention_text(state),
+                classes="ov-card ov-attention",
+            )
         )
-        self.mount(Static(_overview_transfer_text(state), classes="ov-section"))
-        self.mount(Static(_overview_counts_text(state), classes="ov-section"))
-        self.mount(Static(_overview_alerts_text(state), classes="ov-section"))
+        self.mount(
+            Static(
+                _overview_alerts_text(state),
+                classes="ov-card ov-attention",
+            )
+        )
         self.mount(Static(_OVERVIEW_NAV_HINT, classes="ov-nav"))
 
 
@@ -183,10 +235,9 @@ def _overview_connection_text(state: TuiState) -> str:
             "  [bold yellow]STALE[/bold yellow] -- showing last-good data"
         )
     if status.qbittorrent_version:
-        version_line = f"  qBittorrent {status.qbittorrent_version}"
-        if status.api_version:
-            version_line += f" (API {status.api_version})"
-        lines.append(version_line)
+        lines.append(f"  qBittorrent {status.qbittorrent_version}")
+    if status.api_version:
+        lines.append(f"  Web API {status.api_version}")
     return "\n".join(lines)
 
 
@@ -198,20 +249,37 @@ def _overview_transfer_text(state: TuiState) -> str:
     return f"[bold]Transfer[/bold]\n  ↓ {down}   ↑ {up}"
 
 
-def _overview_counts_text(state: TuiState) -> str:
+def _overview_activity_text(state: TuiState) -> str:
     status = state.status
     assert status is not None
     counts = status.counts
-    lines = [
-        "[bold]Torrents[/bold]",
-        f"  {counts.total} total",
-        f"  {counts.downloading} downloading · {counts.seeding} seeding"
-        f" · {counts.completed} completed",
-        f"  {state.stopped_count} paused/stopped · {counts.checking} checking"
-        f" · {counts.stalled} stalled · {counts.errored} errored"
-        f" · {counts.unknown} unknown",
-    ]
-    return "\n".join(lines)
+    return (
+        f"[bold]Activity[/bold] · {counts.total} total\n"
+        f"  {counts.downloading} downloading · {counts.seeding} seeding\n"
+        f"  {state.stopped_count} stopped · {counts.checking} checking"
+    )
+
+
+def _overview_completion_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    counts = status.counts
+    incomplete = max(counts.total - counts.completed, 0)
+    return (
+        "[bold]Completion[/bold]\n"
+        f"  {counts.completed} completed · {incomplete} incomplete"
+    )
+
+
+def _overview_attention_text(state: TuiState) -> str:
+    status = state.status
+    assert status is not None
+    counts = status.counts
+    return (
+        "[bold]Attention[/bold]\n"
+        f"  {counts.stalled} stalled · {counts.errored} errored · "
+        f"{counts.unknown} unknown"
+    )
 
 
 def _overview_alerts_text(state: TuiState) -> str:
@@ -220,7 +288,8 @@ def _overview_alerts_text(state: TuiState) -> str:
     style = _HEALTH_STYLES[status.health]
     alerts = status.alerts
     header = (
-        f"[{style}]{status.health.value.title()}[/{style}] · "
+        f"[bold]Health[/bold]\n"
+        f"  [{style}]{status.health.value.title()}[/{style}] · "
         f"{len(alerts)} finding(s)"
     )
     lines = [header]
@@ -231,39 +300,71 @@ def _overview_alerts_text(state: TuiState) -> str:
 def _format_local_time(moment: datetime) -> str:
     """Format a timestamp in the local system timezone.
 
-    Overview-redesign requirement: refresh times default to local time,
-    not UTC, with the timezone label always shown so a UTC-configured
-    host is not silently ambiguous. `moment` is always timezone-aware
-    (`datetime.now(UTC)` upstream, see `app.status`), so `.astimezone()`
-    with no argument converts it to the system's local timezone.
+    Refresh times default to local time, not UTC, with the timezone
+    label always shown so a UTC-configured host is not silently
+    ambiguous. `moment` is always timezone-aware (`datetime.now(UTC)`
+    upstream, see `app.status`), so `.astimezone()` with no argument
+    converts it to the system's local timezone.
     """
     local = moment.astimezone()
     tz_label = local.tzname() or "local"
     return f"{local:%H:%M:%S} {tz_label}"
 
 
+def _shorten_hash(full_hash: str) -> str:
+    """Shorten a 40-character infohash for display, e.g. '8ac34f89…f95704b8'.
+
+    Display-only: `c` (`action_copy_hash`) always copies the untouched
+    `full_hash`, never this shortened form.
+    """
+    if len(full_hash) <= 20:
+        return full_hash
+    return f"{full_hash[:8]}…{full_hash[-8:]}"
+
+
 class FiltersPanel(Vertical):
     """The shared `TorrentFilter` vocabulary, applied entirely in memory.
 
     Only ever mounted inside `FiltersScreen` (a modal, at every
-    terminal width, per the Overview redesign -- there is no more
-    permanently visible sidebar). No qBittorrent API call is ever
-    triggered by a change here.
+    terminal width). No qBittorrent API call is ever triggered by a
+    change here. Completion and Activity are each an exclusive
+    `RadioSet` (Any/Completed/Incomplete, Any/Active/Inactive) so a
+    contradictory pair (Completed *and* Incomplete) is structurally
+    impossible through the UI -- `build_torrent_filter`'s own
+    completed+incomplete/active+inactive rejection remains as defense
+    in depth, never actually reachable from here.
     """
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Filters[/bold]")
-        yield Input(
-            placeholder="category (comma-separated)", classes="f-category"
-        )
-        yield Input(placeholder="state (comma-separated)", classes="f-state")
-        yield Checkbox("Completed", classes="f-completed")
-        yield Checkbox("Incomplete", classes="f-incomplete")
-        yield Checkbox("Active", classes="f-active")
-        yield Checkbox("Inactive", classes="f-inactive")
-        yield Checkbox("Stalled", classes="f-stalled")
-        yield Checkbox("Errored", classes="f-errored")
+        with Horizontal(classes="f-columns"):
+            with Vertical(classes="f-col"):
+                yield Static("[bold]Category[/bold]")
+                yield Input(placeholder="films, tv", classes="f-category")
+                yield Static("[bold]State[/bold]")
+                yield Input(placeholder="stalled, errored", classes="f-state")
+                yield Static("[bold]Attention[/bold]")
+                yield Checkbox("Stalled", classes="f-stalled")
+                yield Checkbox("Errored", classes="f-errored")
+            with Vertical(classes="f-col"):
+                yield Static("[bold]Completion[/bold]")
+                yield RadioSet(
+                    RadioButton("Any"),
+                    RadioButton("Completed"),
+                    RadioButton("Incomplete"),
+                    classes="f-completion",
+                )
+                yield Static("[bold]Activity[/bold]")
+                yield RadioSet(
+                    RadioButton("Any"),
+                    RadioButton("Active"),
+                    RadioButton("Inactive"),
+                    classes="f-activity",
+                )
         yield Static("", classes="f-error")
+        with Horizontal(classes="f-actions"):
+            yield Button("Apply", id="filters-apply", variant="primary")
+            yield Button("Clear", id="filters-clear")
+            yield Button("Cancel", id="filters-cancel")
 
     def build_filter(self) -> TorrentFilter:
         """Build a `TorrentFilter` from this panel's own widget values."""
@@ -276,13 +377,18 @@ class FiltersPanel(Vertical):
             part.strip() for part in state_text.split(",") if part.strip()
         ]
 
+        completion_index = self.query_one(
+            ".f-completion", RadioSet
+        ).pressed_index
+        activity_index = self.query_one(".f-activity", RadioSet).pressed_index
+
         return build_torrent_filter(
             categories=categories,
             states=states,
-            completed=self.query_one(".f-completed", Checkbox).value,
-            incomplete=self.query_one(".f-incomplete", Checkbox).value,
-            active=self.query_one(".f-active", Checkbox).value,
-            inactive=self.query_one(".f-inactive", Checkbox).value,
+            completed=completion_index == 1,
+            incomplete=completion_index == 2,
+            active=activity_index == 1,
+            inactive=activity_index == 2,
             stalled=self.query_one(".f-stalled", Checkbox).value,
             errored=self.query_one(".f-errored", Checkbox).value,
         )
@@ -293,23 +399,37 @@ class FiltersPanel(Vertical):
             filters.categories
         )
         self.query_one(".f-state", Input).value = ", ".join(filters.states)
-        self.query_one(".f-completed", Checkbox).value = (
-            filters.completed is True
+        self._select_radio(
+            ".f-completion",
+            (
+                1
+                if filters.completed is True
+                else (2 if filters.completed is False else 0)
+            ),
         )
-        self.query_one(".f-incomplete", Checkbox).value = (
-            filters.completed is False
+        self._select_radio(
+            ".f-activity",
+            (
+                1
+                if filters.active is True
+                else (2 if filters.active is False else 0)
+            ),
         )
-        self.query_one(".f-active", Checkbox).value = filters.active is True
-        self.query_one(".f-inactive", Checkbox).value = filters.active is False
         self.query_one(".f-stalled", Checkbox).value = bool(filters.stalled)
         self.query_one(".f-errored", Checkbox).value = bool(filters.errored)
+
+    def _select_radio(self, selector: str, index: int) -> None:
+        radio_set = self.query_one(selector, RadioSet)
+        buttons = list(radio_set.query(RadioButton))
+        buttons[index].value = True
 
     def show_error(self, message: str) -> None:
         self.query_one(".f-error", Static).update(message)
 
 
 class DetailsPanel(VerticalScroll):
-    """Safe details for the focused torrent.
+    """Safe details for the focused torrent, grouped into Identity,
+    Transfer, and Trackers sections.
 
     Only ever renders `SelectedTorrent` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker
@@ -327,21 +447,30 @@ class DetailsPanel(VerticalScroll):
             self.mount(Static("No torrent focused."))
             return
 
-        lines = [
+        identity_lines = [
             f"[bold]{torrent.name}[/bold]",
-            f"Hash: {torrent.hash}",
-            f"State: {torrent.state}",
+            f"Hash: {_shorten_hash(torrent.hash)}  [dim](c to copy)[/dim]",
             f"Category: {torrent.category}",
-            f"Progress: {torrent.progress * 100:.1f}%",
+        ]
+        self.mount(Static("\n".join(identity_lines), classes="d-section"))
+
+        transfer_lines = [
+            "[bold]Transfer[/bold]",
+            f"State: {torrent.state}",
+            f"Progress: {torrent.progress * 100:.1f}%   "
             f"Ratio: {torrent.ratio:.2f}",
-            f"Down: {_format_byte_rate(torrent.download_rate)}",
+            f"Down: {_format_byte_rate(torrent.download_rate)}   "
             f"Up: {_format_byte_rate(torrent.upload_rate)}",
         ]
-        self.mount(Static("\n".join(lines)))
+        self.mount(Static("\n".join(transfer_lines), classes="d-section"))
 
         tracker_details = state.focused_tracker_details
         if tracker_details is None:
-            self.mount(Static("Trackers: loading..."))
+            self.mount(
+                Static(
+                    "[bold]Trackers[/bold]\n  loading...", classes="d-section"
+                )
+            )
         else:
             fetched_at = state.focused_details_fetched_at
             freshness = (
@@ -349,11 +478,15 @@ class DetailsPanel(VerticalScroll):
                 if fetched_at is not None
                 else ""
             )
-            self.mount(Static(f"[bold]Trackers[/bold] ({freshness})"))
+            lines = [f"[bold]Trackers[/bold] ({freshness})"]
             if not tracker_details:
-                self.mount(Static("  (none)"))
-            for endpoint in tracker_details:
-                self.mount(Static(f"  {_format_endpoint(endpoint)}"))
+                lines.append("  (none)")
+            else:
+                lines.extend(
+                    f"  {_format_endpoint(endpoint)}"
+                    for endpoint in tracker_details
+                )
+            self.mount(Static("\n".join(lines), classes="d-section"))
 
 
 class HelpScreen(ModalScreen[None]):
@@ -386,19 +519,19 @@ class HelpScreen(ModalScreen[None]):
 
 
 class FiltersScreen(ModalScreen[None]):
-    """The sole access path to filters, at every terminal width -- the
-    previous design's permanently visible sidebar is gone.
+    """The sole access path to filters, at every terminal width.
 
     Filters apply live, locally, as the user edits them (zero
     qBittorrent calls -- see `QbitOpsTuiApp._apply_filters_from_panel`),
-    but `Enter`/`Escape`/clearing are three distinct, deterministic
-    interactions:
+    but Apply/Cancel/Clear are three distinct, deterministic
+    interactions, each reachable both by binding and by a visible
+    button (`FiltersPanel`'s `Apply`/`Clear`/`Cancel`):
 
-    * `Enter` -- apply (already in effect) and close.
-    * `Escape` -- cancel: revert to the filter that was active when
-      this screen opened, then close.
-    * `ctrl+r` -- clear: reset to no filter at all, modal stays open so
-      the operator can keep adjusting.
+    * Apply (`Enter`, or the Apply button) -- already in effect; closes.
+    * Cancel (`Escape`, or the Cancel button) -- revert to the filter
+      that was active when this screen opened, then close.
+    * Clear (`ctrl+r`, or the Clear button) -- reset to no filter at
+      all; the modal stays open so the operator can keep adjusting.
 
     `enter`/`escape` are deliberately *not* bound here: both are already
     `priority=True` bindings on `QbitOpsTuiApp`, and Textual resolves an
@@ -406,7 +539,9 @@ class FiltersScreen(ModalScreen[None]):
     top of the stack -- so a same-key Screen-level binding here would
     simply never fire (verified empirically). `action_activate`/
     `action_dismiss_overlay` on the App special-case `FiltersScreen`
-    instead -- see their docstrings.
+    instead -- see their docstrings. The visible buttons exist
+    specifically so Apply/Cancel/Clear are not *only* discoverable via
+    a keyboard shortcut.
     """
 
     BINDINGS = [Binding("ctrl+r", "clear", "Clear")]
@@ -416,28 +551,54 @@ class FiltersScreen(ModalScreen[None]):
         align: center middle;
     }
     #filters-dialog {
-        width: 44;
-        height: auto;
+        width: 64;
+        max-height: 90%;
         border: solid $accent;
         background: $surface;
         padding: 1 2;
+    }
+    .f-columns {
+        height: auto;
+    }
+    .f-col {
+        width: 1fr;
+        height: auto;
+        padding: 0 1;
+    }
+    .f-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    .f-actions Button {
+        margin-right: 1;
     }
     """
 
     def __init__(self, current_filters: TorrentFilter) -> None:
         super().__init__()
         self.original_filters = current_filters
-        """The filter in effect when this screen opened -- `escape`
+        """The filter in effect when this screen opened -- Cancel
         (handled by `QbitOpsTuiApp.action_dismiss_overlay`) reverts to
         exactly this value."""
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="filters-dialog"):
+        with VerticalScroll(id="filters-dialog"):
+            yield Static("[bold]Filters[/bold]")
             yield FiltersPanel()
-            yield Static("[dim]Enter apply · Esc cancel · Ctrl+R clear[/dim]")
+            yield Static("[dim]Enter/Apply · Esc/Cancel · Ctrl+R/Clear[/dim]")
 
     def on_mount(self) -> None:
         self.query_one(FiltersPanel).sync_from(self.original_filters)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app = self.app
+        assert isinstance(app, QbitOpsTuiApp)
+        if event.button.id == "filters-apply":
+            app.action_activate()
+        elif event.button.id == "filters-cancel":
+            app.action_dismiss_overlay()
+        elif event.button.id == "filters-clear":
+            self.action_clear()
 
     def action_clear(self) -> None:
         app = self.app
@@ -453,9 +614,24 @@ class FiltersScreen(ModalScreen[None]):
 
 class DetailsScreen(ModalScreen[None]):
     """A modal Details panel -- the narrow-layout's access path to the
-    focused torrent's details, opened by `enter`."""
+    focused torrent's details, opened by `enter`.
 
-    BINDINGS = [Binding("escape", "dismiss", "Close", priority=True)]
+    Explicitly binds `c` (copy hash), delegating straight to
+    `QbitOpsTuiApp.action_copy_hash` -- Textual restricts a *non*-
+    priority key's binding lookup to `Screen._modal_binding_chain` while
+    a `ModalScreen` is on top of the stack, which does **not** include
+    the App's own `BINDINGS` (only `priority=True` ones bypass this, via
+    a separate lookup -- see `FiltersScreen`'s docstring for that other
+    case). A plain `Binding("c", "copy_hash", ...)` left only on the App
+    would silently never fire while this screen is open -- verified
+    empirically. `q`/`r`/`e` are deliberately not re-bound here: only
+    Copy hash is a documented Details-view action (see docs/COMMANDS.md).
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", priority=True),
+        Binding("c", "copy_hash", "Copy hash"),
+    ]
 
     CSS = """
     DetailsScreen {
@@ -473,7 +649,7 @@ class DetailsScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="details-dialog"):
             yield DetailsPanel()
-            yield Static("[dim]Esc to close[/dim]")
+            yield Static("[dim]Esc to close · c to copy hash[/dim]")
 
     def on_mount(self) -> None:
         assert isinstance(self.app, QbitOpsTuiApp)
@@ -481,6 +657,67 @@ class DetailsScreen(ModalScreen[None]):
 
     def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
         self.dismiss()
+
+    def action_copy_hash(self) -> None:
+        assert isinstance(self.app, QbitOpsTuiApp)
+        self.app.action_copy_hash()
+
+
+class ExplainScreen(ModalScreen[None]):
+    """An evidence-based explanation of the focused torrent's state.
+
+    `report` starts `None` while tracker data is still being fetched
+    (see `QbitOpsTuiApp.action_explain`) -- `refresh_content()` shows a
+    concise loading line in that case, and the App calls it again once
+    (and only if) a matching, still-current result arrives (see
+    `QbitOpsTuiApp._on_detail_worker_state_changed`'s explain-race
+    handling). Purely a renderer: it never fetches anything itself and
+    never calls back into `TuiController`.
+    """
+
+    BINDINGS: list[Binding] = []
+    """Deliberately empty: `escape` is already a `priority=True` App
+    binding (`action_dismiss_overlay`), which always wins over any
+    same-key Screen binding -- see `FiltersScreen`'s docstring for the
+    verified mechanism. A Screen-level `escape` binding here would
+    simply never fire."""
+
+    CSS = """
+    ExplainScreen {
+        align: center middle;
+    }
+    #explain-dialog {
+        width: 80%;
+        max-width: 96;
+        height: 85%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    def __init__(
+        self, torrent_name: str, report: ExplanationReport | None
+    ) -> None:
+        super().__init__()
+        self.torrent_name = torrent_name
+        self.report = report
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="explain-dialog"):
+            yield Static(id="explain-content")
+            yield Static("[dim]Esc to close[/dim]")
+
+    def on_mount(self) -> None:
+        self.refresh_content()
+
+    def refresh_content(self) -> None:
+        assert isinstance(self.app, QbitOpsTuiApp)
+        state = self.app.controller.state
+        content = self.query_one("#explain-content", Static)
+        content.update(
+            _format_explain_text(self.torrent_name, self.report, state)
+        )
 
 
 class MainScreen(Screen[None]):
@@ -494,8 +731,16 @@ class MainScreen(Screen[None]):
     """
 
     def on_resize(self, event: events.Resize) -> None:
-        is_narrow = event.size.width < NARROW_WIDTH_THRESHOLD
+        self._apply_width(event.size.width)
+
+    def _apply_width(self, width: int) -> None:
+        is_narrow = width < NARROW_WIDTH_THRESHOLD
         self.set_class(is_narrow, "narrow")
+        overview = self.query_one("#overview-workspace")
+        overview.set_class(not is_narrow, "grid")
+
+        assert isinstance(self.app, QbitOpsTuiApp)
+        self.app._render_table()
 
         # Never leave a now-hidden inline Details widget focused -- an
         # invisible focused widget can neither be seen nor meaningfully
@@ -515,7 +760,7 @@ class MainScreen(Screen[None]):
 
 
 class QbitOpsTuiApp(App[None]):
-    """The Overview-first, read-only TUI."""
+    """The Overview-first, read-only TUI (V1)."""
 
     # Textual's built-in Ctrl+P command palette has no qbit-ops commands
     # yet and only confused dogfooders ("^p palette" in the footer) --
@@ -545,11 +790,23 @@ class QbitOpsTuiApp(App[None]):
         height: 1fr;
         padding: 0 1;
     }
-    .ov-section {
-        margin-bottom: 1;
+    #overview-workspace.grid {
+        layout: grid;
+        grid-size: 2;
+        grid-gutter: 1 2;
+        grid-rows: auto;
+    }
+    .ov-card {
+        border: round $accent;
+        padding: 0 1;
+        height: auto;
+    }
+    .ov-card.ov-attention {
+        border: round $warning;
     }
     .ov-nav {
         color: $text-muted;
+        padding: 0 1;
     }
     #filter-summary {
         height: 1;
@@ -563,12 +820,15 @@ class QbitOpsTuiApp(App[None]):
         width: 1fr;
     }
     #main > DetailsPanel {
-        width: 36;
+        width: 40;
         border: solid $accent;
         padding: 0 1;
     }
     Screen.narrow #main > DetailsPanel {
         display: none;
+    }
+    .d-section {
+        margin-bottom: 1;
     }
     """
 
@@ -593,6 +853,8 @@ class QbitOpsTuiApp(App[None]):
         # printable-character handling, which bypasses the bindings
         # system entirely -- see `action_activate`'s docstring).
         Binding("enter", "activate", "Open", show=False, priority=True),
+        Binding("c", "copy_hash", "Copy hash"),
+        Binding("e", "explain", "Explain"),
         Binding("r", "refresh_details", "Refresh details"),
         Binding("question_mark", "toggle_help", "Help"),
         # `escape` must win over whatever has focus (a filter/search
@@ -619,6 +881,8 @@ class QbitOpsTuiApp(App[None]):
         self._rebuilding_table = False
         self._refresh_worker: Worker[Any] | None = None
         self._last_detail_worker: Worker[Any] | None = None
+        self._pending_explain_request_id: int | None = None
+        self._explain_screen: ExplainScreen | None = None
 
     def get_default_screen(self) -> Screen[None]:
         return MainScreen(id="_default")
@@ -635,8 +899,6 @@ class QbitOpsTuiApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        table = self.query_one("#torrents", DataTable)
-        table.add_columns("Name", "State", "Progress", "Down", "Up", "Ratio")
         # Render the initial (empty) state immediately -- pure, no I/O --
         # so the screen never sits blank while the first refresh worker
         # is still in flight. The app opens on Overview; the Torrents
@@ -784,7 +1046,7 @@ class QbitOpsTuiApp(App[None]):
         total = state.torrent_snapshot.scanned if state.torrent_snapshot else 0
         shown = len(visible.matched) if visible is not None else 0
 
-        parts = [f"{shown} shown / {total}"]
+        parts = [f"{shown:,} shown / {total:,}"]
         description = describe_torrent_filter(state.filters)
         if description != "none":
             parts.append(description)
@@ -797,18 +1059,24 @@ class QbitOpsTuiApp(App[None]):
         table = self.query_one("#torrents", DataTable)
         state = self.controller.state
         visible = state.visible
+        columns = _columns_for_width(self.size.width)
 
         previously_focused = state.focused_hash
         self._rebuilding_table = True
         try:
-            table.clear()
+            table.clear(columns=True)
             self._hash_by_row = {}
+            for name in columns:
+                table.add_column(name, width=_COLUMN_WIDTHS.get(name), key=name)
 
             if visible is None or not visible.matched:
                 return
 
             for index, torrent in enumerate(visible.matched):
-                table.add_row(*_torrent_row(torrent), key=torrent.hash)
+                values = _torrent_row_values(torrent)
+                table.add_row(
+                    *(values[name] for name in columns), key=torrent.hash
+                )
                 self._hash_by_row[index] = torrent.hash
 
             if previously_focused is not None:
@@ -839,8 +1107,8 @@ class QbitOpsTuiApp(App[None]):
         Zero qBittorrent API calls (`TuiController.set_workspace` is a
         pure state assignment). A no-op while a modal is on top of the
         screen stack, so a stray workspace-switch keystroke never
-        switches the workspace underneath an open Filters/Details/Help
-        modal. Search/filter state and the focused torrent are
+        switches the workspace underneath an open Filters/Details/Help/
+        Explain modal. Search/filter state and the focused torrent are
         untouched by construction (`set_workspace` does not reset
         them); only widget *focus* is actively managed here, so a
         switch never leaves a now-hidden widget focused.
@@ -997,6 +1265,42 @@ class QbitOpsTuiApp(App[None]):
                 request_id, torrent_hash, raw_trackers
             )
         self._render_details_panels()
+        self._maybe_resolve_pending_explain(request_id, torrent_hash)
+
+    def _maybe_resolve_pending_explain(
+        self, request_id: int, torrent_hash: str
+    ) -> None:
+        """Update a still-open Explain modal once its awaited detail
+        fetch completes -- race-safe (see `action_explain`).
+
+        A no-op unless this exact request is the one Explain is
+        waiting on. Even then, the update is applied only if: the
+        Explain modal is still open (never reopens one the user already
+        closed), focus has not moved to a different torrent since, and
+        no newer detail request has superseded this one -- any of these
+        failing means a stale result for a torrent Explain no longer
+        cares about, discarded like any other late result.
+        """
+        if self._pending_explain_request_id != request_id:
+            return
+        self._pending_explain_request_id = None
+
+        if self._explain_screen is None or self._explain_screen not in (
+            self.screen_stack
+        ):
+            return
+        if self.controller.state.focused_hash != torrent_hash:
+            return
+        if self.controller.detail_request_id != request_id:
+            return
+
+        report = self.controller.build_explanation()
+        if report is None:
+            self.pop_screen()
+            self.notify("Torrent no longer available.", severity="warning")
+            return
+        self._explain_screen.report = report
+        self._explain_screen.refresh_content()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search-input":
@@ -1022,6 +1326,13 @@ class QbitOpsTuiApp(App[None]):
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         try:
             panel = event.checkbox.query_ancestor(FiltersPanel)
+        except NoMatches:
+            return
+        self._apply_filters_from_panel(panel)
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        try:
+            panel = event.radio_set.query_ancestor(FiltersPanel)
         except NoMatches:
             return
         self._apply_filters_from_panel(panel)
@@ -1091,10 +1402,11 @@ class QbitOpsTuiApp(App[None]):
         neighboring comment).
 
         Also special-cases `FiltersScreen`: its filter edits already
-        apply live (see `on_input_changed`/`on_checkbox_changed`), so
-        `enter` there only needs to close the modal -- see
-        `FiltersScreen`'s docstring for why this can't just be a
-        Screen-level binding.
+        apply live (see `on_input_changed`/`on_checkbox_changed`/
+        `on_radio_set_changed`), so `enter` there only needs to close
+        the modal -- see `FiltersScreen`'s docstring for why this can't
+        just be a Screen-level binding. Any other modal (Details, Help,
+        Explain) simply ignores `enter`.
 
         Otherwise dispatches by active workspace: from Overview, `enter`
         is the documented "browse torrents" shortcut (same as `t`);
@@ -1145,6 +1457,83 @@ class QbitOpsTuiApp(App[None]):
             return None
         return self._start_detail_fetch(torrent_hash, request_id)
 
+    def action_copy_hash(self) -> None:
+        """Copy the focused torrent's full canonical hash to the clipboard.
+
+        A safe no-op (a notification, not a crash) when nothing is
+        focused. Performs no qBittorrent API call. Uses `Textual`'s own
+        `App.copy_to_clipboard` (OSC 52), which writes to the terminal
+        emulator's clipboard -- some terminals (notably macOS
+        Terminal.app) do not support this escape sequence and will
+        silently not receive it; that is a terminal limitation, not
+        something qbit-ops can detect or work around (see
+        docs/COMMANDS.md).
+        """
+        torrent_hash = self.controller.state.focused_hash
+        if torrent_hash is None:
+            self.notify("No torrent focused.", severity="warning")
+            return
+        self.copy_to_clipboard(torrent_hash)
+        self.notify(f"Copied hash {_shorten_hash(torrent_hash)}")
+
+    def action_explain(self) -> Worker[Any] | None:
+        """Open an evidence-based explanation of the focused torrent.
+
+        Only meaningful in the Torrents workspace; a safe notification
+        (never a crash) when nothing is focused. Zero API calls when
+        the focused torrent's tracker details are already loaded --
+        `TuiController.build_explanation` is pure. Otherwise reuses the
+        existing in-flight focused-detail worker if one is already
+        running for the current focus (never starts a second,
+        redundant `torrents_trackers()` call), or starts exactly one if
+        none is in flight (e.g. an earlier fetch failed) -- see
+        `_maybe_resolve_pending_explain` for the race-safe completion
+        path. Returns the dispatched `Worker` when a new fetch was
+        started, for the same test-observability reason as
+        `_focus_torrent`; `None` otherwise.
+        """
+        if not self._in_torrents_workspace():
+            return None
+        state = self.controller.state
+        torrent_hash = state.focused_hash
+        if torrent_hash is None:
+            self.notify("No torrent focused.", severity="warning")
+            return None
+
+        torrent = state.focused_torrent()
+        name = torrent.name if torrent is not None else torrent_hash
+
+        if state.focused_tracker_details is not None:
+            report = self.controller.build_explanation()
+            if report is None:
+                self.notify("Torrent no longer available.", severity="warning")
+                return None
+            self._open_explain_screen(name, report)
+            return None
+
+        self._open_explain_screen(name, None)
+        worker_in_flight = (
+            self._last_detail_worker is not None
+            and not self._last_detail_worker.is_finished
+        )
+        if worker_in_flight:
+            self._pending_explain_request_id = self.controller.detail_request_id
+            return self._last_detail_worker
+
+        request_id = self.controller.begin_manual_detail_refresh()
+        if request_id is None:
+            return None
+        self._pending_explain_request_id = request_id
+        self._render_details_panels()
+        return self._start_detail_fetch(torrent_hash, request_id)
+
+    def _open_explain_screen(
+        self, torrent_name: str, report: ExplanationReport | None
+    ) -> None:
+        screen = ExplainScreen(torrent_name, report)
+        self._explain_screen = screen
+        self.push_screen(screen)
+
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
 
@@ -1191,8 +1580,8 @@ class ConnectionBanner(Static):
 class FilterSummary(Static):
     """A concise, always-visible line describing the active filter/search.
 
-    e.g. "146 shown / 1105 · stalled" or
-    "24 shown / 1105 · category: films · stalled · search: ubuntu" --
+    e.g. "146 shown / 1,105 · stalled" or
+    "24 shown / 1,105 · category: films · stalled · search: ubuntu" --
     see docs/COMMANDS.md ("TUI"). Purely presentational: derived from
     `TuiState`, never fetched. Only shown in the Torrents workspace.
     """
@@ -1205,6 +1594,8 @@ up/down, j/k   navigate torrents (Torrents workspace)
 /              search by name or hash, live as you type (Torrents workspace)
 f              open filters (Torrents workspace)
 enter          browse torrents (Overview) / open details (Torrents)
+c              copy the focused torrent's full hash
+e              explain the focused torrent's state
 r              refresh focused torrent's tracker details
 esc            close a modal, or return focus to the torrent list
 q              quit
@@ -1234,23 +1625,168 @@ def _format_byte_rate(bytes_per_second: int) -> str:
     return f"{value:.1f} {unit}/s"
 
 
-def _torrent_row(torrent: SelectedTorrent) -> tuple[Any, ...]:
-    return (
-        torrent.name,
-        torrent.state,
-        f"{torrent.progress * 100:.0f}%",
-        _format_byte_rate(torrent.download_rate),
-        _format_byte_rate(torrent.upload_rate),
-        f"{torrent.ratio:.2f}",
-    )
+# Column display order -- "a user-oriented column order", per the
+# visual-polish phase: Name first (always shown, gets the remaining
+# width), then operational columns, Category last (shown only once
+# width permits). Row *identity* (the DataTable row `key=`) is always
+# the full torrent hash regardless of which columns are visible.
+_ALL_COLUMNS: tuple[str, ...] = (
+    "Name",
+    "State",
+    "Progress",
+    "Down",
+    "Up",
+    "Ratio",
+    "Category",
+)
+
+# Compact, predictable widths for operational columns -- `Name` is
+# deliberately left unset so it absorbs the remaining width instead of
+# being squeezed to its content's natural size.
+_COLUMN_WIDTHS: dict[str, int] = {
+    "State": 12,
+    "Progress": 7,
+    "Down": 10,
+    "Up": 10,
+    "Ratio": 6,
+    "Category": 14,
+}
+
+
+def _columns_for_width(width: int) -> tuple[str, ...]:
+    """Pick which table columns to show, in order, for a given App width.
+
+    Progressive disclosure: Name/State/Progress are always shown; Down/
+    Up appear at normal width; Ratio/Category only once the terminal is
+    comfortably wide. Details, Filters, Search, Copy, and Explain never
+    depend on which columns happen to be visible.
+    """
+    if width < NARROW_WIDTH_THRESHOLD:
+        return ("Name", "State", "Progress")
+    if width < WIDE_WIDTH_THRESHOLD:
+        return ("Name", "State", "Progress", "Down", "Up")
+    return _ALL_COLUMNS
+
+
+def _torrent_row_values(torrent: SelectedTorrent) -> dict[str, str]:
+    return {
+        "Name": torrent.name,
+        "State": torrent.state,
+        "Progress": f"{torrent.progress * 100:.0f}%",
+        "Down": _format_byte_rate(torrent.download_rate),
+        "Up": _format_byte_rate(torrent.upload_rate),
+        "Ratio": f"{torrent.ratio:.2f}",
+        "Category": torrent.category,
+    }
 
 
 def _format_endpoint(endpoint: dict[str, Any]) -> str:
-    """Render one safe, structural tracker endpoint -- never a raw URL."""
-    parts = [str(endpoint["tracker"]), str(endpoint["health"])]
-    if not endpoint["enabled"]:
-        parts.append("disabled")
-    return " ".join(parts)
+    """Render one safe, structural tracker endpoint as one aligned line.
+
+    Never a raw URL, path, query value, userinfo, or passkey. Shows
+    identity and health/status as separate, clearly labeled columns,
+    and a sanitized message only when one is present -- never a bare
+    status word with nothing identifying which tracker it belongs to.
+    Deliberately does *not* also append a synthetic "disabled" suffix
+    from `endpoint["enabled"]`: `health` is already `"disabled"`
+    whenever `enabled` is `False` for a classifiable status
+    (`app.trackers`'s single status->health mapping), so doing both
+    previously produced a duplicated "disabled disabled".
+    """
+    identity = str(endpoint["tracker"])
+    health = str(endpoint["health"])
+    line = f"{identity:<10} {health}"
+    message = endpoint.get("message")
+    if message and health != "disabled":
+        line += f"  -- {message}"
+    return line
+
+
+@dataclass(frozen=True)
+class _ExplainSection:
+    title: str
+    lines: tuple[str, ...]
+
+
+def _format_explain_text(
+    torrent_name: str,
+    report: ExplanationReport | None,
+    state: TuiState,
+) -> str:
+    """Render an `ExplanationReport` as one scrollable, structured block.
+
+    Display-only: never invents a recommendation, a confidence score,
+    or hidden reasoning beyond what `report` itself carries. `report`
+    being `None` means tracker data is still being fetched in the
+    background -- shown as a concise loading line, not a blank modal.
+    """
+    freshness_lines = []
+    if state.last_successful_refresh is not None:
+        freshness_lines.append(
+            f"Torrent snapshot refreshed "
+            f"{_format_local_time(state.last_successful_refresh)}"
+        )
+    if state.focused_details_fetched_at is not None:
+        freshness_lines.append(
+            f"Tracker details fetched "
+            f"{_format_local_time(state.focused_details_fetched_at)}"
+        )
+    if state.stale:
+        freshness_lines.append(
+            "[bold yellow]STALE[/bold yellow] -- qBittorrent is currently "
+            "unreachable; this explanation uses last-known data."
+        )
+
+    header = [f"[bold]Explain[/bold] · {torrent_name}"]
+    header.extend(freshness_lines)
+
+    if report is None:
+        header.append("")
+        header.append("Fetching tracker data...")
+        return "\n".join(header)
+
+    style = _SEVERITY_STYLES[report.overall_severity]
+    header.append(f"[{style}]{report.overall_severity.value.title()}[/{style}]")
+    header.append("")
+    header.append(report.summary)
+
+    blocks = ["\n".join(header)]
+
+    for finding in report.findings:
+        blocks.append(_format_finding(finding))
+
+    return "\n\n".join(blocks)
+
+
+def _format_finding(finding: ExplanationFinding) -> str:
+    style = _SEVERITY_STYLES[finding.severity]
+    lines = [
+        f"[{style}]{finding.severity.value.upper()}[/{style}] "
+        f"[bold]{finding.title}[/bold]",
+        finding.explanation,
+    ]
+
+    if finding.evidence:
+        lines.append("")
+        lines.append("[bold]Evidence[/bold]")
+        lines.extend(_format_evidence(item) for item in finding.evidence)
+
+    if finding.limitations:
+        lines.append("")
+        lines.append("[bold]Limitations[/bold]")
+        lines.extend(f"  - {item}" for item in finding.limitations)
+
+    if finding.next_commands:
+        lines.append("")
+        lines.append("[bold]Consider[/bold]")
+        lines.extend(f"  $ {command}" for command in finding.next_commands)
+
+    return "\n".join(lines)
+
+
+def _format_evidence(evidence: Evidence) -> str:
+    label = f"{evidence.label}:"
+    return f"  {label:<15} {evidence.value}"
 
 
 def run_tui(

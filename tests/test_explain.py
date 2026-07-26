@@ -4,6 +4,7 @@ import pytest
 
 from app.explain import (
     ExplanationSeverity,
+    build_torrent_explanation,
     evidence_to_dict,
     explain_torrent,
     explain_tracker,
@@ -12,6 +13,7 @@ from app.explain import (
     finding_to_dict,
 )
 from app.selectors import AmbiguousTorrentHashError
+from app.torrents import get_safe_tracker_details
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40
@@ -331,6 +333,99 @@ def test_torrent_explanation_uses_at_most_one_tracker_lookup() -> None:
     assert client.torrents_info_calls == 1
     assert client.torrents_trackers_calls == 1
     assert client.calls[-1] == ("torrents_trackers", (HASH_A,), {})
+
+
+# --- Pure builder: build_torrent_explanation ----------------------------------
+#
+# `explain_torrent` (client-calling, ambiguity-aware) is now a thin wrapper
+# around `build_torrent_explanation` (pure, zero-API) -- the TUI's `e`
+# binding calls the builder directly with already-fetched data (see
+# `app.tui.state.TuiController.build_explanation`), so both interfaces must
+# produce identical findings for identical evidence, with no second,
+# TUI-only rule catalogue.
+
+
+def test_pure_builder_matches_explain_torrent_for_the_same_torrent() -> None:
+    torrent = make_torrent(hash=HASH_A, name="T1", state="stalledDL")
+    raw_trackers = [{"url": "https://tracker.example/announce", "status": 2}]
+    client = FakeQbitClient(
+        torrents=[torrent], trackers_by_hash={HASH_A: raw_trackers}
+    )
+
+    via_client = explain_torrent(client, HASH_A)
+    via_builder = build_torrent_explanation(
+        torrent,
+        get_safe_tracker_details(raw_trackers),
+        generated_at=via_client.generated_at if via_client else None,
+    )
+
+    assert via_client is not None
+    assert via_client.target_identity == via_builder.target_identity
+    assert via_client.summary == via_builder.summary
+    assert via_client.overall_severity == via_builder.overall_severity
+    assert via_client.findings == via_builder.findings
+
+
+def test_pure_builder_performs_zero_api_calls() -> None:
+    """`build_torrent_explanation` never touches a client at all -- it
+    does not even accept one."""
+    import inspect
+
+    signature = inspect.signature(build_torrent_explanation)
+    assert "client" not in signature.parameters
+
+
+def test_pure_builder_treats_none_tracker_details_as_collection_failure() -> (
+    None
+):
+    torrent = make_torrent(hash=HASH_A, name="T1", state="stalledDL")
+
+    report = build_torrent_explanation(torrent, None)
+
+    finding = report.findings[0]
+    assert any(
+        "could not be collected" in limitation
+        for limitation in finding.limitations
+    )
+
+
+def test_pure_builder_treats_empty_list_as_no_endpoints_reported() -> None:
+    torrent = make_torrent(hash=HASH_A, name="T1", state="stalledDL")
+
+    report = build_torrent_explanation(torrent, [])
+
+    finding = report.findings[0]
+    assert any(
+        "No tracker endpoints were reported" in limitation
+        for limitation in finding.limitations
+    )
+
+
+def test_pure_builder_uses_the_supplied_generated_at() -> None:
+    from datetime import UTC, datetime
+
+    torrent = make_torrent(hash=HASH_A, name="T1")
+    fixed = datetime(2026, 1, 1, tzinfo=UTC)
+
+    report = build_torrent_explanation(torrent, [], generated_at=fixed)
+
+    assert report.generated_at == fixed
+
+
+def test_explain_torrent_output_unchanged_after_extraction() -> None:
+    """Regression: extracting the pure builder must not change
+    `explain_torrent`'s own output for an existing, already-covered
+    scenario (healthy seeding, no trackers)."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=HASH_A, name="T1", state="uploading")],
+        trackers_by_hash={HASH_A: []},
+    )
+
+    report = explain_torrent(client, HASH_A)
+
+    assert report is not None
+    assert report.findings[0].code == "TORRENT_HEALTHY_SEEDING"
+    assert report.overall_severity == ExplanationSeverity.INFO
 
 
 # --- Tracker explanation ------------------------------------------------------
