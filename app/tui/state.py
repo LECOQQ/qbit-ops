@@ -46,7 +46,8 @@ function, any deletion function, or `app.main` -- enforced by
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -174,14 +175,39 @@ class TuiController:
     (a `tests.support.FakeQbitClient` factory) and for reconnect
     (calling it again after a recoverable failure).
 
-    Thread-safety: `_ensure_client()` is the only method more than one
-    thread may call concurrently in practice (a periodic-refresh worker
-    and a focused-detail worker can be in flight at the same time) --
-    guarded by `_client_lock` so at most one of them ever constructs a
-    new client. Every `apply_*` method mutates `self.state` and must
-    only ever be called from the UI thread; every `collect_*` method
-    performs blocking I/O only and touches no widget or reactive state,
-    so it is safe to call from a background thread.
+    Thread-safety -- **one remote-client coordinator** (audit finding
+    F-2, see docs/audits/2026-07-26-tui-bulk-mutation-remediation.md):
+    `_remote_lock` serializes *every* blocking qBittorrent operation the
+    TUI can reach. There are exactly three such entry points, and all
+    three take it for the whole duration of their call:
+
+    * `collect_refresh()`          -- periodic refresh
+    * `collect_tracker_details()`  -- focused/manual tracker details
+    * `apply_bulk_plan()`          -- LOW-risk bulk mutation Apply
+
+    This replaces the pre-TUI-2 posture (documented on `_ensure_client`
+    until this remediation) that a periodic-refresh worker and a
+    focused-detail worker could use the same client concurrently:
+    `qbittorrentapi` is backed by a `requests.Session` whose
+    multithreaded safety is not guaranteed, and a mutation overlapping a
+    read was accepted limitation L-3 plus finding F-2. At most one
+    remote operation now touches the client at a time -- provable via
+    `max_concurrent_remote_operations`.
+
+    The lock is only ever held on a worker thread, never on the UI
+    thread, and never across widget rendering or user input. It is a
+    plain `Lock`, not an `RLock`: no coordinated method calls another,
+    and the post-Apply refresh is dispatched as a *separate* worker from
+    the UI thread only after the mutation worker has already returned
+    (and therefore released the lock), so nesting -- and deadlock --
+    cannot occur. `_client_lock` remains a distinct, narrower lock
+    guarding only lazy client *construction*; the acquisition order is
+    always `_remote_lock` then `_client_lock`, never the reverse.
+
+    Every `apply_*` method mutates `self.state` and must only ever be
+    called from the UI thread; every `collect_*` method performs
+    blocking I/O only and touches no widget or reactive state, so it is
+    safe to call from a background thread.
     """
 
     def __init__(
@@ -194,19 +220,53 @@ class TuiController:
         self._host = host
         self._client: Any | None = None
         self._client_lock = threading.Lock()
+        self._remote_lock = threading.Lock()
+        self._remote_in_flight = 0
+        self._max_concurrent_remote = 0
         self._raw_torrents: list[Any] = []
         self._detail_request_id = 0
         self.state = TuiState()
 
+    @property
+    def max_concurrent_remote_operations(self) -> int:
+        """High-water mark of simultaneous remote client operations.
+
+        Instrumentation for the F-2 regression tests: must never exceed
+        `1`. Incremented/decremented inside `_remote_operation()`, so it
+        measures actual overlap rather than merely asserting the lock
+        exists.
+        """
+        return self._max_concurrent_remote
+
+    @contextmanager
+    def _remote_operation(self) -> Iterator[Any]:
+        """Own the qBittorrent client exclusively for one blocking call.
+
+        Yields the (lazily created) client. Worker threads only -- see
+        the class docstring. The in-flight accounting lives inside the
+        lock, so `max_concurrent_remote_operations` is an honest
+        measurement of overlap, not a restatement of the lock's
+        existence.
+        """
+        with self._remote_lock:
+            self._remote_in_flight += 1
+            self._max_concurrent_remote = max(
+                self._max_concurrent_remote, self._remote_in_flight
+            )
+            try:
+                yield self._ensure_client()
+            finally:
+                self._remote_in_flight -= 1
+
     def _ensure_client(self) -> Any:
         """Lazily create (or reuse) the qBittorrent client.
 
-        Safe to call concurrently from more than one thread: the
-        check-and-create sequence is guarded by `_client_lock` so a
-        periodic-refresh worker and a focused-detail worker racing to
-        reconnect after a failure can never both construct a client at
-        once -- whichever acquires the lock first creates it, the other
-        reuses that same instance.
+        Guarded by `_client_lock` so two callers racing to reconnect
+        after a failure can never both construct a client at once.
+        Callers performing a *blocking* call must go through
+        `_remote_operation()` instead of calling this directly -- that
+        is what serializes the call itself (see the class docstring);
+        this method only makes construction safe.
         """
         with self._client_lock:
             if self._client is None:
@@ -228,11 +288,32 @@ class TuiController:
         avoid (mirrors `refresh()`'s guard) -- this method itself has no
         opinion on when it is appropriate to call.
         """
-        client = self._ensure_client()
-        return collect_tui_refresh(client, host=self._host)
+        with self._remote_operation() as client:
+            return collect_tui_refresh(client, host=self._host)
 
-    def apply_refresh_success(self, result: TuiRefreshResult) -> None:
-        """Apply a successful periodic refresh. UI-thread only."""
+    def apply_refresh_success(
+        self, result: TuiRefreshResult, *, reconcile: bool = True
+    ) -> None:
+        """Apply a successful periodic refresh. UI-thread only.
+
+        `reconcile=False` suppresses only the *selection* reconciliation
+        (audit finding F-1): the raw snapshot, status, counts, visible
+        set, and focus are always updated, since a refresh must never
+        show stale data merely because a modal is open. The caller
+        passes `False` while a `FiltersScreen` holds an uncommitted
+        draft -- a category filter is exact-match, so a half-typed
+        "films" transiently matches nothing and would silently destroy
+        a selection the operator patiently built, which is exactly what
+        `set_filters`'s documented deferral exists to prevent. The
+        existing commit points (Apply/Clear/Cancel) reconcile instead;
+        this knowledge lives in `app.tui.app`, which owns the screen
+        stack, rather than teaching the controller what a modal is.
+
+        Note `_recompute_visible()` still runs, and it uses the
+        *committed* `state.filters`/`state.search` -- never the modal's
+        draft, which lives only in `FiltersPanel`'s widgets until Apply
+        commits it via `set_filters`.
+        """
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
         self.state.torrent_snapshot = result.torrents
@@ -244,7 +325,8 @@ class TuiController:
         self.state.refreshing = False
         self._recompute_visible()
         self._reconcile_focus()
-        self.reconcile_selection()
+        if reconcile:
+            self.reconcile_selection()
 
     def apply_refresh_failure(self, error: Exception) -> None:
         """Classify and apply a failed periodic refresh. UI-thread only.
@@ -480,17 +562,31 @@ class TuiController:
     def classify_plan_status(
         self, plan: BulkTorrentActionPlan
     ) -> MutationStatus:
-        """Classify a plan before Apply -- pure, mirrors `app.main`'s
-        shared `_run_mutation` mapping exactly, so the TUI and CLI never
-        disagree about what counts as `NO_MATCH` vs `NO_CHANGES` vs a
-        real, previewable change (`plan.matched` covers both `changes`
-        and `skipped`; only an empty `matched` is `NO_MATCH`).
+        """Classify a plan before Apply -- pure.
+
+        Follows `app.main`'s shared `_run_mutation` mapping for the two
+        cases the CLI can actually produce, with one TUI-specific
+        refinement (audit finding F-3): a selection whose torrents all
+        *disappeared* between the Actions snapshot and the plan build
+        yields `matched > 0` with only `not_found` skips, which the CLI
+        mapping alone would report as `NO_CHANGES` -- i.e. "already
+        satisfied", which is untrue and misleading. Only the TUI can
+        reach that state (its selection is captured ahead of planning,
+        unlike a CLI selector resolved in one pass), so the refinement
+        lives here rather than in the shared
+        `build_bulk_action_plan_from_snapshot` model.
+
+        `NO_MATCH`   -- nothing actionable was *found*.
+        `NO_CHANGES` -- targets were found and already satisfied.
+        `PREVIEW`    -- there is at least one real change to apply.
         """
         if plan.matched == 0:
             return MutationStatus.NO_MATCH
-        if not plan.changes:
-            return MutationStatus.NO_CHANGES
-        return MutationStatus.PREVIEW
+        if plan.changes:
+            return MutationStatus.PREVIEW
+        if all(skip.reason == "not_found" for skip in plan.skipped):
+            return MutationStatus.NO_MATCH
+        return MutationStatus.NO_CHANGES
 
     def apply_bulk_plan(self, plan: BulkTorrentActionPlan) -> None:
         """Apply an already-frozen plan. Blocking I/O -- safe on a
@@ -502,8 +598,8 @@ class TuiController:
         `classify_recoverable_qbit_failure`, exactly like
         `collect_refresh`/`collect_tracker_details`.
         """
-        client = self._ensure_client()
-        apply_bulk_torrent_action(client, plan)
+        with self._remote_operation() as client:
+            apply_bulk_torrent_action(client, plan)
 
     # -- focused torrent / tracker details ----------------------------------
 
@@ -618,8 +714,8 @@ class TuiController:
         it via `apply_tracker_details_success`/`_failure` on the UI
         thread, which also enforces the stale-result guard.
         """
-        client = self._ensure_client()
-        return client.torrents_trackers(torrent_hash)
+        with self._remote_operation() as client:
+            return client.torrents_trackers(torrent_hash)
 
     def apply_tracker_details_success(
         self,
