@@ -309,10 +309,17 @@ class TuiController:
         this knowledge lives in `app.tui.app`, which owns the screen
         stack, rather than teaching the controller what a modal is.
 
-        Note `_recompute_visible()` still runs, and it uses the
-        *committed* `state.filters`/`state.search` -- never the modal's
-        draft, which lives only in `FiltersPanel`'s widgets until Apply
-        commits it via `set_filters`.
+        Precisely what is and is not deferred (closure review D-1 --
+        the earlier wording here described the mechanism backwards):
+        `set_filters()` **is** called on every keystroke, by
+        `app.tui.app._apply_filters_from_panel` via `on_input_changed`,
+        so `state.filters` genuinely holds the partial draft and
+        `_recompute_visible()` genuinely uses it -- with only "f" typed,
+        `visible` is empty. What the `reconcile` flag defers is *only*
+        the selection reconciliation, never the filter itself. Do not
+        "simplify" this parameter away as redundant: without it, a tick
+        landing mid-typing would drop the whole selection against a
+        filter the operator has not finished writing.
         """
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
@@ -588,7 +595,12 @@ class TuiController:
             return MutationStatus.NO_MATCH
         return MutationStatus.NO_CHANGES
 
-    def apply_bulk_plan(self, plan: BulkTorrentActionPlan) -> None:
+    def apply_bulk_plan(
+        self,
+        plan: BulkTorrentActionPlan,
+        *,
+        should_proceed: Callable[[], bool] | None = None,
+    ) -> bool:
         """Apply an already-frozen plan. Blocking I/O -- safe on a
         background worker thread, never the UI thread.
 
@@ -597,9 +609,31 @@ class TuiController:
         raise -- the caller classifies the failure via
         `classify_recoverable_qbit_failure`, exactly like
         `collect_refresh`/`collect_tracker_details`.
+
+        Returns whether the mutation was actually dispatched.
+
+        `should_proceed` is a last-moment authority check evaluated
+        **inside** `_remote_operation()`, i.e. *after* the shared remote
+        lock has been acquired and immediately before any qBittorrent
+        call (closure review finding N-2). This placement is the whole
+        point: serializing remote access (F-2) means a mutation can now
+        sit queued behind a blocked read for an unbounded time, so an
+        authority check performed before the wait -- or by the caller
+        before dispatching the worker -- proves nothing about the state
+        of the world when the call would finally go out. The TUI passes
+        `lambda: self.is_running`, so quitting while an Apply is queued
+        means the request is never sent at all.
+
+        When the predicate is false nothing is called, nothing raises,
+        and `False` is returned so the caller can report a
+        cancelled-before-dispatch outcome that is distinct from both a
+        remote failure and a successful submission.
         """
         with self._remote_operation() as client:
+            if should_proceed is not None and not should_proceed():
+                return False
             apply_bulk_torrent_action(client, plan)
+            return True
 
     # -- focused torrent / tracker details ----------------------------------
 

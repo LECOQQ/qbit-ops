@@ -193,6 +193,15 @@ class MutationUiResult:
     completed_at: datetime
     error_category: ErrorCategory | None = None
     error_message: str | None = None
+    cancelled_before_dispatch: bool = False
+    """The Apply lost authority while queued behind the shared remote
+    lock and was abandoned *before* any qBittorrent call (closure review
+    finding N-2). Deliberately a distinct fact rather than a reuse of
+    `error_category`: nothing failed remotely, nothing was submitted,
+    and the operator did not cancel the Preview either. Kept TUI-local
+    (not added to the shared `MutationStatus`) because the CLI has no
+    equivalent queue-then-shutdown window, so its public schemas are
+    unaffected."""
 
     @classmethod
     def from_plan(
@@ -203,21 +212,24 @@ class MutationUiResult:
         operation_id: int,
         error_category: ErrorCategory | None = None,
         error_message: str | None = None,
+        cancelled_before_dispatch: bool = False,
     ) -> MutationUiResult:
         satisfied, not_found = _split_skips(plan)
         submitted = tuple(change.hash for change in plan.changes)
+        nothing_sent = error_category is not None or cancelled_before_dispatch
         return cls(
             operation_id=operation_id,
             action=plan.action,
             status=status,
             planned_hashes=submitted
             + tuple(skip.hash for skip in plan.skipped),
-            submitted_hashes=(submitted if error_category is None else ()),
+            submitted_hashes=(() if nothing_sent else submitted),
             satisfied_hashes=tuple(skip.hash for skip in satisfied),
             not_found_hashes=tuple(skip.hash for skip in not_found),
             completed_at=datetime.now(UTC),
             error_category=error_category,
             error_message=error_message,
+            cancelled_before_dispatch=cancelled_before_dispatch,
         )
 
 
@@ -1292,6 +1304,15 @@ class QbitOpsTuiApp(App[None]):
         padding: 0 1;
         color: $text-muted;
     }
+    #last-action {
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+        display: none;
+    }
+    #last-action.visible {
+        display: block;
+    }
     #main {
         height: 1fr;
     }
@@ -1388,6 +1409,7 @@ class QbitOpsTuiApp(App[None]):
         yield OverviewPanel(id="overview-workspace")
         with Vertical(id="torrents-workspace"):
             yield FilterSummary(id="filter-summary")
+            yield LastActionBar(id="last-action")
             with Horizontal(id="main"):
                 yield DataTable(id="torrents", cursor_type="row")
                 yield DetailsPanel()
@@ -1483,24 +1505,34 @@ class QbitOpsTuiApp(App[None]):
 
         assert event.worker.result is not None
         result, error = event.worker.result
-        if error is not None:
-            try:
-                self.controller.apply_refresh_failure(error)
-            except Exception as internal_error:
-                self._show_fatal(internal_error)
-                return
-        else:
-            assert result is not None
-            # Audit finding F-1: never reconcile the selection out from
-            # under an uncommitted Filters draft -- a half-typed
-            # exact-match category matches nothing, so reconciling here
-            # would silently erase the operator's selection. The modal's
-            # own Apply/Clear/Cancel commit points reconcile instead.
-            self.controller.apply_refresh_success(
-                result, reconcile=not self._filters_draft_is_open()
-            )
-        self._render_all()
-        self._refresh_preview_freshness()
+        # Closure review, R-2 residual: preview freshness must fail
+        # closed on *every* unsuccessful refresh, including one whose
+        # exception `classify_recoverable_qbit_failure` cannot classify.
+        # That path used to `return` straight after `_show_fatal`,
+        # skipping invalidation entirely -- leaving an open Preview
+        # applicable while the TUI had in fact stopped refreshing. The
+        # `finally` makes the invalidation unconditional.
+        try:
+            if error is not None:
+                try:
+                    self.controller.apply_refresh_failure(error)
+                except Exception as internal_error:
+                    self._show_fatal(internal_error)
+                    return
+            else:
+                assert result is not None
+                # Audit finding F-1: never reconcile the selection out
+                # from under an uncommitted Filters draft -- a
+                # half-typed exact-match category matches nothing, so
+                # reconciling here would silently erase the operator's
+                # selection. The modal's own Apply/Clear/Cancel commit
+                # points reconcile instead.
+                self.controller.apply_refresh_success(
+                    result, reconcile=not self._filters_draft_is_open()
+                )
+            self._render_all()
+        finally:
+            self._refresh_preview_freshness(refresh_failed=error is not None)
 
     def _filters_draft_is_open(self) -> bool:
         """Whether a `FiltersScreen` is anywhere on the screen stack."""
@@ -1523,6 +1555,7 @@ class QbitOpsTuiApp(App[None]):
         self._render_banner()
         self._render_overview()
         self._render_filter_summary()
+        self._render_last_action()
         self._render_table()
         self._render_details_panels()
 
@@ -1579,6 +1612,21 @@ class QbitOpsTuiApp(App[None]):
             parts.append(f"search: {state.search}")
 
         summary.update(" · ".join(parts))
+
+    def _render_last_action(self) -> None:
+        """Render the persistent latest-mutation line, or hide it.
+
+        Hidden entirely until a mutation has completed at least once, so
+        an operator who never used a bulk action never sees an empty
+        placeholder.
+        """
+        bar = self.query_one("#last-action", LastActionBar)
+        outcome = self._last_mutation_result
+        if outcome is None:
+            bar.remove_class("visible")
+            return
+        bar.update(_format_last_action_line(outcome))
+        bar.add_class("visible")
 
     def _render_table(self) -> None:
         table = self.query_one("#torrents", DataTable)
@@ -2305,14 +2353,27 @@ class QbitOpsTuiApp(App[None]):
         state = self.controller.state
         return state.connection is ConnectionState.CONNECTED and not state.stale
 
-    def _refresh_preview_freshness(self) -> None:
+    def _refresh_preview_freshness(
+        self, *, refresh_failed: bool = False
+    ) -> None:
         """Propagate snapshot staleness into any open `PreviewScreen`.
 
-        Called after every refresh outcome. Staleness is sticky
+        Called after every refresh outcome, from a `finally` so no
+        failure path can skip it. Staleness is sticky
         (`PreviewScreen.mark_stale`), so a later recovery deliberately
         does not re-enable an old preview -- the operator rebuilds it.
+
+        `refresh_failed=True` invalidates unconditionally, without
+        consulting `_snapshot_is_fresh()` (closure review, R-2
+        residual): an unclassifiable refresh exception leaves
+        `state.connection` at CONNECTED and `state.stale` unset, so the
+        freshness heuristic alone would wrongly conclude all is well
+        while the TUI has in fact stopped refreshing. Every
+        unsuccessful refresh -- connection, authentication,
+        configuration, known domain error, or unexpected internal
+        exception -- fails closed here.
         """
-        if self._snapshot_is_fresh():
+        if not refresh_failed and self._snapshot_is_fresh():
             return
         for screen in self.screen_stack:
             if isinstance(screen, PreviewScreen):
@@ -2366,7 +2427,7 @@ class QbitOpsTuiApp(App[None]):
 
     def _mutation_worker_body(
         self, plan: BulkTorrentActionPlan, operation_id: int
-    ) -> tuple[int, Exception | None]:
+    ) -> tuple[int, bool, Exception | None]:
         """Run on a background thread: blocking I/O only, never state
         mutation, and never raises -- see `_refresh_worker_body` for
         why the outcome travels back as a plain tagged tuple.
@@ -2374,12 +2435,19 @@ class QbitOpsTuiApp(App[None]):
         `operation_id` travels with the result so a late completion can
         be matched to the exact preview that started it (audit finding
         R-1) rather than to whatever happens to be on top of the stack.
+        The middle element reports whether the mutation was actually
+        dispatched: `should_proceed` re-checks `self.is_running` *after*
+        the shared remote lock is acquired, so a mutation queued behind
+        a blocked read is abandoned rather than sent if the application
+        shut down while it waited (closure review finding N-2).
         """
         try:
-            self.controller.apply_bulk_plan(plan)
-            return (operation_id, None)
+            dispatched = self.controller.apply_bulk_plan(
+                plan, should_proceed=lambda: self.is_running
+            )
+            return (operation_id, dispatched, None)
         except Exception as error:
-            return (operation_id, error)
+            return (operation_id, False, error)
 
     def _on_mutation_worker_state_changed(
         self, event: Worker.StateChanged
@@ -2399,49 +2467,74 @@ class QbitOpsTuiApp(App[None]):
             return
 
         assert event.worker.result is not None
-        operation_id, error = event.worker.result
+        operation_id, dispatched, error = event.worker.result
         if operation_id != preview_screen.operation_id:
             # A completion from a superseded operation -- never allow it
             # to touch a newer preview or result (audit finding R-1).
             return
 
-        outcome = self._classify_mutation_outcome(plan, error)
+        outcome = self._classify_mutation_outcome(plan, error, dispatched)
         self._last_mutation_result = outcome
+        self._render_last_action()
 
-        # Audit finding R-1: only ever dismiss *this* operation's own
-        # preview, and only while it is genuinely the active screen. A
-        # bare `pop_screen()` would remove whatever sits on top --
-        # potentially Help/Filters/Details/Explain -- and strand a
-        # `PreviewScreen` stuck in `applying=True`, which neither
-        # `action_dismiss_overlay` nor its own Cancel will close.
+        # Completion of the *operation* is deliberately separated from
+        # presentation of a *Result modal* (closure review finding N-1).
+        # Whatever happens to the UI, this operation's own preview must
+        # always stop being logically "applying" -- otherwise, once an
+        # overlay above it is closed, the operator is left on a modal
+        # that neither Escape nor Cancel will dismiss, with the whole
+        # TUI stuck after a mutation that really was submitted.
         preview_is_active = self.screen is preview_screen
+        preview_still_exists = preview_screen in self.screen_stack
+
+        if preview_still_exists:
+            preview_screen.set_applying(False)
+            if not preview_is_active:
+                # Hidden behind an unrelated screen: never pop or
+                # replace that screen, never reopen this one. Just hand
+                # back control of it -- and mark it stale, since its
+                # plan has now been acted on and must not be re-applied.
+                preview_screen.mark_stale()
+
         if preview_is_active:
+            # Audit finding R-1: only ever dismiss *this* operation's
+            # own preview, and only while it is genuinely the active
+            # screen. A bare `pop_screen()` would remove whatever sits
+            # on top -- potentially Help/Filters/Details/Explain.
             self.pop_screen()
             self.refresh_bindings()
 
         if outcome.status is MutationStatus.APPLIED:
             # One immediate refresh after a real mutation, per plan.
+            # Never scheduled for a cancelled-before-dispatch outcome:
+            # nothing was sent, so there is nothing new to observe.
             self._start_periodic_refresh()
 
         if preview_is_active:
             self._push_result_screen(outcome)
-        else:
-            # Audit finding R-3: the request really was submitted, so it
-            # must never vanish silently just because its preview is no
-            # longer on top. Keep the structured result and surface it
-            # as a notification instead of touching an unrelated modal.
-            self.notify(
-                _format_result_notification(outcome),
-                severity=(
-                    "information"
-                    if outcome.status is MutationStatus.APPLIED
-                    else "warning"
-                ),
-            )
-            self._apply_selection_policy(outcome)
+            return
+
+        # Audit finding R-3 / closure review N-3: the request really may
+        # have been submitted, so it must never vanish silently just
+        # because its preview is no longer on top. The persistent
+        # last-action line (rendered above) is the durable record; this
+        # transient toast is supplemental only. Never touches an
+        # unrelated modal.
+        self.notify(
+            _format_result_notification(outcome),
+            severity=(
+                "information"
+                if outcome.status is MutationStatus.APPLIED
+                else "warning"
+            ),
+        )
+        self._apply_selection_policy(outcome)
 
     def _classify_mutation_outcome(
-        self, plan: BulkTorrentActionPlan, error: Exception | None
+        self,
+        plan: BulkTorrentActionPlan,
+        error: Exception | None,
+        dispatched: bool,
     ) -> MutationUiResult:
         """Map a raw Apply outcome to one truthful, structured result.
 
@@ -2461,7 +2554,22 @@ class QbitOpsTuiApp(App[None]):
         A recoverable outer error therefore can never be downgraded to
         INTERNAL merely because it carries an opaque cause, and a
         `ConfigError` is never blamed on qbit-ops.
+
+        `dispatched=False` with no error means the mutation deliberately
+        never left: it lost authority while queued behind the shared
+        remote lock (closure review finding N-2). That is reported as a
+        distinct cancelled-before-dispatch outcome -- not UNAVAILABLE
+        (nothing failed remotely), not APPLIED (nothing was sent), and
+        not the operator cancelling before pressing Apply.
         """
+        if error is None and not dispatched:
+            return MutationUiResult.from_plan(
+                plan,
+                MutationStatus.CANCELLED,
+                operation_id=self._last_operation_id,
+                cancelled_before_dispatch=True,
+            )
+
         if error is None:
             status = self.controller.classify_plan_status(plan)
             if status is MutationStatus.PREVIEW:
@@ -2506,7 +2614,11 @@ class QbitOpsTuiApp(App[None]):
         Whatever survives is then reconciled against currently visible
         hashes, preserving the "selection ⊆ visible" invariant.
         """
-        if outcome.error_category is None:
+        if outcome.cancelled_before_dispatch:
+            # Nothing was sent, so nothing may be treated as submitted:
+            # the live selection is kept intact (closure review N-2).
+            pass
+        elif outcome.error_category is None:
             if outcome.status is MutationStatus.APPLIED:
                 self.controller.clear_selection_for(outcome.submitted_hashes)
             elif outcome.status is MutationStatus.NO_CHANGES:
@@ -2592,6 +2704,24 @@ class ConnectionBanner(Static):
 
     Never replaces the workspace content underneath it -- stale data
     stays visible (see docs/TUI_ARCHITECTURE_REVIEW.md §5/§6).
+    """
+
+
+class LastActionBar(Static):
+    """A compact, persistent record of the most recent bulk action.
+
+    Closure review finding N-3: a five-second Textual toast was the only
+    visible trace of a mutation whose Preview was no longer active, so
+    an operator looking away could miss that a request had been sent --
+    while the selection policy had already been applied on their behalf.
+    This line is rendered from `QbitOpsTuiApp._last_mutation_result` and
+    stays until a later mutation replaces it.
+
+    Deliberately *not* a mutation history: exactly one result, the
+    latest. It renders only safe structured data (action, counts, an
+    already-sanitized error category, a local timestamp) -- never a
+    tracker URL, raw remote message, credential, or passkey -- and never
+    dispatches anything or touches the selection.
     """
 
 
@@ -2975,6 +3105,17 @@ def _format_result_text(outcome: MutationUiResult) -> str:
             )
         return "\n".join(lines)
 
+    if outcome.cancelled_before_dispatch:
+        return (
+            "[bold]Cancelled before dispatch[/bold]\n\n"
+            "qbit-ops shut down while this action was queued behind "
+            "another qBittorrent operation, so it was abandoned before "
+            "being sent.\n\n"
+            f"No request reached qBittorrent: 0 of "
+            f"{len(outcome.planned_hashes)} planned torrent(s) were "
+            "submitted, and nothing was changed."
+        )
+
     if outcome.status is MutationStatus.CANCELLED:
         return "[bold]Cancelled[/bold]\n\nNothing was submitted."
 
@@ -2999,9 +3140,45 @@ def _format_result_text(outcome: MutationUiResult) -> str:
     return "\n".join(lines)
 
 
+def _format_last_action_line(outcome: MutationUiResult) -> str:
+    """One compact, persistent line summarising the latest mutation.
+
+    Reuses the same truthful vocabulary as the Result modal -- notably
+    "submitted", never "applied to each torrent" -- and distinguishes
+    every outcome the TUI can produce: submitted, no-change, no-match,
+    cancelled-before-dispatch, and each error category. Safe structured
+    data only; short enough to stay readable at 80 columns.
+    """
+    when = _format_local_time(outcome.completed_at)
+    action = outcome.action.title()
+
+    if outcome.cancelled_before_dispatch:
+        summary = "cancelled before dispatch (nothing sent)"
+    elif outcome.error_category is not None:
+        summary = f"failed · {outcome.error_category.value}"
+    elif outcome.status is MutationStatus.APPLIED:
+        summary = f"submitted for {len(outcome.submitted_hashes)} torrent(s)"
+    elif outcome.status is MutationStatus.NO_MATCH:
+        summary = "no selected torrents found"
+    elif outcome.status is MutationStatus.NO_CHANGES:
+        summary = (
+            f"no change needed ({len(outcome.satisfied_hashes)} already "
+            "satisfied)"
+        )
+    else:
+        summary = "cancelled"
+
+    return f"[dim]Last action ·[/dim] {action} {summary} [dim]· {when}[/dim]"
+
+
 def _format_result_notification(outcome: MutationUiResult) -> str:
     """One-line fallback shown when the Result modal cannot be (audit
     finding R-3) -- a submitted mutation must never vanish silently."""
+    if outcome.cancelled_before_dispatch:
+        return (
+            f"{outcome.action.title()} cancelled before dispatch -- "
+            "nothing was sent to qBittorrent."
+        )
     if outcome.error_category is not None:
         return (
             f"{outcome.action.title()} failed "
