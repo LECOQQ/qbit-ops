@@ -27,17 +27,26 @@ calls the granular `collect_*`/`apply_*`/`begin_*` methods itself, from
 the appropriate thread. Both paths share the exact same logic, so
 behavior cannot drift between "convenience" and "threaded" use.
 
-Security boundary (see docs/TUI_ARCHITECTURE_REVIEW.md §10): this module
-only ever imports safe, structured domain outputs. It must never import
-`app.torrents.list_torrents_with_trackers`, `app.torrents._get_tracker_details`,
-any `plan_*`/`apply_*` mutation function, or `app.main` -- enforced by
+Security boundary (see docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for
+TUI 2 -- see docs/DECISIONS.md, "multi-selection + LOW-risk bulk
+actions"): this module only ever imports safe, structured domain
+outputs, plus exactly the two LOW-risk bulk torrent mutation functions
+TUI 2 needs (`app.torrents.apply_bulk_torrent_action`,
+`build_bulk_action_plan_from_snapshot`) -- both act only on
+Pause/Resume/Reannounce, take an already-frozen plan or an explicit
+hash list, and never rescan or accept an unbounded selector. It must
+never import `app.torrents.list_torrents_with_trackers`,
+`app.torrents._get_tracker_details`, `app.torrents.plan_bulk_torrent_action`
+(it always rescans and accepts `--all`, neither of which fits the
+frozen-plan model here), any tracker mutation `plan_*`/`apply_*`
+function, any deletion function, or `app.main` -- enforced by
 `tests/test_tui_security.py`.
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -51,14 +60,19 @@ from app.app_services import (
 )
 from app.config import ConfigError
 from app.errors import AppError, ErrorCategory
+from app.execution import MutationStatus
 from app.explain import ExplanationReport, build_torrent_explanation
 from app.qbit_fields import get_field_as_string
 from app.status import StatusSnapshot
 from app.torrent_states import is_stopped_state
 from app.torrents import (
+    BulkTorrentActionPlan,
     SelectedTorrent,
+    TorrentBulkAction,
     TorrentFilter,
     TorrentSelection,
+    apply_bulk_torrent_action,
+    build_bulk_action_plan_from_snapshot,
     get_safe_tracker_details,
     select_torrents_from_items,
 )
@@ -126,6 +140,14 @@ class TuiState:
     last_successful_refresh: datetime | None = None
     last_error: AppError | None = None
     workspace: Workspace = Workspace.OVERVIEW
+    selected_hashes: set[str] = field(default_factory=set)
+    """Explicit multi-selection for bulk actions (TUI 2) -- full
+    canonical hashes only. Deliberately distinct from `focused_hash`
+    (never implied by focus alone), `visible` (the current filter/
+    search result), and any CLI `--all` concept: `set()` always means
+    "nothing selected", never "every torrent" -- see
+    `TuiController.select_all_visible`/`reconcile_selection`.
+    """
 
     def focused_torrent(self) -> SelectedTorrent | None:
         """Look up the focused torrent's live fields from `visible`.
@@ -222,6 +244,7 @@ class TuiController:
         self.state.refreshing = False
         self._recompute_visible()
         self._reconcile_focus()
+        self.reconcile_selection()
 
     def apply_refresh_failure(self, error: Exception) -> None:
         """Classify and apply a failed periodic refresh. UI-thread only.
@@ -323,12 +346,26 @@ class TuiController:
     # -- filters / search (always local, no I/O) ---------------------------
 
     def set_filters(self, filters: TorrentFilter) -> None:
-        """Apply a new `TorrentFilter`. Zero qBittorrent API calls."""
+        """Apply a new `TorrentFilter`. Zero qBittorrent API calls.
+
+        Deliberately does *not* reconcile the selection itself: the
+        Filters modal applies live, on every keystroke (see
+        `app.tui.app._apply_filters_from_panel`), and a category filter
+        is an *exact*-match field -- typing "films" one letter at a
+        time transiently matches nothing (`"f"`, `"fi"`, ... never
+        equal "films"), which would otherwise wipe out a selection
+        before the user finishes typing the very filter that would
+        have kept it visible. The caller reconciles explicitly, once,
+        at each real commit point instead (`reconcile_selection()` --
+        see `app.tui.app.action_activate`'s `FiltersScreen` branch and
+        `FiltersScreen.action_clear`/`QbitOpsTuiApp.action_dismiss_overlay`'s
+        cancel-revert branch).
+        """
         self.state.filters = filters
         self._recompute_visible()
         self._reconcile_focus()
 
-    def set_search(self, text: str) -> None:
+    def set_search(self, text: str) -> int:
         """Apply read-only search text against name and hash.
 
         Matches a torrent whose name contains `text` as a case-
@@ -338,11 +375,135 @@ class TuiController:
         read-only list filter, not a target-selection lookup. Zero
         qBittorrent API calls. If the currently focused torrent no
         longer matches, `_reconcile_focus()` clears focus (and any
-        pending detail fetch) for it -- see `clear_focus()`.
+        pending detail fetch) for it -- see `clear_focus()`. Returns
+        the number of selected hashes hidden by the new search and
+        dropped from the selection (see `reconcile_selection()`).
+
+        Unlike `set_filters()`, search reconciles live on every
+        keystroke: a substring match only ever *narrows* while typing
+        forward (every prefix of a matching string still matches), so
+        the same transient-wipe risk does not apply the same way, and
+        there is no separate "commit" step in the UI to hook instead.
         """
         self.state.search = text
         self._recompute_visible()
         self._reconcile_focus()
+        return self.reconcile_selection()
+
+    # -- multi-selection (always local, no I/O) -----------------------------
+
+    def visible_hashes(self) -> frozenset[str]:
+        """The set of full hashes currently visible (post filter/search)."""
+        if self.state.visible is None:
+            return frozenset()
+        return frozenset(torrent.hash for torrent in self.state.visible.matched)
+
+    def toggle_selection(self, torrent_hash: str) -> None:
+        """Toggle one torrent's membership in the selection.
+
+        Never implied by focus -- this is the only way a torrent enters
+        `selected_hashes`. Selecting a torrent that is not currently
+        visible is the caller's mistake to avoid; this method itself
+        does not check visibility (a toggle always targets one exact,
+        already-known hash, e.g. the currently focused row).
+        """
+        if torrent_hash in self.state.selected_hashes:
+            self.state.selected_hashes.discard(torrent_hash)
+        else:
+            self.state.selected_hashes.add(torrent_hash)
+
+    def select_all_visible(self) -> None:
+        """Select every currently visible torrent -- never a hidden one
+        and never "the whole instance". Zero qBittorrent API calls."""
+        self.state.selected_hashes = set(self.visible_hashes())
+
+    def clear_selection(self) -> None:
+        """Clear the selection entirely. Zero qBittorrent API calls."""
+        self.state.selected_hashes = set()
+
+    def reconcile_selection(self) -> int:
+        """Drop any selected hash no longer visible. UI-thread only.
+
+        The safety-first policy TUI 2 is built on: "the actionable
+        selection is always a subset of the currently visible
+        torrents." Called after every filter/search change and every
+        successful periodic refresh (see `set_filters`/`set_search`/
+        `apply_refresh_success`) -- a torrent that becomes hidden or
+        disappears is never left selectable-but-invisible. Returns the
+        number of hashes removed, so the caller can show a concise
+        "N hidden selections cleared" notification; `0` when nothing
+        changed (the common case), never itself a reason to notify.
+        """
+        visible = self.visible_hashes()
+        hidden = self.state.selected_hashes - visible
+        if not hidden:
+            return 0
+        self.state.selected_hashes -= hidden
+        return len(hidden)
+
+    def clear_selection_for(self, hashes: Iterable[str]) -> None:
+        """Remove exactly `hashes` from the selection.
+
+        Used after a result modal is dismissed to clear only the
+        torrents an applied plan actually acted on (`plan.changes`),
+        per TUI 2's documented dismissal policy -- a skipped or
+        unavailable torrent's selection is left untouched so the
+        operator can reconsider it, rather than being silently cleared
+        alongside the ones that did change.
+        """
+        self.state.selected_hashes -= set(hashes)
+
+    # -- bulk actions (LOW-risk only: pause / resume / reannounce) ----------
+
+    def build_bulk_plan(
+        self,
+        action: TorrentBulkAction,
+        torrent_hashes: tuple[str, ...],
+    ) -> BulkTorrentActionPlan:
+        """Build a frozen bulk-action plan -- pure, zero API calls.
+
+        `torrent_hashes` must already be an immutable, sorted snapshot
+        (see `QbitOpsTuiApp.action_open_actions`, which captures
+        `tuple(sorted(selected_hashes))` at the moment an action is
+        chosen) -- this method never reads `self.state.selected_hashes`
+        itself, so a selection change after this call can never affect
+        an already-built plan. Delegates every skip-reason decision to
+        `app.torrents.build_bulk_action_plan_from_snapshot` (the same
+        rule `plan_bulk_torrent_action`/the CLI uses) against the
+        current `_raw_torrents` snapshot -- no second rule catalogue,
+        no rescan.
+        """
+        return build_bulk_action_plan_from_snapshot(
+            self._raw_torrents, action, torrent_hashes
+        )
+
+    def classify_plan_status(
+        self, plan: BulkTorrentActionPlan
+    ) -> MutationStatus:
+        """Classify a plan before Apply -- pure, mirrors `app.main`'s
+        shared `_run_mutation` mapping exactly, so the TUI and CLI never
+        disagree about what counts as `NO_MATCH` vs `NO_CHANGES` vs a
+        real, previewable change (`plan.matched` covers both `changes`
+        and `skipped`; only an empty `matched` is `NO_MATCH`).
+        """
+        if plan.matched == 0:
+            return MutationStatus.NO_MATCH
+        if not plan.changes:
+            return MutationStatus.NO_CHANGES
+        return MutationStatus.PREVIEW
+
+    def apply_bulk_plan(self, plan: BulkTorrentActionPlan) -> None:
+        """Apply an already-frozen plan. Blocking I/O -- safe on a
+        background worker thread, never the UI thread.
+
+        Mutates exactly `plan.changes`; never rescans, never re-reads
+        `selected_hashes`, never substitutes a different target. May
+        raise -- the caller classifies the failure via
+        `classify_recoverable_qbit_failure`, exactly like
+        `collect_refresh`/`collect_tracker_details`.
+        """
+        client = self._ensure_client()
+        apply_bulk_torrent_action(client, plan)
 
     # -- focused torrent / tracker details ----------------------------------
 

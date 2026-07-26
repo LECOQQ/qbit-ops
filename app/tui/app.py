@@ -1,12 +1,18 @@
 """Textual application for `qbit-ops tui` (read-only V1, visual polish).
 
-Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, enforced by
-`tests/test_tui_security.py`): this module and every other module under
-`app/tui/` must never import `app.main`, any mutation `plan_*`/`apply_*`
-function, `app.torrents.list_torrents_with_trackers`, or
-`app.torrents._get_tracker_details`. Widgets only ever render safe,
-structured domain outputs (`StatusSnapshot`, `SelectedTorrent`,
-`get_safe_tracker_details` output, `ExplanationReport`, `AppError`).
+Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for TUI
+2 -- see docs/DECISIONS.md): this module and every other module under
+`app/tui/` must never import `app.main`, `app.torrents.plan_bulk_torrent_action`
+(always rescans, accepts `--all`), any tracker mutation `plan_*`/
+`apply_*` function, any deletion function,
+`app.torrents.list_torrents_with_trackers`, or
+`app.torrents._get_tracker_details`. It may import exactly
+`app.torrents.build_bulk_action_plan_from_snapshot`/
+`apply_bulk_torrent_action` (LOW-risk Pause/Resume/Reannounce only,
+frozen-plan-in, frozen-plan-out, never a live rescan). Widgets only
+ever render safe, structured domain outputs (`StatusSnapshot`,
+`SelectedTorrent`, `get_safe_tracker_details` output,
+`ExplanationReport`, `BulkTorrentActionPlan`, `AppError`).
 
 Worker-hardening phase (see docs/DECISIONS.md): every qBittorrent API
 call runs on a Textual thread worker (`run_worker(thread=True)`), never
@@ -69,6 +75,26 @@ checks `event.row_key is None`/`event.cursor_row < 0` before ever
 touching `.value`, with an explicit `_rebuilding_table` guard around
 table rebuilds. The help screen (`?`) is always a separate modal
 (`HelpScreen`) at every width.
+
+TUI 2 (see docs/DECISIONS.md): explicit multi-selection
+(`TuiState.selected_hashes`) plus a safe, three-step bulk-action loop
+for LOW-risk torrent mutations only (Pause/Resume/Reannounce) --
+`Space` toggles the focused row, `Ctrl+A` selects only currently
+*visible* rows, `a` opens `ActionsScreen`. Choosing an action there
+freezes `tuple(sorted(selected_hashes))` into a `BulkTorrentActionPlan`
+(`TuiController.build_bulk_plan`, pure, zero API calls, reusing
+`app.torrents.build_bulk_action_plan_from_snapshot` -- no second rule
+catalogue) shown in `PreviewScreen`; only an explicit Apply there
+dispatches a `MUTATION_WORKER_GROUP` worker
+(`TuiController.apply_bulk_plan`) that consumes exactly that frozen
+plan, never a live re-read of `selected_hashes`. Selection is always a
+subset of currently visible torrents by construction
+(`TuiController._reconcile_selection`, called after every filter/
+search change and every periodic refresh) -- `set()` never means
+"all". The periodic refresh timer skips a tick while a mutation is in
+flight (`_start_periodic_refresh`), and an explicit one-shot refresh is
+triggered right after a mutation completes. No tracker mutation, no
+deletion, no `--all`/whole-instance selector is reachable from the TUI.
 """
 
 from __future__ import annotations
@@ -76,6 +102,7 @@ from __future__ import annotations
 from datetime import datetime, tzinfo
 from typing import Any
 
+from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -94,12 +121,19 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from app.app_services import TuiRefreshResult, create_qbit_client
+from app.app_services import (
+    TuiRefreshResult,
+    classify_recoverable_qbit_failure,
+    create_qbit_client,
+)
+from app.execution import MutationStatus
 from app.explain import Evidence, ExplanationFinding, ExplanationReport
 from app.explain import ExplanationSeverity as Severity
 from app.status import Health
 from app.torrents import (
+    BulkTorrentActionPlan,
     SelectedTorrent,
+    TorrentBulkAction,
     TorrentFilter,
     build_torrent_filter,
     describe_torrent_filter,
@@ -122,6 +156,14 @@ WIDE_WIDTH_THRESHOLD = 130
 # threading design.
 REFRESH_WORKER_GROUP = "qbit-refresh"
 DETAIL_WORKER_GROUP = "qbit-detail"
+MUTATION_WORKER_GROUP = "qbit-mutation"
+
+_PAST_TENSE_ACTION: dict[TorrentBulkAction, str] = {
+    "pause": "paused",
+    "resume": "resumed",
+    "start": "started",
+    "reannounce": "reannounced",
+}
 
 _HEALTH_STYLES: dict[Health, str] = {
     Health.HEALTHY: "bold green",
@@ -549,7 +591,17 @@ class FiltersScreen(ModalScreen[None]):
     a keyboard shortcut.
     """
 
-    BINDINGS = [Binding("ctrl+r", "clear", "Clear")]
+    BINDINGS = [
+        Binding("ctrl+r", "clear", "Clear"),
+        # `up`/`down` move focus between fields/buttons, same as
+        # Tab/Shift+Tab -- namespaced to `app.*` so they resolve through
+        # `QbitOpsTuiApp.check_action`, which already always allows
+        # `focus_next`/`focus_previous` regardless of which modal is
+        # open (see its docstring) -- the same mechanism that already
+        # makes Tab work in every modal.
+        Binding("up", "app.focus_previous", "Up", show=False),
+        Binding("down", "app.focus_next", "Down", show=False),
+    ]
 
     CSS = """
     FiltersScreen {
@@ -642,6 +694,10 @@ class FiltersScreen(ModalScreen[None]):
         app._render_filter_summary()
         app._render_table()
         app._render_details_panels()
+        # Clearing widens visibility, so this is unlikely to hide
+        # anything -- but a search term may still narrow it back down,
+        # so reconcile for correctness/consistency with Apply/Cancel.
+        app._reconcile_selection_and_notify()
 
 
 class DetailsScreen(ModalScreen[None]):
@@ -750,6 +806,265 @@ class ExplainScreen(ModalScreen[None]):
         content.update(
             _format_explain_text(self.torrent_name, self.report, state)
         )
+
+
+class ActionsScreen(ModalScreen[None]):
+    """Choose a LOW-risk bulk action for the frozen selection snapshot.
+
+    Only ever opened with a non-empty selection (see
+    `QbitOpsTuiApp.action_open_actions`). No mutation happens here --
+    picking an action just builds a frozen `BulkTorrentActionPlan`
+    (zero API calls) and opens `PreviewScreen`; Cancel/Escape close
+    without any side effect at all.
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Cancel", priority=True),
+        # Up/Down move between the buttons, same as Tab/Shift+Tab --
+        # see `FiltersScreen`'s identical bindings for why this
+        # resolves correctly through `QbitOpsTuiApp.check_action`.
+        Binding("up", "app.focus_previous", "Up", show=False),
+        Binding("down", "app.focus_next", "Down", show=False),
+    ]
+
+    CSS = """
+    ActionsScreen {
+        align: center middle;
+    }
+    #actions-dialog {
+        width: 48;
+        max-height: 90%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #actions-dialog Button {
+        width: 100%;
+        margin-bottom: 1;
+    }
+    .actions-names {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    """
+
+    _ACTION_BY_BUTTON_ID: dict[str, TorrentBulkAction] = {
+        "actions-pause": "pause",
+        "actions-resume": "resume",
+        "actions-reannounce": "reannounce",
+    }
+
+    def __init__(
+        self, selected_hashes: tuple[str, ...], names: tuple[str, ...]
+    ) -> None:
+        super().__init__()
+        self.selected_hashes = selected_hashes
+        self._names = names
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="actions-dialog"):
+            yield Static(
+                f"[bold]Actions[/bold] · {len(self.selected_hashes)} selected"
+            )
+            preview = ", ".join(_truncate(name, 24) for name in self._names[:3])
+            extra = len(self._names) - 3
+            if extra > 0:
+                preview += f" (+{extra} more)"
+            yield Static(preview, classes="actions-names")
+            yield Button("Pause", id="actions-pause")
+            yield Button("Resume", id="actions-resume")
+            yield Button("Reannounce", id="actions-reannounce")
+            yield Button("Cancel", id="actions-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#actions-pause", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app = self.app
+        assert isinstance(app, QbitOpsTuiApp)
+        button_id = event.button.id
+        if button_id == "actions-cancel" or button_id is None:
+            self.dismiss()
+            return
+        action = self._ACTION_BY_BUTTON_ID.get(button_id)
+        if action is None:
+            return
+        hashes = self.selected_hashes
+        self.dismiss()
+        app._open_preview_for_action(action, hashes)
+
+    def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
+        self.dismiss()
+
+
+class PreviewScreen(ModalScreen[None]):
+    """Preview of a frozen `BulkTorrentActionPlan` before Apply.
+
+    Owns and displays exactly the plan passed at construction --
+    `plan`/`snapshot_at` never change after `__init__`. The live
+    selection, filters, search, and focus may keep changing in the
+    background while this modal is open; none of that ever mutates
+    this screen's plan (see docs/DECISIONS.md, "frozen plan"
+    invariant).
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Cancel", priority=True),
+        # Up/Down move between the Cancel/Apply buttons, same as
+        # Tab/Shift+Tab -- see `FiltersScreen`'s identical bindings.
+        Binding("up", "app.focus_previous", "Up", show=False),
+        Binding("down", "app.focus_next", "Down", show=False),
+    ]
+
+    CSS = """
+    PreviewScreen {
+        align: center middle;
+    }
+    #preview-dialog {
+        width: 76%;
+        max-width: 90;
+        max-height: 90%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #preview-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    #preview-actions Button {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        plan: BulkTorrentActionPlan,
+        snapshot_at: datetime | None,
+    ) -> None:
+        super().__init__()
+        self.plan = plan
+        self.snapshot_at = snapshot_at
+        self.applying = False
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="preview-dialog"):
+            yield Static(id="preview-content")
+            with Horizontal(id="preview-actions"):
+                yield Button("Cancel", id="preview-cancel")
+                yield Button("Apply", id="preview-apply", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#preview-content", Static).update(
+            _format_preview_text(self.plan, self.snapshot_at)
+        )
+        self.query_one("#preview-apply", Button).focus()
+
+    def set_applying(self, applying: bool) -> None:
+        """Freeze the modal while a mutation is actually in flight --
+        disables both buttons (Cancel too: see
+        `QbitOpsTuiApp.action_dismiss_overlay`) and relabels Apply so
+        double-pressing it (or pressing Enter twice) cannot dispatch a
+        second mutation."""
+        self.applying = applying
+        apply_button = self.query_one("#preview-apply", Button)
+        apply_button.disabled = applying
+        apply_button.label = "Applying..." if applying else "Apply"
+        self.query_one("#preview-cancel", Button).disabled = applying
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app = self.app
+        assert isinstance(app, QbitOpsTuiApp)
+        if event.button.id == "preview-cancel":
+            if not self.applying:
+                self.dismiss()
+        elif event.button.id == "preview-apply":
+            app.action_apply_plan()
+
+    def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
+        if self.applying:
+            return
+        self.dismiss()
+
+
+class ResultScreen(ModalScreen[None]):
+    """A truthful, dismissible report of what an Apply actually did.
+
+    Never inferred from "Apply was pressed" -- `status`/
+    `unavailable_message`/`internal_error` are computed by the App from
+    the mutation worker's real outcome (see
+    `QbitOpsTuiApp._on_mutation_worker_state_changed`/
+    `_show_mutation_failure`) before this screen is even constructed.
+    Dismissing (`Esc`, or the Close button) never re-applies anything;
+    it only triggers `QbitOpsTuiApp._on_result_dismissed`'s documented
+    selection-clearing policy.
+
+    Deliberately no Screen-level `escape` binding: `escape` is already
+    a `priority=True` App binding
+    (`QbitOpsTuiApp.action_dismiss_overlay`), which always wins over a
+    same-key `Screen` binding regardless -- a `Binding("escape",
+    "dismiss", ...)` here would simply never fire (verified
+    empirically; see docs/MEMORY.md, the same mechanism documented for
+    `FiltersScreen`/`ExplainScreen`). `action_dismiss_overlay` special-
+    cases `ResultScreen` instead. The Close button below reuses that
+    same central path rather than duplicating the dismissal policy.
+    """
+
+    BINDINGS: list[Binding] = []
+
+    CSS = """
+    ResultScreen {
+        align: center middle;
+    }
+    #result-dialog {
+        width: 64;
+        max-height: 90%;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #result-close {
+        margin-top: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        plan: BulkTorrentActionPlan,
+        status: MutationStatus | None,
+        *,
+        applied: bool,
+        unavailable_message: str | None = None,
+        internal_error: Exception | None = None,
+    ) -> None:
+        super().__init__()
+        self.plan = plan
+        self.status = status
+        self.applied = applied
+        self.unavailable_message = unavailable_message
+        self.internal_error = internal_error
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="result-dialog"):
+            yield Static(id="result-content")
+            yield Button("Close", id="result-close")
+
+    def on_mount(self) -> None:
+        self.query_one("#result-content", Static).update(
+            _format_result_text(
+                self.plan,
+                self.status,
+                unavailable_message=self.unavailable_message,
+                internal_error=self.internal_error,
+            )
+        )
+        self.query_one("#result-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        app = self.app
+        assert isinstance(app, QbitOpsTuiApp)
+        if event.button.id == "result-close":
+            app.action_dismiss_overlay()
 
 
 class MainScreen(Screen[None]):
@@ -894,6 +1209,13 @@ class QbitOpsTuiApp(App[None]):
         Binding("c", "copy_hash", "Copy"),
         Binding("e", "explain", "Explain"),
         Binding("r", "refresh_details", "Refresh"),
+        # TUI 2: explicit multi-selection, distinct from focus -- see
+        # the module docstring. `space` never selects merely by
+        # highlighting a row; only an explicit press toggles it.
+        Binding("space", "toggle_selection", "Select"),
+        Binding("ctrl+a", "select_all_visible", "Select visible", show=False),
+        Binding("ctrl+d", "deselect_all", "Deselect all", show=False),
+        Binding("a", "open_actions", "Actions"),
         Binding("question_mark", "toggle_help", "Help"),
         # `escape` must win over whatever has focus (a filter/search
         # Input never binds it, but priority makes the intent explicit
@@ -921,6 +1243,9 @@ class QbitOpsTuiApp(App[None]):
         self._last_detail_worker: Worker[Any] | None = None
         self._pending_explain_request_id: int | None = None
         self._explain_screen: ExplainScreen | None = None
+        self._mutation_worker: Worker[Any] | None = None
+        self._preview_screen: PreviewScreen | None = None
+        self._active_mutation_plan: BulkTorrentActionPlan | None = None
 
     def get_default_screen(self) -> Screen[None]:
         return MainScreen(id="_default")
@@ -960,10 +1285,21 @@ class QbitOpsTuiApp(App[None]):
         most one `torrents_info()`/`transfer_info()`/`app_version()`/
         `app_web_api_version()` set of calls is ever in flight at once
         -- never two periodic refreshes hitting the client concurrently.
+
+        Also skipped (same coalescing, not queueing) while a bulk
+        mutation is in flight (TUI 2): a refresh racing an Apply could
+        otherwise show a transient, confusing mix of pre- and post-
+        mutation state. `action_apply_plan` triggers one refresh
+        explicitly right after the mutation completes instead.
         """
         if (
             self._refresh_worker is not None
             and not self._refresh_worker.is_finished
+        ):
+            return
+        if (
+            self._mutation_worker is not None
+            and not self._mutation_worker.is_finished
         ):
             return
 
@@ -995,6 +1331,8 @@ class QbitOpsTuiApp(App[None]):
             self._on_refresh_worker_state_changed(event)
         elif event.worker.group == DETAIL_WORKER_GROUP:
             self._on_detail_worker_state_changed(event)
+        elif event.worker.group == MUTATION_WORKER_GROUP:
+            self._on_mutation_worker_state_changed(event)
 
     def _on_refresh_worker_state_changed(
         self, event: Worker.StateChanged
@@ -1086,6 +1424,8 @@ class QbitOpsTuiApp(App[None]):
         shown = len(visible.matched) if visible is not None else 0
 
         parts = [f"{shown:,} shown / {total:,}"]
+        if state.selected_hashes:
+            parts.append(f"{len(state.selected_hashes):,} selected")
         description = describe_torrent_filter(state.filters)
         if description != "none":
             parts.append(description)
@@ -1112,7 +1452,9 @@ class QbitOpsTuiApp(App[None]):
                 return
 
             for index, torrent in enumerate(visible.matched):
-                values = _torrent_row_values(torrent)
+                values = _torrent_row_values(
+                    torrent, torrent.hash in state.selected_hashes
+                )
                 table.add_row(
                     *(values[name] for name in columns), key=torrent.hash
                 )
@@ -1195,6 +1537,20 @@ class QbitOpsTuiApp(App[None]):
             return (
                 state.workspace is Workspace.TORRENTS
                 and state.focused_hash is not None
+            )
+        if action == "toggle_selection":
+            return state.workspace is Workspace.TORRENTS
+        if action == "select_all_visible":
+            return state.workspace is Workspace.TORRENTS and bool(
+                state.visible and state.visible.matched
+            )
+        if action == "deselect_all":
+            return state.workspace is Workspace.TORRENTS and bool(
+                state.selected_hashes
+            )
+        if action == "open_actions":
+            return state.workspace is Workspace.TORRENTS and bool(
+                state.selected_hashes
             )
         return True
 
@@ -1425,7 +1781,16 @@ class QbitOpsTuiApp(App[None]):
         needed since `TuiController.set_search` is pure in-memory
         filtering. If this hides the currently focused torrent,
         `set_search` itself clears focus/details/any pending detail
-        fetch (see `TuiController._reconcile_focus`/`clear_focus`)."""
+        fetch (see `TuiController._reconcile_focus`/`clear_focus`).
+
+        `set_search`'s returned hidden-selection count is deliberately
+        not surfaced as a notification here (unlike Filters' Apply/
+        Clear/Cancel, see `_reconcile_selection_and_notify`): search
+        reconciles on every keystroke, and popping a notification for
+        every narrowing character would be noise, not signal. The
+        selected count in the filter summary (re-rendered below) still
+        reflects it immediately.
+        """
         self.controller.set_search(text)
         self._render_filter_summary()
         self._render_table()
@@ -1457,6 +1822,29 @@ class QbitOpsTuiApp(App[None]):
         self._render_filter_summary()
         self._render_table()
         self._render_details_panels()
+        # Deliberately no selection reconciliation here: this fires on
+        # every keystroke while editing Filters live, and a category
+        # filter is exact-match -- reconciling now would wipe a
+        # selection while the user is still mid-way through typing the
+        # very filter that would have kept it visible. Reconciliation
+        # happens once, at each real commit point instead -- see
+        # `TuiController.set_filters`'s docstring.
+
+    def _reconcile_selection_and_notify(self) -> None:
+        """Reconcile the selection against the current filter, and show
+        a concise notification if anything was actually dropped.
+
+        The single commit-point helper for Filters Apply/Clear/Cancel
+        (see `action_activate`/`FiltersScreen.action_clear`/
+        `action_dismiss_overlay`) -- search reconciles inline instead
+        (see `TuiController.set_search`'s docstring for why the two
+        differ).
+        """
+        removed = self.controller.reconcile_selection()
+        self._render_table()
+        self._render_filter_summary()
+        if removed:
+            self.notify(f"{removed} hidden selection(s) cleared.")
 
     def action_focus_search(self) -> None:
         if not self._in_torrents_workspace():
@@ -1514,8 +1902,18 @@ class QbitOpsTuiApp(App[None]):
         apply live (see `on_input_changed`/`on_checkbox_changed`/
         `on_radio_set_changed`), so `enter` there only needs to close
         the modal -- see `FiltersScreen`'s docstring for why this can't
-        just be a Screen-level binding. Any other modal (Details, Help,
-        Explain) simply ignores `enter`.
+        just be a Screen-level binding.
+
+        For any other modal, if a `Button` currently has focus (e.g.
+        after navigating there with Tab/Up/Down), `enter` presses it --
+        `Button.press()` triggers exactly the same `Button.Pressed`
+        handling a mouse click would. Without this, `enter` silently did
+        nothing in `ActionsScreen`/`PreviewScreen`/`ResultScreen`: this
+        same `priority=True` binding intercepts the key before the
+        focused `Button`'s own native `enter`-activates-click behavior
+        ever gets a chance to run (the same mechanism documented for
+        `FiltersScreen`/`#search-input` below). Modals with no buttons
+        at all (Details, Help, Explain) simply ignore `enter`.
 
         Otherwise dispatches by active workspace: from Overview, `enter`
         is the documented "browse torrents" shortcut (same as `t`);
@@ -1529,7 +1927,12 @@ class QbitOpsTuiApp(App[None]):
         if len(self.screen_stack) > 1:
             if isinstance(self.screen, FiltersScreen):
                 self.pop_screen()
+                self._reconcile_selection_and_notify()
                 self.refresh_bindings()
+                return
+            focused = self.focused
+            if isinstance(focused, Button):
+                focused.press()
             return
 
         if self.controller.state.workspace is Workspace.OVERVIEW:
@@ -1646,25 +2049,291 @@ class QbitOpsTuiApp(App[None]):
         self.push_screen(screen)
         self.refresh_bindings()
 
+    # -- TUI 2: multi-selection + LOW-risk bulk actions ---------------------
+
+    def action_toggle_selection(self) -> None:
+        """Toggle the focused torrent's membership in the selection.
+
+        Never implied by navigation alone -- only an explicit `Space`
+        (or this method) changes the selection. A safe notification,
+        not a crash, when nothing is focused (e.g. an empty filter
+        result).
+        """
+        if not self._in_torrents_workspace():
+            return
+        torrent_hash = self.controller.state.focused_hash
+        if torrent_hash is None:
+            self.notify("No torrent focused.", severity="warning")
+            return
+        self.controller.toggle_selection(torrent_hash)
+        self._render_table()
+        self._render_filter_summary()
+        self.refresh_bindings()
+
+    def action_select_all_visible(self) -> None:
+        """Select every currently *visible* torrent -- never a hidden
+        one, never "the whole instance". Zero qBittorrent API calls."""
+        if not self._in_torrents_workspace():
+            return
+        self.controller.select_all_visible()
+        self._render_table()
+        self._render_filter_summary()
+        self.refresh_bindings()
+
+    def action_deselect_all(self) -> None:
+        """Clear the entire selection -- the explicit counterpart to
+        `Ctrl+A`. `Escape` already clears a non-empty selection when
+        nothing else needs it first (no modal open, not editing text),
+        but this binding works unconditionally and unambiguously,
+        without competing with Escape's other jobs. Zero API calls; a
+        safe no-op (no notification) when nothing is selected."""
+        if not self._in_torrents_workspace():
+            return
+        if not self.controller.state.selected_hashes:
+            return
+        count = len(self.controller.state.selected_hashes)
+        self.controller.clear_selection()
+        self._render_table()
+        self._render_filter_summary()
+        self.refresh_bindings()
+        self.notify(f"Cleared {count} selection(s).")
+
+    def action_open_actions(self) -> None:
+        """Open the Actions modal for the current selection.
+
+        A safe notification, never a crash, when the selection is
+        empty -- `check_action` already hides this from the footer in
+        that case, but the guard stays here too since this method can
+        be reached directly (tests, or a future caller).
+        """
+        if not self._in_torrents_workspace():
+            return
+        state = self.controller.state
+        if not state.selected_hashes:
+            self.notify("No torrents selected.", severity="warning")
+            return
+
+        snapshot = tuple(sorted(state.selected_hashes))
+        name_by_hash = {
+            torrent.hash: torrent.name
+            for torrent in (state.visible.matched if state.visible else ())
+        }
+        names = tuple(
+            name_by_hash.get(torrent_hash, _shorten_hash(torrent_hash))
+            for torrent_hash in snapshot
+        )
+        self.push_screen(ActionsScreen(snapshot, names))
+        self.refresh_bindings()
+
+    def _open_preview_for_action(
+        self, action: TorrentBulkAction, hashes: tuple[str, ...]
+    ) -> None:
+        """Build a frozen plan from `hashes` (already a snapshot taken
+        at Actions-selection time) and open its Preview.
+
+        Zero API calls: `TuiController.build_bulk_plan` is pure, built
+        entirely from the current in-memory torrent snapshot -- no
+        `torrents_info()` rescan is needed merely to preview a plan.
+        """
+        plan = self.controller.build_bulk_plan(action, hashes)
+        self.push_screen(
+            PreviewScreen(plan, self.controller.state.last_successful_refresh)
+        )
+        self.refresh_bindings()
+
+    def action_apply_plan(self) -> None:
+        """Apply the plan owned by the currently open `PreviewScreen`.
+
+        A no-op unless `PreviewScreen` is actually on top (Apply is
+        only ever reachable by pressing its button, but this guard
+        keeps the method safe to call directly too) and unless no
+        mutation is already in flight -- double-pressing Apply (or any
+        other path that might call this twice) dispatches at most one
+        `MUTATION_WORKER_GROUP` worker; a second call while the first is
+        still running is silently ignored, never queued.
+        """
+        if not isinstance(self.screen, PreviewScreen):
+            return
+        if (
+            self._mutation_worker is not None
+            and not self._mutation_worker.is_finished
+        ):
+            return
+
+        preview_screen = self.screen
+        preview_screen.set_applying(True)
+        self._preview_screen = preview_screen
+        self._active_mutation_plan = preview_screen.plan
+        plan = preview_screen.plan
+        self._mutation_worker = self.run_worker(
+            lambda: self._mutation_worker_body(plan),
+            group=MUTATION_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _mutation_worker_body(
+        self, plan: BulkTorrentActionPlan
+    ) -> tuple[bool, Exception | None]:
+        """Run on a background thread: blocking I/O only, never state
+        mutation, and never raises -- see `_refresh_worker_body` for
+        why the outcome travels back as a plain tagged tuple.
+        """
+        try:
+            self.controller.apply_bulk_plan(plan)
+            return (True, None)
+        except Exception as error:
+            return (False, error)
+
+    def _on_mutation_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS:
+            return
+        if not self.is_running:
+            # The app is shutting down -- never enqueue another
+            # operation, never let a late result touch a closed app.
+            return
+
+        preview_screen = self._preview_screen
+        plan = self._active_mutation_plan
+        self._preview_screen = None
+        self._active_mutation_plan = None
+        if (
+            preview_screen is None
+            or plan is None
+            or preview_screen not in self.screen_stack
+        ):
+            # The Preview modal was already closed (or replaced) --
+            # discard this result rather than updating unrelated UI.
+            return
+
+        assert event.worker.result is not None
+        _succeeded, error = event.worker.result
+
+        self.pop_screen()
+        self.refresh_bindings()
+
+        if error is not None:
+            self._show_mutation_failure(plan, error)
+            return
+
+        self._start_periodic_refresh()  # one immediate refresh, per plan
+        # `classify_plan_status` truthfully distinguishes an empty plan
+        # (NO_MATCH/NO_CHANGES -- `apply_bulk_torrent_action` itself is a
+        # no-op for these, never an API call) from a plan that had real
+        # changes, which -- having reached here without an exception --
+        # is reported as APPLIED. Never inferred merely from "Apply was
+        # pressed".
+        status = self.controller.classify_plan_status(plan)
+        if status is MutationStatus.PREVIEW:
+            status = MutationStatus.APPLIED
+        self._push_result_screen(plan, status, applied=bool(plan.changes))
+
+    def _show_mutation_failure(
+        self, plan: BulkTorrentActionPlan, error: Exception
+    ) -> None:
+        """Report a failed Apply truthfully -- never claim success.
+
+        `apply_bulk_torrent_action` wraps every transport/API failure in
+        a `RuntimeError` (for the CLI's own error rendering), so the
+        original exception (needed to tell a recoverable connection
+        failure apart from a genuine internal defect) is recovered via
+        `__cause__` -- `raise RuntimeError(...) from error` in
+        `app.torrents.apply_bulk_torrent_action` is what sets it.
+        """
+        cause = error.__cause__
+        original: Exception = cause if isinstance(cause, Exception) else error
+        failure = classify_recoverable_qbit_failure(original)
+        if failure is None:
+            self._push_result_screen(
+                plan, None, applied=False, internal_error=original
+            )
+            return
+        self._push_result_screen(
+            plan, None, applied=False, unavailable=failure.message
+        )
+
+    def _push_result_screen(
+        self,
+        plan: BulkTorrentActionPlan,
+        status: MutationStatus | None,
+        *,
+        applied: bool,
+        unavailable: str | None = None,
+        internal_error: Exception | None = None,
+    ) -> None:
+        self.push_screen(
+            ResultScreen(
+                plan,
+                status,
+                applied=applied,
+                unavailable_message=unavailable,
+                internal_error=internal_error,
+            )
+        )
+        self.refresh_bindings()
+
+    def _on_result_dismissed(
+        self, plan: BulkTorrentActionPlan, applied: bool
+    ) -> None:
+        """Apply TUI 2's documented post-dismissal selection policy.
+
+        Only ever clears the hashes the plan actually *changed*
+        (`plan.changes`) and only when the mutation genuinely applied --
+        a skipped torrent (already satisfied) or one belonging to a
+        failed/cancelled attempt keeps its selection untouched, so the
+        operator can reconsider it rather than losing track of it.
+        """
+        if not applied:
+            return
+        changed_hashes = [change.hash for change in plan.changes]
+        self.controller.clear_selection_for(changed_hashes)
+        self._render_table()
+        self._render_filter_summary()
+        self.refresh_bindings()
+
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
         self.refresh_bindings()
 
     def action_dismiss_overlay(self) -> None:
-        """Close a modal, or return focus from a text input to the table.
+        """Close a modal, return focus from a text input to the table,
+        or (TUI 2) clear a non-empty selection.
 
         Special-cases `FiltersScreen`: `escape` there means *cancel*,
         i.e. revert to `FiltersScreen.original_filters` before closing
         -- not a plain `Screen`-level binding, for the same App-priority
-        reason documented on `FiltersScreen`/`action_activate`.
+        reason documented on `FiltersScreen`/`action_activate`. Also
+        refuses to close `PreviewScreen` while a mutation is actually
+        in flight (`applying=True`) -- cancelling out from under an
+        already-dispatched Apply would leave nothing able to observe
+        its result.
+
+        Also special-cases `ResultScreen` for the exact same reason:
+        `escape` is a `priority=True` App binding, which always wins
+        over a same-key `Screen`-level binding -- `ResultScreen`'s own
+        `action_dismiss` (which triggers the documented post-dismissal
+        selection-clearing policy) would otherwise silently never run,
+        leaving successfully-acted-on torrents stuck selected. Verified
+        empirically; see docs/MEMORY.md.
         """
         if len(self.screen_stack) > 1:
             screen = self.screen
+            if isinstance(screen, PreviewScreen) and screen.applying:
+                return
             if isinstance(screen, FiltersScreen):
                 self.controller.set_filters(screen.original_filters)
                 self._render_filter_summary()
                 self._render_table()
                 self._render_details_panels()
+                self._reconcile_selection_and_notify()
+            if isinstance(screen, ResultScreen):
+                plan, applied = screen.plan, screen.applied
+                self.pop_screen()
+                self.refresh_bindings()
+                self._on_result_dismissed(plan, applied)
+                return
             self.pop_screen()
             self.refresh_bindings()
             return
@@ -1678,6 +2347,15 @@ class QbitOpsTuiApp(App[None]):
 
         if was_editing_text:
             self.query_one("#torrents", DataTable).focus()
+            return
+
+        if self.controller.state.selected_hashes:
+            count = len(self.controller.state.selected_hashes)
+            self.controller.clear_selection()
+            self._render_table()
+            self._render_filter_summary()
+            self.refresh_bindings()
+            self.notify(f"Cleared {count} selection(s).")
 
     def _is_narrow(self) -> bool:
         return self.size.width < NARROW_WIDTH_THRESHOLD
@@ -1705,17 +2383,31 @@ _HELP_TEXT = """[bold]Global[/bold]
 1, g       Overview
 2, t       Torrents
 ?          Help
-esc        Close modal / back
+esc        Close modal / clear selection / back
 q          Quit
 
 [bold]Torrents workspace[/bold]
-j/k, ↑/↓   Navigate
+j/k, ↑/↓   Navigate (moves focus)
 /          Search (name or hash)
 f          Filters
-enter      Details
-c          Copy hash
-e          Explain
-r          Refresh tracker details
+enter      Details (focused torrent)
+c          Copy hash (focused torrent)
+e          Explain (focused torrent)
+r          Refresh tracker details (focused torrent)
+space      Toggle selection (focused torrent)
+ctrl+a     Select all visible torrents
+ctrl+d     Deselect all torrents
+a          Actions for selected torrents
+
+[bold]In any modal (Filters, Actions, Preview, Result)[/bold]
+tab, ↑/↓   Move between fields/buttons
+enter      Apply / press the focused button
+
+[dim]Focused = the highlighted row (one at a time).
+Selected = marked with ✔ for bulk actions (any number).
+Visible = shown after the current filter/search.
+Copy/Explain/Refresh always act on the focused torrent only,
+never the selection.[/dim]
 """
 
 
@@ -1761,6 +2453,7 @@ _ALL_COLUMNS: tuple[str, ...] = (
 # deliberately left unset so it absorbs the remaining width instead of
 # being squeezed to its content's natural size.
 _COLUMN_WIDTHS: dict[str, int] = {
+    "Sel": 4,
     "State": 12,
     "Progress": 7,
     "Down": 10,
@@ -1769,24 +2462,45 @@ _COLUMN_WIDTHS: dict[str, int] = {
     "Category": 14,
 }
 
+# A heavier glyph (U+2714, "heavy check mark") than a plain "✓", plus
+# bold+color, so a selected row's marker reads clearly at a glance
+# instead of blending into the row -- requested after dogfooding found
+# the previous plain "✓" too easy to miss.
+_SELECTED_MARK = "✔"
+_UNSELECTED_MARK = " "
+
+
+def _selection_cell(selected: bool) -> Text:
+    if not selected:
+        return Text(_UNSELECTED_MARK)
+    return Text(_SELECTED_MARK, style="bold green")
+
 
 def _columns_for_width(width: int) -> tuple[str, ...]:
     """Pick which table columns to show, in order, for a given App width.
 
-    Progressive disclosure: Name/State/Progress are always shown; Down/
-    Up appear at normal width; Ratio/Category only once the terminal is
-    comfortably wide. Details, Filters, Search, Copy, and Explain never
-    depend on which columns happen to be visible.
+    `Sel` (the selection marker, TUI 2) is always shown at every width
+    -- multi-selection must never lose its only visual indicator just
+    because the terminal is narrow. Progressive disclosure otherwise:
+    Name/State/Progress are always shown; Down/Up appear at normal
+    width; Ratio/Category only once the terminal is comfortably wide.
+    Details, Filters, Search, Copy, and Explain never depend on which
+    columns happen to be visible.
     """
     if width < NARROW_WIDTH_THRESHOLD:
-        return ("Name", "State", "Progress")
-    if width < WIDE_WIDTH_THRESHOLD:
-        return ("Name", "State", "Progress", "Down", "Up")
-    return _ALL_COLUMNS
+        base = ("Name", "State", "Progress")
+    elif width < WIDE_WIDTH_THRESHOLD:
+        base = ("Name", "State", "Progress", "Down", "Up")
+    else:
+        base = _ALL_COLUMNS
+    return ("Sel", *base)
 
 
-def _torrent_row_values(torrent: SelectedTorrent) -> dict[str, str]:
+def _torrent_row_values(
+    torrent: SelectedTorrent, selected: bool
+) -> dict[str, Any]:
     return {
+        "Sel": _selection_cell(selected),
         "Name": torrent.name,
         "State": torrent.state,
         "Progress": f"{torrent.progress * 100:.0f}%",
@@ -1881,6 +2595,112 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+_MAX_PREVIEW_ROWS = 50
+_MAX_SKIPPED_ROWS = 20
+
+
+def _format_preview_text(
+    plan: BulkTorrentActionPlan, snapshot_at: datetime | None
+) -> str:
+    """Render a frozen `BulkTorrentActionPlan` for the Preview modal.
+
+    Display-only: reads `plan`'s already-computed counts/changes/
+    skips, never recomputes or rescans anything. `snapshot_at` is the
+    periodic refresh the plan's torrent data came from -- shown so an
+    operator can judge freshness, never "now" (no clock is read here).
+    """
+    action_label = plan.action.title()
+    lines = [
+        f"[bold]{action_label} · Preview[/bold]",
+        "",
+        f"Selected             {plan.matched}",
+        f"Will {plan.action:<10}     {len(plan.changes)}",
+        f"Skipped              {len(plan.skipped)}",
+    ]
+    if snapshot_at is not None:
+        lines.append(f"Snapshot             {_format_local_time(snapshot_at)}")
+    lines.append("")
+
+    lines.append("[bold]Affected torrents[/bold]")
+    if not plan.changes:
+        lines.append("  (none)")
+    else:
+        for change in plan.changes[:_MAX_PREVIEW_ROWS]:
+            lines.append(
+                f"  {_SELECTED_MARK} {_truncate(change.name, 40):<40} "
+                f"{_shorten_hash(change.hash)}"
+            )
+        remaining = len(plan.changes) - _MAX_PREVIEW_ROWS
+        if remaining > 0:
+            lines.append(f"  … and {remaining} more")
+
+    if plan.skipped:
+        lines.append("")
+        lines.append("[bold]Skipped[/bold]")
+        for skip in plan.skipped[:_MAX_SKIPPED_ROWS]:
+            lines.append(f"  - {_truncate(skip.name, 40):<40} ({skip.reason})")
+        remaining_skips = len(plan.skipped) - _MAX_SKIPPED_ROWS
+        if remaining_skips > 0:
+            lines.append(f"  … and {remaining_skips} more")
+
+    return "\n".join(lines)
+
+
+def _format_result_text(
+    plan: BulkTorrentActionPlan,
+    status: MutationStatus | None,
+    *,
+    unavailable_message: str | None = None,
+    internal_error: Exception | None = None,
+) -> str:
+    """Render the truthful outcome of an Apply attempt.
+
+    `status is None` means Apply itself never completed (a recoverable
+    connection failure or a genuine internal defect, distinguished by
+    which of `unavailable_message`/`internal_error` is set) -- never
+    rendered as if it were `CANCELLED` or any other terminal status
+    that would misrepresent what actually happened.
+    """
+    if internal_error is not None:
+        return (
+            "[bold red]Internal error[/bold red]\n\n"
+            f"{type(internal_error).__name__}: {internal_error}\n\n"
+            "No change was confirmed applied. This is a qbit-ops defect, "
+            "not a remote failure -- it is not retried automatically."
+        )
+
+    if unavailable_message is not None:
+        return (
+            "[bold yellow]Unavailable[/bold yellow]\n\n"
+            f"{unavailable_message}\n\n"
+            f"The plan is unchanged ({len(plan.changes)} torrent(s) queued "
+            f"to {plan.action}), but the mutation could not be confirmed."
+        )
+
+    if status is MutationStatus.NO_MATCH:
+        return "[bold]No changes[/bold]\n\nNo torrents matched this selection."
+
+    if status is MutationStatus.NO_CHANGES:
+        return (
+            "[bold]No changes[/bold]\n\n"
+            f"All selected torrents already satisfied '{plan.action}'."
+        )
+
+    if status is MutationStatus.CANCELLED:
+        return "[bold]Cancelled[/bold]\n\nNo mutation was applied."
+
+    # APPLIED
+    past_tense = _PAST_TENSE_ACTION[plan.action]
+    lines = [
+        "[bold green]Applied[/bold green]",
+        "",
+        f"{len(plan.changes)} torrent(s) {past_tense}",
+    ]
+    if plan.skipped:
+        lines.append(f"{len(plan.skipped)} skipped")
+    return "\n".join(lines)
 
 
 def _format_finding(finding: ExplanationFinding) -> str:

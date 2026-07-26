@@ -746,6 +746,75 @@ def plan_bulk_torrent_action(
     )
 
 
+def build_bulk_action_plan_from_snapshot(
+    raw_torrents: Sequence[Any],
+    action: TorrentBulkAction,
+    selected_hashes: Sequence[str],
+) -> BulkTorrentActionPlan:
+    """Build a `BulkTorrentActionPlan` from an explicit hash selection
+    against an already-fetched torrent snapshot -- zero API calls.
+
+    The TUI's multi-selection counterpart to `plan_bulk_torrent_action`:
+    that function always resolves its own selector (`--hash`/`--all`/
+    filters) via a fresh `torrents_info()` scan, which does not fit an
+    explicit, already-known set of full hashes the caller (e.g. a TUI
+    that just refreshed) already has in memory. Reuses the exact same
+    skip-reason rule (`_bulk_action_skip_reason`) and result shapes
+    (`BulkTorrentChange`/`BulkTorrentSkip`/`BulkTorrentActionPlan`) as
+    the CLI planner -- there is only one skip-reason rule catalogue.
+
+    A selected hash no longer present in `raw_torrents` is reported as
+    a skip (reason `"not_found"`), never silently dropped and never
+    substituted -- the caller can tell "excluded because satisfied"
+    apart from "excluded because it disappeared". `torrent_hash`/
+    `select_all`/`filters` on the returned plan are placeholders
+    (`None`/`False`/empty): they describe *how* a CLI selector was
+    built, which does not apply to an explicit hash set, and
+    `apply_bulk_torrent_action` never reads them anyway (only
+    `action`/`changes`).
+    """
+    by_hash: dict[str, Any] = {
+        get_field_as_string(item, "hash").lower(): item for item in raw_torrents
+    }
+
+    changes: list[BulkTorrentChange] = []
+    skips: list[BulkTorrentSkip] = []
+
+    for torrent_hash in sorted(dict.fromkeys(selected_hashes)):
+        torrent = by_hash.get(torrent_hash.lower())
+        if torrent is None:
+            skips.append(
+                BulkTorrentSkip(
+                    hash=torrent_hash, name=torrent_hash, reason="not_found"
+                )
+            )
+            continue
+
+        name = get_field_as_string(torrent, "name")
+        state = get_field_as_string(torrent, "state")
+        skip_reason = _bulk_action_skip_reason(action, state)
+        if skip_reason is not None:
+            skips.append(
+                BulkTorrentSkip(
+                    hash=torrent_hash, name=name, reason=skip_reason
+                )
+            )
+            continue
+
+        changes.append(BulkTorrentChange(hash=torrent_hash, name=name))
+
+    return BulkTorrentActionPlan(
+        action=action,
+        torrent_hash=None,
+        select_all=False,
+        filters=_EMPTY_TORRENT_FILTER,
+        scanned=len(raw_torrents),
+        matched=len(changes) + len(skips),
+        changes=tuple(changes),
+        skipped=tuple(skips),
+    )
+
+
 def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
     """Apply a previously built plan. Mutates exactly `plan.changes`.
 
