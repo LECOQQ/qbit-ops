@@ -48,6 +48,7 @@ from textual.worker import Worker, WorkerState
 
 from app.torrents import TorrentFilter
 from app.tui.app import (
+    ActionsScreen,
     ConnectionBanner,
     DetailsPanel,
     DetailsScreen,
@@ -57,7 +58,9 @@ from app.tui.app import (
     FilterSummary,
     HelpScreen,
     OverviewPanel,
+    PreviewScreen,
     QbitOpsTuiApp,
+    ResultScreen,
     WorkspaceTabs,
     _columns_for_width,
     _format_byte_rate,
@@ -1867,9 +1870,13 @@ async def test_internal_error_shows_distinct_fatal_state() -> None:
 
 
 async def test_torrents_columns_disclose_progressively() -> None:
-    assert _columns_for_width(80) == ("Name", "State", "Progress")
-    assert _columns_for_width(99) == ("Name", "State", "Progress")
+    # "Sel" (the selection marker, TUI 2) is always present at every
+    # width -- multi-selection must never lose its only visual
+    # indicator just because the terminal is narrow.
+    assert _columns_for_width(80) == ("Sel", "Name", "State", "Progress")
+    assert _columns_for_width(99) == ("Sel", "Name", "State", "Progress")
     assert _columns_for_width(100) == (
+        "Sel",
         "Name",
         "State",
         "Progress",
@@ -1877,6 +1884,7 @@ async def test_torrents_columns_disclose_progressively() -> None:
         "Up",
     )
     assert _columns_for_width(129) == (
+        "Sel",
         "Name",
         "State",
         "Progress",
@@ -1884,6 +1892,7 @@ async def test_torrents_columns_disclose_progressively() -> None:
         "Up",
     )
     assert _columns_for_width(130) == (
+        "Sel",
         "Name",
         "State",
         "Progress",
@@ -3011,3 +3020,681 @@ async def test_tab_navigates_between_filter_fields() -> None:
 
         await pilot.press("escape")
         await pilot.pause()
+
+
+# --- 14. TUI 2: multi-selection + LOW-risk bulk actions ---------------------
+
+
+class BlockingMutationClient(FakeQbitClient):
+    """A `FakeQbitClient` whose `torrents_pause()` blocks on a real
+    `threading.Event` until released -- used to prove Apply cannot be
+    double-dispatched and that a periodic refresh never races it."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.entry_count = 0
+
+    def torrents_pause(self, torrent_hashes: Any) -> None:
+        self.entry_count += 1
+        self.entered.set()
+        if not self.release.wait(timeout=WAIT_TIMEOUT):
+            raise TimeoutError("test forgot to release BlockingMutationClient")
+        super().torrents_pause(torrent_hashes)
+
+
+async def test_space_selects_and_shows_a_visible_marker() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        assert app.controller.state.selected_hashes == set()
+        await pilot.press("space")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == {"a" * 40}
+        table = app.query_one("#torrents", DataTable)
+        row = table.get_row_at(0)
+        # A heavier, bold+colored glyph -- easier to spot at a glance
+        # than a plain unstyled "✓" (requested after dogfooding).
+        assert "✔" in str(row[0])
+        assert row[0].style == "bold green"
+
+
+async def test_filter_summary_shows_selected_count() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("j")
+        await pilot.press("space")
+        await pilot.pause()
+
+        summary = app.query_one("#filter-summary", FilterSummary)
+        assert "2 selected" in str(summary.content)
+
+
+async def test_ctrl_a_selects_only_visible_rows_with_a_filter_active() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "alpha")
+        await pilot.press("escape")  # leave the search box, keep the term
+        await pilot.pause()
+
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == {"a" * 40}
+
+
+async def test_changing_filters_clears_hidden_selections() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        assert len(app.controller.state.selected_hashes) == 2
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one(".f-category", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == {"a" * 40}
+
+
+async def test_actions_modal_inaccessible_with_no_selection() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
+
+
+async def test_actions_modal_opens_with_selection() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.pause()
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ActionsScreen)
+        content = _static_text(app.screen.query_one("#actions-dialog"))
+        assert "1 selected" in content
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_each_low_risk_action_opens_a_preview() -> None:
+    for button_id in ("actions-pause", "actions-resume", "actions-reannounce"):
+        client = FakeQbitClient(
+            torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+        )
+        app = _app(client)
+        async with app.run_test(size=WIDE_SIZE) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            await pilot.press("space")
+            await pilot.press("a")
+            await pilot.pause()
+
+            button = app.screen.query_one(f"#{button_id}", Button)
+            await pilot.click(button)
+            await pilot.pause()
+
+            assert isinstance(app.screen, PreviewScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+
+
+async def test_preview_list_matches_selected_rows() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha ISO", state="downloading"),
+            make_torrent(hash="b" * 40, name="Beta ISO", state="downloading"),
+            make_torrent(hash="c" * 40, name="Gamma ISO", state="downloading"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("j")
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+
+        pause_button = app.screen.query_one("#actions-pause", Button)
+        await pilot.click(pause_button)
+        await pilot.pause()
+
+        content = str(app.screen.query_one("#preview-content", Static).content)
+        assert "Alpha ISO" in content
+        assert "Beta ISO" in content
+        assert "Gamma ISO" not in content
+        assert "Selected             2" in content
+
+
+async def test_escape_cancels_actions_and_preview_without_mutation() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        pause_button = app.screen.query_one("#actions-pause", Button)
+        await pilot.click(pause_button)
+        await pilot.pause()
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
+        assert client.paused_hashes == []
+        assert app.controller.state.selected_hashes == {"a" * 40}
+
+
+async def test_apply_runs_exactly_once_and_reports_applied() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+
+        apply_button = app.screen.query_one("#preview-apply", Button)
+        await pilot.click(apply_button)
+        await _settle(app, pilot)
+
+        assert client.paused_hashes == [["a" * 40]]
+        assert isinstance(app.screen, ResultScreen)
+        content = str(app.screen.query_one("#result-content", Static).content)
+        assert "Applied" in content
+        assert "1 torrent(s) paused" in content
+
+
+async def test_result_modal_reflects_no_changes_truthfully() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", state="pausedDL")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await _settle(app, pilot)
+
+        assert isinstance(app.screen, ResultScreen)
+        content = str(app.screen.query_one("#result-content", Static).content)
+        assert "No changes" in content
+        assert client.paused_hashes == []
+
+
+async def test_double_apply_invokes_the_mutation_only_once() -> None:
+    client = BlockingMutationClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+
+        apply_button = app.screen.query_one("#preview-apply", Button)
+        await pilot.click(apply_button)
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+        # A second press while Apply is already in flight must not
+        # dispatch a second mutation -- the button is disabled.
+        assert apply_button.disabled is True
+        await pilot.click(apply_button)
+        await pilot.pause()
+        assert client.entry_count == 1
+
+        client.release.set()
+        await _settle(app, pilot)
+        assert client.entry_count == 1
+        assert client.paused_hashes == [["a" * 40]]
+
+
+async def test_refresh_never_overlaps_an_in_flight_mutation() -> None:
+    client = BlockingMutationClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+
+        calls_before = client.torrents_info_calls
+        app._start_periodic_refresh()
+        await pilot.pause()
+
+        assert client.torrents_info_calls == calls_before
+
+        client.release.set()
+        await _settle(app, pilot)
+
+
+async def test_late_mutation_result_ignored_after_preview_closed() -> None:
+    client = BlockingMutationClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+
+        # The Apply button is disabled while applying -- Escape (which
+        # would refuse anyway) is not needed to simulate "already
+        # gone"; instead we directly pop the screen to model an already
+        # -closed modal by the time the worker resolves.
+        app.pop_screen()
+        client.release.set()
+        await _settle(app, pilot)
+
+        assert len(app.screen_stack) == 1
+        assert not isinstance(app.screen, ResultScreen)
+
+
+async def test_workspace_switch_blocked_behind_preview_modal() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-pause", Button))
+        await pilot.pause()
+
+        await pilot.press("g")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        assert app.controller.state.workspace is Workspace.TORRENTS
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_copy_and_explain_operate_on_focus_not_selection() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ],
+        trackers_by_hash={"a" * 40: [], "b" * 40: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        # Select Alpha, then move focus to Beta without selecting it.
+        await pilot.press("space")
+        await pilot.press("j")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == {"a" * 40}
+        assert app.controller.state.focused_hash == "b" * 40
+
+        await pilot.press("c")
+        await pilot.pause()
+
+        assert app._clipboard == "b" * 40
+
+
+async def test_no_actions_binding_reachable_from_overview() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.pause()
+        await _goto_overview(app, pilot)
+
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
+        assert app.controller.state.workspace is Workspace.OVERVIEW
+
+
+async def test_text_inputs_retain_normal_space_and_a_characters() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        search = app.query_one("#search-input", Input)
+
+        await pilot.press("a", "space", "a")
+        await pilot.pause()
+
+        assert search.value == "a a"
+        assert app.controller.state.selected_hashes == set()
+
+
+async def test_selection_and_actions_at_every_tested_width() -> None:
+    for size in RESPONSIVE_SIZES:
+        client = FakeQbitClient(
+            torrents=[
+                make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+            ]
+        )
+        app = _app(client)
+        async with app.run_test(size=size) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            await pilot.press("space")
+            await pilot.pause()
+            assert app.controller.state.selected_hashes == {"a" * 40}
+
+            await pilot.press("a")
+            await pilot.pause()
+            assert isinstance(app.screen, ActionsScreen)
+            await pilot.click(app.screen.query_one("#actions-pause", Button))
+            await pilot.pause()
+            assert isinstance(app.screen, PreviewScreen)
+
+            await pilot.click(app.screen.query_one("#preview-apply", Button))
+            await _settle(app, pilot)
+            assert isinstance(app.screen, ResultScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+
+
+async def test_no_tracker_secrets_in_preview_or_result() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=torrent_hash, name="Alpha", state="downloading")
+        ],
+        trackers_by_hash={
+            torrent_hash: [
+                {
+                    "url": "https://tracker.example/announce/TOPSECRET",
+                    "status": 2,
+                }
+            ]
+        },
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-reannounce", Button))
+        await pilot.pause()
+
+        preview_content = str(
+            app.screen.query_one("#preview-content", Static).content
+        )
+        assert "TOPSECRET" not in preview_content
+        assert "https://" not in preview_content
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await _settle(app, pilot)
+        result_content = str(
+            app.screen.query_one("#result-content", Static).content
+        )
+        assert "TOPSECRET" not in result_content
+        assert "https://" not in result_content
+
+
+# --- 15. Dogfooding follow-up fixes -----------------------------------------
+
+
+async def test_enter_presses_the_focused_button_in_actions_and_preview() -> (
+    None
+):
+    """Regression: `action_activate` (bound to `enter` with
+    `priority=True`) only special-cased `FiltersScreen`, so `enter`
+    silently did nothing in `ActionsScreen`/`PreviewScreen`/
+    `ResultScreen` even with a `Button` focused -- the priority binding
+    intercepted the key before the `Button`'s own native
+    enter-activates-click behavior ever ran."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        assert isinstance(app.screen, ActionsScreen)
+        assert app.focused is not None and app.focused.id == "actions-pause"
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        assert app.focused is not None and app.focused.id == "preview-apply"
+
+        await pilot.press("enter")
+        await _settle(app, pilot)
+
+        assert isinstance(app.screen, ResultScreen)
+        assert client.paused_hashes == [["a" * 40]]
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+async def test_up_down_navigate_actions_menu() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+
+        assert app.focused is not None and app.focused.id == "actions-pause"
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.focused is not None and app.focused.id == "actions-resume"
+        await pilot.press("down")
+        await pilot.pause()
+        assert (
+            app.focused is not None and app.focused.id == "actions-reannounce"
+        )
+        await pilot.press("up")
+        await pilot.pause()
+        assert app.focused is not None and app.focused.id == "actions-resume"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_up_down_navigate_filters_modal() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        category_input = app.screen.query_one(".f-category", Input)
+        assert category_input.has_focus
+
+        await pilot.press("down")
+        await pilot.pause()
+        state_input = app.screen.query_one(".f-state", Input)
+        assert state_input.has_focus
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert category_input.has_focus
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_ctrl_d_deselects_all_visible_torrents() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        assert len(app.controller.state.selected_hashes) == 2
+
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == set()
+
+
+async def test_ctrl_d_with_no_selection_is_a_safe_noop() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == set()

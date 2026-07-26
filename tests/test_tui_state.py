@@ -17,6 +17,7 @@ from app.errors import (
     QbitAuthenticationError,
     QbitConnectionError,
 )
+from app.execution import MutationStatus
 from app.torrents import build_torrent_filter
 from app.tui.state import ConnectionState, TuiController, Workspace
 from tests.support import FakeQbitClient, make_torrent
@@ -559,3 +560,333 @@ def test_raw_torrent_by_hash_is_case_insensitive() -> None:
     found = controller.raw_torrent_by_hash("A" * 40)
 
     assert found is not None
+
+
+# --- TUI 2: explicit multi-selection + LOW-risk bulk actions ------------------
+
+
+def test_focusing_a_torrent_does_not_select_it() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_focus("a" * 40)
+
+    assert controller.state.selected_hashes == set()
+
+
+def test_toggle_selection_toggles_exactly_one_hash() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.toggle_selection("a" * 40)
+    assert controller.state.selected_hashes == {"a" * 40}
+
+    controller.toggle_selection("b" * 40)
+    assert controller.state.selected_hashes == {"a" * 40, "b" * 40}
+
+    controller.toggle_selection("a" * 40)
+    assert controller.state.selected_hashes == {"b" * 40}
+
+
+def test_select_all_visible_selects_only_visible_hashes() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.set_filters(build_torrent_filter(categories=["films"]))
+
+    controller.select_all_visible()
+
+    assert controller.state.selected_hashes == {"a" * 40}
+
+
+def test_zero_selection_never_implies_all() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    assert controller.state.selected_hashes == set()
+    plan = controller.build_bulk_plan(
+        "pause", tuple(controller.state.selected_hashes)
+    )
+    assert plan.changes == ()
+    assert plan.matched == 0
+
+
+def test_filter_change_does_not_auto_reconcile_selection() -> None:
+    """`set_filters` deliberately does not reconcile the selection by
+    itself: the Filters modal applies live, on every keystroke, and a
+    category filter is exact-match -- typing "films" one letter at a
+    time would otherwise transiently wipe a selection before the user
+    finishes typing the very filter that keeps it visible. The caller
+    (`app.tui.app`) reconciles once, explicitly, at each real commit
+    point (Apply/Clear/Cancel) via `reconcile_selection()` -- see
+    `test_reconcile_selection_removes_hidden_hashes_on_demand`.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    controller.toggle_selection("b" * 40)
+
+    controller.set_filters(build_torrent_filter(categories=["films"]))
+
+    assert controller.state.selected_hashes == {"a" * 40, "b" * 40}
+
+
+def test_reconcile_selection_removes_hidden_hashes_on_demand() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    controller.toggle_selection("b" * 40)
+    controller.set_filters(build_torrent_filter(categories=["films"]))
+
+    removed = controller.reconcile_selection()
+
+    assert removed == 1
+    assert controller.state.selected_hashes == {"a" * 40}
+
+
+def test_search_change_removes_hidden_selections() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    controller.toggle_selection("b" * 40)
+
+    removed = controller.set_search("alpha")
+
+    assert removed == 1
+    assert controller.state.selected_hashes == {"a" * 40}
+
+
+def test_periodic_refresh_removes_missing_selections() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    controller.toggle_selection("b" * 40)
+
+    client.torrents = [make_torrent(hash="a" * 40, name="Alpha")]
+    controller.refresh()
+
+    assert controller.state.selected_hashes == {"a" * 40}
+
+
+def test_build_bulk_plan_freezes_a_sorted_hash_tuple() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="b" * 40, name="Beta"),
+            make_torrent(hash="a" * 40, name="Alpha"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("b" * 40)
+    controller.toggle_selection("a" * 40)
+
+    snapshot = tuple(sorted(controller.state.selected_hashes))
+    plan = controller.build_bulk_plan("pause", snapshot)
+
+    assert [c.hash for c in plan.changes] == ["a" * 40, "b" * 40]
+
+
+def test_plan_is_frozen_against_later_selection_changes() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    snapshot = tuple(sorted(controller.state.selected_hashes))
+
+    plan = controller.build_bulk_plan("pause", snapshot)
+
+    controller.toggle_selection("b" * 40)
+    controller.clear_selection()
+
+    assert [c.hash for c in plan.changes] == ["a" * 40]
+
+
+def test_build_bulk_plan_performs_zero_api_calls() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    calls_before = len(client.calls)
+
+    controller.build_bulk_plan("pause", ("a" * 40,))
+
+    assert len(client.calls) == calls_before
+
+
+def test_apply_bulk_plan_mutates_exactly_the_plan_hashes() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading"),
+            make_torrent(hash="b" * 40, name="Beta", state="downloading"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    plan = controller.build_bulk_plan("pause", ("a" * 40,))
+
+    controller.apply_bulk_plan(plan)
+
+    assert client.paused_hashes == [["a" * 40]]
+
+
+def test_pause_plan_skips_already_stopped_torrents() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading"),
+            make_torrent(hash="b" * 40, name="Beta", state="pausedDL"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    plan = controller.build_bulk_plan("pause", ("a" * 40, "b" * 40))
+
+    assert [c.hash for c in plan.changes] == ["a" * 40]
+    assert plan.skipped[0].reason == "already_stopped"
+
+
+def test_resume_plan_skips_already_running_torrents() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="pausedDL"),
+            make_torrent(hash="b" * 40, name="Beta", state="downloading"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    plan = controller.build_bulk_plan("resume", ("a" * 40, "b" * 40))
+
+    assert [c.hash for c in plan.changes] == ["a" * 40]
+    assert plan.skipped[0].reason == "already_running"
+
+
+def test_reannounce_plan_uses_exact_selected_hashes() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading"),
+            make_torrent(hash="b" * 40, name="Beta", state="pausedDL"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    plan = controller.build_bulk_plan("reannounce", ("a" * 40, "b" * 40))
+    controller.apply_bulk_plan(plan)
+
+    assert sorted(client.reannounced_hashes[0]) == ["a" * 40, "b" * 40]
+
+
+def test_classify_plan_status_no_match_is_truthful() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    plan = controller.build_bulk_plan("pause", ())
+
+    assert controller.classify_plan_status(plan) is MutationStatus.NO_MATCH
+
+
+def test_classify_plan_status_no_changes_is_truthful() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", state="pausedDL")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    plan = controller.build_bulk_plan("pause", ("a" * 40,))
+
+    assert controller.classify_plan_status(plan) is MutationStatus.NO_CHANGES
+
+
+def test_apply_bulk_plan_propagates_failure_untruthfully_unclaimed() -> None:
+    """A failed apply must never be silently swallowed -- the caller
+    (app.tui.app) needs the exception to classify and report failure
+    truthfully instead of assuming success."""
+
+    class _FailingClient(FakeQbitClient):
+        def torrents_pause(self, torrent_hashes):  # type: ignore[override]
+            raise ConnectionError("boom")
+
+    client = _FailingClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", state="downloading")
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    plan = controller.build_bulk_plan("pause", ("a" * 40,))
+
+    with pytest.raises(RuntimeError):
+        controller.apply_bulk_plan(plan)
+
+
+def test_clear_selection_for_only_removes_given_hashes() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    controller.toggle_selection("a" * 40)
+    controller.toggle_selection("b" * 40)
+
+    controller.clear_selection_for(["a" * 40])
+
+    assert controller.state.selected_hashes == {"b" * 40}

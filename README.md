@@ -29,20 +29,24 @@ qbit-ops trackers replace-passkey \
   table/JSON/JSONL/CSV.
 - 🔁 **`status --watch`** — live-refreshing status in place (table) or as a
   flushed JSONL stream, on the same snapshot model, until `Ctrl+C`.
-- 🖥️ **`tui`** *(optional `tui` extra)* — a read-only interactive terminal
-  UI, Overview-first: it opens on an Overview workspace grouping
+- 🖥️ **`tui`** *(optional `tui` extra)* — an interactive terminal UI,
+  Overview-first: it opens on an Overview workspace grouping
   Connection, Transfer, Activity, Completion, Attention, and grounded
   Health findings into distinct cards, all from the same periodic
   refresh — no extra API call — with a second Torrents workspace
   (`t`/`2`) for browsing a responsive torrent table, filtering (a
-  compact modal with exclusive Completion/Activity choices), and safe
-  inspection: focused-torrent Details (identity, transfer, sanitized
-  tracker identities), a `c` binding to copy the full hash, and an `e`
-  binding to explain a torrent's current state with the same
-  evidence-based rule catalogue `explain torrent` uses. Switching
-  workspaces, filtering, searching, and explaining (when tracker data
-  is already loaded) are all local — zero qBittorrent calls. No
-  mutation is reachable from the TUI. See
+  compact modal with exclusive Completion/Activity choices), safe
+  inspection (focused-torrent Details, `c` to copy the full hash, `e`
+  to explain a torrent's current state with the same evidence-based
+  rule catalogue `explain torrent` uses), and explicit multi-selection
+  (`space`/`ctrl+a`) with a safe, three-step bulk-action loop for
+  LOW-risk actions only (`a` → Pause/Resume/Reannounce → an exact
+  preview of what will change → an explicit Apply). Switching
+  workspaces, filtering, searching, selecting, and previewing are all
+  local — zero qBittorrent calls; a mutation only ever happens after
+  the operator explicitly presses Apply on an already-frozen, already-
+  previewed plan. No deletion, tracker mutation, or whole-instance
+  selector is reachable from the TUI. See
   [docs/COMMANDS.md](docs/COMMANDS.md#tui) for controls and
   [docs/TUI_ARCHITECTURE_REVIEW.md](docs/TUI_ARCHITECTURE_REVIEW.md) for
   the architecture and roadmap.
@@ -247,7 +251,7 @@ qbit-ops status --quiet; echo $?   # healthchecks: 0 healthy, 1 warning, 2 criti
 qbit-ops status --watch                       # refresh in place every 5s until Ctrl+C
 qbit-ops status --watch --interval 10
 
-qbit-ops tui                                  # interactive: Overview dashboard, then Torrents (t/2) to browse/filter/search/inspect/copy hash (c)/explain (e) (requires the `tui` extra)
+qbit-ops tui                                  # interactive: Overview dashboard, Torrents (t/2) to browse/filter/search/inspect, select (space/ctrl+a) + Actions (a) for safe Pause/Resume/Reannounce (requires the `tui` extra)
 qbit-ops status --watch --format jsonl | jq .  # one flushed JSON object per line
 
 qbit-ops connection check

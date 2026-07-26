@@ -448,17 +448,45 @@ while any modal (Filters/Details/Help/Explain) is open.
 ```text
 1, g           Overview
 2, t           Torrents
-up/down, j/k   navigate torrents (Torrents workspace)
+up/down, j/k   navigate torrents (Torrents workspace) -- moves focus
 /              open a search box (Enter to apply, Esc to close)
 f              open filters (a modal, at every terminal width)
 enter          Overview: browse torrents · Torrents: open focused details
 c              copy the focused torrent's full hash
 e              explain the focused torrent's current state
 r              refresh the focused torrent's tracker details
-esc            close a modal/help/search box, or return focus to the list
+space          toggle the focused torrent's selection
+ctrl+a         select every currently visible torrent
+ctrl+d         deselect every torrent (the explicit counterpart to ctrl+a)
+a              open Actions for the current selection
+esc            close a modal/help/search box, clear a non-empty
+               selection, or return focus to the list
 ?              open help (a real modal, listing only working bindings)
 q              quit
 ```
+
+Inside any modal that has more than one field or button (Filters,
+Actions, Preview), `Tab`/`Shift+Tab` **and** `↑`/`↓` both move between
+them, and `Enter` presses whichever button currently has focus — the
+same as clicking it.
+
+**Focus, selection, and visibility are three distinct concepts:**
+*focused* is the single highlighted row (keyboard navigation moves it);
+*selected* is any number of torrents explicitly marked with `space`/
+`ctrl+a` for a bulk action; *visible* is whatever the current filter/
+search leaves in the table. Copy, Explain, and Refresh details always
+act on the **focused** torrent only, never the selection — moving focus
+never selects anything by itself.
+
+The footer only ever advertises what is actually reachable right now:
+Overview shows just Torrents/Help/Quit; Torrents without a focused
+torrent adds Search/Filters/Overview; focusing a torrent additionally
+shows Copy/Explain/Refresh; a non-empty selection additionally shows
+Actions. This is enforced by Textual's own `check_action` mechanism,
+not cosmetic — the underlying key press is genuinely inert outside its
+context, not merely unlisted. Help (`?`) is one concise, scrollable
+table grouped as "Global" / "Torrents workspace" rather than repeating
+per-line context notes.
 
 `q` quits from anywhere the App's own bindings are reachable — the
 torrent list, the details panel, any Checkbox — but while a text box
@@ -522,6 +550,13 @@ the torrent table:
 stalled · category: films · search: ubuntu
 ```
 
+or, with a non-empty selection (shown right after the shown/total
+count):
+
+```text
+24 shown / 1,106 · 7 selected · stalled · category: films
+```
+
 Details are always reachable, at every terminal width: an inline side
 panel when the terminal is wide enough, a dedicated modal (opened by
 `Enter`) otherwise — narrow terminals never simply lose access to safe
@@ -538,6 +573,122 @@ torrent details. Details are grouped into three sections:
   belongs to, and never a duplicated "disabled disabled"), plus the
   fetch timestamp (local time) — never a raw announce URL, path
   segment, query value, userinfo, or passkey.
+
+### Multi-selection and bulk actions
+
+```text
+space      toggle the focused torrent's selection
+ctrl+a     select every currently visible torrent
+ctrl+d     deselect every torrent (works unconditionally)
+a          open Actions for the current selection
+esc        clear the selection (when non-empty and no modal is open)
+```
+
+Selection is explicit and separate from focus: navigating the table
+never selects anything, and `ctrl+a` only ever selects the torrents
+**currently visible** under the active filter/search — never a hidden
+torrent, and never "the whole instance" (an empty selection is always
+empty, never implicitly "all"). If a filter or search change hides an
+already-selected torrent, it is dropped from the selection the moment
+that change is applied (Filters' Apply/Clear/Cancel, or as you type in
+Search), with a concise notification for Filters (`N hidden
+selection(s) cleared.`) — Search reconciles silently on every
+keystroke, since narrating every character typed would be noise, not
+signal. A periodic refresh that removes a torrent entirely also drops
+it from the selection.
+
+With a non-empty selection, `a` opens **Actions**:
+
+```text
+Actions · 7 selected
+
+Pause
+Resume
+Reannounce
+
+Cancel
+```
+
+Choosing an action builds a **frozen plan** from exactly the selected
+hashes at that moment (`tuple(sorted(selected_hashes))`) and opens a
+**Preview** — no qBittorrent call is needed for this, since the plan is
+built entirely from the torrent data the TUI already has from its last
+periodic refresh:
+
+```text
+Reannounce · Preview
+
+Selected             12
+Will reannounce      10
+Skipped               2
+Snapshot             14:32:05 CEST
+
+Affected torrents
+✓ Ubuntu ISO             8ac34f89…f95704b8
+✓ Debian ISO             1a2b3c4d…5e6f7089
+…
+
+Cancel                                    Apply
+```
+
+The plan shown is frozen the moment Preview opens: it does not change
+even if the selection, filters, search, or focus change in the
+background while the modal is open. Only **Apply** — an explicit
+button press, never automatic — mutates anything; Escape or Cancel
+close the modal with zero API calls and leave the selection untouched
+for reconsideration. Because these are the same LOW-risk operations
+`torrents pause`/`resume`/`reannounce` already perform without a
+confirmation prompt, Apply does not ask for a second yes/no
+confirmation — the Preview itself is the confirmation step. While
+Apply is running, both buttons are disabled and the button reads
+"Applying…", so double-pressing (or pressing Enter twice) can never
+dispatch a second mutation; Cancel/Escape are also refused until it
+finishes, since cancelling out from under an in-flight mutation would
+leave nothing to observe its result. A periodic refresh tick is
+skipped for the same reason (coalesced, never queued) while a mutation
+is in flight; one refresh is triggered immediately once it completes.
+
+The result is always reported truthfully, never inferred merely from
+"Apply was pressed":
+
+```text
+Applied
+
+10 torrent(s) reannounced
+2 skipped
+```
+
+```text
+No changes
+
+All selected torrents already satisfied 'pause'.
+```
+
+```text
+Unavailable
+
+Unable to connect to qBittorrent...
+
+The plan is unchanged (7 torrent(s) queued to pause), but the
+mutation could not be confirmed.
+```
+
+An authentication/configuration failure instead enters the TUI's
+existing blocking connection state (same as periodic refresh); an
+internal exception is shown as a distinct, sanitized "Internal error"
+result, never mistaken for a remote failure, and is never retried
+automatically. Dismissing a successful **Applied** result clears the
+selection for exactly the torrents that changed (`plan`'s recorded
+changes) — a skipped torrent, or the whole selection after a failed/
+cancelled attempt, keeps its selection so the operator can reconsider
+it, rather than losing track of it.
+
+Reannounce never exposes a tracker URL anywhere in Actions/Preview/
+Result, and never repeats or schedules itself automatically. No
+torrent/file deletion, tracker add/remove/replace, category editing,
+priority change, or whole-instance (`--all`-equivalent) selector is
+reachable from the TUI — those remain CLI-only, at their existing risk
+tiers.
 
 ### Copy hash
 
@@ -680,18 +831,30 @@ are built from that same safe data (and already-classified torrent
 state) — a suggested command is always a display-only, dry-run-safe
 string, never `--no-dry-run`/`--yes`, and is never executed by the TUI.
 Copy hash copies only the full canonical hash string, never a details
-block or tracker data. See [docs/PHILOSOPHY.md](PHILOSOPHY.md) §15 and
+block or tracker data. The only mutation surface reachable from the TUI
+is exactly two functions — `app.torrents.build_bulk_action_plan_from_snapshot`
+(pure, builds a plan from an already-fetched snapshot) and
+`apply_bulk_torrent_action` (mutates exactly a frozen plan's hashes) —
+covering only Pause/Resume/Reannounce; every tracker mutation function,
+`app.torrents.plan_bulk_torrent_action` (always rescans, accepts
+`--all`), and any deletion function remain fully out of reach,
+enforced by a static (AST) test, not just a runtime one
+(`tests/test_tui_security.py`). See
+[docs/PHILOSOPHY.md](PHILOSOPHY.md) §15 and
 [docs/TUI_ARCHITECTURE_REVIEW.md](TUI_ARCHITECTURE_REVIEW.md) §10 for
 the full invariant and the tests that enforce it.
 
 ### Scope
 
-Read-only. TUI 1 does not include torrent mutations, multi-selection,
-tracker-wide status/health views, a doctor workspace, an explanation
-view, filesystem features, persistent history, charts, or automatic
-remediation — see
+Interactive, but deliberately narrow: the TUI supports explicit
+multi-selection and LOW-risk bulk actions (Pause/Resume/Reannounce)
+only. It does not include torrent/file deletion, tracker add/remove/
+replace, passkey replacement, category editing, priorities, automatic
+actions, a whole-instance (`--all`-equivalent) selector, MEDIUM/HIGH-risk
+operations, undo, background queues, tracker-wide status/health views,
+or a doctor workspace — see
 [docs/TUI_ARCHITECTURE_REVIEW.md §12](TUI_ARCHITECTURE_REVIEW.md#12-revised-roadmap)
-for the full phased roadmap (TUI 1.1 through TUI 5).
+for the full phased roadmap.
 
 ## Connection
 
