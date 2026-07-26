@@ -3276,8 +3276,11 @@ async def test_apply_runs_exactly_once_and_reports_applied() -> None:
         assert client.paused_hashes == [["a" * 40]]
         assert isinstance(app.screen, ResultScreen)
         content = str(app.screen.query_one("#result-content", Static).content)
-        assert "Applied" in content
-        assert "1 torrent(s) paused" in content
+        # "Submitted", not "Applied": qBittorrent's bulk endpoints
+        # confirm request acceptance, not a per-hash state transition
+        # (documented accepted limitation, audit remediation §5).
+        assert "Submitted" in content
+        assert "submitted for 1 torrent(s)" in content
 
 
 async def test_result_modal_reflects_no_changes_truthfully() -> None:

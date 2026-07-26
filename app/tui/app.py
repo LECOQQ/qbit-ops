@@ -99,7 +99,8 @@ deletion, no `--all`/whole-instance selector is reachable from the TUI.
 
 from __future__ import annotations
 
-from datetime import datetime, tzinfo
+from dataclasses import dataclass
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 
 from rich.text import Text
@@ -126,6 +127,8 @@ from app.app_services import (
     classify_recoverable_qbit_failure,
     create_qbit_client,
 )
+from app.config import ConfigError
+from app.errors import ErrorCategory
 from app.execution import MutationStatus
 from app.explain import Evidence, ExplanationFinding, ExplanationReport
 from app.explain import ExplanationSeverity as Severity
@@ -138,6 +141,7 @@ from app.torrents import (
     build_torrent_filter,
     describe_torrent_filter,
 )
+from app.trackers import sanitize_tracker_text
 from app.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
     ConnectionState,
@@ -164,6 +168,102 @@ _PAST_TENSE_ACTION: dict[TorrentBulkAction, str] = {
     "start": "started",
     "reannounce": "reannounced",
 }
+
+
+@dataclass(frozen=True)
+class MutationUiResult:
+    """One completed Apply's truthful, safe, structured outcome.
+
+    Deliberately small and immutable (audit finding R-3): it exists so a
+    mutation that really was submitted can still be reported even when
+    its `PreviewScreen` is no longer the active screen -- never as a
+    generic notification-history framework. Carries only safe data:
+    counts, full canonical hashes the TUI already holds, a semantic
+    error category, and an already-sanitized message. No exception
+    object, no traceback, no tracker data.
+    """
+
+    operation_id: int
+    action: TorrentBulkAction
+    status: MutationStatus
+    planned_hashes: tuple[str, ...]
+    submitted_hashes: tuple[str, ...]
+    satisfied_hashes: tuple[str, ...]
+    not_found_hashes: tuple[str, ...]
+    completed_at: datetime
+    error_category: ErrorCategory | None = None
+    error_message: str | None = None
+
+    @classmethod
+    def from_plan(
+        cls,
+        plan: BulkTorrentActionPlan,
+        status: MutationStatus,
+        *,
+        operation_id: int,
+        error_category: ErrorCategory | None = None,
+        error_message: str | None = None,
+    ) -> MutationUiResult:
+        satisfied, not_found = _split_skips(plan)
+        submitted = tuple(change.hash for change in plan.changes)
+        return cls(
+            operation_id=operation_id,
+            action=plan.action,
+            status=status,
+            planned_hashes=submitted
+            + tuple(skip.hash for skip in plan.skipped),
+            submitted_hashes=(submitted if error_category is None else ()),
+            satisfied_hashes=tuple(skip.hash for skip in satisfied),
+            not_found_hashes=tuple(skip.hash for skip in not_found),
+            completed_at=datetime.now(UTC),
+            error_category=error_category,
+            error_message=error_message,
+        )
+
+
+def _classify_mutation_error(
+    error: Exception,
+) -> tuple[ErrorCategory, str]:
+    """Classify an Apply failure into one semantic category + message.
+
+    Outer-first (audit findings F-4/F-5), then `__cause__` as fallback
+    context only -- see `QbitOpsTuiApp._classify_mutation_outcome` for
+    the full documented ladder and why the order matters. All returned
+    text is already safe to render: `ConfigError`/`QbitAuthenticationError`/
+    `QbitConnectionError` messages are qbit-ops' own wording, and the
+    recoverable classifier reuses the same messages the refresh path
+    shows in its banner.
+    """
+    classified = _classify_one_mutation_error(error)
+    if classified is not None:
+        return classified
+
+    cause = error.__cause__
+    if isinstance(cause, Exception):
+        classified = _classify_one_mutation_error(cause)
+        if classified is not None:
+            return classified
+
+    return (
+        ErrorCategory.INTERNAL,
+        f"{type(error).__name__}: {sanitize_tracker_text(str(error))}",
+    )
+
+
+def _classify_one_mutation_error(
+    error: Exception,
+) -> tuple[ErrorCategory, str] | None:
+    """One rung of the ladder: classify `error` itself, or `None`."""
+    if isinstance(error, ConfigError):
+        return (ErrorCategory.CONFIGURATION, str(error))
+
+    failure = classify_recoverable_qbit_failure(error)
+    if failure is None:
+        return None
+    if failure.code == "authentication_failed":
+        return (ErrorCategory.AUTHENTICATION, failure.message)
+    return (ErrorCategory.UNAVAILABLE, failure.message)
+
 
 _HEALTH_STYLES: dict[Health, str] = {
     Health.HEALTHY: "bold green",
@@ -901,11 +1001,20 @@ class PreviewScreen(ModalScreen[None]):
     """Preview of a frozen `BulkTorrentActionPlan` before Apply.
 
     Owns and displays exactly the plan passed at construction --
-    `plan`/`snapshot_at` never change after `__init__`. The live
-    selection, filters, search, and focus may keep changing in the
-    background while this modal is open; none of that ever mutates
+    `plan`/`snapshot_at`/`operation_id` never change after `__init__`.
+    The live selection, filters, search, and focus may keep changing in
+    the background while this modal is open; none of that ever mutates
     this screen's plan (see docs/DECISIONS.md, "frozen plan"
     invariant).
+
+    Staleness (audit finding R-2) is **sticky**: a plan is grounded in
+    exactly one snapshot generation, so once that generation stops
+    being current -- the connection leaves `CONNECTED`, or a refresh
+    fails and marks the state stale -- this preview becomes permanently
+    non-applicable. Recovery deliberately does *not* re-enable it: the
+    operator must close and rebuild the preview from current data,
+    because the plan was computed against torrents whose state is no
+    longer known to be accurate. `mark_stale()` is one-way by design.
     """
 
     BINDINGS = [
@@ -941,11 +1050,26 @@ class PreviewScreen(ModalScreen[None]):
         self,
         plan: BulkTorrentActionPlan,
         snapshot_at: datetime | None,
+        *,
+        operation_id: int,
     ) -> None:
         super().__init__()
         self.plan = plan
         self.snapshot_at = snapshot_at
+        self.operation_id = operation_id
+        """Immutable identity of the mutation this preview owns (audit
+        finding R-1) -- a completion only ever touches the preview
+        carrying its own id."""
         self.applying = False
+        self.stale = False
+
+    @property
+    def can_apply(self) -> bool:
+        """Whether Apply may dispatch: fresh snapshot, not already
+        applying. The single source of truth behind both the button's
+        `disabled` state and `QbitOpsTuiApp.action_apply_plan`'s guard,
+        so keyboard Apply cannot bypass what the button forbids."""
+        return not self.stale and not self.applying
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="preview-dialog"):
@@ -955,10 +1079,27 @@ class PreviewScreen(ModalScreen[None]):
                 yield Button("Apply", id="preview-apply", variant="primary")
 
     def on_mount(self) -> None:
-        self.query_one("#preview-content", Static).update(
-            _format_preview_text(self.plan, self.snapshot_at)
-        )
+        self._render_content()
         self.query_one("#preview-apply", Button).focus()
+
+    def _render_content(self) -> None:
+        self.query_one("#preview-content", Static).update(
+            _format_preview_text(self.plan, self.snapshot_at, stale=self.stale)
+        )
+
+    def mark_stale(self) -> None:
+        """Permanently mark this preview's snapshot generation stale.
+
+        One-way (see the class docstring): recovery never clears it. A
+        no-op while a mutation is already in flight -- the request was
+        dispatched against a snapshot that *was* fresh, and relabelling
+        the button mid-flight would neither undo it nor add information.
+        """
+        if self.stale or self.applying:
+            return
+        self.stale = True
+        self._render_content()
+        self._sync_buttons()
 
     def set_applying(self, applying: bool) -> None:
         """Freeze the modal while a mutation is actually in flight --
@@ -967,10 +1108,18 @@ class PreviewScreen(ModalScreen[None]):
         double-pressing it (or pressing Enter twice) cannot dispatch a
         second mutation."""
         self.applying = applying
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
         apply_button = self.query_one("#preview-apply", Button)
-        apply_button.disabled = applying
-        apply_button.label = "Applying..." if applying else "Apply"
-        self.query_one("#preview-cancel", Button).disabled = applying
+        apply_button.disabled = not self.can_apply
+        if self.applying:
+            apply_button.label = "Applying..."
+        elif self.stale:
+            apply_button.label = "Apply unavailable"
+        else:
+            apply_button.label = "Apply"
+        self.query_one("#preview-cancel", Button).disabled = self.applying
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         app = self.app
@@ -990,14 +1139,12 @@ class PreviewScreen(ModalScreen[None]):
 class ResultScreen(ModalScreen[None]):
     """A truthful, dismissible report of what an Apply actually did.
 
-    Never inferred from "Apply was pressed" -- `status`/
-    `unavailable_message`/`internal_error` are computed by the App from
-    the mutation worker's real outcome (see
-    `QbitOpsTuiApp._on_mutation_worker_state_changed`/
-    `_show_mutation_failure`) before this screen is even constructed.
-    Dismissing (`Esc`, or the Close button) never re-applies anything;
-    it only triggers `QbitOpsTuiApp._on_result_dismissed`'s documented
-    selection-clearing policy.
+    Never inferred from "Apply was pressed" -- the whole `outcome` is
+    computed by the App from the mutation worker's real result (see
+    `QbitOpsTuiApp._classify_mutation_outcome`) before this screen is
+    even constructed. Dismissing (`Esc`, or the Close button) never
+    re-applies anything; it only triggers
+    `QbitOpsTuiApp._on_result_dismissed`'s documented selection policy.
 
     Deliberately no Screen-level `escape` binding: `escape` is already
     a `priority=True` App binding
@@ -1028,21 +1175,9 @@ class ResultScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(
-        self,
-        plan: BulkTorrentActionPlan,
-        status: MutationStatus | None,
-        *,
-        applied: bool,
-        unavailable_message: str | None = None,
-        internal_error: Exception | None = None,
-    ) -> None:
+    def __init__(self, outcome: MutationUiResult) -> None:
         super().__init__()
-        self.plan = plan
-        self.status = status
-        self.applied = applied
-        self.unavailable_message = unavailable_message
-        self.internal_error = internal_error
+        self.outcome = outcome
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="result-dialog"):
@@ -1051,12 +1186,7 @@ class ResultScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.query_one("#result-content", Static).update(
-            _format_result_text(
-                self.plan,
-                self.status,
-                unavailable_message=self.unavailable_message,
-                internal_error=self.internal_error,
-            )
+            _format_result_text(self.outcome)
         )
         self.query_one("#result-close", Button).focus()
 
@@ -1246,6 +1376,8 @@ class QbitOpsTuiApp(App[None]):
         self._mutation_worker: Worker[Any] | None = None
         self._preview_screen: PreviewScreen | None = None
         self._active_mutation_plan: BulkTorrentActionPlan | None = None
+        self._last_operation_id = 0
+        self._last_mutation_result: MutationUiResult | None = None
 
     def get_default_screen(self) -> Screen[None]:
         return MainScreen(id="_default")
@@ -1359,8 +1491,22 @@ class QbitOpsTuiApp(App[None]):
                 return
         else:
             assert result is not None
-            self.controller.apply_refresh_success(result)
+            # Audit finding F-1: never reconcile the selection out from
+            # under an uncommitted Filters draft -- a half-typed
+            # exact-match category matches nothing, so reconciling here
+            # would silently erase the operator's selection. The modal's
+            # own Apply/Clear/Cancel commit points reconcile instead.
+            self.controller.apply_refresh_success(
+                result, reconcile=not self._filters_draft_is_open()
+            )
         self._render_all()
+        self._refresh_preview_freshness()
+
+    def _filters_draft_is_open(self) -> bool:
+        """Whether a `FiltersScreen` is anywhere on the screen stack."""
+        return any(
+            isinstance(screen, FiltersScreen) for screen in self.screen_stack
+        )
 
     def _show_fatal(self, error: Exception) -> None:
         banner = self.query_one("#banner", ConnectionBanner)
@@ -2136,10 +2282,41 @@ class QbitOpsTuiApp(App[None]):
         `torrents_info()` rescan is needed merely to preview a plan.
         """
         plan = self.controller.build_bulk_plan(action, hashes)
-        self.push_screen(
-            PreviewScreen(plan, self.controller.state.last_successful_refresh)
+        self._last_operation_id += 1
+        preview = PreviewScreen(
+            plan,
+            self.controller.state.last_successful_refresh,
+            operation_id=self._last_operation_id,
         )
+        self.push_screen(preview)
+        # A preview built while already disconnected/stale is stale from
+        # birth -- it was computed from data known not to be current.
+        if not self._snapshot_is_fresh():
+            preview.mark_stale()
         self.refresh_bindings()
+
+    def _snapshot_is_fresh(self) -> bool:
+        """Whether the current torrent snapshot may ground an Apply.
+
+        Requires a live connection *and* a non-stale snapshot: any of
+        RECONNECTING/AUTH_FAILED/CONFIG_FAILED, or a stale flag set by a
+        failed refresh, withdraws Apply (audit finding R-2).
+        """
+        state = self.controller.state
+        return state.connection is ConnectionState.CONNECTED and not state.stale
+
+    def _refresh_preview_freshness(self) -> None:
+        """Propagate snapshot staleness into any open `PreviewScreen`.
+
+        Called after every refresh outcome. Staleness is sticky
+        (`PreviewScreen.mark_stale`), so a later recovery deliberately
+        does not re-enable an old preview -- the operator rebuilds it.
+        """
+        if self._snapshot_is_fresh():
+            return
+        for screen in self.screen_stack:
+            if isinstance(screen, PreviewScreen):
+                screen.mark_stale()
 
     def action_apply_plan(self) -> None:
         """Apply the plan owned by the currently open `PreviewScreen`.
@@ -2151,6 +2328,13 @@ class QbitOpsTuiApp(App[None]):
         other path that might call this twice) dispatches at most one
         `MUTATION_WORKER_GROUP` worker; a second call while the first is
         still running is silently ignored, never queued.
+
+        `preview.can_apply` is checked here too, not only reflected in
+        the button's `disabled` state, so a keyboard Apply on a stale
+        preview is genuinely rejected rather than merely discouraged
+        (audit finding R-2). No mutation call is ever dispatched while
+        stale, reconnecting, unavailable, authentication-failed, or
+        configuration-failed.
         """
         if not isinstance(self.screen, PreviewScreen):
             return
@@ -2161,29 +2345,41 @@ class QbitOpsTuiApp(App[None]):
             return
 
         preview_screen = self.screen
+        if not preview_screen.can_apply:
+            self.notify(
+                "Snapshot stale — rebuild the preview after reconnection.",
+                severity="warning",
+            )
+            return
+
         preview_screen.set_applying(True)
         self._preview_screen = preview_screen
         self._active_mutation_plan = preview_screen.plan
         plan = preview_screen.plan
+        operation_id = preview_screen.operation_id
         self._mutation_worker = self.run_worker(
-            lambda: self._mutation_worker_body(plan),
+            lambda: self._mutation_worker_body(plan, operation_id),
             group=MUTATION_WORKER_GROUP,
             thread=True,
             exit_on_error=False,
         )
 
     def _mutation_worker_body(
-        self, plan: BulkTorrentActionPlan
-    ) -> tuple[bool, Exception | None]:
+        self, plan: BulkTorrentActionPlan, operation_id: int
+    ) -> tuple[int, Exception | None]:
         """Run on a background thread: blocking I/O only, never state
         mutation, and never raises -- see `_refresh_worker_body` for
         why the outcome travels back as a plain tagged tuple.
+
+        `operation_id` travels with the result so a late completion can
+        be matched to the exact preview that started it (audit finding
+        R-1) rather than to whatever happens to be on top of the stack.
         """
         try:
             self.controller.apply_bulk_plan(plan)
-            return (True, None)
+            return (operation_id, None)
         except Exception as error:
-            return (False, error)
+            return (operation_id, error)
 
     def _on_mutation_worker_state_changed(
         self, event: Worker.StateChanged
@@ -2199,96 +2395,126 @@ class QbitOpsTuiApp(App[None]):
         plan = self._active_mutation_plan
         self._preview_screen = None
         self._active_mutation_plan = None
-        if (
-            preview_screen is None
-            or plan is None
-            or preview_screen not in self.screen_stack
-        ):
-            # The Preview modal was already closed (or replaced) --
-            # discard this result rather than updating unrelated UI.
+        if preview_screen is None or plan is None:
             return
 
         assert event.worker.result is not None
-        _succeeded, error = event.worker.result
-
-        self.pop_screen()
-        self.refresh_bindings()
-
-        if error is not None:
-            self._show_mutation_failure(plan, error)
+        operation_id, error = event.worker.result
+        if operation_id != preview_screen.operation_id:
+            # A completion from a superseded operation -- never allow it
+            # to touch a newer preview or result (audit finding R-1).
             return
 
-        self._start_periodic_refresh()  # one immediate refresh, per plan
-        # `classify_plan_status` truthfully distinguishes an empty plan
-        # (NO_MATCH/NO_CHANGES -- `apply_bulk_torrent_action` itself is a
-        # no-op for these, never an API call) from a plan that had real
-        # changes, which -- having reached here without an exception --
-        # is reported as APPLIED. Never inferred merely from "Apply was
-        # pressed".
-        status = self.controller.classify_plan_status(plan)
-        if status is MutationStatus.PREVIEW:
-            status = MutationStatus.APPLIED
-        self._push_result_screen(plan, status, applied=bool(plan.changes))
+        outcome = self._classify_mutation_outcome(plan, error)
+        self._last_mutation_result = outcome
 
-    def _show_mutation_failure(
-        self, plan: BulkTorrentActionPlan, error: Exception
-    ) -> None:
-        """Report a failed Apply truthfully -- never claim success.
+        # Audit finding R-1: only ever dismiss *this* operation's own
+        # preview, and only while it is genuinely the active screen. A
+        # bare `pop_screen()` would remove whatever sits on top --
+        # potentially Help/Filters/Details/Explain -- and strand a
+        # `PreviewScreen` stuck in `applying=True`, which neither
+        # `action_dismiss_overlay` nor its own Cancel will close.
+        preview_is_active = self.screen is preview_screen
+        if preview_is_active:
+            self.pop_screen()
+            self.refresh_bindings()
 
-        `apply_bulk_torrent_action` wraps every transport/API failure in
-        a `RuntimeError` (for the CLI's own error rendering), so the
-        original exception (needed to tell a recoverable connection
-        failure apart from a genuine internal defect) is recovered via
-        `__cause__` -- `raise RuntimeError(...) from error` in
-        `app.torrents.apply_bulk_torrent_action` is what sets it.
-        """
-        cause = error.__cause__
-        original: Exception = cause if isinstance(cause, Exception) else error
-        failure = classify_recoverable_qbit_failure(original)
-        if failure is None:
-            self._push_result_screen(
-                plan, None, applied=False, internal_error=original
+        if outcome.status is MutationStatus.APPLIED:
+            # One immediate refresh after a real mutation, per plan.
+            self._start_periodic_refresh()
+
+        if preview_is_active:
+            self._push_result_screen(outcome)
+        else:
+            # Audit finding R-3: the request really was submitted, so it
+            # must never vanish silently just because its preview is no
+            # longer on top. Keep the structured result and surface it
+            # as a notification instead of touching an unrelated modal.
+            self.notify(
+                _format_result_notification(outcome),
+                severity=(
+                    "information"
+                    if outcome.status is MutationStatus.APPLIED
+                    else "warning"
+                ),
             )
-            return
-        self._push_result_screen(
-            plan, None, applied=False, unavailable=failure.message
+            self._apply_selection_policy(outcome)
+
+    def _classify_mutation_outcome(
+        self, plan: BulkTorrentActionPlan, error: Exception | None
+    ) -> MutationUiResult:
+        """Map a raw Apply outcome to one truthful, structured result.
+
+        Error-classification order (audit findings F-4 and F-5), applied
+        to the **outer** exception first:
+
+        1. `ConfigError`            -> CONFIGURATION
+        2. `QbitAuthenticationError`-> AUTHENTICATION
+        3. `QbitConnectionError`/`OSError` -> UNAVAILABLE
+        4. otherwise, retry the same ladder on `__cause__` (only as
+           supporting context, never in preference to a recognized
+           outer type -- `apply_bulk_torrent_action` wraps failures in
+           a `RuntimeError`, so the cause is where a recoverable error
+           usually hides)
+        5. still unclassified       -> INTERNAL
+
+        A recoverable outer error therefore can never be downgraded to
+        INTERNAL merely because it carries an opaque cause, and a
+        `ConfigError` is never blamed on qbit-ops.
+        """
+        if error is None:
+            status = self.controller.classify_plan_status(plan)
+            if status is MutationStatus.PREVIEW:
+                status = MutationStatus.APPLIED
+            return MutationUiResult.from_plan(
+                plan, status, operation_id=self._last_operation_id
+            )
+
+        category, message = _classify_mutation_error(error)
+        return MutationUiResult.from_plan(
+            plan,
+            MutationStatus.CANCELLED,
+            operation_id=self._last_operation_id,
+            error_category=category,
+            error_message=message,
         )
 
-    def _push_result_screen(
-        self,
-        plan: BulkTorrentActionPlan,
-        status: MutationStatus | None,
-        *,
-        applied: bool,
-        unavailable: str | None = None,
-        internal_error: Exception | None = None,
-    ) -> None:
-        self.push_screen(
-            ResultScreen(
-                plan,
-                status,
-                applied=applied,
-                unavailable_message=unavailable,
-                internal_error=internal_error,
-            )
-        )
+    def _push_result_screen(self, outcome: MutationUiResult) -> None:
+        self.push_screen(ResultScreen(outcome))
         self.refresh_bindings()
 
-    def _on_result_dismissed(
-        self, plan: BulkTorrentActionPlan, applied: bool
-    ) -> None:
-        """Apply TUI 2's documented post-dismissal selection policy.
+    def _on_result_dismissed(self, outcome: MutationUiResult) -> None:
+        """Dismissing a Result never dispatches, rebuilds, or mutates
+        anything -- it only applies the selection policy below."""
+        self._apply_selection_policy(outcome)
 
-        Only ever clears the hashes the plan actually *changed*
-        (`plan.changes`) and only when the mutation genuinely applied --
-        a skipped torrent (already satisfied) or one belonging to a
-        failed/cancelled attempt keeps its selection untouched, so the
-        operator can reconsider it rather than losing track of it.
+    def _apply_selection_policy(self, outcome: MutationUiResult) -> None:
+        """The documented selection policy, one branch per outcome.
+
+        * APPLIED    -- drop exactly the hashes the frozen plan
+          submitted; a skipped torrent keeps its selection.
+        * NO_CHANGES -- drop the plan's hashes: they were found and
+          already satisfied, so re-selecting them changes nothing.
+        * NO_MATCH   -- drop only the hashes *proven absent* from the
+          snapshot (`not_found` skips); nothing else was established.
+        * any failure (CONFIGURATION/AUTHENTICATION/UNAVAILABLE/
+          INTERNAL) -- retain the live selection so the operator can
+          retry deliberately; the frozen plan stays inspectable, and a
+          fresh preview is required before any later Apply because the
+          old one is by then sticky-stale (see `PreviewScreen`).
+
+        Whatever survives is then reconciled against currently visible
+        hashes, preserving the "selection ⊆ visible" invariant.
         """
-        if not applied:
-            return
-        changed_hashes = [change.hash for change in plan.changes]
-        self.controller.clear_selection_for(changed_hashes)
+        if outcome.error_category is None:
+            if outcome.status is MutationStatus.APPLIED:
+                self.controller.clear_selection_for(outcome.submitted_hashes)
+            elif outcome.status is MutationStatus.NO_CHANGES:
+                self.controller.clear_selection_for(outcome.planned_hashes)
+            elif outcome.status is MutationStatus.NO_MATCH:
+                self.controller.clear_selection_for(outcome.not_found_hashes)
+
+        self.controller.reconcile_selection()
         self._render_table()
         self._render_filter_summary()
         self.refresh_bindings()
@@ -2329,10 +2555,10 @@ class QbitOpsTuiApp(App[None]):
                 self._render_details_panels()
                 self._reconcile_selection_and_notify()
             if isinstance(screen, ResultScreen):
-                plan, applied = screen.plan, screen.applied
+                outcome = screen.outcome
                 self.pop_screen()
                 self.refresh_bindings()
-                self._on_result_dismissed(plan, applied)
+                self._on_result_dismissed(outcome)
                 return
             self.pop_screen()
             self.refresh_bindings()
@@ -2601,8 +2827,31 @@ _MAX_PREVIEW_ROWS = 50
 _MAX_SKIPPED_ROWS = 20
 
 
+def _split_skips(
+    plan: BulkTorrentActionPlan,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """Split a plan's skips into (already-satisfied, not-found).
+
+    Audit finding F-3: "the torrent disappeared from the snapshot" and
+    "the torrent is already in the requested state" are different facts
+    and must never be collapsed into one message. `not_found` is the
+    reason `app.torrents.build_bulk_action_plan_from_snapshot` records
+    for a selected hash absent from the planning snapshot.
+    """
+    not_found = tuple(
+        skip for skip in plan.skipped if skip.reason == "not_found"
+    )
+    satisfied = tuple(
+        skip for skip in plan.skipped if skip.reason != "not_found"
+    )
+    return satisfied, not_found
+
+
 def _format_preview_text(
-    plan: BulkTorrentActionPlan, snapshot_at: datetime | None
+    plan: BulkTorrentActionPlan,
+    snapshot_at: datetime | None,
+    *,
+    stale: bool = False,
 ) -> str:
     """Render a frozen `BulkTorrentActionPlan` for the Preview modal.
 
@@ -2610,17 +2859,29 @@ def _format_preview_text(
     skips, never recomputes or rescans anything. `snapshot_at` is the
     periodic refresh the plan's torrent data came from -- shown so an
     operator can judge freshness, never "now" (no clock is read here).
+    `stale` renders the same warning wording `_format_explain_text`
+    already uses, plus the explicit rebuild instruction (audit finding
+    R-2) -- the preview stays fully readable, only Apply is withdrawn.
     """
     action_label = plan.action.title()
+    satisfied, not_found = _split_skips(plan)
     lines = [
         f"[bold]{action_label} · Preview[/bold]",
         "",
         f"Selected             {plan.matched}",
         f"Will {plan.action:<10}     {len(plan.changes)}",
-        f"Skipped              {len(plan.skipped)}",
+        f"Already satisfied    {len(satisfied)}",
+        f"Not found            {len(not_found)}",
     ]
     if snapshot_at is not None:
         lines.append(f"Snapshot             {_format_local_time(snapshot_at)}")
+    if stale:
+        lines.append("")
+        lines.append(
+            "[bold yellow]Snapshot stale[/bold yellow] -- qBittorrent is "
+            "currently unreachable; this preview uses last-known data."
+        )
+        lines.append("Apply disabled — rebuild the preview after reconnection.")
     lines.append("")
 
     lines.append("[bold]Affected torrents[/bold]")
@@ -2648,59 +2909,119 @@ def _format_preview_text(
     return "\n".join(lines)
 
 
-def _format_result_text(
-    plan: BulkTorrentActionPlan,
-    status: MutationStatus | None,
-    *,
-    unavailable_message: str | None = None,
-    internal_error: Exception | None = None,
-) -> str:
-    """Render the truthful outcome of an Apply attempt.
+_ERROR_HEADINGS: dict[ErrorCategory, tuple[str, str]] = {
+    ErrorCategory.CONFIGURATION: (
+        "[bold red]Configuration invalid[/bold red]",
+        "Fix .env and restart qbit-ops. This is a local configuration "
+        "problem -- neither a software defect nor a remote failure.",
+    ),
+    ErrorCategory.AUTHENTICATION: (
+        "[bold red]Authentication failed[/bold red]",
+        "Check QBIT_USER/QBIT_PASSWORD. Nothing was submitted.",
+    ),
+    ErrorCategory.UNAVAILABLE: (
+        "[bold yellow]Unavailable[/bold yellow]",
+        "qBittorrent could not be reached, so nothing was confirmed "
+        "submitted.",
+    ),
+    ErrorCategory.INTERNAL: (
+        "[bold red]Internal error[/bold red]",
+        "This is a qbit-ops defect, not a remote failure. Nothing was "
+        "confirmed submitted.",
+    ),
+}
 
-    `status is None` means Apply itself never completed (a recoverable
-    connection failure or a genuine internal defect, distinguished by
-    which of `unavailable_message`/`internal_error` is set) -- never
-    rendered as if it were `CANCELLED` or any other terminal status
-    that would misrepresent what actually happened.
+
+def _format_result_text(outcome: MutationUiResult) -> str:
+    """Render one truthful `MutationUiResult`.
+
+    Never claims more certainty than qBittorrent's bulk endpoints can
+    provide: APPLIED says the request was *submitted* for exactly the
+    planned hashes and that a refresh will show the observable state --
+    it is not a per-hash confirmation (documented accepted limitation).
+    NO_MATCH and NO_CHANGES are kept strictly distinct (audit finding
+    F-3): "we could not find them" is not "they were already fine".
     """
-    if internal_error is not None:
+    if outcome.error_category is not None:
+        heading, explanation = _ERROR_HEADINGS[outcome.error_category]
+        message = outcome.error_message or ""
+        planned = len(outcome.planned_hashes)
         return (
-            "[bold red]Internal error[/bold red]\n\n"
-            f"{type(internal_error).__name__}: {internal_error}\n\n"
-            "No change was confirmed applied. This is a qbit-ops defect, "
-            "not a remote failure -- it is not retried automatically."
+            f"{heading}\n\n{message}\n\n{explanation}\n\n"
+            f"The frozen plan ({planned} torrent(s)) is unchanged and "
+            "remains inspectable. Rebuild the preview before retrying: "
+            "it is now grounded in a stale snapshot."
         )
 
-    if unavailable_message is not None:
+    if outcome.status is MutationStatus.NO_MATCH:
         return (
-            "[bold yellow]Unavailable[/bold yellow]\n\n"
-            f"{unavailable_message}\n\n"
-            f"The plan is unchanged ({len(plan.changes)} torrent(s) queued "
-            f"to {plan.action}), but the mutation could not be confirmed."
+            "[bold]Nothing to do[/bold]\n\n"
+            "No selected torrents were found in the current snapshot.\n"
+            f"{len(outcome.not_found_hashes)} selected torrent(s) had "
+            "disappeared before the plan was built."
         )
 
-    if status is MutationStatus.NO_MATCH:
-        return "[bold]No changes[/bold]\n\nNo torrents matched this selection."
+    if outcome.status is MutationStatus.NO_CHANGES:
+        lines = [
+            "[bold]No changes[/bold]",
+            "",
+            f"{len(outcome.satisfied_hashes)} selected torrent(s) already "
+            f"satisfied '{outcome.action}'.",
+        ]
+        if outcome.not_found_hashes:
+            lines.append(
+                f"{len(outcome.not_found_hashes)} were not found in the "
+                "current snapshot."
+            )
+        return "\n".join(lines)
 
-    if status is MutationStatus.NO_CHANGES:
-        return (
-            "[bold]No changes[/bold]\n\n"
-            f"All selected torrents already satisfied '{plan.action}'."
-        )
-
-    if status is MutationStatus.CANCELLED:
-        return "[bold]Cancelled[/bold]\n\nNo mutation was applied."
+    if outcome.status is MutationStatus.CANCELLED:
+        return "[bold]Cancelled[/bold]\n\nNothing was submitted."
 
     # APPLIED
-    past_tense = _PAST_TENSE_ACTION[plan.action]
     lines = [
-        "[bold green]Applied[/bold green]",
+        "[bold green]Submitted[/bold green]",
         "",
-        f"{len(plan.changes)} torrent(s) {past_tense}",
+        f"Action submitted for {len(outcome.submitted_hashes)} torrent(s).",
+        "A refresh will show the latest observable state.",
     ]
-    if plan.skipped:
-        lines.append(f"{len(plan.skipped)} skipped")
+    if outcome.satisfied_hashes:
+        lines.append("")
+        lines.append(
+            f"{len(outcome.satisfied_hashes)} already satisfied "
+            f"'{outcome.action}'."
+        )
+    if outcome.not_found_hashes:
+        lines.append(
+            f"{len(outcome.not_found_hashes)} were not found in the "
+            "current snapshot."
+        )
     return "\n".join(lines)
+
+
+def _format_result_notification(outcome: MutationUiResult) -> str:
+    """One-line fallback shown when the Result modal cannot be (audit
+    finding R-3) -- a submitted mutation must never vanish silently."""
+    if outcome.error_category is not None:
+        return (
+            f"{outcome.action.title()} failed "
+            f"({outcome.error_category.value}): "
+            f"{outcome.error_message or 'no detail available'}"
+        )
+    if outcome.status is MutationStatus.APPLIED:
+        return (
+            f"{outcome.action.title()} submitted for "
+            f"{len(outcome.submitted_hashes)} torrent(s)."
+        )
+    if outcome.status is MutationStatus.NO_MATCH:
+        return (
+            f"{outcome.action.title()}: no selected torrents were found "
+            "in the current snapshot."
+        )
+    return (
+        f"{outcome.action.title()}: no changes needed "
+        f"({len(outcome.satisfied_hashes)} already satisfied)."
+    )
 
 
 def _format_finding(finding: ExplanationFinding) -> str:

@@ -534,6 +534,20 @@ ctrl+r / Clear button   clear: reset to no filter at all; the modal
                         stays open
 ```
 
+**Committed filter vs draft.** While the modal is open you are editing
+a *draft*: it has no effect on your selection until you Apply. Only the
+committed filter is used by the torrent workspace and by the periodic
+refresh's recomputation — a refresh landing mid-edit updates the
+torrent data but never interprets or commits your draft, and never
+reconciles your selection against a half-typed filter. (Category
+matching is exact, so a partially typed "films" transiently matches
+nothing; reconciling then would silently destroy a selection you were
+in the middle of narrowing.) Selection reconciliation happens exactly
+once, when you Apply, Clear, or Cancel — and any selection dropped for
+becoming invisible is reported (`N hidden selection(s) cleared.`).
+Cancel leaves both the active filter and the selection exactly as they
+were, no matter how many refreshes landed while the modal was open.
+
 Search is a separate, UI-only, read-only match, live as you type: a
 case-insensitive substring match on torrent **name**, OR a
 case-insensitive leading-prefix match on torrent **hash** (covers both
@@ -644,44 +658,115 @@ Apply is running, both buttons are disabled and the button reads
 "Applying…", so double-pressing (or pressing Enter twice) can never
 dispatch a second mutation; Cancel/Escape are also refused until it
 finishes, since cancelling out from under an in-flight mutation would
-leave nothing to observe its result. A periodic refresh tick is
-skipped for the same reason (coalesced, never queued) while a mutation
-is in flight; one refresh is triggered immediately once it completes.
+leave nothing to observe its result.
+
+**Serialized remote access.** Every blocking qBittorrent operation the
+TUI can reach — the periodic refresh, focused/manual tracker-detail
+collection, and Apply — is serialized through one coordinator, so at
+most one of them ever uses the client at a time, in *either* direction.
+An Apply requested while a refresh or detail fetch is still in flight
+waits behind it rather than sharing the HTTP session; a periodic tick
+arriving during a mutation is skipped (coalesced, never queued). One
+refresh is triggered immediately once a mutation completes. The
+interface stays responsive throughout: all of this happens on worker
+threads, never on the event loop.
+
+**Stale previews cannot Apply.** A preview is grounded in exactly one
+snapshot generation. If the connection leaves `connected` — or a
+refresh fails and the data becomes stale — the preview stays fully
+readable but Apply is withdrawn:
+
+```text
+Snapshot stale -- qBittorrent is currently unreachable; this preview
+uses last-known data.
+Apply disabled — rebuild the preview after reconnection.
+```
+
+Staleness is **sticky**: reconnecting deliberately does *not* re-enable
+an old preview, because its plan was computed against torrent states
+that are no longer known to be accurate. Close it and build a new one.
+The refusal is real, not cosmetic — the keyboard cannot bypass what the
+disabled button forbids, and no mutation call is made while stale,
+reconnecting, unavailable, authentication-failed, or
+configuration-failed.
 
 The result is always reported truthfully, never inferred merely from
 "Apply was pressed":
 
 ```text
-Applied
+Submitted
 
-10 torrent(s) reannounced
-2 skipped
+Action submitted for 10 torrent(s).
+A refresh will show the latest observable state.
+
+2 already satisfied 'reannounce'.
 ```
 
 ```text
 No changes
 
-All selected torrents already satisfied 'pause'.
+2 selected torrent(s) already satisfied 'pause'.
 ```
 
 ```text
-Unavailable
+Nothing to do
 
-Unable to connect to qBittorrent...
-
-The plan is unchanged (7 torrent(s) queued to pause), but the
-mutation could not be confirmed.
+No selected torrents were found in the current snapshot.
+3 selected torrent(s) had disappeared before the plan was built.
 ```
 
-An authentication/configuration failure instead enters the TUI's
-existing blocking connection state (same as periodic refresh); an
-internal exception is shown as a distinct, sanitized "Internal error"
-result, never mistaken for a remote failure, and is never retried
-automatically. Dismissing a successful **Applied** result clears the
-selection for exactly the torrents that changed (`plan`'s recorded
-changes) — a skipped torrent, or the whole selection after a failed/
-cancelled attempt, keeps its selection so the operator can reconsider
-it, rather than losing track of it.
+Note the deliberate distinction: **"already satisfied" and "not found"
+are never conflated.** A torrent that vanished between selection and
+planning is reported as missing, not as already being in the requested
+state.
+
+Note also the deliberate wording of a success: **"submitted", not
+"applied to each torrent".** qBittorrent's bulk endpoints confirm that
+the request was accepted for exactly the planned hashes; they do not
+report a per-hash state transition. qbit-ops does not fabricate that
+information — it tells you the request went out and that a refresh will
+show the observable state.
+
+Failures are classified into distinct, grounded categories, always by
+looking at the raised error itself first (and only then at its
+underlying cause as supporting context):
+
+```text
+Configuration invalid   local .env problem -- not a software defect
+Authentication failed   check QBIT_USER / QBIT_PASSWORD
+Unavailable             qBittorrent unreachable; nothing confirmed sent
+Internal error          a genuine qbit-ops defect
+```
+
+A recoverable connection failure is therefore never reported as an
+internal defect merely because it carries an opaque cause, and an
+invalid local configuration is never blamed on qbit-ops. No mutation is
+ever retried automatically after any failure. Note that an
+authentication or configuration failure *during Apply* is reported in
+the result modal and does **not** put the TUI into its blocking
+connection state (unlike the same failure during a periodic refresh) —
+the frozen plan stays inspectable, and a fresh preview is required
+before retrying.
+
+**A submitted mutation always leaves a visible outcome.** If its
+Preview is still the active screen, the Result modal is shown. If it is
+not — because another modal was opened over it — the result is
+preserved and surfaced as a notification instead; an unrelated modal is
+never closed or replaced to make room for it, and a closed modal is
+never reopened.
+
+Dismissing a result never re-applies anything. It only applies the
+selection policy:
+
+```text
+Submitted     drop exactly the hashes the plan submitted
+No changes    drop the plan's hashes (found, already satisfied)
+Nothing to do drop only the hashes proven absent from the snapshot
+any failure   keep the selection so you can retry deliberately
+```
+
+Whatever remains is then reconciled against currently visible torrents,
+preserving the "selection ⊆ visible" rule.
 
 Reannounce never exposes a tracker URL anywhere in Actions/Preview/
 Result, and never repeats or schedules itself automatically. No
