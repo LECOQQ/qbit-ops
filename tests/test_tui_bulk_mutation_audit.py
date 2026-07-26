@@ -22,6 +22,7 @@ sleep, matching `tests/test_tui_app.py`'s existing style.
 from __future__ import annotations
 
 import ast
+import asyncio
 import threading
 from pathlib import Path
 from typing import Any
@@ -32,17 +33,20 @@ from textual.worker import Worker, WorkerState
 import app.tui
 from app.config import ConfigError
 from app.errors import ErrorCategory, QbitConnectionError
+from app.execution import MutationStatus
 from app.tui.app import (
     MUTATION_WORKER_GROUP,
     HelpScreen,
+    LastActionBar,
+    MutationUiResult,
     PreviewScreen,
     ResultScreen,
     _classify_mutation_error,
+    _format_result_text,
 )
 from tests.support import FakeQbitClient, make_torrent
 from tests.test_tui_app import (
     WIDE_SIZE,
-    BlockingTrackerClient,
     _app,
     _FakeCompletedWorker,
     _goto_torrents,
@@ -83,6 +87,19 @@ async def _pump_until(pilot: Any, predicate: Any, limit: int = 200) -> None:
 
 def _result_text(app: Any) -> str:
     return str(app.screen.query_one("#result-content", Static).content)
+
+
+async def _drain_workers(app: Any, limit: int = 400) -> None:
+    """Wait for in-flight workers after shutdown, without a `pilot`.
+
+    `pilot.pause()` is unusable once the app has stopped, and the worker
+    threads outlive it -- so poll the worker manager directly instead of
+    sleeping a fixed amount.
+    """
+    for _ in range(limit):
+        if all(worker.is_finished for worker in app.workers):
+            return
+        await asyncio.sleep(0.005)
 
 
 # -- properties the audit attacked and could not break ---------------------
@@ -227,7 +244,9 @@ async def test_late_mutation_result_after_shutdown_never_touches_the_ui() -> (
         assert app.is_running is False
 
         calls_before = client.torrents_info_calls
-        fake_worker = _FakeCompletedWorker(MUTATION_WORKER_GROUP, (True, None))
+        fake_worker = _FakeCompletedWorker(
+            MUTATION_WORKER_GROUP, (1, True, None)
+        )
         event = Worker.StateChanged(fake_worker, WorkerState.SUCCESS)  # type: ignore[arg-type]
         app.on_worker_state_changed(event)
 
@@ -311,41 +330,190 @@ async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
         assert app.controller.state.selected_hashes == {HASH_A}
 
 
-class _RefreshOverlapClient(FakeQbitClient):
-    """Reports whether `torrents_pause()` ran while `torrents_info()` was
-    still inside the call, on the same client object."""
+class _CallLogClient(FakeQbitClient):
+    """Records an ordered `+name` / `-name` log of every remote call.
+
+    Proving "no overlap" alone is vacuous: a mutation that never
+    happened also never overlaps anything (closure review, §3 "Qualité
+    de preuve"). Asserting the *order* of entries and exits, plus the
+    exact hashes finally sent, makes the serialization tests fail if
+    Apply were silently refused.
+
+    Reads and tracker fetches can each be blocked on a real
+    `threading.Event`. Deliberately one class rather than a subclass
+    per blocked call: an override that logs and then delegates to a
+    logging parent would record the same call twice and look like
+    concurrency that never happened.
+    """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.armed = False
-        self.inside_read = False
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.pause_overlapped_read = False
+        self.log: list[str] = []
+        self._depth = 0
+        self.max_depth = 0
+        self._lock = threading.Lock()
+        self.block_reads = False
+        self.read_entered = threading.Event()
+        self.read_release = threading.Event()
+        self.block_trackers = False
+        self.tracker_entered = threading.Event()
+        self.tracker_release = threading.Event()
+
+    def _enter(self, name: str) -> None:
+        with self._lock:
+            self.log.append(f"+{name}")
+            self._depth += 1
+            self.max_depth = max(self.max_depth, self._depth)
+
+    def _exit(self, name: str) -> None:
+        with self._lock:
+            self._depth -= 1
+            self.log.append(f"-{name}")
+
+    def _wait(self, entered: threading.Event, release: threading.Event) -> None:
+        entered.set()
+        if not release.wait(timeout=5.0):
+            raise TimeoutError("test forgot to release a blocked call")
 
     def torrents_info(self) -> list[dict[str, Any]]:
-        if not self.armed:
-            return super().torrents_info()
-        self.inside_read = True
-        self.entered.set()
+        self._enter("read")
         try:
-            if not self.release.wait(timeout=5.0):
-                raise TimeoutError("test forgot to release the read")
-            return super().torrents_info()
+            if self.block_reads:
+                self._wait(self.read_entered, self.read_release)
+            return FakeQbitClient.torrents_info(self)
         finally:
-            self.inside_read = False
+            self._exit("read")
+
+    def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
+        self._enter("trackers")
+        try:
+            if self.block_trackers:
+                self._wait(self.tracker_entered, self.tracker_release)
+            return FakeQbitClient.torrents_trackers(self, torrent_hash)
+        finally:
+            self._exit("trackers")
 
     def torrents_pause(self, torrent_hashes: Any) -> None:
-        if self.inside_read:
-            self.pause_overlapped_read = True
-        super().torrents_pause(torrent_hashes)
+        self._enter("pause")
+        try:
+            FakeQbitClient.torrents_pause(self, torrent_hashes)
+        finally:
+            self._exit("pause")
 
 
-async def test_apply_never_overlaps_an_in_flight_refresh() -> None:
-    """F-2 closed: `TuiController._remote_lock` serializes every
-    blocking client call, so Apply now waits behind an in-flight
-    `torrents_info()` instead of sharing the `requests.Session`."""
-    client = _RefreshOverlapClient(
+def _assert_serialized_after(log: list[str], blocker: str) -> None:
+    """Assert the mutation started strictly after `blocker` finished."""
+    assert f"+{blocker}" in log, f"the {blocker} never started: {log}"
+    assert "+pause" in log, f"the mutation was never dispatched: {log}"
+    assert log.index("+pause") > log.index(
+        f"-{blocker}"
+    ), f"the mutation did not wait for the {blocker} to finish: {log}"
+    assert log.count("+pause") == 1, f"mutation dispatched twice: {log}"
+
+
+async def test_apply_is_serialized_after_an_in_flight_refresh() -> None:
+    """F-2, proven non-vacuously.
+
+    Asserts the full chain, not merely the absence of overlap: the read
+    started, the mutation waited for it to finish, the mutation was
+    eventually dispatched exactly once with exactly `plan.changes`, no
+    skipped hash was sent, one post-mutation refresh followed, and the
+    observed peak concurrency on the client was 1. Any of those failing
+    -- including Apply being silently ignored -- fails the test.
+    """
+    client = _CallLogClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
+            make_torrent(hash=HASH_B, name="Beta", state="pausedUP"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        plan_hashes = [c.hash for c in _current_plan(app).changes]
+        assert plan_hashes == [HASH_A]  # Beta is skipped, already stopped
+
+        client.block_reads = True
+        app._start_periodic_refresh()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.read_entered)
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        # Still queued: the blocked read owns the client.
+        assert client.paused_hashes == []
+
+        client.block_reads = False
+        client.read_release.set()
+        await _settle(app, pilot)
+        await _pump_until(pilot, lambda: bool(client.paused_hashes))
+        await _settle(app, pilot)
+
+        _assert_serialized_after(client.log, "read")
+        assert client.max_depth == 1, client.log
+        assert app.controller.max_concurrent_remote_operations == 1
+        # Exactly the frozen plan, once -- never the skipped hash.
+        assert client.paused_hashes == [plan_hashes]
+        assert HASH_B not in client.paused_hashes[0]
+        # One post-mutation refresh followed the mutation.
+        assert client.log.index("+read", client.log.index("-pause")) > 0
+
+
+async def test_apply_is_serialized_after_an_in_flight_detail_fetch() -> None:
+    """F-2, detail-fetch half, proven non-vacuously -- same full chain
+    as the refresh test above."""
+    client = _CallLogClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
+        trackers_by_hash={HASH_A: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _settle(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        plan_hashes = [c.hash for c in _current_plan(app).changes]
+        assert plan_hashes == [HASH_A]
+
+        client.log.clear()
+        client.block_trackers = True
+        app.action_refresh_details()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.tracker_entered)
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        assert client.paused_hashes == []
+
+        client.block_trackers = False
+        client.tracker_release.set()
+        await _settle(app, pilot)
+        await _pump_until(pilot, lambda: bool(client.paused_hashes))
+        await _settle(app, pilot)
+
+        _assert_serialized_after(client.log, "trackers")
+        assert client.max_depth == 1, client.log
+        assert app.controller.max_concurrent_remote_operations == 1
+        assert client.paused_hashes == [plan_hashes]
+
+
+# -- cancellation tests: zero dispatch is the *expected* outcome ----------
+#
+# Deliberately separate from the serialization-success tests above. These
+# assert `paused_hashes == []` because the mutation must be abandoned,
+# not because serialization was proven -- conflating the two is exactly
+# the vacuity the closure review flagged.
+
+
+async def test_shutdown_while_queued_behind_a_refresh_sends_nothing() -> None:
+    """N-2 closed: a mutation queued behind a blocked read re-checks its
+    authority *after* acquiring the remote lock, so quitting mid-wait
+    abandons it before any qBittorrent call."""
+    client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
     app = _app(client)
@@ -355,113 +523,101 @@ async def test_apply_never_overlaps_an_in_flight_refresh() -> None:
         await _goto_torrents(app, pilot)
         await _select_all_and_open_preview(app, pilot)
 
-        client.armed = True
+        client.block_reads = True
         app._start_periodic_refresh()
         await pilot.pause()
-        await asyncio_wait_for_event(client.entered)
+        await asyncio_wait_for_event(client.read_entered)
 
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
-        await _pump_until(pilot, lambda: bool(client.paused_hashes))
 
-        client.release.set()
-        await _settle(app, pilot)
+        await app.action_quit()
+        await pilot.pause()
+        assert app.is_running is False
 
-        assert client.pause_overlapped_read is False
+        client.block_reads = False
+        client.read_release.set()
+        await _drain_workers(app)
 
-
-class _DetailOverlapClient(BlockingTrackerClient):
-    """Reports whether `torrents_pause()` ran while `torrents_trackers()`
-    was still inside the call, on the same client object."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.inside_tracker = False
-        self.pause_overlapped_detail = False
-
-    def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
-        self.inside_tracker = True
-        try:
-            return super().torrents_trackers(torrent_hash)
-        finally:
-            self.inside_tracker = False
-
-    def torrents_pause(self, torrent_hashes: Any) -> None:
-        if self.inside_tracker:
-            self.pause_overlapped_detail = True
-        super().torrents_pause(torrent_hashes)
+        assert client.paused_hashes == []
+        assert "+pause" not in client.log
 
 
-async def test_apply_never_overlaps_an_in_flight_detail_fetch() -> None:
-    """F-2 closed, detail-fetch half: same single coordinator, so Apply
-    also waits behind an in-flight `torrents_trackers()`."""
-    client = _DetailOverlapClient(
+async def test_shutdown_while_queued_behind_details_sends_nothing() -> None:
+    """N-2 closed, detail-fetch half."""
+    client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         trackers_by_hash={HASH_A: []},
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
-        client.release_event(HASH_A).set()  # let the mount-time fetch through
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
         await _settle(app, pilot)
-
-        # Arm a blocking manual detail refresh, then apply on top of it.
-        client.release_event(HASH_A).clear()
-        client.entered_event(HASH_A).clear()
-        await pilot.press("r")
-        await pilot.pause()
-        await asyncio_wait_for_event(client.entered_event(HASH_A))
-
         await _select_all_and_open_preview(app, pilot)
+
+        client.block_trackers = True
+        app.action_refresh_details()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.tracker_entered)
+
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
-        await _pump_until(pilot, lambda: bool(client.paused_hashes))
 
-        client.release_event(HASH_A).set()
-        await _settle(app, pilot)
+        await app.action_quit()
+        await pilot.pause()
 
-        assert client.pause_overlapped_detail is False
+        client.block_trackers = False
+        client.tracker_release.set()
+        await _drain_workers(app)
+
+        assert client.paused_hashes == []
+        assert "+pause" not in client.log
 
 
 async def test_max_simultaneous_remote_client_operations_is_one() -> None:
-    """F-2 closed, measured directly: the controller's own high-water
-    mark of concurrent remote operations never exceeds 1, across a
-    refresh, a detail fetch, and a mutation all contending at once.
+    """F-2 closed, measured directly and non-vacuously.
 
-    This measures actual overlap inside `_remote_operation()` rather
-    than merely asserting a lock object exists.
+    A detail fetch, a periodic refresh and a mutation all contend at
+    once. Asserts not only that the controller's high-water mark of
+    concurrent remote operations stays at 1, but that the client itself
+    never saw two overlapping calls *and* that the mutation genuinely
+    happened -- a peak of 1 is otherwise trivially satisfied by a single
+    operation, or by an Apply that was silently refused.
     """
-    client = _DetailOverlapClient(
+    client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         trackers_by_hash={HASH_A: []},
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
-        client.release_event(HASH_A).set()
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
         await _settle(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        plan_hashes = [c.hash for c in _current_plan(app).changes]
 
-        # Contend: a manual detail refresh, a periodic refresh, and a
-        # mutation, dispatched back-to-back without awaiting each other.
-        client.release_event(HASH_A).clear()
-        client.entered_event(HASH_A).clear()
-        await pilot.press("r")
+        client.block_trackers = True
+        app.action_refresh_details()
         await pilot.pause()
-        await asyncio_wait_for_event(client.entered_event(HASH_A))
+        await asyncio_wait_for_event(client.tracker_entered)
 
         app._start_periodic_refresh()
-        await _select_all_and_open_preview(app, pilot)
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
 
-        client.release_event(HASH_A).set()
+        client.block_trackers = False
+        client.tracker_release.set()
+        await _settle(app, pilot)
+        await _pump_until(pilot, lambda: bool(client.paused_hashes))
         await _settle(app, pilot)
 
         assert app.controller.max_concurrent_remote_operations == 1
+        assert client.max_depth == 1, client.log
+        # ...and the mutation really did happen, with exactly the plan.
+        assert client.paused_hashes == [plan_hashes]
 
 
 async def test_vanished_torrents_are_not_reported_as_already_satisfied() -> (
@@ -665,7 +821,7 @@ async def test_old_operation_completion_cannot_replace_a_newer_preview() -> (
         # preview's -- it must be discarded outright.
         superseded = _FakeCompletedWorker(
             MUTATION_WORKER_GROUP,
-            (stale_preview.operation_id + 999, None),
+            (stale_preview.operation_id + 999, True, None),
         )
         event = Worker.StateChanged(superseded, WorkerState.SUCCESS)  # type: ignore[arg-type]
         app.on_worker_state_changed(event)
@@ -904,3 +1060,357 @@ async def test_one_refresh_follows_a_successful_mutation() -> None:
         await _settle(app, pilot)
 
         assert client.torrents_info_calls == reads_before + 1
+
+
+# -- N-1: hidden Preview must never stay stuck in `applying` ---------------
+
+
+async def test_hidden_preview_is_not_stranded_after_completion() -> None:
+    """N-1 closed.
+
+    A mutation completing while an unrelated modal sits above its
+    Preview must (a) leave that unrelated modal completely alone, and
+    (b) still terminate the Preview's logical `applying` state -- so
+    that once the overlay is closed, Escape and Cancel can dismiss it.
+    Previously the Preview stayed `applying=True` forever, with both its
+    buttons disabled and every dismissal path refusing: the whole TUI
+    was stuck after a mutation that had really been submitted.
+    """
+    client = _BlockingPauseClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        preview = app.screen
+        assert isinstance(preview, PreviewScreen)
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+
+        app.push_screen(HelpScreen())
+        await pilot.pause()
+
+        client.release.set()
+        await _settle(app, pilot)
+
+        # The unrelated modal is untouched and still on top.
+        assert isinstance(app.screen, HelpScreen)
+        # The Preview exists, is no longer applying, and its controls
+        # are usable again.
+        assert preview in app.screen_stack
+        assert preview.applying is False
+        assert preview.query_one("#preview-cancel", Button).disabled is False
+        assert "Applying" not in str(
+            preview.query_one("#preview-apply", Button).label
+        )
+
+        await pilot.press("escape")  # close Help
+        await pilot.pause()
+        assert app.screen is preview
+
+        await pilot.press("escape")  # dismiss the revealed Preview
+        await pilot.pause()
+        assert not any(isinstance(s, PreviewScreen) for s in app.screen_stack)
+        # Still exactly one dispatch, and the result survived.
+        assert client.paused_hashes == [[HASH_A]]
+        assert app._last_mutation_result is not None
+
+
+async def test_hidden_preview_cancel_button_dismisses_after_reveal() -> None:
+    """N-1 closed: the visible Cancel control works too, not just Escape."""
+    client = _BlockingPauseClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        preview = app.screen
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+        app.push_screen(HelpScreen())
+        await pilot.pause()
+        client.release.set()
+        await _settle(app, pilot)
+
+        await pilot.press("escape")  # close Help
+        await pilot.pause()
+        assert app.screen is preview
+
+        await pilot.click(app.screen.query_one("#preview-cancel", Button))
+        await pilot.pause()
+        assert not any(isinstance(s, PreviewScreen) for s in app.screen_stack)
+
+
+async def test_completion_with_no_surviving_preview_touches_no_screen() -> None:
+    """N-1 closed, missing-Preview case: the result is preserved
+    globally, no other screen is manipulated, the Preview is not
+    recreated."""
+    client = _BlockingPauseClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+
+        app.pop_screen()  # the Preview is gone entirely
+        app.push_screen(HelpScreen())
+        await pilot.pause()
+
+        client.release.set()
+        await _settle(app, pilot)
+
+        assert isinstance(app.screen, HelpScreen)
+        assert not any(isinstance(s, PreviewScreen) for s in app.screen_stack)
+        assert app._last_mutation_result is not None
+        assert app._last_mutation_result.submitted_hashes == (HASH_A,)
+
+
+# -- N-3: persistent last-action indicator --------------------------------
+
+
+async def test_persistent_result_outlives_the_transient_notification() -> None:
+    """N-3 closed: the durable record is a rendered line in the Torrents
+    workspace, not a five-second toast.
+
+    Textual toasts are dropped from the DOM on timeout; the last-action
+    line is asserted to still be mounted, visible, and truthful after
+    every notification has been cleared.
+    """
+    client = _BlockingPauseClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        bar = app.query_one("#last-action", LastActionBar)
+        assert "visible" not in bar.classes  # hidden until a result exists
+
+        await _select_all_and_open_preview(app, pilot)
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await asyncio_wait_for_event(client.entered)
+        app.push_screen(HelpScreen())  # the Preview is hidden
+        await pilot.pause()
+        client.release.set()
+        await _settle(app, pilot)
+
+        # Simulate every transient notification expiring.
+        app._notifications.clear()
+        app.refresh()
+        await pilot.pause()
+
+        assert "visible" in bar.classes
+        text = str(bar.content)
+        assert "Last action" in text
+        assert "Pause" in text
+        assert "submitted for 1 torrent(s)" in text
+
+
+async def test_persistent_result_reflects_only_the_latest_operation() -> None:
+    """N-3 closed: a stored result never alters a later operation, and
+    the indicator shows the latest contract only -- no history."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
+            make_torrent(hash=HASH_B, name="Beta", state="pausedUP"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        # Operation A: pause Alpha (Beta is skipped).
+        await _select_all_and_open_preview(app, pilot)
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await _settle(app, pilot)
+        await pilot.press("escape")
+        await _settle(app, pilot)
+        first = app._last_mutation_result
+        assert first is not None and first.submitted_hashes == (HASH_A,)
+
+        # Operation B: resume Beta.
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        await _settle(app, pilot)
+        visible = app.controller.state.visible
+        assert visible is not None
+        rows = {t.hash for t in visible.matched}
+        assert HASH_B in rows
+        await pilot.press("ctrl+a")
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#actions-resume", Button))
+        await pilot.pause()
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await _settle(app, pilot)
+
+        second = app._last_mutation_result
+        assert second is not None
+        # The stored result was replaced, not appended to, and the older
+        # one could not influence the newer operation.
+        assert second.operation_id != first.operation_id
+        assert second.action == "resume"
+        bar = app.query_one("#last-action", LastActionBar)
+        assert "Resume" in str(bar.content)
+        assert "Pause" not in str(bar.content)
+
+
+# -- R-2 residual: unexpected refresh exception fails closed --------------
+
+
+class _UnclassifiableRefreshClient(FakeQbitClient):
+    """Raises an exception `classify_recoverable_qbit_failure` rejects."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fail_reads = False
+
+    def torrents_info(self) -> list[dict[str, Any]]:
+        if self.fail_reads:
+            raise RuntimeError("unclassifiable refresh defect")
+        return super().torrents_info()
+
+
+async def test_unexpected_refresh_exception_invalidates_open_preview() -> None:
+    """R-2 residual closed: an unclassifiable refresh exception used to
+    `return` before freshness invalidation, leaving an open Preview
+    applicable while the TUI had stopped refreshing. Every unsuccessful
+    refresh now fails closed."""
+    client = _UnclassifiableRefreshClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        preview = app.screen
+        assert isinstance(preview, PreviewScreen)
+        assert preview.can_apply is True
+
+        client.fail_reads = True
+        app._start_periodic_refresh()
+        await _settle(app, pilot)
+
+        assert preview.stale is True
+        assert preview.can_apply is False
+        assert preview.query_one("#preview-apply", Button).disabled is True
+
+        # Keyboard Apply is rejected too, not just the button.
+        app.action_apply_plan()
+        await _settle(app, pilot)
+        await pilot.press("enter")
+        await _settle(app, pilot)
+        assert client.paused_hashes == []
+
+        # A later successful refresh does not revive the old Preview.
+        client.fail_reads = False
+        app._start_periodic_refresh()
+        await _settle(app, pilot)
+        assert preview.can_apply is False
+
+        # But a rebuilt Preview is applicable again.
+        await pilot.press("escape")
+        await pilot.pause()
+        await _select_all_and_open_preview(app, pilot)
+        rebuilt = app.screen
+        assert isinstance(rebuilt, PreviewScreen)
+        assert rebuilt.can_apply is True
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await _settle(app, pilot)
+        assert client.paused_hashes == [[HASH_A]]
+
+
+# -- cancelled-before-dispatch is a distinct, truthful outcome ------------
+
+
+async def test_cancelled_before_dispatch_is_distinct_from_unavailable() -> None:
+    """The queued-then-shutdown outcome must be distinguishable from a
+    remote failure: nothing failed, nothing was sent."""
+    client = _CallLogClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        selected_before = set(app.controller.state.selected_hashes)
+
+        client.block_reads = True
+        app._start_periodic_refresh()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.read_entered)
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+
+        await app.action_quit()
+        await pilot.pause()
+        client.block_reads = False
+        client.read_release.set()
+        await _drain_workers(app)
+
+        # Zero dispatch, and the selection was never treated as submitted.
+        assert client.paused_hashes == []
+        assert app.controller.state.selected_hashes == selected_before
+
+        # The classification itself is distinct from UNAVAILABLE.
+        plan = app._active_mutation_plan or _frozen_plan_for(app)
+        outcome = app._classify_mutation_outcome(plan, None, False)
+        assert outcome.cancelled_before_dispatch is True
+        assert outcome.error_category is None
+        assert outcome.status is not MutationStatus.APPLIED
+        assert outcome.submitted_hashes == ()
+        text = _format_result_text(outcome)
+        assert "Cancelled before dispatch" in text
+        assert "Unavailable" not in text
+
+
+def _frozen_plan_for(app: Any) -> Any:
+    """The plan of the last preview the app owned, for classification."""
+    return app.controller.build_bulk_plan("pause", (HASH_A,))
+
+
+def test_cancelled_before_dispatch_never_reports_success() -> None:
+    """Pure classification check, no UI: a non-dispatched mutation is
+    never APPLIED and never carries submitted hashes."""
+    from app.torrents import build_bulk_action_plan_from_snapshot
+
+    plan = build_bulk_action_plan_from_snapshot(
+        [make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
+        "pause",
+        (HASH_A,),
+    )
+    outcome = MutationUiResult.from_plan(
+        plan,
+        MutationStatus.CANCELLED,
+        operation_id=1,
+        cancelled_before_dispatch=True,
+    )
+    assert outcome.submitted_hashes == ()
+    assert outcome.cancelled_before_dispatch is True
+    assert outcome.error_category is None
+    assert "submitted for" not in _format_result_text(outcome)

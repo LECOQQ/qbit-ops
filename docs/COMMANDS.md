@@ -534,19 +534,29 @@ ctrl+r / Clear button   clear: reset to no filter at all; the modal
                         stays open
 ```
 
-**Committed filter vs draft.** While the modal is open you are editing
-a *draft*: it has no effect on your selection until you Apply. Only the
-committed filter is used by the torrent workspace and by the periodic
-refresh's recomputation — a refresh landing mid-edit updates the
-torrent data but never interprets or commits your draft, and never
-reconciles your selection against a half-typed filter. (Category
-matching is exact, so a partially typed "films" transiently matches
-nothing; reconciling then would silently destroy a selection you were
-in the middle of narrowing.) Selection reconciliation happens exactly
-once, when you Apply, Clear, or Cancel — and any selection dropped for
-becoming invisible is reported (`N hidden selection(s) cleared.`).
-Cancel leaves both the active filter and the selection exactly as they
-were, no matter how many refreshes landed while the modal was open.
+**What the draft affects, and what it does not.** Filter fields apply
+*live* as you type: the torrent list behind the modal updates on every
+keystroke, so you can see what a filter will match before committing
+it. Because category matching is exact, a partially typed "films"
+transiently matches nothing — that is expected, and the list fills back
+in as you finish typing.
+
+What is deliberately **deferred** is only the reconciliation of your
+*selection* against the filter. Typing a draft never drops selected
+torrents, and neither does a periodic refresh landing mid-edit.
+Reconciliation happens exactly once, at a commit point:
+
+```text
+Apply    commit the draft, then reconcile the selection
+Cancel   restore the filter that was active when the modal opened;
+         the selection is left exactly as it was
+Clear    reset the draft to no filter; the modal stays open
+```
+
+Any selection dropped for becoming invisible at a commit point is
+reported (`N hidden selection(s) cleared.`). Cancel leaves both the
+active filter and the selection exactly as they were, no matter how
+many refreshes landed while the modal was open.
 
 Search is a separate, UI-only, read-only match, live as you type: a
 case-insensitive substring match on torrent **name**, OR a
@@ -601,8 +611,12 @@ esc        clear the selection (when non-empty and no modal is open)
 Selection is explicit and separate from focus: navigating the table
 never selects anything, and `ctrl+a` only ever selects the torrents
 **currently visible** under the active filter/search — never a hidden
-torrent, and never "the whole instance" (an empty selection is always
-empty, never implicitly "all"). If a filter or search change hides an
+torrent. Note the honest consequence: with no filter and no search
+active, every torrent is visible, so `ctrl+a` does then select the
+whole instance. The guarantee is "never beyond what is displayed", not
+"never many" — filter or search first if you want a bounded scope.
+Separately, an empty selection is always empty and never implicitly
+means "all". If a filter or search change hides an
 already-selected torrent, it is dropped from the selection the moment
 that change is applied (Filters' Apply/Clear/Cancel, or as you type in
 Search), with a concise notification for Filters (`N hidden
@@ -647,7 +661,13 @@ Cancel                                    Apply
 
 The plan shown is frozen the moment Preview opens: it does not change
 even if the selection, filters, search, or focus change in the
-background while the modal is open. Only **Apply** — an explicit
+background while the modal is open.
+
+**The enumeration is truncated, the plan is not.** Preview lists at
+most 50 affected torrents and 20 skipped ones by name, followed by
+`… and N more`. Truncation is purely visual: the counts above the list
+and the frozen plan itself always cover every selected canonical hash,
+and Apply acts on the complete plan — not merely on the sample shown. Only **Apply** — an explicit
 button press, never automatic — mutates anything; Escape or Cancel
 close the modal with zero API calls and leave the selection untouched
 for reconsideration. Because these are the same LOW-risk operations
@@ -750,10 +770,37 @@ before retrying.
 
 **A submitted mutation always leaves a visible outcome.** If its
 Preview is still the active screen, the Result modal is shown. If it is
-not — because another modal was opened over it — the result is
-preserved and surfaced as a notification instead; an unrelated modal is
-never closed or replaced to make room for it, and a closed modal is
-never reopened.
+not — because another modal was opened over it — an unrelated modal is
+never closed or replaced to make room for the result, and a closed
+modal is never reopened.
+
+Either way, the latest outcome is recorded on a compact persistent line
+in the Torrents workspace:
+
+```text
+Last action · Pause submitted for 3 torrent(s) · 14:32:18 CEST
+```
+
+That line is the durable record: it stays until the next bulk action
+replaces it, survives its originating Preview disappearing, and remains
+after any transient toast has expired (toasts are supplemental only,
+and disappear after a few seconds). It shows exactly one result — the
+most recent — and is hidden entirely until you have run a bulk action.
+qbit-ops keeps no mutation history beyond it. The line never dispatches
+anything and never changes your selection.
+
+It distinguishes every outcome the TUI can produce: submitted, no
+change needed, nothing found, cancelled before dispatch, and each
+failure category (configuration, authentication, unavailable,
+internal).
+
+**Cancelled before dispatch.** Because remote access is serialized, an
+Apply can be queued behind an in-flight read. If you quit qbit-ops
+while it is still queued, the request is abandoned before it is sent:
+qBittorrent receives nothing, your selection is left intact, no refresh
+is scheduled, and the outcome is reported as *cancelled before
+dispatch* — deliberately distinct from a remote failure, since nothing
+failed and nothing was sent.
 
 Dismissing a result never re-applies anything. It only applies the
 selection policy:
