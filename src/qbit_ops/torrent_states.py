@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from qbit_ops.qbit_fields import get_field_as_float, get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_float, get_field_as_string
 
 TorrentStateGroup = Literal[
     "downloading",

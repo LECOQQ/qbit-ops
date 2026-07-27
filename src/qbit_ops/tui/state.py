@@ -64,7 +64,7 @@ from qbit_ops.config import ConfigError
 from qbit_ops.errors import AppError, ErrorCategory
 from qbit_ops.execution import MutationStatus
 from qbit_ops.explain import ExplanationReport, build_torrent_explanation
-from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_string
 from qbit_ops.status import StatusSnapshot
 from qbit_ops.torrent_states import is_stopped_state
 from qbit_ops.torrents import (

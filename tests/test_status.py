@@ -10,6 +10,7 @@ from qbit_ops.status import (
     StatusSnapshot,
     TransferCounts,
     TransferRates,
+    build_status_snapshot_from_data,
     build_unavailable_snapshot,
     classify_torrent_state,
     collect_status_snapshot,
@@ -505,3 +506,24 @@ def test_watch_status_recovers_to_healthy_after_unavailable() -> None:
         )
 
     assert emitted == [Health.UNAVAILABLE, Health.HEALTHY]
+
+
+def test_malformed_non_mapping_transfer_info_fails_explicitly() -> None:
+    """`status` routes `transfer_info` through the shared qbit boundary.
+
+    Proves `build_status_snapshot_from_data` does not bypass
+    `qbit_ops.qbit.fields.get_transfer_rates` with a direct `.get()`
+    call (constat P-2): a non-mapping payload must fail with an
+    explicit `TypeError`, not an accidental `AttributeError`.
+    """
+
+    class _NotAMapping:
+        pass
+
+    with pytest.raises(TypeError, match="mapping"):
+        build_status_snapshot_from_data(
+            qbittorrent_version="5.0.1",
+            api_version="2.11.4",
+            transfer_info_data=_NotAMapping(),
+            torrents=[],
+        )

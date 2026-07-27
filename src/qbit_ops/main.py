@@ -3240,6 +3240,13 @@ def qbit_error_boundary() -> Iterator[None]:
     of being relabelled as a remote failure (see
     docs/ERRORS_AND_EXIT_CODES.md, "Internal error behavior").
 
+    This is the one intentional direct `qbittorrentapi` import left
+    outside `qbit_ops.qbit` (see
+    `docs/audits/2026-07-package-refactor-plan.md` Phase 3): a generic
+    CLI-level catch-all for `qbittorrentapi.APIError` raised by a
+    post-login command call, not client construction, which already
+    lives entirely in `qbit_ops.qbit.client`.
+
     Keep the `with` block scoped to exactly the client-creation-plus-
     domain-call span, never wider: widening it risks swallowing a
     `typer.Exit` raised by rendering code further down the same
