@@ -5,38 +5,25 @@ name/infohash, a local filesystem path identifying the user, or an
 `.env` fragment -- see `tests/compatibility/README.md`'s security
 policy. These scans run over the raw fixture *files*, not just their
 decoded payloads, so a leak hidden in `_meta` prose would still be
-caught.
+caught. Patterns live in `_security_scan.py`, shared with the
+captured-container capture harness (`tests/integration/_capture.py`),
+which runs the same scan *before* writing a fixture to disk.
 """
 
 from __future__ import annotations
 
 import json
-import re
 
 from tests.compatibility._fixture_loader import FIXTURES_DIR, load_all_fixtures
-
-# The one sanctioned placeholder passkey value fixtures may use to test
-# sanitization itself (see message_with_secret_like_material.json).
-_ALLOWED_PLACEHOLDER_PASSKEY = "FAKE_PLACEHOLDER_PASSKEY_0000000000000000"
-
-# Hostnames a fixture may legitimately use -- RFC 2606 reserved example
-# domains, plus qbit-ops's own established placeholder convention.
-_ALLOWED_HOSTS = {
-    "tracker.example",
-    "other.example",
-    "example.com",
-    "example.org",
-    "example.net",
-    "localhost",
-}
-
-_USERINFO_PATTERN = re.compile(r"://[^/@\s]+:[^/@\s]+@")
-_PASSKEY_PARAM_PATTERN = re.compile(
-    r"[?&](passkey|auth|token|secret|key)=([^&\s\"']+)", re.IGNORECASE
+from tests.compatibility._security_scan import (
+    _ENV_FRAGMENT_PATTERN,
+    _HOME_DIR_PATTERN,
+    _PASSKEY_PARAM_PATTERN,
+    _URL_HOST_PATTERN,
+    _USERINFO_PATTERN,
+    ALLOWED_HOSTS,
+    ALLOWED_PLACEHOLDER_PASSKEY,
 )
-_HOME_DIR_PATTERN = re.compile(r"(/home/|/Users/|C:\\\\Users\\\\)[^/\\\"']+")
-_ENV_FRAGMENT_PATTERN = re.compile(r"\bQBIT_(HOST|USER|PASSWORD)\s*=")
-_URL_HOST_PATTERN = re.compile(r"://([^/:@\s\"']+)")
 
 
 def _all_fixture_files() -> list:
@@ -47,11 +34,21 @@ def _all_fixture_files() -> list:
 
 def test_fixture_discovery_is_non_empty() -> None:
     """Guard the scan itself: an empty fixture set would make every
-    other test in this file vacuously pass."""
+    other test in this file vacuously pass.
+
+    `_all_fixture_files()` recurses (`rglob`) so it also reaches
+    `captured-container/<matrix-id>/*.json`, which
+    `load_all_fixtures()` deliberately does not enumerate (see
+    `tests/compatibility/_captured_loader.py`) -- so the two counts are
+    only compared for the four flat `category/name.json` directories.
+    """
     files = _all_fixture_files()
     assert len(files) >= 10
+    category_json_files = [
+        path for path in files if "captured-container" not in path.parts
+    ]
     fixtures = load_all_fixtures()
-    assert len(fixtures) == len(files)
+    assert len(fixtures) == len(category_json_files)
 
 
 def test_no_fixture_contains_userinfo_in_a_url() -> None:
@@ -72,7 +69,7 @@ def test_no_fixture_contains_a_non_placeholder_passkey_value() -> None:
         bad_values = [
             value
             for _param, value in matches
-            if value != _ALLOWED_PLACEHOLDER_PASSKEY
+            if value != ALLOWED_PLACEHOLDER_PASSKEY
         ]
         if bad_values:
             offenders[str(path)] = bad_values
@@ -88,7 +85,7 @@ def test_no_fixture_uses_a_hostname_outside_the_allowlist() -> None:
             host.split(":")[0]  # strip a port, if any
             for host in _URL_HOST_PATTERN.findall(text)
         }
-        unexpected = hosts - _ALLOWED_HOSTS
+        unexpected = hosts - ALLOWED_HOSTS
         if unexpected:
             offenders[str(path)] = unexpected
 

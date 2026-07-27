@@ -1,0 +1,79 @@
+# qBittorrent Docker version matrix -- single source of truth.
+#
+# Consumed by tests/integration/_matrix.py (loader), the local
+# `make test-qbit-matrix` / `make test-qbit-version` / `make
+# capture-qbit-fixtures` targets, and .github/workflows/qbittorrent-matrix.yml.
+# Do not duplicate these entries anywhere else -- update this file only.
+#
+# Provenance: image tags and digests were pulled and inspected directly
+# (`docker pull`, `docker inspect --format '{{index .RepoDigests 0}}'`)
+# against Docker Hub on 2026-07-27, not taken from memory. The
+# `linuxserver/qbittorrent` image was chosen because it is the most widely
+# used, actively maintained qBittorrent container with per-release version
+# tags going back through the 4.5.x/4.6.x line (verified via the Docker Hub
+# tags API, not assumed) -- there is no image published by the qBittorrent
+# project itself.
+#
+# A version is only added here once a real image has been pulled and its
+# *observed* `app_version()` has been verified to match `expected_version`
+# below (see docs/audits/2026-07-package-refactor-plan.md, Docker matrix
+# implementation note).
+#
+# `qbit-5.2.3` was added 2026-07-27 as the then-current stable release
+# (verified against https://api.github.com/repos/qbittorrent/qBittorrent/releases/latest,
+# not memory) alongside the three historical entries below -- it does not
+# replace any of them (see AGENTS.md's qBittorrent compatibility-claims
+# policy: one patch release must not be generalized into a range, and the
+# current stable release should be matrix-tested before a public release).
+
+[[entry]]
+id = "qbit-4.6.7"
+image_repository = "linuxserver/qbittorrent"
+image_tag = "4.6.7"
+image_digest = "sha256:55f15d44396315551f87294a176efae733b16e283f38980308e46073950257c6"
+release_line = "4.6.x"
+expected_version = "v4.6.7"
+expected_web_api_version = "2.9.3"
+webui_port = 18110
+capabilities = ["read_only", "mutations", "tracker_mutations", "capture"]
+limitations = "Web API below the 2.11.0 stop/start threshold: qbit-ops's pause/resume path exercises torrents/pause and torrents/resume, not torrents/stop and torrents/start."
+provenance = "docker pull linuxserver/qbittorrent:4.6.7 + docker inspect, 2026-07-27; last maintained 4.6.x tag per Docker Hub tags API at capture time."
+
+[[entry]]
+id = "qbit-5.0.0"
+image_repository = "linuxserver/qbittorrent"
+image_tag = "5.0.0"
+image_digest = "sha256:d01b1df556154862eca982d0f2c420073e2e2959c309951fbfddd25525ea28ce"
+release_line = "5.0.x"
+expected_version = "v5.0.0"
+expected_web_api_version = "2.11.2"
+webui_port = 18111
+capabilities = ["read_only", "mutations", "tracker_mutations", "capture"]
+limitations = "First 5.0.x release; Web API 2.11.2 is at/above the 2.11.0 threshold, so qbit-ops's pause/resume path is expected to reach torrents/stop and torrents/start."
+provenance = "docker pull linuxserver/qbittorrent:5.0.0 + docker inspect, 2026-07-27; first 5.0.x tag per Docker Hub tags API at capture time -- chosen specifically to sit at the documented stop/start negotiation threshold (docs/COMPATIBILITY.md #2)."
+
+[[entry]]
+id = "qbit-5.1.4"
+image_repository = "linuxserver/qbittorrent"
+image_tag = "5.1.4"
+image_digest = "sha256:c9990949e968e99333f47f49da7d16e81ba6e1469c8c46807a65b984c9e8b6ff"
+release_line = "5.1.x"
+expected_version = "v5.1.4"
+expected_web_api_version = "2.11.4"
+webui_port = 18112
+capabilities = ["read_only", "mutations", "tracker_mutations", "capture"]
+limitations = "Latest maintained 5.1.x tag at capture time; no known payload-shape difference from qbit-5.0.0 has been observed."
+provenance = "docker pull linuxserver/qbittorrent:5.1.4 + docker inspect, 2026-07-27; last 5.1.x tag per Docker Hub tags API at capture time."
+
+[[entry]]
+id = "qbit-5.2.3"
+image_repository = "linuxserver/qbittorrent"
+image_tag = "5.2.3"
+image_digest = "sha256:b024436f8ca665d16d9a997d26fd27fdf867ee5566ba09f32764e7b2976d3e02"
+release_line = "5.2.x"
+expected_version = "v5.2.3"
+expected_web_api_version = "2.15.1"
+webui_port = 18113
+capabilities = ["read_only", "mutations", "tracker_mutations", "capture"]
+limitations = "Current stable release at the time it was added (2026-07-27, verified via the qbittorrent/qBittorrent GitHub releases API, not memory); no known payload-shape difference from qbit-5.1.4 has been observed."
+provenance = "docker pull linuxserver/qbittorrent:5.2.3 + docker inspect, 2026-07-27 (amd64, matching this host's architecture); latest non-prerelease tag per https://api.github.com/repos/qbittorrent/qBittorrent/releases/latest at capture time. Web API version (2.15.1) observed from a real running container, not assumed from a prior release's value."

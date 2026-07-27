@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "capture_date": "2026-07-27",
+    "description": "Real `app_build_info()` snapshot, where the endpoint exists.",
+    "fields_removed": [],
+    "image_digest": "sha256:c9990949e968e99333f47f49da7d16e81ba6e1469c8c46807a65b984c9e8b6ff",
+    "image_reference": "linuxserver/qbittorrent:5.1.4",
+    "limitations": "qbit-ops never calls this endpoint itself (see docs/COMPATIBILITY.md #3); captured for reference only.",
+    "matrix_id": "qbit-5.1.4",
+    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_version": "v5.1.4",
+    "sanitization": "n/a -- build info carries no host/credential fields.",
+    "trust": "captured-container",
+    "web_api_version": "2.11.4"
+  },
+  "payload": {
+    "bitness": 64,
+    "boost": "1.84.0",
+    "libtorrent": "2.0.11.0",
+    "openssl": "3.5.6",
+    "platform": "linux",
+    "qt": "6.11.0",
+    "zlib": "1.3.2"
+  }
+}

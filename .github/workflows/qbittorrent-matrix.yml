@@ -1,0 +1,132 @@
+name: qBittorrent Docker version matrix
+
+# Manual and low-frequency only -- never on every push/PR. Each entry
+# starts a real, disposable qBittorrent container; running the full
+# historical matrix on every small PR would not be a reasonable use of
+# CI minutes for this project's size (see item 13 of the Docker matrix
+# phase spec).
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 03:00 UTC -- catches upstream image drift without
+    # running on every commit.
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  generate-matrix:
+    name: Read qbittorrent-matrix.toml
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_ids: ${{ steps.read.outputs.matrix_ids }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read matrix ids from the committed manifest
+        id: read
+        run: |
+          ids=$(python3 -c "
+          import json, tomllib
+          from pathlib import Path
+          manifest = tomllib.loads(Path('tests/integration/qbittorrent-matrix.toml').read_text())
+          print(json.dumps([entry['id'] for entry in manifest['entry']]))
+          ")
+          echo "matrix_ids=$ids" >> "$GITHUB_OUTPUT"
+
+  matrix-entry:
+    name: ${{ matrix.matrix_id }}
+    needs: generate-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        matrix_id: ${{ fromJson(needs.generate-matrix.outputs.matrix_ids) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --extras tui --no-interaction --no-ansi
+
+      - name: Run this matrix entry (disposable, loopback-only container)
+        run: make test-qbit-version QBIT_MATRIX_ID=${{ matrix.matrix_id }}
+
+      - name: Fail if any disposable container/network was left behind
+        if: always()
+        run: |
+          leaked_containers=$(docker ps -aq --filter "label=qbit-ops.harness" | wc -l)
+          leaked_networks=$(docker network ls -q --filter "label=qbit-ops.harness" | wc -l)
+          if [ "$leaked_containers" -ne 0 ] || [ "$leaked_networks" -ne 0 ]; then
+            echo "::error::leaked $leaked_containers container(s), $leaked_networks network(s)"
+            exit 1
+          fi
+
+      - name: Upload sanitized test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbit-matrix-${{ matrix.matrix_id }}-report
+          # Only pytest's own summary output -- never a qBittorrent
+          # config directory, never anything that could carry a
+          # disposable-run credential (which is randomly generated
+          # per run and discarded at teardown regardless).
+          path: |
+            .pytest_cache/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  freshness-check:
+    name: Check for a newer stable qBittorrent release
+    runs-on: ubuntu-latest
+    # Informational only: a "stale" result means "matrix review
+    # required", not "qbit-ops is broken" -- this job's own exit code
+    # is therefore never allowed to fail the workflow (see
+    # scripts/check_qbit_matrix_freshness.py). It never edits the
+    # matrix and needs no repository secret (public GitHub API).
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --extras tui --no-interaction --no-ansi
+
+      - name: Compare the matrix manifest against the latest stable release
+        run: |
+          poetry run python3 scripts/check_qbit_matrix_freshness.py
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::warning::qBittorrent matrix review required -- a newer stable release exists. This does not mean qbit-ops is incompatible."
+          elif [ "$exit_code" -eq 2 ]; then
+            echo "::warning::qBittorrent matrix freshness could not be determined this run (network/source issue) -- not evidence of staleness."
+          fi
+          exit 0

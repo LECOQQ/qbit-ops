@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "capture_date": "2026-07-27",
+    "description": "Real `torrents_trackers()` entries (DHT/PeX/LSD pseudo-trackers plus the disposable in-network tracker) for the tracked synthetic torrent.",
+    "fields_removed": [],
+    "image_digest": "sha256:b024436f8ca665d16d9a997d26fd27fdf867ee5566ba09f32764e7b2976d3e02",
+    "image_reference": "linuxserver/qbittorrent:5.2.3",
+    "limitations": "The disposable tracker returns a minimal bencode response; real-world tracker messages may vary.",
+    "matrix_id": "qbit-5.2.3",
+    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_version": "v5.2.3",
+    "sanitization": "Tracker hostname replaced with 'tracker.example'; no passkey was ever present.",
+    "trust": "captured-container",
+    "web_api_version": "2.15.1"
+  },
+  "payload": [
+    {
+      "msg": "",
+      "num_downloaded": 0,
+      "num_leeches": 0,
+      "num_peers": 0,
+      "num_seeds": 0,
+      "status": 0,
+      "tier": -1,
+      "url": "** [DHT] **"
+    },
+    {
+      "msg": "",
+      "num_downloaded": 0,
+      "num_leeches": 0,
+      "num_peers": 0,
+      "num_seeds": 0,
+      "status": 0,
+      "tier": -1,
+      "url": "** [PeX] **"
+    },
+    {
+      "msg": "",
+      "num_downloaded": 0,
+      "num_leeches": 0,
+      "num_peers": 0,
+      "num_seeds": 0,
+      "status": 0,
+      "tier": -1,
+      "url": "** [LSD] **"
+    },
+    {
+      "endpoints": [],
+      "min_announce": 0,
+      "msg": "",
+      "next_announce": 0,
+      "num_downloaded": -1,
+      "num_leeches": -1,
+      "num_peers": -1,
+      "num_seeds": -1,
+      "status": 1,
+      "tier": 0,
+      "updating": false,
+      "url": "http://tracker.example:6969/announce"
+    }
+  ]
+}

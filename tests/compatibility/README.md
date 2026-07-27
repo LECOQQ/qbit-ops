@@ -7,11 +7,16 @@ qbit-ops's real production boundary functions
 (`qbit_ops.qbit.fields`, `qbit_ops.torrent_states`,
 `qbit_ops.trackers`, `qbit_ops.doctor`) against them.
 
-The goal is **contract testing against payload shapes**, not a
-qBittorrent version compatibility matrix. No fixture here proves that
-qbit-ops works against a real running qBittorrent instance of any
-particular version — that is the job of a future Docker-based version
-matrix (see "What this does not prove" below).
+The goal is **contract testing against payload shapes**. Most fixtures
+here are `synthetic`/`official-example` and prove nothing about a real
+running instance on their own — but `fixtures/captured-container/`
+(added by the Docker version matrix phase, 2026-07-27) now contains
+authentic payloads captured from real, disposable
+`linuxserver/qbittorrent` containers for the 4.6.x/5.0.x/5.1.x release
+lines. See `tests/compatibility/test_captured_container_payloads.py`
+for the contract tests that exercise them, and
+`docs/COMPATIBILITY.md` §1/§9 for exactly what that does and does not
+justify claiming.
 
 ## Trust levels
 
@@ -28,9 +33,11 @@ Every fixture's `_meta.trust` field is one of:
   documentation, without being an actual capture of a specific running
   instance.
 - **`captured-container`** — captured from a real qBittorrent instance
-  running in a disposable, hermetic Docker container, via the (not yet
-  implemented) capture mechanism described below. **No fixture in this
-  directory currently has this trust level.**
+  running in a disposable, hermetic Docker container, via the capture
+  mechanism described below (`tests/integration/_capture.py`,
+  `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`). Now used by
+  `fixtures/captured-container/<matrix-id>/*.json` for each of the
+  three matrix entries in `tests/integration/qbittorrent-matrix.toml`.
 - **`captured-instance`** — captured from a real qBittorrent instance
   outside of the disposable-container harness. **qbit-ops never
   captures fixtures from a user's homelab instance; this trust level is
@@ -128,66 +135,66 @@ still caught) for:
 
 Any new fixture must pass all of these scans.
 
-## Version-shaped fixture directories (qBittorrent 4.6.x / 5.0.x / 5.1.x)
+## Version-shaped fixture directories (qBittorrent 4.6.x / 5.0.x / 5.1.x / 5.2.x)
 
-This phase does **not** create per-version fixture directories (e.g.
-`fixtures/4.6.x/`, `fixtures/5.0.x/`, `fixtures/5.1.x/`). Doing so
-without real captures would either be empty directories that falsely
-imply version support work has started, or would require inventing
-version-specific payload differences that have not actually been
-observed — both explicitly out of scope for this phase.
+Per-version fixture directories now exist, but only where a real image
+was pulled, started, version-verified, and captured (2026-07-27) — see
+`tests/integration/qbittorrent-matrix.toml` for the exact pinned image
+references and digests:
 
-**Current honest state: authentic version fixture pending Docker
-capture.** The `torrents`/`trackers`/`transfer`/`application` fixtures
-in this directory use vocabulary known to differ between 4.x and 5.x
-where it matters (e.g. `paused_state_4x.json` vs. `stopped_state_5x.json`
-for the pause/resume → stop/start state-name rename), documented from
-public qBittorrent release notes and `qbittorrentapi` source, not from
-a captured instance. When the future Docker version matrix captures
-real per-version payloads, they should land in version-labelled
-subdirectories with `trust: "captured-container"` and an actual
-`qbittorrent_version`/`web_api_version`, and the fixtures here should be
-compared against them rather than assumed correct.
+| Directory | Release line | Observed | Web API |
+|---|---|---|---|
+| `fixtures/captured-container/qbit-4.6.7/` | 4.6.x (last maintained tag) | `v4.6.7` | `2.9.3` |
+| `fixtures/captured-container/qbit-5.0.0/` | 5.0.x (first tag) | `v5.0.0` | `2.11.2` |
+| `fixtures/captured-container/qbit-5.1.4/` | 5.1.x (last maintained tag) | `v5.1.4` | `2.11.4` |
+| `fixtures/captured-container/qbit-5.2.3/` | 5.2.x (current stable at capture time) | `v5.2.3` | `2.15.1` |
 
-## Fixture capture mechanism (designed, not implemented)
+`qbit-5.2.3` was added as the then-current stable release, verified
+against the official `qbittorrent/qBittorrent` GitHub releases API (not
+memory) — it does not replace any of the three historical entries.
 
-No capture script exists yet. This phase only designs the constraints
-a future one-off capture tool must satisfy before it may run against a
-disposable, hermetic qBittorrent container as part of the eventual
-Docker version matrix work:
+No empty directory was ever created for a version that had not yet
+been captured, and no version-specific payload difference was invented
+ahead of an actual observation.
+
+## Fixture capture mechanism
+
+`tests/integration/_capture.py` (`capture_matrix_fixtures()`) implements
+the capture tool, run via `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`
+(also exercised by `tests/integration/test_matrix_capture.py`):
 
 - Runs with an explicit temporary `HOME`/`XDG_CONFIG_HOME` and a
-  controlled temporary working directory — never the real user
-  environment, never discovering a real `.env` (see `AGENTS.md`'s
-  smoke-test isolation rule).
-- Targets only an explicit, hardcoded `localhost`/container-network URL
-  for a disposable container the tool itself provisions — never a URL
-  read from configuration, never the user's homelab instance.
-- Uses explicit, dedicated test credentials created for that disposable
-  container, never real credentials.
-- Adds only synthetic torrent data (freely distributable test content,
-  e.g. a well-known Linux ISO's public torrent) to the container before
+  controlled temporary working directory, via
+  `tests/integration/_harness.HermeticEnv` — never the real user
+  environment, never discovering a real `.env`.
+- Targets only the loopback-published port of the disposable container
+  the harness itself started and version-verified
+  (`tests/integration/_harness.start_matrix_container` fails closed if
+  the observed `app_version()` does not match the matrix manifest) —
+  never a URL read from configuration.
+- Uses a fixed, per-run WebUI credential the harness itself generates
+  and pre-seeds into the container's config before first boot (see
+  `_qbit_conf_template.py`) — never a real credential.
+- Adds only the deterministic synthetic torrent corpus
+  (`tests/integration/_torrent_corpus.py`) to the container before
   capturing — never real user torrents.
-- Calls **only read-only endpoints** (`torrents/info`,
-  `torrents/trackers`, `transfer/info`, `app/version`,
-  `app/webapiVersion`) against an explicit allowlist. It must refuse to
-  call any mutation endpoint unless it has independently verified the
-  target is the isolated disposable container it provisioned itself —
-  never the user's real instance.
-- Applies the same deterministic sanitization/placeholder rules as
-  this README's security policy before writing anything to disk, and
-  refuses to write a fixture file containing an unredacted secret.
+- Calls only `torrents_info()`, `torrents_trackers()`, `transfer_info()`,
+  `app_version()`, `app_web_api_version()`, and `app_build_info()`
+  (where the endpoint exists) — no mutation endpoint.
+- Substitutes the disposable in-network tracker's hostname
+  (`qbit-ops-tracker`) with the allowlisted placeholder
+  `tracker.example` before writing, and re-scans the final serialized
+  JSON text with the exact same `tests/compatibility/_security_scan.py`
+  rules the committed-fixture test suite enforces
+  (`test_no_captured_fixture_leaks_a_real_secret`) -- a violation
+  raises `CaptureSecurityError` and nothing is written.
 - Writes each captured payload with a `_meta` block using
-  `trust: "captured-container"` and the real observed
+  `trust: "captured-container"`, the real observed
   `qbittorrent_version`/`web_api_version`/`qbittorrent_api_version`,
-  into a version-labelled subdirectory.
-- Writes to an explicit, dedicated output directory — never overwrites
-  existing hand-authored `synthetic`/`official-example` fixtures in
-  place.
-
-Building and running this tool is out of scope for this phase; it is
-a prerequisite for the future Docker version matrix phase, not part of
-the payload-fixture compatibility phase.
+  and the exact pinned `image_reference`/`image_digest`, into
+  `fixtures/captured-container/<matrix-id>/`.
+- Never overwrites existing hand-authored `synthetic`/`official-example`
+  fixtures — a fully separate directory tree.
 
 ## What this does prove
 
@@ -196,15 +203,26 @@ the payload-fixture compatibility phase.
   (ordinary values, missing optional fields, explicit `null`s, unknown
   states/statuses, extra future fields, both 4.x and 5.x state
   vocabularies, both v1 and v2/hybrid infohash lengths) without raising
-  or silently producing wrong output.
+  or silently producing wrong output — against both hand-constructed
+  `synthetic` payloads and real `captured-container` payloads.
 - Tracker messages containing embedded secret-shaped URLs are fully
   sanitized before they could reach rendered output.
+- For the three captured matrix entries: qbit-ops's field-reading
+  functions handle a *real* `torrents_info()`/`torrents_trackers()`/
+  `transfer_info()`/`app_version()` payload from that exact pinned
+  image, not an approximation of one.
 
 ## What this does not prove
 
-- That qbit-ops works against any specific real, running qBittorrent
-  version. That requires the future Docker version matrix, using real
-  captured-container fixtures, not the synthetic/official-example
-  fixtures here.
+- That qbit-ops's *mutation* commands work end to end against a real
+  instance from bare payload fixtures alone — that requires the live
+  container tests under `tests/integration/` (`make test-qbit-matrix`),
+  which exercise real HTTP calls, not just captured snapshots.
+- Broad version-range support (e.g. "4.6–5.1 supported"). Each captured
+  entry is one specific, pinned image digest at one point in time — see
+  `docs/COMPATIBILITY.md` §9 for the terminology distinguishing
+  `payload fixture tested`/`container integration tested` from
+  `supported`.
 - That the documented Web API shapes these fixtures encode have not
-  drifted from a given qBittorrent release's actual behavior.
+  drifted from a given qBittorrent release's actual behavior beyond
+  the three pinned digests actually captured.
