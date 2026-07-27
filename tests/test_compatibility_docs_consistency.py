@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tests.integration._matrix import load_matrix
+from qbit_ops.qbit.compatibility import load_compatibility_evidence
 
 COMPATIBILITY_DOC = Path(__file__).parent.parent / "docs" / "COMPATIBILITY.md"
 
@@ -47,7 +47,7 @@ def test_evidence_table_discovery_is_non_empty() -> None:
 
 def test_every_matrix_entry_appears_in_the_evidence_table() -> None:
     doc_rows = _parsed_doc_rows()
-    manifest_ids = {entry.id for entry in load_matrix()}
+    manifest_ids = {entry.id for entry in load_compatibility_evidence().entries}
     assert manifest_ids <= set(doc_rows), (
         f"matrix entries missing from docs/COMPATIBILITY.md's evidence "
         f"table: {manifest_ids - set(doc_rows)}"
@@ -56,7 +56,7 @@ def test_every_matrix_entry_appears_in_the_evidence_table() -> None:
 
 def test_evidence_table_never_lists_an_id_absent_from_the_manifest() -> None:
     doc_rows = _parsed_doc_rows()
-    manifest_ids = {entry.id for entry in load_matrix()}
+    manifest_ids = {entry.id for entry in load_compatibility_evidence().entries}
     assert set(doc_rows) <= manifest_ids, (
         f"docs/COMPATIBILITY.md documents an id the manifest no longer "
         f"has: {set(doc_rows) - manifest_ids}"
@@ -65,7 +65,7 @@ def test_evidence_table_never_lists_an_id_absent_from_the_manifest() -> None:
 
 def test_documented_version_and_web_api_match_the_manifest() -> None:
     doc_rows = _parsed_doc_rows()
-    for entry in load_matrix():
+    for entry in load_compatibility_evidence().entries:
         row = doc_rows[entry.id]
         assert row["version"] == entry.expected_version.removeprefix(
             "v"
@@ -114,3 +114,64 @@ def test_docs_never_claim_a_broad_version_range() -> None:
                 f"broad version-range claim found outside a "
                 f"forbidden-example context: {line!r}"
             )
+
+
+_TEST_READMES_WITH_HERMETICITY_WORDING = (
+    Path(__file__).parent / "integration" / "README.md",
+    Path(__file__).parent / "compatibility" / "README.md",
+)
+_UNQUALIFIED_ISOLATION_CLAIMS = (
+    "network is isolated",
+    "network is hermetic",
+)
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+def test_test_readmes_never_claim_network_egress_is_technically_blocked() -> (
+    None
+):
+    """F-1 follow-up: the independent review proved the disposable
+    container's public network egress is NOT technically blocked (only
+    application-level DHT/PeX/LSD/UPnP/tracker settings are disabled) --
+    `docs/COMPATIBILITY.md` §5.2 documents this precisely. Both test
+    READMEs must carry the same qualification: every occurrence of
+    "technically blocked" must be part of a "not ... technically
+    blocked" qualification (whitespace/markdown-tolerant), and neither
+    README may claim the Docker network itself is isolated/hermetic."""
+    offenders = []
+    for readme in _TEST_READMES_WITH_HERMETICITY_WORDING:
+        normalized = _normalize_whitespace(readme.read_text(encoding="utf-8"))
+        text_lower = normalized.lower()
+
+        for claim in _UNQUALIFIED_ISOLATION_CLAIMS:
+            if claim in text_lower:
+                offenders.append(f"{readme.name}: {claim!r}")
+
+        for match in re.finditer("technically blocked", text_lower):
+            preceding = text_lower[max(0, match.start() - 30) : match.start()]
+            if "not" not in preceding:
+                offenders.append(
+                    f"{readme.name}: unqualified 'technically blocked' "
+                    f"near {preceding!r}"
+                )
+
+    assert not offenders, (
+        f"test README(s) falsely claim network egress is blocked: "
+        f"{offenders}"
+    )
+
+
+def test_test_readmes_qualify_hermetic_as_configuration_not_network() -> None:
+    """The word "hermetic" may remain in these READMEs only when
+    qualified as configuration/test-target hermeticity -- never used
+    bare to describe the Docker network itself. Also guards discovery:
+    both READMEs must actually mention the egress limitation at all."""
+    for readme in _TEST_READMES_WITH_HERMETICITY_WORDING:
+        text = _normalize_whitespace(readme.read_text(encoding="utf-8"))
+        assert "not technically blocked" in text, (
+            f"{readme.name} does not mention the network-egress "
+            "limitation at all"
+        )

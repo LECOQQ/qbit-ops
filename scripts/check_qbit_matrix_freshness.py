@@ -1,5 +1,6 @@
 """Check whether a newer stable qBittorrent release exists than the newest
-entry in `tests/integration/qbittorrent-matrix.toml`.
+entry in the packaged compatibility manifest
+(`qbit_ops.qbit.compatibility`, `qbit_ops/data/qbittorrent-matrix.toml`).
 
 This is a **detector, not an updater**: it never edits the matrix, never
 marks a new release as supported, and never runs as part of ordinary
@@ -25,16 +26,15 @@ Uses the public, unauthenticated GitHub releases API for
 from __future__ import annotations
 
 import json
-import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from packaging.version import InvalidVersion, Version
 
-from tests.integration._matrix import load_matrix
+from qbit_ops.qbit.compatibility import (
+    CompatibilityManifestError,
+    load_compatibility_evidence,
+)
 
 RELEASES_API_URL = (
     "https://api.github.com/repos/qbittorrent/qBittorrent/releases/latest"
@@ -91,12 +91,14 @@ def fetch_latest_stable_version(url: str = RELEASES_API_URL) -> str:
 
 def newest_matrix_version() -> str:
     """Return the highest `expected_version` across every matrix entry."""
-    entries = load_matrix()
-    if not entries:
-        raise FreshnessCheckError("qbittorrent-matrix.toml has no entries")
+    try:
+        evidence = load_compatibility_evidence()
+    except CompatibilityManifestError as error:
+        raise FreshnessCheckError(
+            f"could not read the packaged compatibility manifest: {error}"
+        ) from error
 
-    versions = [entry.expected_version.removeprefix("v") for entry in entries]
-    return str(max(versions, key=Version))
+    return evidence.latest().expected_version.removeprefix("v")
 
 
 def main() -> int:
@@ -121,9 +123,9 @@ def main() -> int:
             f"matrix entry is {matrix_version}. MATRIX REVIEW REQUIRED -- "
             "this does not mean qbit-ops is incompatible with "
             f"{latest_stable}, only that it has not yet been "
-            "container-integration tested against it. The matrix "
-            "manifest (tests/integration/qbittorrent-matrix.toml) was not "
-            "modified by this check."
+            "container-integration tested against it. The packaged "
+            "compatibility manifest (qbit_ops/data/qbittorrent-matrix.toml) "
+            "was not modified by this check."
         )
         return 1
 

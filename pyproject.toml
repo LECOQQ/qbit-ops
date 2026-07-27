@@ -12,6 +12,7 @@ python-dotenv = "*"
 qbittorrent-api = "*"
 typer = "*"
 rich = "^15.0.0"
+packaging = "*"
 textual = { version = ">=8.2.8", optional = true }
 
 [tool.poetry.extras]

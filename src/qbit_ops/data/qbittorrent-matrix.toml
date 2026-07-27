@@ -1,9 +1,15 @@
-# qBittorrent Docker version matrix -- single source of truth.
+# qBittorrent compatibility evidence manifest -- single source of truth.
 #
-# Consumed by tests/integration/_matrix.py (loader), the local
-# `make test-qbit-matrix` / `make test-qbit-version` / `make
-# capture-qbit-fixtures` targets, and .github/workflows/qbittorrent-matrix.yml.
-# Do not duplicate these entries anywhere else -- update this file only.
+# Packaged under `qbit_ops.data` and loaded exclusively through
+# `qbit_ops.qbit.compatibility.load_compatibility_evidence()` (uses
+# `importlib.resources`, works from an installed wheel with no
+# repository checkout). Every consumer -- `tests/integration/_matrix.py`
+# (test-side adapter), the local `make test-qbit-matrix` / `make
+# test-qbit-version` / `make capture-qbit-fixtures` targets,
+# `scripts/check_qbit_matrix_freshness.py`, and
+# `.github/workflows/qbittorrent-matrix.yml` -- reads this same packaged
+# file. Do not duplicate these entries anywhere else -- update this file
+# only.
 #
 # Provenance: image tags and digests were pulled and inspected directly
 # (`docker pull`, `docker inspect --format '{{index .RepoDigests 0}}'`)

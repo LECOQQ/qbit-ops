@@ -1,125 +1,92 @@
-"""Load the qBittorrent Docker version matrix manifest.
+"""Test-side adapter over the packaged qBittorrent compatibility manifest.
 
-The single source of truth for matrix entries is
-`tests/integration/qbittorrent-matrix.toml`. Nothing under
-`tests/integration/` or `Makefile`/CI may hardcode a second copy of an
-image tag, digest, or expected version -- read it from here instead.
+The canonical parsing and single source of truth now live in
+`qbit_ops.qbit.compatibility` (packaged under `qbit_ops/data/`, loaded
+via `importlib.resources` -- works from an installed wheel, no
+repository checkout required). This module does not re-parse the
+manifest; it only re-exports `QbitMatrixEntry` as `MatrixEntry` (the
+name the rest of `tests/integration/` already imports) and adds the
+handful of loader convenience wrappers Docker harness code and CI use,
+translating package-loader errors into the exception types this test
+suite already expects.
 """
 
 from __future__ import annotations
 
-import tomllib
-from dataclasses import dataclass
+import importlib.resources
 from pathlib import Path
 
-MATRIX_MANIFEST_PATH = Path(__file__).parent / "qbittorrent-matrix.toml"
+from qbit_ops.qbit.compatibility import (
+    CompatibilityManifestError,
+    load_compatibility_evidence,
+    parse_manifest_text,
+)
+from qbit_ops.qbit.compatibility import (
+    QbitMatrixEntry as MatrixEntry,
+)
 
+__all__ = [
+    "MATRIX_MANIFEST_PATH",
+    "MatrixEntry",
+    "load_matrix",
+    "load_matrix_entry",
+    "latest_matrix_entry",
+]
 
-@dataclass(frozen=True)
-class MatrixEntry:
-    """One qBittorrent Docker matrix entry."""
-
-    id: str
-    image_repository: str
-    image_tag: str
-    image_digest: str
-    expected_architecture: str
-    release_line: str
-    expected_version: str
-    expected_web_api_version: str
-    webui_port: int
-    capabilities: tuple[str, ...]
-    limitations: str
-    provenance: str
-
-    @property
-    def image_reference(self) -> str:
-        """Return the pinned `repository:tag` reference for `docker run`."""
-        return f"{self.image_repository}:{self.image_tag}"
-
-    @property
-    def image_reference_with_digest(self) -> str:
-        """Return the immutable `repository@sha256:...` reference."""
-        return f"{self.image_repository}@{self.image_digest}"
-
-    def has_capability(self, capability: str) -> bool:
-        """Return whether this entry declares a given test capability."""
-        return capability in self.capabilities
-
-
-def load_matrix(path: Path = MATRIX_MANIFEST_PATH) -> list[MatrixEntry]:
-    """Load every matrix entry from the manifest, in file order.
-
-    Fails closed on an empty manifest (F-8): a matrix with zero entries
-    must never silently produce a CI job with nothing to run, or a
-    local/freshness command that reports success having tested
-    nothing. Callers must never catch this to fall back to "run
-    against whatever is available".
-    """
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    entries = [_parse_entry(item) for item in raw.get("entry", [])]
-
-    if not entries:
-        raise ValueError(
-            f"{path} declares zero matrix entries; refusing to report "
-            "success for a matrix that tests nothing"
+# Test-only convenience: the real, on-disk location of the packaged
+# manifest -- used by tests that assert the file is untouched by a run
+# (e.g. the freshness checker), never as an alternate loading path for
+# production code.
+MATRIX_MANIFEST_PATH = Path(
+    str(
+        importlib.resources.files("qbit_ops.data").joinpath(
+            "qbittorrent-matrix.toml"
         )
-
-    ids = [entry.id for entry in entries]
-    if len(ids) != len(set(ids)):
-        raise ValueError(f"duplicate matrix entry id in {path}: {ids}")
-
-    return entries
+    )
+)
 
 
-def latest_matrix_entry(path: Path = MATRIX_MANIFEST_PATH) -> MatrixEntry:
+def load_matrix(path: Path | None = None) -> list[MatrixEntry]:
+    """Load every matrix entry, in file order.
+
+    With no `path`, delegates entirely to the packaged loader (the
+    ordinary case for every real consumer). `path` exists only so
+    sabotage tests can exercise the same parsing/validation rules
+    against arbitrary text (missing, empty, malformed, duplicate)
+    without touching the packaged manifest.
+    """
+    try:
+        if path is None:
+            return list(load_compatibility_evidence().entries)
+        text = Path(path).read_text(encoding="utf-8")
+        return list(parse_manifest_text(text))
+    except CompatibilityManifestError as error:
+        raise ValueError(str(error)) from error
+
+
+def latest_matrix_entry() -> MatrixEntry:
     """Return the matrix entry with the highest `expected_version`.
 
     Used to select "the current stable entry" for the weekly CI cadence
     and CLI-driven `scope=latest` dispatch -- computed from the
-    manifest via `packaging.version.Version`, never a second hardcoded
-    "latest" id (see docs/TESTING.md, CI cadence policy).
+    manifest, never a second hardcoded "latest" id (see
+    docs/TESTING.md, CI cadence policy).
     """
-    from packaging.version import Version
-
-    entries = load_matrix(path)
-    return max(
-        entries,
-        key=lambda entry: Version(entry.expected_version.removeprefix("v")),
-    )
+    try:
+        return load_compatibility_evidence().latest()
+    except CompatibilityManifestError as error:
+        raise ValueError(str(error)) from error
 
 
-def load_matrix_entry(
-    matrix_id: str, path: Path = MATRIX_MANIFEST_PATH
-) -> MatrixEntry:
+def load_matrix_entry(matrix_id: str) -> MatrixEntry:
     """Load exactly one matrix entry by its stable id.
 
     Raises `KeyError` (not a silent `None`) when `matrix_id` is unknown --
     the harness must fail closed on a typo'd or removed matrix id, never
     fall back to "run against whatever is available".
     """
-    for entry in load_matrix(path):
-        if entry.id == matrix_id:
-            return entry
-
-    known = ", ".join(entry.id for entry in load_matrix(path))
-    raise KeyError(
-        f"unknown qBittorrent matrix id {matrix_id!r}; known ids: {known}"
-    )
-
-
-def _parse_entry(item: dict) -> MatrixEntry:
-    return MatrixEntry(
-        id=item["id"],
-        image_repository=item["image_repository"],
-        image_tag=item["image_tag"],
-        image_digest=item["image_digest"],
-        expected_architecture=item["expected_architecture"],
-        release_line=item["release_line"],
-        expected_version=item["expected_version"],
-        expected_web_api_version=item["expected_web_api_version"],
-        webui_port=int(item["webui_port"]),
-        capabilities=tuple(item["capabilities"]),
-        limitations=item["limitations"],
-        provenance=item["provenance"],
-    )
+    try:
+        evidence = load_compatibility_evidence()
+    except CompatibilityManifestError as error:
+        raise ValueError(str(error)) from error
+    return evidence.entry(matrix_id)

@@ -116,7 +116,7 @@ test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one ent
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make test-qbit-version QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
-		grep '^id = ' tests/integration/qbittorrent-matrix.toml >&2 || true; \
+		grep '^id = ' src/qbit_ops/data/qbittorrent-matrix.toml >&2 || true; \
 		exit 1; \
 	fi
 	@printf 'Running the qBittorrent Docker matrix entry %s against a disposable container.\n' "$(QBIT_MATRIX_ID)"
@@ -133,7 +133,7 @@ capture-qbit-fixtures: docker-matrix-doctor ## Capture authentic payload fixture
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make capture-qbit-fixtures QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
-		grep '^id = ' tests/integration/qbittorrent-matrix.toml >&2 || true; \
+		grep '^id = ' src/qbit_ops/data/qbittorrent-matrix.toml >&2 || true; \
 		exit 1; \
 	fi
 	@printf 'Capturing payload fixtures for %s from a disposable container.\n' "$(QBIT_MATRIX_ID)"
