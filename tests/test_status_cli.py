@@ -7,7 +7,7 @@ import re
 
 from typer.testing import CliRunner
 
-from app.main import QbitAuthenticationError, StatusExitCode, app
+from qbit_ops.main import QbitAuthenticationError, StatusExitCode, app
 from tests.support import FakeQbitClient, make_torrent
 
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")

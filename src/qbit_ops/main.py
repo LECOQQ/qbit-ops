@@ -16,12 +16,12 @@ from typing import Annotated, Any, NoReturn
 import qbittorrentapi
 import typer
 
-from app import __version__
-from app.app_services import (
+from qbit_ops import __version__
+from qbit_ops.app_services import (
     classify_recoverable_qbit_failure,
     create_qbit_client,
 )
-from app.backup import (
+from qbit_ops.backup import (
     BackupExportError,
     diff_backup_exports,
     export_instance_state,
@@ -29,8 +29,8 @@ from app.backup import (
     load_export_file,
     redact_backup_diff,
 )
-from app.config import ConfigError, QbitConfig, load_qbit_config
-from app.doctor import (
+from qbit_ops.config import ConfigError, QbitConfig, load_qbit_config
+from qbit_ops.doctor import (
     ConnectionOutcome,
     DoctorReport,
     collect_doctor_report,
@@ -38,7 +38,7 @@ from app.doctor import (
     doctor_report_to_csv_rows,
     doctor_report_to_json_dict,
 )
-from app.errors import (
+from qbit_ops.errors import (
     AppError,
     ErrorCategory,
     InvalidInputError,
@@ -46,22 +46,22 @@ from app.errors import (
     QbitConnectionError,
     require_non_blank,
 )
-from app.execution import (
+from qbit_ops.execution import (
     MUTATION_RISK,
     ExecutionDecision,
     ExecutionPolicy,
     MutationOperation,
     MutationStatus,
 )
-from app.explain import (
+from qbit_ops.explain import (
     ExplanationReport,
     explain_torrent,
     explain_tracker,
     explanation_exit_code,
     explanation_report_to_dict,
 )
-from app.selectors import AmbiguousTorrentHashError
-from app.status import (
+from qbit_ops.selectors import AmbiguousTorrentHashError
+from qbit_ops.status import (
     StatusSnapshot,
     build_unavailable_snapshot,
     collect_status_snapshot,
@@ -70,7 +70,7 @@ from app.status import (
     status_exit_code,
     watch_status,
 )
-from app.torrents import (
+from qbit_ops.torrents import (
     STATE_FILTER_VALUES,
     BulkTorrentActionPlan,
     SelectedTorrent,
@@ -87,7 +87,7 @@ from app.torrents import (
     torrent_filter_to_dict,
     validate_torrent_selector,
 )
-from app.tracker_status import (
+from qbit_ops.tracker_status import (
     TRACKER_STATUS_CSV_FIELDNAMES,
     TrackerStatusReport,
     collect_tracker_status,
@@ -95,7 +95,7 @@ from app.tracker_status import (
     tracker_status_report_to_csv_rows,
     tracker_status_report_to_dict,
 )
-from app.trackers import (
+from qbit_ops.trackers import (
     PasskeyReplacementPlan,
     TrackerAdditionPlan,
     TrackerRemovalPlan,
@@ -113,7 +113,7 @@ from app.trackers import (
     plan_tracker_replacement,
     redact_tracker_identity,
 )
-from app.ui import (
+from qbit_ops.ui import (
     OutputFormat,
     WatchRenderContext,
     confirm,
@@ -192,7 +192,7 @@ class StatusExitCode(IntEnum):
 
     Deliberately separate from `ExitCode`: `status` reports operational
     health rather than success/failure, so its exit codes carry
-    different semantics (0-3 map to `app.status.Health`; 4 is reserved
+    different semantics (0-3 map to `qbit_ops.status.Health`; 4 is reserved
     for invalid local configuration or invalid CLI usage). Other
     commands keep `ExitCode` until a later consolidation decision.
 
@@ -215,7 +215,7 @@ class StatusExitCode(IntEnum):
 class DoctorExitCode(IntEnum):
     """Define exit codes specific to the `doctor` command.
 
-    `0`/`1`/`2` mirror `app.doctor.doctor_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_ops.doctor.doctor_exit_code`'s
     pass/warning/failure mapping exactly (kept here only for readability
     at call sites and in tests). `3` is intentionally unused: doctor has
     no condition that needs a fourth severity tier. `4` is reserved for
@@ -237,7 +237,7 @@ class DoctorExitCode(IntEnum):
 class TrackerStatusExitCode(IntEnum):
     """Define exit codes specific to the `trackers status` command.
 
-    Mirrors `app.tracker_status.tracker_status_exit_code`'s
+    Mirrors `qbit_ops.tracker_status.tracker_status_exit_code`'s
     healthy/warning/critical/unavailable mapping exactly (kept here only
     for readability at call sites and in tests). Deliberately its own
     scheme rather than `ExitCode`: `2` here means CRITICAL, not
@@ -259,7 +259,7 @@ class TrackerStatusExitCode(IntEnum):
 class ExplainExitCode(IntEnum):
     """Define exit codes specific to the `explain` command group.
 
-    `0`/`1`/`2` mirror `app.explain.explanation_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_ops.explain.explanation_exit_code`'s
     info/warning-or-unknown/critical mapping exactly (kept here only for
     readability at call sites and in tests). `3` (`TARGET_UNAVAILABLE`)
     is used when there is nothing to explain at all -- an unresolved
@@ -294,7 +294,7 @@ class TrackerMatchModeOption(StrEnum):
     without_query = "without-query"
 
 
-# Every read-only command uses the same `app.ui.OutputFormat` enum and the
+# Every read-only command uses the same `qbit_ops.ui.OutputFormat` enum and the
 # same `--format` option, but not every command can meaningfully render
 # every format (see docs/COMMANDS.md "Format Support Matrix" and
 # docs/DECISIONS.md, 2026-07-24). This table is the single source of truth:
@@ -670,7 +670,7 @@ def tui(
             ErrorCategory.CONFIGURATION,
         )
 
-    from app.tui.app import run_tui
+    from qbit_ops.tui.app import run_tui
 
     host: str | None = None
     try:
@@ -2288,7 +2288,7 @@ def _run_mutation(
 ) -> bool:
     """Run the shared confirm/apply/refuse flow for an already-built plan.
 
-    Centralizes `app.execution.ExecutionPolicy` decisions for every
+    Centralizes `qbit_ops.execution.ExecutionPolicy` decisions for every
     mutation command: low-risk commands apply real changes immediately
     (no `confirmation_message` needed); medium/high-risk commands show
     the plan, then confirm, then apply exactly that plan (no rescan).
@@ -2435,14 +2435,14 @@ def _run_bulk_torrent_action(
 
 
 _create_qbit_client = create_qbit_client
-"""Re-export `app.app_services.create_qbit_client` under its former name.
+"""Re-export `qbit_ops.app_services.create_qbit_client` under its former name.
 
-Moved to `app/app_services.py` in Phase 9's TUI work so a second
+Moved to `qbit_ops/app_services.py` in Phase 9's TUI work so a second
 interface (the TUI) can create a qBittorrent client without importing a
 CLI-private symbol from this module -- see docs/TUI_ARCHITECTURE_REVIEW.md,
 finding F2. Kept as a private, callable module attribute here (not just
 removed) so `tests/conftest.py::configure_qbit_backend`, which
-monkeypatches `"app.main._create_qbit_client"` by string path, and every
+monkeypatches `"qbit_ops.main._create_qbit_client"` by string path, and every
 existing call site in this module keep working unchanged.
 """
 
@@ -2567,7 +2567,7 @@ def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
     """Collect one snapshot for `status --watch`.
 
     Mirrors `_collect_status_snapshot_safely()`'s connection handling via
-    the same shared `app.app_services.classify_recoverable_qbit_failure`
+    the same shared `qbit_ops.app_services.classify_recoverable_qbit_failure`
     classifier, but never prints to stderr on this path: the unavailable
     snapshot's own health/alert already carries the failure, and
     repeating it there would spam stderr on every retry — see
@@ -2602,7 +2602,7 @@ def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
     """Run `status --watch`: repeatedly collect, then render or serialize.
 
     Reuses `collect_status_snapshot`/`build_unavailable_snapshot`
-    unchanged via `watch_status()` (`app/status.py`) — no second status
+    unchanged via `watch_status()` (`qbit_ops/status.py`) — no second status
     model, no duplicated health calculation, no duplicated alerts or
     rate formatting. Local invalid configuration is checked exactly
     once, before the loop starts, and terminates immediately
@@ -2831,7 +2831,7 @@ def _print_torrent_selection(
     """Print a torrent selection, one shared shape for every filter.
 
     JSON/JSONL always include a normalized `filters` representation
-    (`app.torrents.torrent_filter_to_dict`) alongside the usual
+    (`qbit_ops.torrents.torrent_filter_to_dict`) alongside the usual
     `summary`/`torrents` -- a schema addition, not a removal, over the
     previous filter-specific payloads (see docs/DECISIONS.md for the
     unification this replaces).

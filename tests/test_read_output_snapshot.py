@@ -21,7 +21,7 @@ import json
 
 from typer.testing import CliRunner
 
-from app.main import ExitCode, StatusExitCode, app
+from qbit_ops.main import ExitCode, StatusExitCode, app
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 runner = CliRunner()
@@ -114,10 +114,10 @@ def test_status_json_reports_unavailable_health_on_connection_failure(
 
     `status` never raises on a connection failure -- it degrades to a
     valid, schema-conformant snapshot with `health: "unavailable"` and a
-    dedicated exit code (see `app.status.EXIT_CODE_BY_HEALTH`), which is
+    dedicated exit code (see `qbit_ops.status.EXIT_CODE_BY_HEALTH`), which is
     qbit-ops' contract for "unavailable" rather than a fatal CLI error.
     """
-    from app.errors import QbitConnectionError
+    from qbit_ops.errors import QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect to qBittorrent.")
@@ -142,7 +142,7 @@ def test_fatal_cli_error_json_path_emits_no_stdout(
     non-zero exit, no partial/malformed JSON on stdout. Both shapes are
     legitimate, existing contracts; this locks the second one.
     """
-    from app.errors import QbitConnectionError
+    from qbit_ops.errors import QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect.")

@@ -2,12 +2,13 @@
 
 Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for TUI
 2 -- see docs/DECISIONS.md): this module and every other module under
-`app/tui/` must never import `app.main`, `app.torrents.plan_bulk_torrent_action`
-(always rescans, accepts `--all`), any tracker mutation `plan_*`/
-`apply_*` function, any deletion function,
-`app.torrents.list_torrents_with_trackers`, or
-`app.torrents._get_tracker_details`. It may import exactly
-`app.torrents.build_bulk_action_plan_from_snapshot`/
+`qbit_ops/tui/` must never import `qbit_ops.main`,
+`qbit_ops.torrents.plan_bulk_torrent_action` (always rescans, accepts
+`--all`), any tracker mutation `plan_*`/`apply_*` function, any deletion
+function,
+`qbit_ops.torrents.list_torrents_with_trackers`, or
+`qbit_ops.torrents._get_tracker_details`. It may import exactly
+`qbit_ops.torrents.build_bulk_action_plan_from_snapshot`/
 `apply_bulk_torrent_action` (LOW-risk Pause/Resume/Reannounce only,
 frozen-plan-in, frozen-plan-out, never a live rescan). Widgets only
 ever render safe, structured domain outputs (`StatusSnapshot`,
@@ -26,7 +27,7 @@ details, guarded by `TuiController`'s monotonic `_detail_request_id` so
 rapid focus movement A -> B -> C only ever applies C's result). Every
 worker body is a plain function that never raises -- it returns a
 tagged `(..., error)` tuple instead -- and only ever calls
-`collect_*`/pure-network methods on `app.tui.state.TuiController`;
+`collect_*`/pure-network methods on `qbit_ops.tui.state.TuiController`;
 `apply_*` (state-mutating) methods are only ever called from
 `on_worker_state_changed`, which Textual always delivers on the UI
 thread. See `_start_periodic_refresh`/`_focus_torrent`/
@@ -66,7 +67,7 @@ terminal-support limitation, not a qbit-ops bug -- see
 Checkbox pairs (Completed+Incomplete, Active+Inactive) with exclusive
 `RadioSet`s, and gained visible Apply/Clear/Cancel buttons alongside
 the existing bindings. `e` opens an Explain modal for the focused
-torrent, built by the same pure, zero-API `app.explain.
+torrent, built by the same pure, zero-API `qbit_ops.explain.
 build_torrent_explanation` the CLI's `explain torrent` delegates to --
 see `TuiController.build_explanation` and `action_explain`.
 
@@ -83,7 +84,7 @@ for LOW-risk torrent mutations only (Pause/Resume/Reannounce) --
 *visible* rows, `a` opens `ActionsScreen`. Choosing an action there
 freezes `tuple(sorted(selected_hashes))` into a `BulkTorrentActionPlan`
 (`TuiController.build_bulk_plan`, pure, zero API calls, reusing
-`app.torrents.build_bulk_action_plan_from_snapshot` -- no second rule
+`qbit_ops.torrents.build_bulk_action_plan_from_snapshot` -- no second rule
 catalogue) shown in `PreviewScreen`; only an explicit Apply there
 dispatches a `MUTATION_WORKER_GROUP` worker
 (`TuiController.apply_bulk_plan`) that consumes exactly that frozen
@@ -122,18 +123,18 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from app.app_services import (
+from qbit_ops.app_services import (
     TuiRefreshResult,
     classify_recoverable_qbit_failure,
     create_qbit_client,
 )
-from app.config import ConfigError
-from app.errors import ErrorCategory
-from app.execution import MutationStatus
-from app.explain import Evidence, ExplanationFinding, ExplanationReport
-from app.explain import ExplanationSeverity as Severity
-from app.status import Health
-from app.torrents import (
+from qbit_ops.config import ConfigError
+from qbit_ops.errors import ErrorCategory
+from qbit_ops.execution import MutationStatus
+from qbit_ops.explain import Evidence, ExplanationFinding, ExplanationReport
+from qbit_ops.explain import ExplanationSeverity as Severity
+from qbit_ops.status import Health
+from qbit_ops.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentBulkAction,
@@ -141,8 +142,8 @@ from app.torrents import (
     build_torrent_filter,
     describe_torrent_filter,
 )
-from app.trackers import sanitize_tracker_text
-from app.tui.state import (
+from qbit_ops.trackers import sanitize_tracker_text
+from qbit_ops.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
     ConnectionState,
     TuiController,
@@ -347,7 +348,7 @@ class OverviewPanel(VerticalScroll):
     seeding *and* completed *and* stopped torrent all satisfy at once),
     and Attention (stalled/errored/unknown -- conditions worth an
     operator's attention, again independent of the other two). Every
-    count reuses `app.status`/`app.torrent_states`'s existing
+    count reuses `qbit_ops.status`/`qbit_ops.torrent_states`'s existing
     classifiers -- see the module docstring.
     """
 
@@ -465,7 +466,7 @@ def _format_local_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
     Refresh times default to local time, not UTC, with the timezone
     label always shown so a UTC-configured host is not silently
     ambiguous. `moment` is always timezone-aware (`datetime.now(UTC)`
-    upstream, see `app.status`), so `.astimezone()` with no `tz`
+    upstream, see `qbit_ops.status`), so `.astimezone()` with no `tz`
     converts it to the system's local timezone -- exactly what
     `datetime.astimezone(tz=None)` already means. `tz` exists purely
     for deterministic tests: passing a fixed `tzinfo` (e.g. a
@@ -1882,7 +1883,7 @@ class QbitOpsTuiApp(App[None]):
         entirely from `request_id`:
         `TuiController.apply_tracker_details_success`/`_failure` silently
         discard any result whose id no longer matches the controller's
-        current `_detail_request_id` -- see `app.tui.state` for the full
+        current `_detail_request_id` -- see `qbit_ops.tui.state` for the full
         guarantee. Returns the `Worker`, for the same test-observability
         reason as `_focus_torrent`.
         """
@@ -2779,8 +2780,8 @@ never the selection.[/dim]
 def _format_byte_rate(bytes_per_second: int) -> str:
     """Format a byte rate using binary units, e.g. '12.4 MiB/s'.
 
-    A deliberate small duplicate of `app.ui.format_byte_rate`: TUI
-    modules must never import from `app.ui` (a CLI/Rich rendering
+    A deliberate small duplicate of `qbit_ops.ui.format_byte_rate`: TUI
+    modules must never import from `qbit_ops.ui` (a CLI/Rich rendering
     module, see the security boundary at the top of this file), and
     this pure formatting function is too small to justify promoting it
     to a third, shared module.
@@ -2886,7 +2887,7 @@ def _format_endpoint(endpoint: dict[str, Any]) -> str:
     Deliberately does *not* also append a synthetic "disabled" suffix
     from `endpoint["enabled"]`: `health` is already `"disabled"`
     whenever `enabled` is `False` for a classifiable status
-    (`app.trackers`'s single status->health mapping), so doing both
+    (`qbit_ops.trackers`'s single status->health mapping), so doing both
     previously produced a duplicated "disabled disabled".
     """
     identity = str(endpoint["tracker"])
@@ -2939,7 +2940,7 @@ def _format_explain_text(
     header.append(f"[{style}]{report.overall_severity.value.title()}[/{style}]")
 
     # A single-finding report's summary is, by construction
-    # (`app.explain.build_torrent_explanation`), always the finding's
+    # (`qbit_ops.explain.build_torrent_explanation`), always the finding's
     # own `explanation` -- printing both would show the same sentence
     # twice. Only show the summary here when it says something the
     # first finding block does not already say.
@@ -2974,7 +2975,7 @@ def _split_skips(
     Audit finding F-3: "the torrent disappeared from the snapshot" and
     "the torrent is already in the requested state" are different facts
     and must never be collapsed into one message. `not_found` is the
-    reason `app.torrents.build_bulk_action_plan_from_snapshot` records
+    reason `qbit_ops.torrents.build_bulk_action_plan_from_snapshot` records
     for a selected hash absent from the planning snapshot.
     """
     not_found = tuple(
@@ -3237,17 +3238,17 @@ def _format_finding(finding: ExplanationFinding) -> str:
 
 
 # Evidence codes that carry a raw byte-per-second rate, per
-# `app.explain._build_torrent_finding`'s `common_evidence` tuple.
+# `qbit_ops.explain._build_torrent_finding`'s `common_evidence` tuple.
 _RATE_EVIDENCE_CODES = frozenset({"download_rate", "upload_rate"})
 
 
 def _format_evidence(evidence: Evidence) -> str:
     """Render one evidence row with a humanized value where possible.
 
-    Never changes the underlying `Evidence`/JSON model (`app.explain`'s
+    Never changes the underlying `Evidence`/JSON model (`qbit_ops.explain`'s
     `evidence_to_dict` is untouched) and never invents a value this
     formatting doesn't already have -- purely cosmetic, keyed off
-    `evidence.code` (a stable identifier `app.explain` already assigns,
+    `evidence.code` (a stable identifier `qbit_ops.explain` already assigns,
     not inferred from the label text).
     """
     label = f"{evidence.label}:"

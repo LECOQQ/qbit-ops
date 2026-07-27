@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.selectors import (
+from qbit_ops.selectors import (
     AmbiguousTorrentHashError,
     InvalidTorrentSelectorError,
     ResolvedTorrent,

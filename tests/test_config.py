@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import (
+from qbit_ops.config import (
     APP_ENV_FILE_VARIABLE,
     ConfigError,
     load_qbit_config,

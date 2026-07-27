@@ -7,7 +7,7 @@ CLI module -- see docs/TUI_ARCHITECTURE_REVIEW.md §10/§12.
 
 TUI 2 (see docs/DECISIONS.md, "multi-selection + LOW-risk bulk
 actions") narrowed, not removed, this boundary: the TUI may now import
-exactly `app.torrents.apply_bulk_torrent_action`/
+exactly `qbit_ops.torrents.apply_bulk_torrent_action`/
 `build_bulk_action_plan_from_snapshot` (Pause/Resume/Reannounce only,
 frozen-plan-in, frozen-plan-out, never a rescan, never `--all`).
 `plan_bulk_torrent_action` (always rescans and accepts an unbounded
@@ -20,11 +20,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import app.tui
-import app.tui.app
-import app.tui.state
+import qbit_ops.tui
+import qbit_ops.tui.app
+import qbit_ops.tui.state
 
-TUI_PACKAGE_DIR = Path(app.tui.__file__).parent
+TUI_PACKAGE_DIR = Path(qbit_ops.tui.__file__).parent
 
 _ALLOWED_TORRENTS_MUTATION_NAMES = {
     "apply_bulk_torrent_action",
@@ -51,8 +51,8 @@ def _tui_module_files() -> list[Path]:
     """List every TUI production module, including future subdirectories.
 
     Uses `rglob`, not a one-directory `glob`, so a future split of
-    `app/tui/app.py` into `app/tui/widgets/*.py` and
-    `app/tui/screens/*.py` (see
+    `qbit_ops/tui/app.py` into `qbit_ops/tui/widgets/*.py` and
+    `qbit_ops/tui/screens/*.py` (see
     `docs/audits/2026-07-package-refactor-plan.md`, Phase 9) cannot make
     this security boundary silently vacuous by leaving new files
     unscanned.
@@ -84,8 +84,8 @@ def _imported_names_by_module(source: str) -> dict[str, set[str]]:
 def test_tui_modules_never_import_app_main() -> None:
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "app.main" not in imports, (
-            f"{path} must never import app.main -- a TUI must not depend "
+        assert "qbit_ops.main" not in imports, (
+            f"{path} must never import qbit_ops.main -- a TUI must not depend "
             "on the CLI module (docs/TUI_ARCHITECTURE_REVIEW.md §12)."
         )
 
@@ -93,10 +93,10 @@ def test_tui_modules_never_import_app_main() -> None:
 def test_tui_never_imports_raw_tracker_helpers_or_unbounded_planner() -> None:
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        torrents_names = imports.get("app.torrents", set())
+        torrents_names = imports.get("qbit_ops.torrents", set())
         leaked = torrents_names & _FORBIDDEN_TORRENTS_NAMES
         assert not leaked, (
-            f"{path} imports forbidden app.torrents names: {leaked} -- "
+            f"{path} imports forbidden qbit_ops.torrents names: {leaked} -- "
             "raw tracker details and the always-rescanning/`--all` "
             "planner must never reach the TUI."
         )
@@ -111,7 +111,7 @@ def test_tui_may_only_import_the_two_low_risk_bulk_mutation_functions() -> None:
     found: set[str] = set()
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        found |= imports.get("app.torrents", set()) & (
+        found |= imports.get("qbit_ops.torrents", set()) & (
             _ALLOWED_TORRENTS_MUTATION_NAMES | _FORBIDDEN_TORRENTS_NAMES
         )
     assert found <= _ALLOWED_TORRENTS_MUTATION_NAMES
@@ -126,10 +126,10 @@ def test_tui_modules_never_import_tracker_mutation_functions() -> None:
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        trackers_names = imports.get("app.trackers", set())
+        trackers_names = imports.get("qbit_ops.trackers", set())
         leaked = trackers_names & _FORBIDDEN_TRACKERS_NAMES
         assert not leaked, (
-            f"{path} imports forbidden app.trackers mutation names: "
+            f"{path} imports forbidden qbit_ops.trackers mutation names: "
             f"{leaked} -- no tracker mutation is reachable from the TUI."
         )
 
@@ -137,8 +137,8 @@ def test_tui_modules_never_import_tracker_mutation_functions() -> None:
 def test_tui_modules_never_import_backup_module() -> None:
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "app.backup" not in imports, (
-            f"{path} must never import app.backup -- backup raw content "
+        assert "qbit_ops.backup" not in imports, (
+            f"{path} must never import qbit_ops.backup -- backup raw content "
             "is out of scope for TUI 1."
         )
 
@@ -146,16 +146,16 @@ def test_tui_modules_never_import_backup_module() -> None:
 def test_tui_modules_never_import_ui_module() -> None:
     """TUI widgets must never import the CLI's Rich rendering helpers.
 
-    `app.ui` renders for a Rich `Console`/CLI confirmation prompts, not
+    `qbit_ops.ui` renders for a Rich `Console`/CLI confirmation prompts, not
     a Textual widget tree -- a TUI consuming it would be "scraping
     Rich-rendered output" by another name. Pure formatting duplicated
-    locally instead (see `app.tui.app._format_byte_rate`).
+    locally instead (see `qbit_ops.tui.app._format_byte_rate`).
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "app.ui" not in imports, (
-            f"{path} must never import app.ui -- see "
-            "app.tui.app._format_byte_rate for the sanctioned duplicate."
+        assert "qbit_ops.ui" not in imports, (
+            f"{path} must never import qbit_ops.ui -- see "
+            "qbit_ops.tui.app._format_byte_rate for the sanctioned duplicate."
         )
 
 
@@ -165,7 +165,7 @@ def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
 
     Builds a synthetic `tui/` tree with a `screens/` subdirectory --
     exactly the shape Phase 9 (`docs/audits/2026-07-package-refactor-plan.md`)
-    plans to move `app/tui/app.py`'s modal screens into. A one-directory
+    plans to move `qbit_ops/tui/app.py`'s modal screens into. A one-directory
     `glob("*.py")` would miss `screens/help.py` here and make every
     security assertion above silently vacuous once that split happens;
     `rglob` must not.
@@ -186,10 +186,11 @@ def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
 def test_tui_state_module_never_imports_textual() -> None:
     """The pure state/controller layer must stay independently testable.
 
-    `app/tui/state.py` (unlike `app/tui/app.py`) has no Textual-specific
-    concern and must remain importable/testable without a terminal.
+    `qbit_ops/tui/state.py` (unlike `qbit_ops/tui/app.py`) has no
+    Textual-specific concern and must remain importable/testable
+    without a terminal.
     """
-    source = Path(app.tui.state.__file__).read_text(encoding="utf-8")
+    source = Path(qbit_ops.tui.state.__file__).read_text(encoding="utf-8")
     imports = _imported_names_by_module(source)
     assert not any(
         module == "textual" or module.startswith("textual.")

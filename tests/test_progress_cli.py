@@ -1,7 +1,7 @@
 """Test transient progress feedback at the CLI level.
 
 Covers the read-only and mutation command wiring introduced alongside
-`app.ui.progress_enabled`/`transient_spinner`/`transient_progress`:
+`qbit_ops.ui.progress_enabled`/`transient_spinner`/`transient_progress`:
 interactive table mode shows progress, machine-readable/non-interactive
 modes stay silent, progress uses a real known total where the domain
 does one API call per item, and progress never changes mutation
@@ -14,9 +14,9 @@ from contextlib import contextmanager
 import pytest
 from typer.testing import CliRunner
 
-import app.main as m
-from app.main import ExitCode, TrackerStatusExitCode, app
-from app.ui import ProgressCallback
+import qbit_ops.main as m
+from qbit_ops.main import ExitCode, TrackerStatusExitCode, app
+from qbit_ops.ui import ProgressCallback
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_HASH = "abc123def456000000000000000000000000000a"
@@ -31,10 +31,10 @@ def _spy_on_progress_calls(
 ) -> list[tuple[int, int]]:
     """Record every `(completed, total)` advance call via `transient_progress`.
 
-    Wraps `app.main.transient_progress` (the name bound inside app.main,
-    not `app.ui`'s own copy — see `from ... import ...` binding) so the
-    real context manager still runs, but every `advance()` call is also
-    captured for assertions.
+    Wraps `qbit_ops.main.transient_progress` (the name bound inside
+    `qbit_ops.main`, not `qbit_ops.ui`'s own copy — see
+    `from ... import ...` binding) so the real context manager still
+    runs, but every `advance()` call is also captured for assertions.
     """
     calls: list[tuple[int, int]] = []
     real_transient_progress = m.transient_progress

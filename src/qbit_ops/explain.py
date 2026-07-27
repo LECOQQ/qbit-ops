@@ -1,19 +1,21 @@
 """Build deterministic, evidence-based explanations for one torrent or tracker.
 
 This is the `explain` "service": read-only, and free of Typer and Rich
-(mirroring `app.status`/`app.doctor`/`app.tracker_status`'s
+(mirroring
+`qbit_ops.status`/`qbit_ops.doctor`/`qbit_ops.tracker_status`'s
 collection/render split). Every finding comes from a small, explicit
-rule catalogue evaluated over already-classified data (`app.torrent_states`
-groups, `app.trackers.TrackerHealth`) -- there is no generic rule engine
-and no confidence scoring. A finding never claims a cause the collected
-evidence does not support; when qbit-ops cannot classify something, it
-says so via `ExplanationSeverity.UNKNOWN` or an explicit limitation
-rather than guessing.
+rule catalogue evaluated over already-classified data
+(`qbit_ops.torrent_states` groups, `qbit_ops.trackers.TrackerHealth`) --
+there is no generic rule engine and no confidence scoring. A finding
+never claims a cause the collected evidence does not support; when
+qbit-ops cannot classify something, it says so via
+`ExplanationSeverity.UNKNOWN` or an explicit limitation rather than
+guessing.
 
 Tracker-derived evidence (identities, messages) is always the same
-secret-free structural data `app.trackers`/`app.tracker_status` already
-produce -- a raw announce URL or credential is never collected here, let
-alone rendered.
+secret-free structural data `qbit_ops.trackers`/`qbit_ops.tracker_status`
+already produce -- a raw announce URL or credential is never collected
+here, let alone rendered.
 """
 
 from __future__ import annotations
@@ -24,28 +26,28 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from app.qbit_fields import (
+from qbit_ops.qbit_fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
 )
-from app.selectors import (
+from qbit_ops.selectors import (
     ResolvedTorrent,
     TorrentNotFoundError,
     resolve_torrent_hash,
 )
-from app.torrent_states import (
+from qbit_ops.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_stopped_state,
 )
-from app.torrents import build_torrent_filter, get_safe_tracker_details
-from app.tracker_status import (
+from qbit_ops.torrents import build_torrent_filter, get_safe_tracker_details
+from qbit_ops.tracker_status import (
     TrackerAggregate,
     TrackerStatusReport,
     collect_tracker_status,
 )
-from app.trackers import TrackerHealth, compute_tracker_aggregate_health
+from qbit_ops.trackers import TrackerHealth, compute_tracker_aggregate_health
 
 SCHEMA_VERSION = "1"
 
@@ -157,7 +159,7 @@ def explain_torrent(
     `torrents_trackers()` call for the resolved torrent -- the same
     budget `torrents inspect --hash` uses; no other torrent's trackers
     are ever scanned. Returns `None` when nothing matches (mirrors
-    `app.torrents.inspect_torrent`); propagates
+    `qbit_ops.torrents.inspect_torrent`); propagates
     `AmbiguousTorrentHashError`/`InvalidTorrentSelectorError` so the
     caller can present candidates instead of guessing.
 
@@ -166,7 +168,7 @@ def explain_torrent(
     catalogue; this function's only job is the ambiguity-aware hash
     resolution a bare hash string requires (a TUI caller that already
     has one exact, already-focused torrent skips straight to the
-    builder -- see `app.tui.state`).
+    builder -- see `qbit_ops.tui.state`).
     """
     all_torrents = list(client.torrents_info())
 
@@ -202,7 +204,7 @@ def build_torrent_explanation(
 
     The single rule catalogue behind `explain_torrent`: takes an
     already-fetched raw `torrents_info()` item and already-computed safe
-    tracker details (`app.torrents.get_safe_tracker_details`'s output,
+    tracker details (`qbit_ops.torrents.get_safe_tracker_details`'s output,
     or `None` when a `torrents_trackers()` attempt failed or was never
     made) and evaluates exactly the same findings `explain_torrent`
     would for the same torrent -- there is no second, TUI-only
@@ -292,7 +294,7 @@ def _pick_representative_message(
 ) -> str | None:
     """Pick one already-sanitized tracker message, most severe first.
 
-    Mirrors `app.tracker_status`'s aggregate message-selection
+    Mirrors `qbit_ops.tracker_status`'s aggregate message-selection
     precedence (critical > warning > unknown > disabled > healthy) so an
     operator never sees a healthy endpoint's message while a failing one
     is available.
@@ -610,7 +612,7 @@ def explain_tracker(
 ) -> ExplanationReport | None:
     """Explain one tracker's aggregate health using deterministic evidence.
 
-    Reuses `app.tracker_status.collect_tracker_status` unscoped by any
+    Reuses `qbit_ops.tracker_status.collect_tracker_status` unscoped by any
     cheap filter, restricted afterward to the requested identity -- the
     same bounded pattern (`torrents_info()` once, at most one
     `torrents_trackers()` call per surviving torrent) `trackers status`

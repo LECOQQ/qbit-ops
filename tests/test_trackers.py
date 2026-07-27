@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.trackers import (
+from qbit_ops.trackers import (
     apply_tracker_addition,
     apply_tracker_passkey_replacement,
     apply_tracker_removal,
@@ -804,7 +804,7 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
 #
 # `matched` and `len(plan.changes)` are deliberately different signals:
 # a plan can match targets with nothing left to change (NO_CHANGES), or
-# match nothing at all (NO_MATCH). Callers (app/main.py::_run_mutation)
+# match nothing at all (NO_MATCH). Callers (qbit_ops/main.py::_run_mutation)
 # use `matched == 0` to report NO_MATCH and `not plan.changes` (with
 # matched > 0) to report NO_CHANGES — never APPLIED for either.
 

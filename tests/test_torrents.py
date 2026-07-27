@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-from app.selectors import AmbiguousTorrentHashError
-from app.torrents import (
+from qbit_ops.selectors import AmbiguousTorrentHashError
+from qbit_ops.torrents import (
     TorrentBulkAction,
     TorrentFilter,
     apply_bulk_torrent_action,

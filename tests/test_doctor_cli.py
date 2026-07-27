@@ -15,8 +15,8 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-import app.main as m
-from app.main import DoctorExitCode, app
+import qbit_ops.main as m
+from qbit_ops.main import DoctorExitCode, app
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -105,7 +105,7 @@ def test_local_configuration_failure_exits_two(
 ) -> None:
     """Ensure invalid local configuration is reported as a failure, not a
     crash."""
-    from app.config import ConfigError
+    from qbit_ops.config import ConfigError
 
     configure_qbit_backend(config_error=ConfigError("Missing QBIT_HOST"))
 
@@ -143,7 +143,7 @@ def test_authentication_failure_exits_two(
 ) -> None:
     """Ensure a rejected login fails CONN002 specifically, while CONN001
     (reachability) still passes."""
-    from app.main import QbitAuthenticationError
+    from qbit_ops.main import QbitAuthenticationError
 
     configure_qbit_backend(
         config=CLEAN_CONFIG,
@@ -305,7 +305,7 @@ def test_doctor_failure_is_silent_on_stderr(
 ) -> None:
     """Ensure doctor never writes to stderr, even when the report itself
     describes a failure: the failure is the payload, not a CLI error."""
-    from app.config import ConfigError
+    from qbit_ops.config import ConfigError
 
     configure_qbit_backend(config_error=ConfigError("Missing QBIT_HOST"))
 

@@ -17,10 +17,10 @@ from typing import Any
 
 import qbittorrentapi
 
-from app.config import load_qbit_config
-from app.errors import QbitAuthenticationError, QbitConnectionError
-from app.status import StatusSnapshot, build_status_snapshot_from_data
-from app.torrents import (
+from qbit_ops.config import load_qbit_config
+from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_ops.status import StatusSnapshot, build_status_snapshot_from_data
+from qbit_ops.torrents import (
     TorrentFilter,
     TorrentSelection,
     select_torrents_from_items,
@@ -30,12 +30,12 @@ from app.torrents import (
 def create_qbit_client() -> Any:
     """Create and authenticate a qBittorrent API client.
 
-    Relocated verbatim from `app.main._create_qbit_client` (Phase 9
+    Relocated verbatim from `qbit_ops.main._create_qbit_client` (Phase 9
     found its body had no Typer dependency despite living in the CLI
-    module) -- `app.main` re-exports this under the same private name so
+    module) -- `qbit_ops.main` re-exports this under the same private name so
     every existing call site and test seam
     (`tests/conftest.py::configure_qbit_backend` monkeypatches
-    `app.main._create_qbit_client` by string path) keeps working
+    `qbit_ops.main._create_qbit_client` by string path) keeps working
     unchanged. Never prints or exits: raises `QbitAuthenticationError`/
     `QbitConnectionError` for the caller to render or classify.
     """
@@ -97,7 +97,7 @@ def classify_recoverable_qbit_failure(
     are themselves `OSError` subclasses). Callers must let a `None`
     result propagate as an unexpected internal error rather than
     silently degrading it to "unavailable" -- this is the single shared
-    classification `app.main`'s status/watch collection and the TUI's
+    classification `qbit_ops.main`'s status/watch collection and the TUI's
     refresh worker both apply, so the recoverable/internal boundary
     cannot drift between the two interfaces.
     """
@@ -123,7 +123,7 @@ class TuiRefreshResult:
     qBittorrent items, not `torrents.matched`: `SelectedTorrent.category`
     is already display-formatted (e.g. `(uncategorized)`), and
     re-filtering against the formatted value would silently break the
-    `uncategorized` filter token -- see `app.torrents._category_matches`.
+    `uncategorized` filter token -- see `qbit_ops.torrents._category_matches`.
     """
 
     status: StatusSnapshot
@@ -140,7 +140,7 @@ def collect_tui_refresh(
 
     Calls `app_version()`, `app_web_api_version()`, `transfer_info()`,
     and `torrents_info()` exactly once each -- the same bounded budget
-    `app.status.collect_status_snapshot` already uses -- and feeds the
+    `qbit_ops.status.collect_status_snapshot` already uses -- and feeds the
     single `torrents_info()` result to both the status counters
     (`build_status_snapshot_from_data`) and the unfiltered torrent
     snapshot (`select_torrents_from_items`, `TorrentFilter()`, i.e. every

@@ -46,8 +46,8 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from app.torrents import TorrentFilter
-from app.tui.app import (
+from qbit_ops.torrents import TorrentFilter
+from qbit_ops.tui.app import (
     ActionsScreen,
     ConnectionBanner,
     DetailsPanel,
@@ -67,7 +67,7 @@ from app.tui.app import (
     _format_local_time,
     _truncate,
 )
-from app.tui.state import ConnectionState, Workspace
+from qbit_ops.tui.state import ConnectionState, Workspace
 from tests.support import FakeQbitClient, make_torrent
 
 LARGE_INTERVAL = 999.0  # effectively disables the periodic timer mid-test
@@ -1687,7 +1687,7 @@ class _FakeCompletedWorker:
 
 
 async def test_late_periodic_result_is_ignored_after_shutdown() -> None:
-    from app.tui.app import REFRESH_WORKER_GROUP
+    from qbit_ops.tui.app import REFRESH_WORKER_GROUP
 
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
@@ -2689,7 +2689,7 @@ async def test_overview_connection_uses_injected_timezone() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
 
-        with patch("app.tui.app._format_local_time") as mocked:
+        with patch("qbit_ops.tui.app._format_local_time") as mocked:
             mocked.side_effect = (
                 lambda moment, tz=None: f"stub-time {fixed_tz.tzname(moment)}"
             )
