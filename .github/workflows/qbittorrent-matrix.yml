@@ -3,22 +3,51 @@ name: qBittorrent Docker version matrix
 # Manual and low-frequency only -- never on every push/PR. Each entry
 # starts a real, disposable qBittorrent container; running the full
 # historical matrix on every small PR would not be a reasonable use of
-# CI minutes for this project's size (see item 13 of the Docker matrix
-# phase spec).
+# CI minutes for this project's size. Cadence (docs/TESTING.md):
+# weekly = current-stable entry only (the only image likely to drift);
+# monthly = the complete historical matrix (immutable digests, so a
+# weekly re-run of unchanged historical images would prove nothing new).
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "latest | full | an exact matrix id (e.g. qbit-5.2.3)"
+        required: false
+        default: "latest"
+        type: string
   schedule:
-    # Weekly, Monday 03:00 UTC -- catches upstream image drift without
-    # running on every commit.
+    # Weekly, Monday 03:00 UTC -- current-stable entry only.
     - cron: "0 3 * * 1"
+    # Monthly, 1st 04:00 UTC -- complete historical matrix.
+    - cron: "0 4 1 * *"
 
 permissions:
   contents: read
 
 jobs:
-  generate-matrix:
-    name: Read qbittorrent-matrix.toml
+  resolve-scope:
+    name: Resolve which matrix entries to run
     runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.resolve.outputs.scope }}
+    steps:
+      - name: Resolve scope from the trigger
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            scope="${{ inputs.scope }}"
+          elif [ "${{ github.event.schedule }}" = "0 4 1 * *" ]; then
+            scope="full"
+          else
+            scope="latest"
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
+  generate-matrix:
+    name: Select entries from qbittorrent-matrix.toml
+    needs: resolve-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       matrix_ids: ${{ steps.read.outputs.matrix_ids }}
     steps:
@@ -30,21 +59,50 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Read matrix ids from the committed manifest
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --extras tui --no-interaction --no-ansi
+
+      - name: Select matrix ids from the committed manifest for this scope
         id: read
         run: |
-          ids=$(python3 -c "
-          import json, tomllib
-          from pathlib import Path
-          manifest = tomllib.loads(Path('tests/integration/qbittorrent-matrix.toml').read_text())
-          print(json.dumps([entry['id'] for entry in manifest['entry']]))
+          ids=$(poetry run python3 -c "
+          import json
+          from tests.integration._matrix import load_matrix, latest_matrix_entry
+
+          scope = '${{ needs.resolve-scope.outputs.scope }}'
+          entries = load_matrix()  # raises (F-8) if the manifest is empty
+          known_ids = [entry.id for entry in entries]
+
+          if scope == 'full':
+              selected = known_ids
+          elif scope == 'latest':
+              selected = [latest_matrix_entry().id]
+          elif scope in known_ids:
+              selected = [scope]
+          else:
+              raise SystemExit(
+                  f'invalid scope {scope!r}; expected latest, full, or one of {known_ids}'
+              )
+          print(json.dumps(selected))
           ")
           echo "matrix_ids=$ids" >> "$GITHUB_OUTPUT"
 
   matrix-entry:
     name: ${{ matrix.matrix_id }}
     needs: generate-matrix
+    # F-8: never run a "matrix" with zero entries and report green --
+    # `generate-matrix` itself already fails closed on an empty
+    # manifest, but this guard also covers a scope that resolved to an
+    # empty JSON array for any other reason.
+    if: needs.generate-matrix.outputs.matrix_ids != '[]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -67,7 +125,7 @@ jobs:
       - name: Install dependencies
         run: poetry install --extras tui --no-interaction --no-ansi
 
-      - name: Run this matrix entry (disposable, loopback-only container)
+      - name: Run this matrix entry (disposable container, dedicated Docker network)
         run: make test-qbit-version QBIT_MATRIX_ID=${{ matrix.matrix_id }}
 
       - name: Fail if any disposable container/network was left behind
@@ -80,15 +138,16 @@ jobs:
             exit 1
           fi
 
-      - name: Upload sanitized test report
+      - name: Upload pytest node-id cache (diagnostic only, no secrets or fixtures)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: qbit-matrix-${{ matrix.matrix_id }}-report
-          # Only pytest's own summary output -- never a qBittorrent
-          # config directory, never anything that could carry a
-          # disposable-run credential (which is randomly generated
-          # per run and discarded at teardown regardless).
+          # `.pytest_cache/**` is pytest's own node-id/last-failed cache,
+          # not a test report -- useful only to see which node ids ran
+          # last. It never contains a qBittorrent config directory or a
+          # disposable-run credential (randomly generated per run and
+          # discarded at teardown regardless).
           path: |
             .pytest_cache/**
           if-no-files-found: ignore
@@ -97,6 +156,7 @@ jobs:
   freshness-check:
     name: Check for a newer stable qBittorrent release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # Informational only: a "stale" result means "matrix review
     # required", not "qbit-ops is broken" -- this job's own exit code
     # is therefore never allowed to fail the workflow (see
@@ -121,12 +181,26 @@ jobs:
         run: poetry install --extras tui --no-interaction --no-ansi
 
       - name: Compare the matrix manifest against the latest stable release
+        # GitHub Actions runs `run:` blocks under `bash -e {0}` -- a
+        # bare `exit_code=$?` after the script's first line would never
+        # be reached once that line exits 1 or 2 (independent-review
+        # finding F-3: verified with `bash -e` directly, the annotation
+        # was never emitted and the step aborted silently). Note that
+        # `command || true` would defeat capturing the code entirely --
+        # `$?` right after would read `true`'s exit status (always 0),
+        # not the script's. `command || exit_code=$?` is the correct
+        # idiom: the assignment only runs (and only then reads `$?`) on
+        # a non-zero exit, and the assignment's own success keeps `-e`
+        # from aborting either way; `${exit_code:-0}` supplies the
+        # success case, where the right-hand side never ran at all.
         run: |
-          poetry run python3 scripts/check_qbit_matrix_freshness.py
-          exit_code=$?
+          poetry run python3 scripts/check_qbit_matrix_freshness.py || exit_code=$?
+          exit_code=${exit_code:-0}
           if [ "$exit_code" -eq 1 ]; then
             echo "::warning::qBittorrent matrix review required -- a newer stable release exists. This does not mean qbit-ops is incompatible."
           elif [ "$exit_code" -eq 2 ]; then
             echo "::warning::qBittorrent matrix freshness could not be determined this run (network/source issue) -- not evidence of staleness."
+          elif [ "$exit_code" -ne 0 ]; then
+            echo "::error::freshness check exited $exit_code, an unexpected value (expected 0, 1, or 2) -- treating as a script defect."
+            exit "$exit_code"
           fi
-          exit 0

@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor
+.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor
 
 .sync-stamp: pyproject.toml poetry.lock
 	@poetry install --sync --extras tui --no-interaction
@@ -71,7 +71,17 @@ test: ## Run Python tests
 check-version: ## Verify pyproject.toml and the Release Please manifest agree
 	@python3 scripts/check_version_sync.py
 
-check: sync lint test check-version ## Run all required quality checks
+check: sync lint test check-version ## Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
+
+check-fast: sync ## Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (see docs/TESTING.md; not a substitute for `make check`)
+	@$(PY) ruff check src tests
+	@$(PY) black --check src tests
+	@$(PY) pyright
+	@python3 scripts/check_version_sync.py
+	@$(PY) pytest -m "not tui and not docker"
+
+test-tui: sync ## Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
+	@$(PY) pytest tests/test_tui_app.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py
 
 ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --extras tui --no-interaction --no-ansi
@@ -90,10 +100,10 @@ docker-matrix-doctor: ## Check Docker is available for the qBittorrent version m
 	fi; \
 	printf '[OK] docker\n'
 
-test-qbit-matrix: docker-matrix-doctor ## Run the full hermetic Docker qBittorrent version matrix (requires Docker, not part of `make check`)
-	@printf 'Running the full qBittorrent Docker matrix against disposable, loopback-only containers.\n'
+test-qbit-matrix: docker-matrix-doctor ## Run the full Docker qBittorrent version matrix (requires Docker, not part of `make check`; never writes captured fixtures -- see `capture-qbit-fixtures`)
+	@printf 'Running the full qBittorrent Docker matrix against disposable containers on a dedicated Docker network.\n'
 	@printf 'No repository .env, no ~/.config/qbit-ops/.env, no real qBittorrent host is used.\n'
-	@QBIT_OPS_DOCKER_MATRIX=1 $(PY) pytest tests/integration -q; \
+	@QBIT_OPS_DOCKER_MATRIX=1 $(PY) pytest tests/integration -m "docker and not capture" -q; \
 	status=$$?; \
 	leaked=$$(docker ps -aq --filter "label=qbit-ops.harness" 2>/dev/null | wc -l); \
 	if [ "$$leaked" -ne 0 ]; then \
@@ -102,15 +112,15 @@ test-qbit-matrix: docker-matrix-doctor ## Run the full hermetic Docker qBittorre
 	fi; \
 	exit $$status
 
-test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one entry: make test-qbit-version QBIT_MATRIX_ID=<id>
+test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one entry: make test-qbit-version QBIT_MATRIX_ID=<id> (never writes captured fixtures)
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make test-qbit-version QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
 		grep '^id = ' tests/integration/qbittorrent-matrix.toml >&2 || true; \
 		exit 1; \
 	fi
-	@printf 'Running the qBittorrent Docker matrix entry %s against a disposable, loopback-only container.\n' "$(QBIT_MATRIX_ID)"
-	@QBIT_OPS_DOCKER_MATRIX=1 QBIT_MATRIX_ID=$(QBIT_MATRIX_ID) $(PY) pytest tests/integration -q; \
+	@printf 'Running the qBittorrent Docker matrix entry %s against a disposable container.\n' "$(QBIT_MATRIX_ID)"
+	@QBIT_OPS_DOCKER_MATRIX=1 QBIT_MATRIX_ID=$(QBIT_MATRIX_ID) $(PY) pytest tests/integration -m "docker and not capture" -q; \
 	status=$$?; \
 	leaked=$$(docker ps -aq --filter "label=qbit-ops.harness" 2>/dev/null | wc -l); \
 	if [ "$$leaked" -ne 0 ]; then \
@@ -119,16 +129,16 @@ test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one ent
 	fi; \
 	exit $$status
 
-capture-qbit-fixtures: docker-matrix-doctor ## Capture authentic payload fixtures for one matrix entry: make capture-qbit-fixtures QBIT_MATRIX_ID=<id>
+capture-qbit-fixtures: docker-matrix-doctor ## Capture authentic payload fixtures for one matrix entry: make capture-qbit-fixtures QBIT_MATRIX_ID=<id> (the only target that writes committed fixtures)
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make capture-qbit-fixtures QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
 		grep '^id = ' tests/integration/qbittorrent-matrix.toml >&2 || true; \
 		exit 1; \
 	fi
-	@printf 'Capturing payload fixtures for %s from a disposable, loopback-only container.\n' "$(QBIT_MATRIX_ID)"
+	@printf 'Capturing payload fixtures for %s from a disposable container.\n' "$(QBIT_MATRIX_ID)"
 	@printf 'Fixtures land under tests/compatibility/fixtures/captured-container/%s/ -- review before committing.\n' "$(QBIT_MATRIX_ID)"
-	@QBIT_OPS_DOCKER_MATRIX=1 QBIT_MATRIX_ID=$(QBIT_MATRIX_ID) $(PY) pytest tests/integration/test_matrix_capture.py -q; \
+	@QBIT_OPS_DOCKER_MATRIX=1 QBIT_MATRIX_ID=$(QBIT_MATRIX_ID) $(PY) pytest tests/integration -m capture -q; \
 	status=$$?; \
 	leaked=$$(docker ps -aq --filter "label=qbit-ops.harness" 2>/dev/null | wc -l); \
 	if [ "$$leaked" -ne 0 ]; then \
