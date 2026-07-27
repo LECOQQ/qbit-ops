@@ -840,18 +840,25 @@ def _call_bulk_torrent_action(
     action: TorrentBulkAction,
     torrent_hashes: list[str],
 ) -> None:
-    """Call the qBittorrent API for a bulk torrent action."""
+    """Call the qBittorrent API for a bulk torrent action.
+
+    Calls `torrents_start` directly for "resume"/"start" rather than
+    probing for it with `getattr(client, "torrents_start", None)` and
+    falling back to `torrents_resume` (constat P-4): the installed
+    qbittorrent-api aliases `torrents_resume = torrents_start` (the same
+    bound method, verified in `tests/test_qbit_library_http_boundary.py`),
+    so `torrents_start` is never absent on a real client and the
+    fallback branch was unreachable dead code. qbittorrent-api itself
+    already negotiates the underlying `start`/`resume` endpoint by Web
+    API version internally -- this project does not duplicate that
+    negotiation.
+    """
     if action == "pause":
         client.torrents_pause(torrent_hashes)
         return
 
     if action in ("resume", "start"):
-        start_method = getattr(client, "torrents_start", None)
-        if start_method is not None:
-            start_method(torrent_hashes)
-            return
-
-        client.torrents_resume(torrent_hashes)
+        client.torrents_start(torrent_hashes)
         return
 
     client.torrents_reannounce(torrent_hashes)

@@ -118,6 +118,16 @@ MUTATION_APPLY_ARGV: list[list[str]] = [
     ["torrents", "resume", "--all", "--no-dry-run"],
     ["torrents", "start", "--all", "--no-dry-run"],
     ["torrents", "reannounce", "--all", "--no-dry-run"],
+    [
+        "trackers",
+        "add-if-present",
+        "--source",
+        TRACKER_URL,
+        "--target",
+        OTHER_TRACKER_URL,
+        "--no-dry-run",
+        "--yes",
+    ],
     ["trackers", "remove", "--tracker", TRACKER_URL, "--no-dry-run", "--yes"],
     [
         "trackers",
@@ -126,6 +136,16 @@ MUTATION_APPLY_ARGV: list[list[str]] = [
         TRACKER_URL,
         "--target",
         OTHER_TRACKER_URL,
+        "--no-dry-run",
+        "--yes",
+    ],
+    [
+        "trackers",
+        "replace-passkey",
+        "--tracker",
+        f"{TRACKER_URL}",
+        "--new-passkey",
+        "new",
         "--no-dry-run",
         "--yes",
     ],
@@ -272,3 +292,93 @@ def test_confirmed_mutation_calls_are_identical_with_and_without_progress(
 
     assert first.calls == second.calls
     assert first.calls != []
+
+
+# --- A6: exact call budgets, arguments, and no hidden whole-instance selector
+
+
+def test_filtered_pause_targets_exactly_the_matched_hash_not_all(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """A `--category` filtered mutation must send exactly the matched
+    hash(es) -- never expand to a whole-instance `"all"` selector, even
+    though qBittorrent's own API accepts that literal string."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_HASH, category="movies"),
+            make_torrent(hash="b" * 40, category="tv"),
+        ]
+    )
+    configure_qbit_backend(client=client)
+
+    runner.invoke(
+        app, ["torrents", "pause", "--category", "movies", "--no-dry-run"]
+    )
+
+    pause_calls = [c for c in client.calls if c[0] == "torrents_pause"]
+    assert len(pause_calls) == 1
+    _name, args, _kwargs = pause_calls[0]
+    assert args == ([TORRENT_HASH],)
+
+
+def test_bulk_pause_exact_call_count_and_argument_shape(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """`torrents pause --all --no-dry-run` performs exactly one
+    `torrents_pause` call with the full list of matched hashes as its
+    sole positional argument -- no extra reads beyond `torrents_info()`,
+    no per-torrent call."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_HASH, category="movies"),
+            make_torrent(hash="b" * 40, category="tv"),
+        ]
+    )
+    configure_qbit_backend(client=client)
+
+    runner.invoke(app, ["torrents", "pause", "--all", "--no-dry-run"])
+
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 0
+    pause_calls = [c for c in client.calls if c[0] == "torrents_pause"]
+    assert len(pause_calls) == 1
+    _name, args, _kwargs = pause_calls[0]
+    assert set(args[0]) == {TORRENT_HASH, "b" * 40}
+
+
+def test_quiet_status_makes_the_same_calls_as_ordinary_status(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """`--quiet` suppresses rendering, not API calls."""
+    client_quiet = _make_client()
+    client_ordinary = _make_client()
+
+    configure_qbit_backend(client=client_quiet)
+    runner.invoke(app, ["status", "--quiet"])
+
+    configure_qbit_backend(client=client_ordinary)
+    runner.invoke(app, ["status"])
+
+    assert client_quiet.calls == client_ordinary.calls
+
+
+@pytest.mark.parametrize("output_format", ["table", "json", "jsonl", "csv"])
+def test_status_format_choice_makes_the_same_calls_as_table(
+    runner: CliRunner,
+    configure_qbit_backend,
+    output_format: str,
+) -> None:
+    """Changing `--format` must never add or remove an API call."""
+    client_table = _make_client()
+    client_other = _make_client()
+
+    configure_qbit_backend(client=client_table)
+    runner.invoke(app, ["status", "--format", "table"])
+
+    configure_qbit_backend(client=client_other)
+    runner.invoke(app, ["status", "--format", output_format])
+
+    assert client_table.calls == client_other.calls

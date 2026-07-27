@@ -591,6 +591,39 @@ def test_plan_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
     assert client.started_hashes == [["a" * 40]]
 
 
+def test_bulk_resume_calls_torrents_start_without_torrents_resume() -> None:
+    """Constat P-4: `torrents_start` is called directly, with no fallback
+    to `torrents_resume`. A client exposing only `torrents_start` (the
+    real qbittorrent-api client's actual shape -- `torrents_resume` and
+    `torrents_start` are the same bound method, see
+    `tests/test_qbit_library_http_boundary.py`) must still work."""
+
+    class _StartOnlyClient(FakeQbitClient):
+        def __getattribute__(self, name: str) -> Any:
+            if name == "torrents_resume":
+                raise AttributeError(name)
+            return super().__getattribute__(name)
+
+    client = _StartOnlyClient(
+        torrents=[
+            _torrent(
+                hash="a" * 40,
+                name="Torrent A",
+                category="sonarr",
+                state="stoppedUP",
+                progress=1.0,
+            )
+        ]
+    )
+
+    plan = plan_bulk_torrent_action(
+        client=client, action="resume", select_all=True
+    )
+    apply_bulk_torrent_action(client, plan)
+
+    assert client.started_hashes == [["a" * 40]]
+
+
 def test_plan_bulk_torrent_action_starts_completed_torrents() -> None:
     """Ensure start with --completed targets stopped completed torrents,
     now available as a general filter rather than a start-only flag."""
