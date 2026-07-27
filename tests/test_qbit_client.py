@@ -17,7 +17,7 @@ import qbittorrentapi
 
 from qbit_ops.config import ConfigError
 from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
-from qbit_ops.qbit.client import create_qbit_client
+from qbit_ops.qbit.client import create_qbit_client, is_qbit_error
 
 
 class _FakeClient:
@@ -213,3 +213,59 @@ def test_create_qbit_client_makes_no_extra_api_call_beyond_auth_log_in(
     create_qbit_client()
 
     assert calls == ["auth_log_in"]
+
+
+# --- is_qbit_error: the boundary-owned predicate main.py delegates to -------
+
+
+def test_is_qbit_error_true_for_api_error() -> None:
+    assert is_qbit_error(qbittorrentapi.APIError("boom")) is True
+
+
+def test_is_qbit_error_true_for_api_error_subclass() -> None:
+    """`LoginFailed`/`APIConnectionError` are themselves `APIError`
+    subclasses."""
+    assert is_qbit_error(qbittorrentapi.LoginFailed("boom")) is True
+    assert is_qbit_error(qbittorrentapi.APIConnectionError("boom")) is True
+
+
+def test_is_qbit_error_false_for_unrelated_exceptions() -> None:
+    """An internal programming defect must never be mistaken for a
+    qBittorrent error."""
+    assert is_qbit_error(RuntimeError("bug")) is False
+    assert is_qbit_error(TypeError("bug")) is False
+    assert is_qbit_error(ValueError("bug")) is False
+
+
+def test_is_qbit_error_false_for_bare_os_error() -> None:
+    """`OSError` is handled by its own `except` clause in `main.py`, not
+    this predicate."""
+    assert is_qbit_error(OSError("connection reset")) is False
+
+
+def test_main_module_no_longer_imports_qbittorrentapi_directly() -> None:
+    """`qbit_ops.main` must not import `qbittorrentapi` at all (constat
+    A-6/A-8).
+
+    A static source check: the module now reaches `qbittorrentapi`'s
+    exception type only indirectly, through
+    `qbit_ops.qbit.client.is_qbit_error`.
+    """
+    import ast
+    from pathlib import Path
+
+    import qbit_ops.main
+
+    source = Path(qbit_ops.main.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+
+    assert not any(
+        module == "qbittorrentapi" or module.startswith("qbittorrentapi.")
+        for module in imported_modules
+    )

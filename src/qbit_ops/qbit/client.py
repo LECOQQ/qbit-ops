@@ -65,3 +65,17 @@ def create_qbit_client() -> Any:
         ) from error
 
     return client
+
+
+def is_qbit_error(error: Exception) -> bool:
+    """Return whether an exception is a `qbittorrentapi.APIError`.
+
+    The one boundary-owned predicate `qbit_ops.main`'s CLI-level
+    catch-all needs so that module never has to import
+    `qbittorrentapi` itself just to name its exception type (constat
+    A-6/A-8, phase 3 continuation). Deliberately narrow: this is not a
+    general "is this a qBittorrent-related failure" check -- callers
+    still handle `QbitAuthenticationError`/`QbitConnectionError`/
+    `OSError` themselves, exactly as before.
+    """
+    return isinstance(error, qbittorrentapi.APIError)

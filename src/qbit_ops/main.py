@@ -13,7 +13,6 @@ from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
-import qbittorrentapi
 import typer
 
 from qbit_ops import __version__
@@ -60,6 +59,7 @@ from qbit_ops.explain import (
     explanation_exit_code,
     explanation_report_to_dict,
 )
+from qbit_ops.qbit.client import is_qbit_error
 from qbit_ops.selectors import AmbiguousTorrentHashError
 from qbit_ops.status import (
     StatusSnapshot,
@@ -3240,12 +3240,13 @@ def qbit_error_boundary() -> Iterator[None]:
     of being relabelled as a remote failure (see
     docs/ERRORS_AND_EXIT_CODES.md, "Internal error behavior").
 
-    This is the one intentional direct `qbittorrentapi` import left
-    outside `qbit_ops.qbit` (see
-    `docs/audits/2026-07-package-refactor-plan.md` Phase 3): a generic
-    CLI-level catch-all for `qbittorrentapi.APIError` raised by a
-    post-login command call, not client construction, which already
-    lives entirely in `qbit_ops.qbit.client`.
+    This module no longer imports `qbittorrentapi` directly (see
+    `docs/audits/2026-07-package-refactor-plan.md` Phase 3 continuation):
+    the generic CLI-level catch-all for a post-login `qbittorrentapi.APIError`
+    uses the boundary-owned `qbit_ops.qbit.client.is_qbit_error()` predicate
+    instead of naming the exception type here. `except Exception` below
+    is deliberately narrowed by that predicate, not widened by it — any
+    exception the predicate rejects is re-raised unchanged.
 
     Keep the `with` block scoped to exactly the client-creation-plus-
     domain-call span, never wider: widening it risks swallowing a
@@ -3263,7 +3264,11 @@ def qbit_error_boundary() -> Iterator[None]:
         _fail(str(error), ErrorCategory.AUTHENTICATION)
     except QbitConnectionError as error:
         _fail(str(error), ErrorCategory.UNAVAILABLE)
-    except (qbittorrentapi.APIError, OSError) as error:
+    except OSError as error:
+        _fail(f"qBittorrent API error: {error}", ErrorCategory.UNAVAILABLE)
+    except Exception as error:
+        if not is_qbit_error(error):
+            raise
         _fail(f"qBittorrent API error: {error}", ErrorCategory.UNAVAILABLE)
 
 
