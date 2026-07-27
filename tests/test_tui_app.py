@@ -1919,8 +1919,9 @@ async def test_torrents_table_columns_match_width_at_each_tested_size() -> None:
             table = app.query_one("#torrents", DataTable)
             labels = tuple(str(c.label) for c in table.columns.values())
             assert labels == _columns_for_width(size[0])
-            # Row identity always survives regardless of visible columns.
-            assert "Alpha" in labels or True  # Name column always present
+            # Row identity always survives regardless of visible columns:
+            # the Name column itself is never dropped at any tested width.
+            assert "Name" in labels
             assert table.row_count == 1
 
 
@@ -2928,10 +2929,20 @@ async def test_all_modal_bindings_still_dispatch_correctly() -> None:
         assert len(app.screen_stack) == 1
         assert app.controller.state.filters.categories == ("films",)
 
-        # DetailsScreen (narrow-equivalent open via enter) + copy hash.
+        # At WIDE_SIZE (not narrow), `action_activate` never pushes a
+        # DetailsScreen -- it focuses the embedded DetailsPanel instead
+        # (see `action_activate`'s docstring). The previous assertion
+        # here (`isinstance(app.screen, DetailsScreen) or True`) could
+        # never actually pass at this size; the `or True` masked that
+        # permanently-vacuous check (F-10). Re-focus the torrents table
+        # first: the prior FiltersScreen cancel left focus on its
+        # now-unmounted Input widget.
+        app.query_one("#torrents", DataTable).focus()
+        await pilot.pause()
         await pilot.press("enter")
         await _settle(app, pilot)
-        assert isinstance(app.screen, DetailsScreen) or True
+        assert len(app.screen_stack) == 1
+        assert isinstance(app.focused, DetailsPanel)
         await pilot.press("escape")
         await pilot.pause()
 
