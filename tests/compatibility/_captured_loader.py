@@ -42,12 +42,17 @@ class CapturedFixture:
     payload: Any
     qbittorrent_version: str | None
     web_api_version: str | None
+    architecture: str | None
     qbittorrent_api_version: str | None
     image_reference: str | None
     image_digest: str | None
     sanitization: str
     fields_removed: tuple[str, ...]
+    fields_normalized: tuple[str, ...]
     limitations: str
+    expected_qbittorrent_version: str | None
+    expected_web_api_version: str | None
+    expected_architecture: str | None
 
 
 def discover_matrix_ids() -> list[str]:
@@ -76,12 +81,19 @@ def load_captured_fixtures(matrix_id: str) -> list[CapturedFixture]:
                 payload=raw["payload"],
                 qbittorrent_version=meta.get("qbittorrent_version"),
                 web_api_version=meta.get("web_api_version"),
+                architecture=meta.get("architecture"),
                 qbittorrent_api_version=meta.get("qbittorrent_api_version"),
                 image_reference=meta.get("image_reference"),
                 image_digest=meta.get("image_digest"),
                 sanitization=meta.get("sanitization", ""),
                 fields_removed=tuple(meta.get("fields_removed", ())),
+                fields_normalized=tuple(meta.get("fields_normalized", ())),
                 limitations=meta.get("limitations", ""),
+                expected_qbittorrent_version=meta.get(
+                    "expected_qbittorrent_version"
+                ),
+                expected_web_api_version=meta.get("expected_web_api_version"),
+                expected_architecture=meta.get("expected_architecture"),
             )
         )
     return fixtures

@@ -23,6 +23,7 @@ class MatrixEntry:
     image_repository: str
     image_tag: str
     image_digest: str
+    expected_architecture: str
     release_line: str
     expected_version: str
     expected_web_api_version: str
@@ -47,15 +48,45 @@ class MatrixEntry:
 
 
 def load_matrix(path: Path = MATRIX_MANIFEST_PATH) -> list[MatrixEntry]:
-    """Load every matrix entry from the manifest, in file order."""
+    """Load every matrix entry from the manifest, in file order.
+
+    Fails closed on an empty manifest (F-8): a matrix with zero entries
+    must never silently produce a CI job with nothing to run, or a
+    local/freshness command that reports success having tested
+    nothing. Callers must never catch this to fall back to "run
+    against whatever is available".
+    """
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     entries = [_parse_entry(item) for item in raw.get("entry", [])]
+
+    if not entries:
+        raise ValueError(
+            f"{path} declares zero matrix entries; refusing to report "
+            "success for a matrix that tests nothing"
+        )
 
     ids = [entry.id for entry in entries]
     if len(ids) != len(set(ids)):
         raise ValueError(f"duplicate matrix entry id in {path}: {ids}")
 
     return entries
+
+
+def latest_matrix_entry(path: Path = MATRIX_MANIFEST_PATH) -> MatrixEntry:
+    """Return the matrix entry with the highest `expected_version`.
+
+    Used to select "the current stable entry" for the weekly CI cadence
+    and CLI-driven `scope=latest` dispatch -- computed from the
+    manifest via `packaging.version.Version`, never a second hardcoded
+    "latest" id (see docs/TESTING.md, CI cadence policy).
+    """
+    from packaging.version import Version
+
+    entries = load_matrix(path)
+    return max(
+        entries,
+        key=lambda entry: Version(entry.expected_version.removeprefix("v")),
+    )
 
 
 def load_matrix_entry(
@@ -83,6 +114,7 @@ def _parse_entry(item: dict) -> MatrixEntry:
         image_repository=item["image_repository"],
         image_tag=item["image_tag"],
         image_digest=item["image_digest"],
+        expected_architecture=item["expected_architecture"],
         release_line=item["release_line"],
         expected_version=item["expected_version"],
         expected_web_api_version=item["expected_web_api_version"],

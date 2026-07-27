@@ -121,14 +121,16 @@ def test_explain_torrent_for_the_completed_torrent(hermetic_env, seeded_corpus):
         ],
     )
 
-    assert result.exit_code in (
-        0,
-        1,
-        2,
-    )  # explanation exit codes are severity-based, not just 0
+    # F-12: the deterministic corpus's "complete" torrent is
+    # `stoppedUP`/progress 1.0 with no unhealthy trackers attached --
+    # `build_torrent_explanation` classifies this as `TORRENT_STOPPED`
+    # at INFO severity (exit 0), verified against a real container.
+    # Any other code would mean the corpus or the explanation rules
+    # changed underneath this test.
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    # A found torrent renders the full dict, not {"explanation": null}.
-    assert payload
+    assert payload["overall_severity"] == "info"
+    assert payload["findings"][0]["code"] == "TORRENT_STOPPED"
 
 
 def test_explain_tracker_for_the_tracked_torrents_tracker(
@@ -146,8 +148,16 @@ def test_explain_tracker_for_the_tracked_torrents_tracker(
         ],
     )
 
-    assert result.exit_code in (0, 1, 2), result.output
-    json.loads(result.stdout)  # must be valid JSON regardless of severity
+    # F-12: the disposable in-network tracker (real, but only a minimal
+    # bencode responder -- see _tracker_service.py) mixes with the
+    # always-present DHT/PeX/LSD pseudo-trackers, which
+    # `trackers_status` reports as disabled -- `explain tracker`
+    # classifies this exact mix as `TRACKER_MIXED_ENDPOINT_HEALTH` at
+    # WARNING severity (exit 1), verified against a real container.
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["overall_severity"] == "warning"
+    assert payload["findings"][0]["code"] == "TRACKER_MIXED_ENDPOINT_HEALTH"
 
 
 def test_backup_export_json_against_the_isolated_instance_only(
@@ -158,9 +168,19 @@ def test_backup_export_json_against_the_isolated_instance_only(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"]["torrents"] >= 3
-    # No real host/credential leakage into the exported payload.
+    # F-11: each secret class is checked independently -- an `or`
+    # between them would pass as long as just one class were absent,
+    # proving nothing about the other. `backup export`'s whole purpose
+    # is to preserve real tracker URLs (so a backup is restorable), so
+    # the disposable tracker's hostname legitimately appears here --
+    # that is not a leak. What must never appear is the WebUI
+    # password, or a passkey-shaped credential embedded in a tracker
+    # URL (this corpus's tracker URL carries no passkey, so none
+    # should appear either).
     rendered = json.dumps(payload)
-    assert "127.0.0.1" not in rendered or "password" not in rendered.lower()
+    assert "password" not in rendered.lower()
+    assert hermetic_env["QBIT_PASSWORD"] not in rendered
+    assert "passkey" not in rendered.lower()
 
 
 def test_no_unexpected_endpoint_failure_across_the_read_only_suite(
@@ -193,3 +213,36 @@ def test_no_unexpected_endpoint_failure_across_the_read_only_suite(
                 result.exception, SystemExit
             ), f"{command}: unhandled exception {result.exception!r}"
         json.loads(result.stdout)
+
+
+def test_correct_password_succeeds_and_wrong_password_is_rejected(
+    qbit_container,
+):
+    """F-16: prove the sealed `Password_PBKDF2` is what actually gates
+    access, not a same-host/localhost authentication bypass --
+    `WebUI\\LocalHostAuth=false` is set explicitly in the pre-sealed
+    conf precisely so this stays true even though the harness always
+    connects via 127.0.0.1."""
+    import qbittorrentapi
+
+    good_client = qbittorrentapi.Client(
+        host=qbit_container.host,
+        username=qbit_container.username,
+        password=qbit_container.password,
+    )
+    good_client.auth_log_in()  # must not raise
+    assert str(good_client.app_version()) == qbit_container.observed_version
+
+    bad_client = qbittorrentapi.Client(
+        host=qbit_container.host,
+        username=qbit_container.username,
+        password="definitely-the-wrong-password",
+    )
+    try:
+        bad_client.auth_log_in()
+        raise AssertionError(
+            "an incorrect WebUI password was accepted -- LocalHostAuth "
+            "bypass or a broken sealed password"
+        )
+    except qbittorrentapi.LoginFailed:
+        pass  # expected

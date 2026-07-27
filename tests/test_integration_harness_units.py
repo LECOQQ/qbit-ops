@@ -12,6 +12,7 @@ real Docker daemon live under `tests/integration/` instead, gated by
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ import pytest
 from tests.integration._bencode import bencode
 from tests.integration._harness import (
     HarnessError,
+    HermeticEnv,
     assert_no_ambient_qbit_ops_config,
     assert_target_is_disposable,
     make_hermetic_env,
@@ -32,42 +34,66 @@ from tests.integration._torrent_corpus import (
 )
 
 
-def test_hermetic_env_passes_its_own_guard() -> None:
-    env = make_hermetic_env(
-        host="http://127.0.0.1:18112", username="admin", password="x"
-    )
+@pytest.fixture()
+def hermetic_env_for_test():
+    """Build one `HermeticEnv` and remove its temp HOME afterward.
+
+    `make_hermetic_env()` creates a real `/tmp/qbit-ops-it-home-*`
+    directory via `tempfile.mkdtemp` -- calling it directly in a test,
+    without cleanup, leaks that directory on every run
+    (independent-review finding F-9). This fixture is the single,
+    tracked cleanup point every test in this file must go through.
+    """
+    created: list[HermeticEnv] = []
+
+    def _make(
+        *, host: str, username: str = "admin", password: str = "x"
+    ) -> HermeticEnv:
+        env = make_hermetic_env(host=host, username=username, password=password)
+        created.append(env)
+        return env
+
+    try:
+        yield _make
+    finally:
+        for env in created:
+            shutil.rmtree(env.home_dir, ignore_errors=True)
+
+
+def test_hermetic_env_passes_its_own_guard(hermetic_env_for_test) -> None:
+    env = hermetic_env_for_test(host="http://127.0.0.1:18112")
     assert_no_ambient_qbit_ops_config(env.as_environ())
 
 
-def test_sabotage_missing_qbit_ops_env_file_fails_closed() -> None:
+def test_sabotage_missing_qbit_ops_env_file_fails_closed(
+    hermetic_env_for_test,
+) -> None:
     """Item 16: the harness must fail if it could discover the repo `.env`."""
-    env = make_hermetic_env(
-        host="http://127.0.0.1:18112", username="admin", password="x"
-    ).as_environ()
+    env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     del env["QBIT_OPS_ENV_FILE"]
 
     with pytest.raises(HarnessError, match="QBIT_OPS_ENV_FILE"):
         assert_no_ambient_qbit_ops_config(env)
 
 
-def test_sabotage_env_file_pointing_at_a_real_file_fails_closed() -> None:
+def test_sabotage_env_file_pointing_at_a_real_file_fails_closed(
+    hermetic_env_for_test,
+) -> None:
     """Item 16: a `QBIT_OPS_ENV_FILE` that resolves to a real, existing file
     (standing in for the repository `.env`) must be rejected."""
-    env = make_hermetic_env(
-        host="http://127.0.0.1:18112", username="admin", password="x"
-    ).as_environ()
+    env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     env["QBIT_OPS_ENV_FILE"] = str(Path(__file__))  # any real, existing file
 
     with pytest.raises(HarnessError, match="unexpectedly exists"):
         assert_no_ambient_qbit_ops_config(env)
 
 
-def test_sabotage_real_home_directory_fails_closed() -> None:
+def test_sabotage_real_home_directory_fails_closed(
+    hermetic_env_for_test,
+) -> None:
     """Item 16: the harness must fail if HOME could resolve to the user's
     real HOME config."""
-    env = make_hermetic_env(
-        host="http://127.0.0.1:18112", username="admin", password="x"
-    ).as_environ()
+    env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     env["HOME"] = os.path.expanduser("~")
 
     with pytest.raises(HarnessError, match="real user HOME"):
@@ -82,6 +108,21 @@ def test_sabotage_non_loopback_host_fails_closed() -> None:
 
 def test_disposable_loopback_host_passes() -> None:
     assert_target_is_disposable("http://127.0.0.1:18112")
+
+
+def test_sabotage_lookalike_loopback_hostname_fails_closed() -> None:
+    """F-17: a substring check (`"127.0.0.1" in host`) would wrongly accept
+    a hostname that merely *contains* the loopback address -- the guard
+    must parse the URL and compare the exact hostname instead."""
+    with pytest.raises(HarnessError, match="disposable"):
+        assert_target_is_disposable("http://127.0.0.1.evil.example:18112")
+
+
+def test_sabotage_loopback_as_userinfo_fails_closed() -> None:
+    """Another substring-check bypass: embedding the loopback address as
+    URL userinfo rather than the actual host."""
+    with pytest.raises(HarnessError, match="disposable"):
+        assert_target_is_disposable("http://127.0.0.1@evil.example:18112")
 
 
 def test_webui_password_hash_matches_the_reverse_engineered_format() -> None:
@@ -157,3 +198,14 @@ def test_matrix_manifest_only_contains_verified_release_lines() -> None:
 def test_unknown_matrix_id_raises_instead_of_running_something_else() -> None:
     with pytest.raises(KeyError, match="unknown qBittorrent matrix id"):
         load_matrix_entry("qbit-9.9.9-does-not-exist")
+
+
+def test_sabotage_empty_matrix_manifest_fails_closed(tmp_path) -> None:
+    """F-8: a manifest with zero entries must never silently produce
+    "success" -- a CI job with nothing to run, or a local/freshness
+    command reporting green having tested nothing."""
+    empty_manifest = tmp_path / "empty-matrix.toml"
+    empty_manifest.write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="zero matrix entries"):
+        load_matrix(empty_manifest)

@@ -6,6 +6,12 @@ discovery. Every captured payload is sanitized and scanned with the
 exact same rules `tests/compatibility/test_payload_security.py`
 enforces (`_security_scan.scan_text`) *before* it is accepted -- a
 violation raises, it never gets written.
+
+Only `make capture-qbit-fixtures` writes to
+`tests/compatibility/fixtures/captured-container/` -- ordinary matrix
+verification (`make test-qbit-matrix` / `make test-qbit-version`) never
+calls this module (see the `capture` pytest marker on
+`test_matrix_capture.py`, independent-review finding F-7).
 """
 
 from __future__ import annotations
@@ -21,7 +27,6 @@ import qbittorrentapi
 
 from tests.compatibility._security_scan import scan_text
 from tests.integration._harness import RunningQbitContainer
-from tests.integration._matrix import MatrixEntry
 from tests.integration._seed import SeededCorpus
 
 _QBITTORRENT_API_VERSION = importlib.metadata.version("qbittorrent-api")
@@ -37,6 +42,22 @@ CAPTURED_FIXTURES_ROOT = (
 # fixture security allowlist (`tracker.example` is) -- substitute it
 # before writing, and record the substitution in `sanitization`.
 _TRACKER_HOSTNAME_SUBSTITUTION = ("qbit-ops-tracker", "tracker.example")
+
+# Fields whose *value* is a real wall-clock timestamp or an
+# elapsed-time duration measured on the capturing machine -- neither is
+# reproducible between two otherwise-identical captures (independent
+# review finding F-7: "only timestamps drift" was found to be false,
+# `seeding_time` is a duration, not a timestamp, and also drifted).
+# Normalized to a fixed sentinel so two captures of an unchanged
+# instance are byte-identical; the *shape* (the field's presence and
+# type) is preserved, only the volatile value is replaced.
+VOLATILE_TORRENT_FIELDS = (
+    "added_on",
+    "completion_on",
+    "last_activity",
+    "seeding_time",
+)
+_VOLATILE_FIELD_SENTINEL = 0
 
 
 class CaptureSecurityError(RuntimeError):
@@ -63,36 +84,66 @@ def _sanitize(value: Any) -> Any:
     return value
 
 
+def normalize_volatile_torrent_fields(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace known volatile torrent fields with a fixed sentinel value.
+
+    Only replaces a field that is actually present, so the payload
+    *shape* (which fields a real `torrents_info()` entry has) is never
+    hidden -- only the non-reproducible value is. Returns a new dict;
+    never mutates `payload` in place.
+    """
+    normalized = dict(payload)
+    for field_name in VOLATILE_TORRENT_FIELDS:
+        if field_name in normalized:
+            normalized[field_name] = _VOLATILE_FIELD_SENTINEL
+    return normalized
+
+
 def _write_fixture(
     directory: Path,
     name: str,
     *,
     payload: Any,
     description: str,
-    matrix_entry: MatrixEntry,
+    container: RunningQbitContainer,
     sanitization: str,
     fields_removed: list[str],
+    fields_normalized: list[str],
     limitations: str,
 ) -> Path:
+    matrix_entry = container.matrix_entry
     sanitized_payload = _sanitize(payload)
     meta = {
         "trust": "captured-container",
         "description": description,
-        "qbittorrent_version": matrix_entry.expected_version,
-        "web_api_version": matrix_entry.expected_web_api_version,
+        # Observed values -- read from the actual running container,
+        # never copied from the manifest's expected_* fields
+        # (independent-review finding F-2: the manifest values alone
+        # would make this metadata self-consistent but unverified).
+        "qbittorrent_version": container.observed_version,
+        "web_api_version": container.observed_web_api_version,
+        "architecture": container.observed_architecture,
         "qbittorrent_api_version": _QBITTORRENT_API_VERSION,
         "sanitization": sanitization,
         "fields_removed": fields_removed,
+        "fields_normalized": fields_normalized,
         "limitations": limitations,
         "matrix_id": matrix_entry.id,
         "image_reference": matrix_entry.image_reference,
         "image_digest": matrix_entry.image_digest,
         "capture_date": datetime.now(UTC).date().isoformat(),
+        # Expected manifest values, included separately for
+        # cross-reference -- never used as the verified value itself.
+        "expected_qbittorrent_version": matrix_entry.expected_version,
+        "expected_web_api_version": matrix_entry.expected_web_api_version,
+        "expected_architecture": matrix_entry.expected_architecture,
     }
     document = {"_meta": meta, "payload": sanitized_payload}
     # Deterministic ordering and formatting: sorted keys, fixed indent,
     # trailing newline -- stable byte-for-byte across repeated captures
-    # of the same observed state.
+    # of the same observed state (once volatile fields are normalized).
     text = (
         json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
     )
@@ -131,17 +182,21 @@ def capture_matrix_fixtures(
         for t in client.torrents_info()
         if t.hash == corpus.complete.info_hash_hex
     )
+    normalized_torrent = normalize_volatile_torrent_fields(complete_torrent)
+    normalized_field_names = sorted(
+        name for name in VOLATILE_TORRENT_FIELDS if name in complete_torrent
+    )
     written.append(
         _write_fixture(
             directory,
             "torrent_complete",
-            payload=complete_torrent,
+            payload=normalized_torrent,
             description=(
                 "A real `torrents_info()` entry captured from a "
                 f"disposable linuxserver/qbittorrent:{matrix_entry.image_tag} "
                 "container -- a fully seeded synthetic torrent."
             ),
-            matrix_entry=matrix_entry,
+            container=container,
             sanitization=(
                 "Tracker hostname 'qbit-ops-tracker' replaced with the "
                 "allowlisted placeholder 'tracker.example'. Torrent name, "
@@ -149,9 +204,13 @@ def capture_matrix_fixtures(
                 "tests/integration/_torrent_corpus.py)."
             ),
             fields_removed=[],
+            fields_normalized=normalized_field_names,
             limitations=(
                 "One captured instance; does not prove every field shape "
-                "across all real-world usage."
+                "across all real-world usage. Timestamp/duration fields "
+                f"({', '.join(VOLATILE_TORRENT_FIELDS)}) are normalized to "
+                f"{_VOLATILE_FIELD_SENTINEL} -- present and typed "
+                "correctly, but not evidence of real elapsed time."
             ),
         )
     )
@@ -172,12 +231,13 @@ def capture_matrix_fixtures(
                 "pseudo-trackers plus the disposable in-network tracker) "
                 "for the tracked synthetic torrent."
             ),
-            matrix_entry=matrix_entry,
+            container=container,
             sanitization=(
                 "Tracker hostname replaced with 'tracker.example'; no "
                 "passkey was ever present."
             ),
             fields_removed=[],
+            fields_normalized=[],
             limitations=(
                 "The disposable tracker returns a minimal bencode "
                 "response; real-world tracker messages may vary."
@@ -194,12 +254,13 @@ def capture_matrix_fixtures(
             description=(
                 "Real `transfer_info()` snapshot from the disposable instance."
             ),
-            matrix_entry=matrix_entry,
+            container=container,
             sanitization=(
                 "n/a -- no host/credential fields present in this payload "
                 "shape."
             ),
             fields_removed=[],
+            fields_normalized=[],
             limitations=(
                 "Rates reflect the disposable instance's idle synthetic "
                 "corpus, not a real download/upload workload."
@@ -213,9 +274,10 @@ def capture_matrix_fixtures(
             "app_version",
             payload=str(client.app_version()),
             description="Real `app_version()` string.",
-            matrix_entry=matrix_entry,
+            container=container,
             sanitization="n/a",
             fields_removed=[],
+            fields_normalized=[],
             limitations="n/a",
         )
     )
@@ -226,9 +288,10 @@ def capture_matrix_fixtures(
             "app_web_api_version",
             payload=str(client.app_web_api_version()),
             description="Real `app_web_api_version()` string.",
-            matrix_entry=matrix_entry,
+            container=container,
             sanitization="n/a",
             fields_removed=[],
+            fields_normalized=[],
             limitations="n/a",
         )
     )
@@ -244,11 +307,12 @@ def capture_matrix_fixtures(
                     "Real `app_build_info()` snapshot, where the endpoint "
                     "exists."
                 ),
-                matrix_entry=matrix_entry,
+                container=container,
                 sanitization=(
                     "n/a -- build info carries no host/credential fields."
                 ),
                 fields_removed=[],
+                fields_normalized=[],
                 limitations=(
                     "qbit-ops never calls this endpoint itself (see "
                     "docs/COMPATIBILITY.md #3); captured for reference only."

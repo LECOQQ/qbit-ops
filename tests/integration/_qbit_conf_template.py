@@ -64,7 +64,8 @@ def build_hermetic_qbittorrent_conf(
     webui_username: str,
     webui_password: str,
 ) -> str:
-    """Return `qBittorrent.conf` text disabling every public-network feature.
+    """Return `qBittorrent.conf` text disabling every public-network
+    *feature qBittorrent itself owns*.
 
     Disables, from the very first boot (empirically confirmed via
     `qbittorrent.log`, not assumed): DHT, PeX, LSD, UPnP, and the
@@ -72,6 +73,24 @@ def build_hermetic_qbittorrent_conf(
     Pre-accepts the legal notice so no interactive prompt blocks the
     WebUI. Sets a fixed, known WebUI credential so the harness never
     needs to scrape a per-boot temporary password from container logs.
+
+    This is application-level outbound isolation, not a network-level
+    guarantee (independent-review finding F-1): the disposable Docker
+    network the container runs on permits public egress
+    (`Internal=false`, confirmed by `docker network inspect`), so a
+    future qBittorrent release changing one of these defaults, or a
+    malformed torrent, would not be caught by any test here. Do not
+    describe the network itself as "hermetic" or "egress-blocked" --
+    only this configuration is.
+
+    `WebUI\\LocalHostAuth=false` is set explicitly (F-16): without it, a
+    future qBittorrent release could bypass authentication entirely for
+    connections that appear to originate from localhost, and
+    `auth_log_in()` would keep succeeding even if the sealed
+    `Password_PBKDF2` above were silently ignored -- the harness would
+    detect nothing. Explicitly disabling the bypass makes
+    `auth_log_in()` a real proof that the sealed password works, not an
+    artifact of a same-host convenience feature.
     """
     password_hash = build_webui_password_hash(webui_password)
     return f"""[BitTorrent]
@@ -97,4 +116,5 @@ WebUI\\Password_PBKDF2="{password_hash}"
 WebUI\\ServerDomains=*
 WebUI\\HostHeaderValidation=true
 WebUI\\CSRFProtection=true
+WebUI\\LocalHostAuth=false
 """

@@ -86,6 +86,53 @@ def test_dry_run_pause_sends_no_mutation_request(hermetic_env, seeded_corpus):
     assert after == before, "dry-run must never change torrent state"
 
 
+def test_dry_run_resume_sends_no_mutation_request(
+    hermetic_env, qbit_container, seeded_corpus
+):
+    """F-13: dry-run Resume/Start was previously untested, unlike dry-run
+    Pause/Stop -- the safety guarantee (no mutation call) must hold
+    symmetrically for every mutation direction."""
+    target_hash = seeded_corpus.complete.info_hash_hex
+    web_api_version = qbit_container.observed_web_api_version
+    above_threshold = _is_at_or_above_stop_start_threshold(web_api_version)
+    start_endpoint = "torrents/start" if above_threshold else "torrents/resume"
+
+    before = _state_of(hermetic_env, target_hash)
+
+    with record_http_requests() as rec:
+        result = _invoke(
+            hermetic_env, ["torrents", "resume", "--hash", target_hash]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert rec.count(start_endpoint) == 0
+    assert rec.count("torrents/start") == 0
+    assert rec.count("torrents/resume") == 0
+    after = _state_of(hermetic_env, target_hash)
+    assert after == before, "dry-run must never change torrent state"
+
+
+def test_dry_run_reannounce_sends_no_mutation_request(
+    hermetic_env, seeded_corpus
+):
+    """F-13: dry-run Reannounce was previously untested."""
+    target_hash = seeded_corpus.tracked.info_hash_hex
+    control_hash = seeded_corpus.complete.info_hash_hex
+    control_state_before = _state_of(hermetic_env, control_hash)
+
+    with record_http_requests() as rec:
+        result = _invoke(
+            hermetic_env, ["torrents", "reannounce", "--hash", target_hash]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert rec.count("torrents/reannounce") == 0
+    assert _state_of(hermetic_env, control_hash) == control_state_before, (
+        "an unrelated exact-hash torrent must never be affected by a "
+        "dry-run mutation (which should send no request at all)"
+    )
+
+
 def test_real_resume_then_pause_reaches_the_negotiated_endpoint_exactly_once(
     hermetic_env, qbit_container, seeded_corpus
 ):

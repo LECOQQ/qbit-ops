@@ -65,6 +65,14 @@ def test_declared_matrix_id_matches_the_directory_it_lives_in(
 def test_captured_versions_match_the_matrix_manifest_entry(
     matrix_id: str,
 ) -> None:
+    """F-2: `fixture.qbittorrent_version`/`web_api_version`/`architecture`
+    are the values *observed* from the real container
+    (`_capture.py::_write_fixture` reads `container.observed_*`, never
+    `matrix_entry.expected_*`) -- comparing them here to the manifest's
+    independently-loaded `expected_*` is therefore a real cross-check,
+    not the tautology the independent review found (a fixture that
+    copied the manifest's own expected value into its metadata, then
+    compared that copy back against the same manifest)."""
     entry = _MATRIX_ENTRIES_BY_ID[matrix_id]
     for fixture in load_captured_fixtures(matrix_id):
         if fixture.qbittorrent_version is not None:
@@ -74,6 +82,10 @@ def test_captured_versions_match_the_matrix_manifest_entry(
         if fixture.web_api_version is not None:
             assert (
                 fixture.web_api_version == entry.expected_web_api_version
+            ), fixture.path
+        if fixture.architecture is not None:
+            assert (
+                fixture.architecture == entry.expected_architecture
             ), fixture.path
         if fixture.image_digest is not None:
             assert fixture.image_digest == entry.image_digest, fixture.path
@@ -95,15 +107,12 @@ def test_captured_torrent_payload_is_read_correctly() -> None:
             torrent = fixture.payload
             assert get_field_as_string(torrent, "hash")
             assert get_field_as_float(torrent, "progress") == 1.0
-            assert (
-                classify_torrent_state(get_field_as_string(torrent, "state"))
-                in (
-                    "seeding",
-                    "stopped",
-                    "unknown",
-                )
-                or True
-            )  # any classification is a valid, non-raising outcome
+            # Must not raise for a real captured state string -- no
+            # assertion on *which* classification comes back, since
+            # any classification (including "unknown") is a valid,
+            # non-raising outcome for this contract (F-10: this used
+            # to be a dead `assert ... or True`, which tested nothing).
+            classify_torrent_state(get_field_as_string(torrent, "state"))
             # Extra real-world fields (e.g. `availability`, `popularity`) must
             # not break reading the fields qbit-ops actually consumes.
             assert "availability" in torrent
