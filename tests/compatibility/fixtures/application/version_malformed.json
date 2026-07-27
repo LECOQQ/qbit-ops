@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A malformed/unparsable application version string.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "Synthetic; not a real observed malformed response, exists only to prove graceful handling."
+  },
+  "payload": "unknown"
+}

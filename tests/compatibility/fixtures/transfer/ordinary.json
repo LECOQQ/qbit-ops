@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "An ordinary transfer_info() mapping with both rate fields present.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- no host/credential fields in this endpoint",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response. qBittorrent's real transfer_info() returns many more fields (connection status, DHT nodes, limits, etc.) qbit-ops does not read -- this fixture includes only the two fields qbit_ops.qbit.fields.get_transfer_rates consumes."
+  },
+  "payload": {
+    "dl_info_speed": 1048576,
+    "up_info_speed": 262144
+  }
+}

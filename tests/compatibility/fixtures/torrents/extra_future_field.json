@@ -1,0 +1,29 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "An ordinary torrent carrying one field qbit-ops never reads, simulating a future qbittorrent-api/qBittorrent release adding a new column.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "The extra field name is invented; it exists only to prove unknown fields are ignored, not read as a specific future qBittorrent field."
+  },
+  "payload": {
+    "hash": "5555555555555555555555555555555555555555",
+    "name": "sample-linux-image.iso",
+    "state": "downloading",
+    "progress": 0.5,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 0.0,
+    "dlspeed": 0,
+    "upspeed": 0,
+    "save_path": "/downloads/linux",
+    "added_on": 1693000000,
+    "a_field_from_a_future_qbittorrent_release": {
+      "nested": true,
+      "value": 42
+    }
+  }
+}

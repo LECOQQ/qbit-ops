@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "trust": "official-example",
+    "description": "The exact Web API version qbittorrent-api's own source declares as the stop/start (vs pause/resume) negotiation threshold (>= 2.11.0) -- see qbittorrentapi.torrents.TorrentsAPIMixIn.torrents_stop, verified against the installed library in tests/test_qbit_library_http_boundary.py.",
+    "qbittorrent_version": null,
+    "web_api_version": "2.11.4",
+    "qbittorrent_api_version": "2026.7.0",
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "The version number is drawn from the installed qbittorrent-api library's own source constant, not from a real qBittorrent instance's response."
+  },
+  "payload": "2.11.4"
+}

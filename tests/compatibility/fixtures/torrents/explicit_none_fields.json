@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "Optional fields present but explicitly null, rather than absent -- a different shape than 'missing_optional_fields.json' and one qbit_ops.qbit.fields.get_field* must handle identically (both degrade to the same documented default).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "Synthetic; no known qBittorrent version returns explicit nulls for these fields -- this fixture exists to characterize qbit-ops's own tolerance, not to claim this is real observed behavior."
+  },
+  "payload": {
+    "hash": "3333333333333333333333333333333333333333",
+    "name": "sample-linux-image.iso",
+    "state": "downloading",
+    "progress": 0.5,
+    "category": null,
+    "size": 4700372992,
+    "ratio": null,
+    "dlspeed": null,
+    "upspeed": null,
+    "save_path": null,
+    "added_on": null
+  }
+}

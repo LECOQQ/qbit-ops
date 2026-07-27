@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A real (non-pseudo) tracker explicitly disabled by the user, status reported as a plain int 0 -- the shape qBittorrent's JSON API actually returns today (constat P-3's baseline case).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 0,
+    "msg": ""
+  }
+}

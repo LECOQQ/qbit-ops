@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "Only the fields the audit classifies as 'core'/obligatory are present; every optional field (category, save_path, ratio, dlspeed, upspeed, added_on) is absent entirely.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [
+      "category",
+      "save_path",
+      "ratio",
+      "dlspeed",
+      "upspeed",
+      "added_on"
+    ],
+    "limitations": "Synthetic; deliberately incomplete to prove optional-field fallback behavior, not representative of a real response."
+  },
+  "payload": {
+    "hash": "2222222222222222222222222222222222222222",
+    "name": "sample-linux-image.iso",
+    "state": "downloading",
+    "progress": 0.5,
+    "size": 4700372992
+  }
+}
