@@ -33,11 +33,16 @@ Every fixture's `_meta.trust` field is one of:
   documentation, without being an actual capture of a specific running
   instance.
 - **`captured-container`** — captured from a real qBittorrent instance
-  running in a disposable, hermetic Docker container, via the capture
+  running in a disposable container on a dedicated Docker network, with
+  hermetic *configuration* (temporary `HOME`/`.env` discovery, generated
+  credentials — see `tests/integration/README.md` "Hermeticity, in one
+  paragraph"). That configuration hermeticity does **not** extend to the
+  network: the container's public egress is not technically blocked (see
+  `docs/COMPATIBILITY.md` §5.2's reserve F-1). Captured via the capture
   mechanism described below (`tests/integration/_capture.py`,
   `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`). Now used by
   `fixtures/captured-container/<matrix-id>/*.json` for each of the
-  three matrix entries in `tests/integration/qbittorrent-matrix.toml`.
+  four matrix entries in `qbit_ops/data/qbittorrent-matrix.toml`.
 - **`captured-instance`** — captured from a real qBittorrent instance
   outside of the disposable-container harness. **qbit-ops never
   captures fixtures from a user's homelab instance; this trust level is
@@ -139,8 +144,9 @@ Any new fixture must pass all of these scans.
 
 Per-version fixture directories now exist, but only where a real image
 was pulled, started, version-verified, and captured (2026-07-27) — see
-`tests/integration/qbittorrent-matrix.toml` for the exact pinned image
-references and digests:
+`qbit_ops/data/qbittorrent-matrix.toml` (loaded via
+`qbit_ops.qbit.compatibility.load_compatibility_evidence()`) for the
+exact pinned image references and digests:
 
 | Directory | Release line | Observed | Web API |
 |---|---|---|---|

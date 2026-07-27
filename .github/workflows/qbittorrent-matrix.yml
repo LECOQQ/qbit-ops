@@ -68,21 +68,21 @@ jobs:
       - name: Install dependencies
         run: poetry install --extras tui --no-interaction --no-ansi
 
-      - name: Select matrix ids from the committed manifest for this scope
+      - name: Select matrix ids from the packaged manifest for this scope
         id: read
         run: |
           ids=$(poetry run python3 -c "
           import json
-          from tests.integration._matrix import load_matrix, latest_matrix_entry
+          from qbit_ops.qbit.compatibility import load_compatibility_evidence
 
           scope = '${{ needs.resolve-scope.outputs.scope }}'
-          entries = load_matrix()  # raises (F-8) if the manifest is empty
-          known_ids = [entry.id for entry in entries]
+          evidence = load_compatibility_evidence()  # fails closed if the manifest is empty
+          known_ids = list(evidence.ids)
 
           if scope == 'full':
               selected = known_ids
           elif scope == 'latest':
-              selected = [latest_matrix_entry().id]
+              selected = [evidence.latest().id]
           elif scope in known_ids:
               selected = [scope]
           else:

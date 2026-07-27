@@ -105,7 +105,10 @@ Starts one real, disposable qBittorrent container (dedicated Docker
 network, loopback-only published port) and runs the complete read-only
 + mutation + tracker-mutation scenario set against it. Requires
 Docker. Never writes to `tests/compatibility/fixtures/captured-container/`
-(see §7). `<id>` must be an id from `tests/integration/qbittorrent-matrix.toml`.
+(see §7). `<id>` must be an id from the packaged compatibility manifest
+(`src/qbit_ops/data/qbittorrent-matrix.toml`, loaded via
+`qbit_ops.qbit.compatibility.load_compatibility_evidence()` -- run
+`make test-qbit-version` without `QBIT_MATRIX_ID` to print known ids).
 
 **Measured 2026-07-27** (single-entry runs, images already pulled):
 `qbit-5.2.3` ~108s, `qbit-4.6.7` ~112s, `qbit-5.0.0` ~168s, `qbit-5.1.4`

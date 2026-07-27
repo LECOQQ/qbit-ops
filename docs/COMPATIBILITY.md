@@ -22,7 +22,7 @@ status: draft
 
 | Question | Réponse au 2026-07-27 |
 |---|---|
-| Une version de qBittorrent est-elle testée par `qbit-ops` ? | **Oui, quatre** — `v4.6.7` (Web API 2.9.3), `v5.0.0` (2.11.2), `v5.1.4` (2.11.4), `v5.2.3` (2.15.1, version stable courante au 2026-07-27), chacune contre un conteneur Docker jetable réel et identifié par son digest d'image exact (`tests/integration/qbittorrent-matrix.toml`). |
+| Une version de qBittorrent est-elle testée par `qbit-ops` ? | **Oui, quatre** — `v4.6.7` (Web API 2.9.3), `v5.0.0` (2.11.2), `v5.1.4` (2.11.4), `v5.2.3` (2.15.1, version stable courante au 2026-07-27), chacune contre un conteneur Docker jetable réel et identifié par son digest d'image exact (`src/qbit_ops/data/qbittorrent-matrix.toml`, chargé via `qbit_ops.qbit.compatibility.load_compatibility_evidence()`). |
 | Y a-t-il un test contre une instance réelle ? | **Oui** — `make test-qbit-matrix` / `make test-qbit-version QBIT_MATRIX_ID=<id>` (`tests/integration/`), scénarios de lecture, mutations à bas risque et mutations de tracker, tous exécutés en direct. |
 | Y a-t-il des fixtures issues de réponses authentiques ? | **Oui** — `tests/compatibility/fixtures/captured-container/<matrix-id>/`, capturées et sanitisées par `tests/integration/_capture.py`, avec provenance complète (image, digest, version observée). |
 | La CI exerce-t-elle qBittorrent ? | **Non pour `make ci`** (inchangé : lint, Pyright, pytest, `--help`, aucun Docker). **Oui pour un workflow séparé** (`.github/workflows/qbittorrent-matrix.yml`), déclenché manuellement ou de façon hebdomadaire, jamais sur chaque pull request. |
@@ -179,7 +179,7 @@ reproduirait exactement le défaut du double actuel.
 | `qbit-5.1.4` | `linuxserver/qbittorrent:5.1.4` (`sha256:c9990949...`) | `v5.1.4` | `2.11.4` | dernier 5.1.x maintenu |
 | `qbit-5.2.3` | `linuxserver/qbittorrent:5.2.3` (`sha256:b024436f...`) | `v5.2.3` | `2.15.1` | version stable courante au 2026-07-27 (vérifiée via l'API GitHub Releases officielle, pas la mémoire) |
 
-Digests complets et provenance dans `tests/integration/qbittorrent-matrix.toml`.
+Digests complets et provenance dans `src/qbit_ops/data/qbittorrent-matrix.toml` (paquet `qbit_ops.data`, chargé via `qbit_ops.qbit.compatibility.load_compatibility_evidence()`).
 `linuxserver/qbittorrent` a été choisi car aucune image officielle
 qBittorrent n'existe ; c'est l'image la plus utilisée et maintenue avec
 des tags par version exacte (vérifié via l'API Docker Hub, pas supposé).
@@ -248,7 +248,7 @@ exigerait un relais de publication, hors périmètre de cette phase.
 **Ce que cela justifie désormais (palier `TESTED` au sens de §9,
 "container integration tested")** : les quatre versions exactes
 ci-dessus, pour les capacités listées dans
-`tests/integration/qbittorrent-matrix.toml` (`read_only`, `mutations`,
+`src/qbit_ops/data/qbittorrent-matrix.toml` (`read_only`, `mutations`,
 `tracker_mutations`, `capture`). **Ce que cela ne justifie pas** : une
 affirmation de support pour toute version 4.6.x/5.0.x/5.1.x/5.2.x autre
 que ces quatre digests précis, ni pour la ligne 4.5.x. Formulation
@@ -446,7 +446,7 @@ supportée — quatre digests précis ne sont pas une plage.
 Règles, opposables à toute documentation, sortie `doctor`, ou message
 utilisateur futur :
 
-1. `tests/integration/qbittorrent-matrix.toml` est la **source
+1. `src/qbit_ops/data/qbittorrent-matrix.toml` est la **source
    exécutable unique**. Aucune liste de versions dupliquée ailleurs
    n'a d'autorité.
 2. Seules les versions **exactement exécutées avec succès** peuvent
