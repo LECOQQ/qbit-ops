@@ -212,7 +212,7 @@ order:
 | `CONN003` | connectivity | qBittorrent application version is readable (`app_version()`). |
 | `CONN004` | connectivity | Web API version is readable (`app_web_api_version()`). |
 | `COMPAT001` | compatibility | The qBittorrent version string is parsable. |
-| `COMPAT002` | compatibility | The qBittorrent major version (4 or 5) is one qbit-ops has been validated against. |
+| `COMPAT002` | compatibility | The qBittorrent major version (4 or 5) was detected (transitional, neutral wording -- exact compatibility evidence is evaluated separately, see `docs/COMPATIBILITY.md`). |
 | `RUNTIME001` | runtime | Torrent listing succeeds (`torrents_info()`). |
 | `RUNTIME002` | runtime | Global transfer info succeeds (`transfer_info()`). |
 | `RUNTIME003` | runtime | Every torrent's state is recognized (reuses `qbit_ops.status.classify_torrent_state`, the exact same vocabulary `status`/`status --watch` use). |

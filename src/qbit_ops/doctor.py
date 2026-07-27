@@ -28,7 +28,7 @@ from qbit_ops.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
-_SUPPORTED_MAJOR_VERSIONS = {4, 5}
+_RECOGNIZED_MAJOR_VERSIONS = {4, 5}
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 _URL_USERINFO_PATTERN = re.compile(r"://[^/@\s]+:[^/@\s]+@")
 
@@ -520,10 +520,20 @@ def _version_parsable_check(
 def _version_supported_check(
     parsed_version: tuple[int, int, int] | None,
 ) -> DoctorCheck:
-    """Build the supported-version-range compatibility check.
+    """Build a transitional, neutral major-version detection check.
 
-    Unknown or unparsable versions produce a warning, never a failure:
-    qbit-ops does not invent a compatibility guarantee it cannot verify.
+    Deliberately does not use the word "supported" and does not
+    generalize the exact Docker matrix evidence
+    (docs/COMPATIBILITY.md #5.2, #10) into a major-version claim --
+    the independent review (constat F-5) found the previous wording
+    ("qBittorrent major version N is supported" /
+    "qbit-ops has been validated against qBittorrent 4.x and 5.x")
+    told every 4.x/5.x user their exact version was supported without
+    any matching evidence. A future matrix-aware `doctor` phase will
+    replace this with per-exact-version evidence; until then this only
+    reports what was actually observed. Unknown or unparsable versions
+    produce a warning, never a failure: qbit-ops does not invent a
+    compatibility guarantee it cannot verify.
     """
     if parsed_version is None:
         return DoctorCheck(
@@ -535,12 +545,16 @@ def _version_supported_check(
         )
 
     major = parsed_version[0]
-    if major in _SUPPORTED_MAJOR_VERSIONS:
+    if major in _RECOGNIZED_MAJOR_VERSIONS:
         return DoctorCheck(
             code="COMPAT002",
             section="compatibility",
             status=CheckStatus.PASS,
-            message=f"qBittorrent major version {major} is supported.",
+            message=(
+                f"qBittorrent version {major}.x was detected. Exact "
+                "compatibility evidence is evaluated separately -- see "
+                "docs/COMPATIBILITY.md."
+            ),
         )
 
     return DoctorCheck(
@@ -548,12 +562,14 @@ def _version_supported_check(
         section="compatibility",
         status=CheckStatus.WARNING,
         message=(
-            f"qBittorrent major version {major} has not been validated "
-            "against qbit-ops."
+            f"qBittorrent major version {major} is outside the "
+            "currently recognized 4.x/5.x range."
         ),
         remediation=(
-            "qbit-ops has been validated against qBittorrent 4.x and 5.x; "
-            "some behaviors may differ on this version."
+            "This does not mean qbit-ops is incompatible with this "
+            "version -- no exact-version evidence has been evaluated "
+            "either way. See docs/COMPATIBILITY.md for the versions "
+            "qbit-ops has been container-integration tested against."
         ),
     )
 

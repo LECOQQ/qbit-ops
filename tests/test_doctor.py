@@ -215,6 +215,67 @@ def test_unsupported_major_version_warns_not_fails() -> None:
     assert report.overall_status == CheckStatus.WARNING
 
 
+_FORBIDDEN_SUPPORT_CLAIMS = (
+    "is supported",
+    "validated against qbittorrent 4.x and 5.x",
+    "compatible with 4.6",
+    "compatible with 4.6–5.2",
+)
+
+
+@pytest.mark.parametrize("qbit_version", ["4.6.7", "5.2.3", "5.9.0"])
+def test_compat002_never_uses_forbidden_support_wording(
+    qbit_version: str,
+) -> None:
+    """F-5: `doctor` must never tell a user their exact major version is
+    `supported`, nor generalize the Docker matrix's exact-version
+    evidence into a 4.x/5.x major-version claim -- only the matrix
+    manifest (docs/COMPATIBILITY.md) may claim exact-version evidence."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(state="uploading")],
+        qbittorrent_version=qbit_version,
+    )
+    report = collect_doctor_report(
+        config=CLEAN_CONFIG,
+        config_error=None,
+        connection_outcome=ConnectionOutcome.OK,
+        connection_error=None,
+        client=client,
+    )
+
+    check = _checks_by_code(report)["COMPAT002"]
+    rendered = " ".join(
+        filter(None, [check.message, check.remediation])
+    ).lower()
+    for forbidden in _FORBIDDEN_SUPPORT_CLAIMS:
+        assert forbidden not in rendered, (
+            f"COMPAT002 rendered {forbidden!r} for version {qbit_version}: "
+            f"{rendered!r}"
+        )
+
+
+def test_compat002_pass_wording_reports_detection_not_support() -> None:
+    """A suitable class of wording per the phase spec: 'qBittorrent
+    version X was detected. Exact compatibility evidence is evaluated
+    separately.' -- adapted to this project's existing output model."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(state="uploading")],
+        qbittorrent_version="5.2.3",
+    )
+    report = collect_doctor_report(
+        config=CLEAN_CONFIG,
+        config_error=None,
+        connection_outcome=ConnectionOutcome.OK,
+        connection_error=None,
+        client=client,
+    )
+
+    check = _checks_by_code(report)["COMPAT002"]
+    assert check.status == CheckStatus.PASS
+    assert "detected" in check.message.lower()
+    assert "docs/compatibility.md" in check.message.lower()
+
+
 def test_unknown_torrent_states_warn() -> None:
     """Ensure an unrecognized torrent state produces a warning, reusing
     `qbit_ops.status.classify_torrent_state`."""
