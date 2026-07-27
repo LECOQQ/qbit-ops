@@ -201,7 +201,16 @@ class MutationUiResult:
     and the operator did not cancel the Preview either. Kept TUI-local
     (not added to the shared `MutationStatus`) because the CLI has no
     equivalent queue-then-shutdown window, so its public schemas are
-    unaffected."""
+    unaffected.
+
+    Deliberately *not* expected to be rendered on today's only trigger:
+    `should_proceed` is `lambda: self.is_running`, so the sole way to
+    lose authority is quitting -- and `_on_mutation_worker_state_changed`
+    returns early once `is_running` is false, precisely so a late result
+    cannot touch a tearing-down app. The material guarantee is that no
+    mutation call happens; the representation is defence in depth for a
+    future non-shutdown authority-loss path, and keeps the outcome
+    taxonomy honest (final closure report, finding D-4)."""
 
     @classmethod
     def from_plan(

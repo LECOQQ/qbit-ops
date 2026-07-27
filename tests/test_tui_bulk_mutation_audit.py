@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -89,17 +90,77 @@ def _result_text(app: Any) -> str:
     return str(app.screen.query_one("#result-content", Static).content)
 
 
-async def _drain_workers(app: Any, limit: int = 400) -> None:
-    """Wait for in-flight workers after shutdown, without a `pilot`.
+async def _await_flag(
+    flag: threading.Event, what: str, timeout: float = 5.0
+) -> None:
+    """Wait for a *positive* fact, with a deadline that can fail.
 
-    `pilot.pause()` is unusable once the app has stopped, and the worker
-    threads outlive it -- so poll the worker manager directly instead of
-    sleeping a fixed amount.
+    Replaces the previous `_drain_workers` helper, which polled
+    `all(worker.is_finished for worker in app.workers)`. Textual empties
+    its worker registry on shutdown, so after `action_quit()` that
+    `all(...)` ran over an **empty** collection, was vacuously true, and
+    returned in ~0 ms -- before an unguarded mutation could possibly
+    land. The shutdown assertions therefore ran too early to observe
+    anything: measured 0 detections out of 8 with the authority guard
+    deliberately bypassed (final closure report, finding T-1).
+
+    Waiting on a real event that the worker itself sets, with a bounded
+    deadline that raises on timeout, cannot pass vacuously: either the
+    fact happened, or the test fails saying which one did not.
     """
-    for _ in range(limit):
-        if all(worker.is_finished for worker in app.workers):
-            return
-        await asyncio.sleep(0.005)
+    deadline = time.monotonic() + timeout
+    while not flag.is_set():
+        if time.monotonic() > deadline:
+            raise AssertionError(
+                f"timed out after {timeout}s waiting for: {what}"
+            )
+        await asyncio.sleep(0.002)
+
+
+class _AuthorityProbe:
+    """Test seam observing the post-lock authority check and worker exit.
+
+    Wraps `TuiController.apply_bulk_plan`, replacing its `should_proceed`
+    predicate with an instrumented one. The wrapper is transparent: it
+    calls the real predicate and forwards its verdict unchanged, so the
+    production decision is observed, never altered -- and no permanent
+    instrumentation is added to production code.
+
+    `returned` is set from a `finally`, i.e. strictly *after* the real
+    `apply_bulk_plan` (including any qBittorrent call it makes) has
+    completed. Waiting on it is therefore the positive fact a shutdown
+    test needs: if the guard were bypassed, the endpoint call would have
+    already happened by the time the flag fires, and the zero-call
+    assertion would catch it.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.log: list[str] = []
+        self.evaluated = threading.Event()
+        self.entered = threading.Event()
+        self.returned = threading.Event()
+        self.verdicts: list[bool] = []
+        self._original = app.controller.apply_bulk_plan
+        app.controller.apply_bulk_plan = self._wrapper
+
+    def _wrapper(
+        self, plan: Any, *, should_proceed: Any = None, **kwargs: Any
+    ) -> bool:
+        self.entered.set()
+        self.log.append("mutation-worker-entered")
+
+        def probe() -> bool:
+            verdict = True if should_proceed is None else bool(should_proceed())
+            self.verdicts.append(verdict)
+            self.log.append(f"authority:{str(verdict).lower()}")
+            self.evaluated.set()
+            return verdict
+
+        try:
+            return self._original(plan, should_proceed=probe, **kwargs)
+        finally:
+            self.log.append("mutation-worker-returned")
+            self.returned.set()
 
 
 # -- properties the audit attacked and could not break ---------------------
@@ -358,6 +419,7 @@ class _CallLogClient(FakeQbitClient):
         self.block_trackers = False
         self.tracker_entered = threading.Event()
         self.tracker_release = threading.Event()
+        self.pause_calls = 0
 
     def _enter(self, name: str) -> None:
         with self._lock:
@@ -395,6 +457,7 @@ class _CallLogClient(FakeQbitClient):
 
     def torrents_pause(self, torrent_hashes: Any) -> None:
         self._enter("pause")
+        self.pause_calls += 1
         try:
             FakeQbitClient.torrents_pause(self, torrent_hashes)
         finally:
@@ -510,9 +573,16 @@ async def test_apply_is_serialized_after_an_in_flight_detail_fetch() -> None:
 
 
 async def test_shutdown_while_queued_behind_a_refresh_sends_nothing() -> None:
-    """N-2 closed: a mutation queued behind a blocked read re-checks its
-    authority *after* acquiring the remote lock, so quitting mid-wait
-    abandons it before any qBittorrent call."""
+    """N-2 cancellation proof, behind a blocked refresh.
+
+    **Cancellation test**: the expected endpoint call count is zero, and
+    that zero is only meaningful because every preceding milestone is
+    positively observed. Asserting `paused_hashes == []` on its own
+    would pass trivially (T-1) -- the point is to prove the mutation
+    worker really did wake up, really did reach the post-lock authority
+    check, really was told "no", and really returned without calling
+    qBittorrent.
+    """
     client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -522,29 +592,71 @@ async def test_shutdown_while_queued_behind_a_refresh_sends_nothing() -> None:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
         await _select_all_and_open_preview(app, pilot)
+        probe = _AuthorityProbe(app)
 
+        # 1. A blocking refresh starts and takes the shared remote lock.
         client.block_reads = True
         app._start_periodic_refresh()
         await pilot.pause()
         await asyncio_wait_for_event(client.read_entered)
+        # The refresh actually started -- and since the client call runs
+        # inside `_remote_operation()`, being inside it means the shared
+        # remote lock is held. No production introspection hook needed.
+        assert "+read" in client.log
 
+        # 2. Apply dispatches a mutation worker, which queues behind it.
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
+        probe.log.append("apply-requested")
+        await _await_flag(
+            probe.entered, "the mutation worker to enter apply_bulk_plan"
+        )
+        # It is waiting for the lock: it has entered, but the authority
+        # check (which happens *after* acquisition) has not run yet.
+        assert probe.evaluated.is_set() is False
+        assert client.paused_hashes == []
 
+        # 3. Shutdown removes the worker's authority while it waits.
         await app.action_quit()
         await pilot.pause()
+        probe.log.append("shutdown-requested")
         assert app.is_running is False
 
+        # 4. The refresh releases the lock; the mutation may now proceed.
         client.block_reads = False
         client.read_release.set()
-        await _drain_workers(app)
 
+        # 5. Wait for a *positive* fact with a failing deadline: the
+        #    worker returning. Never the worker registry, which Textual
+        #    empties on shutdown (see `_await_flag`).
+        await _await_flag(
+            probe.evaluated, "the post-lock authority check to be evaluated"
+        )
+        await _await_flag(probe.returned, "the mutation worker to return")
+
+        # 6. The guard was reached and said no...
+        assert probe.verdicts == [False], probe.log
+        # ...and nothing whatsoever reached qBittorrent.
         assert client.paused_hashes == []
         assert "+pause" not in client.log
+        assert client.pause_calls == 0
+
+        # Ordering: shutdown preceded the release, which preceded the
+        # authority check, which preceded the worker returning.
+        assert probe.log.index("shutdown-requested") < probe.log.index(
+            "authority:false"
+        )
+        assert probe.log.index("authority:false") < probe.log.index(
+            "mutation-worker-returned"
+        )
 
 
 async def test_shutdown_while_queued_behind_details_sends_nothing() -> None:
-    """N-2 closed, detail-fetch half."""
+    """N-2 cancellation proof, behind a blocked tracker-detail fetch.
+
+    **Cancellation test**: same full lifecycle observation as the
+    refresh variant, with `torrents_trackers()` owning the shared lock.
+    """
     client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         trackers_by_hash={HASH_A: []},
@@ -556,7 +668,126 @@ async def test_shutdown_while_queued_behind_details_sends_nothing() -> None:
         await _goto_torrents(app, pilot)
         await _settle(app, pilot)
         await _select_all_and_open_preview(app, pilot)
+        probe = _AuthorityProbe(app)
 
+        client.log.clear()
+        client.block_trackers = True
+        app.action_refresh_details()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.tracker_entered)
+        assert "+trackers" in client.log  # holds the shared lock
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        probe.log.append("apply-requested")
+        await _await_flag(
+            probe.entered, "the mutation worker to enter apply_bulk_plan"
+        )
+        assert probe.evaluated.is_set() is False
+        assert client.paused_hashes == []
+
+        await app.action_quit()
+        await pilot.pause()
+        probe.log.append("shutdown-requested")
+        assert app.is_running is False
+
+        client.block_trackers = False
+        client.tracker_release.set()
+
+        await _await_flag(
+            probe.evaluated, "the post-lock authority check to be evaluated"
+        )
+        await _await_flag(probe.returned, "the mutation worker to return")
+
+        assert probe.verdicts == [False], probe.log
+        assert client.paused_hashes == []
+        assert "+pause" not in client.log
+        assert client.pause_calls == 0
+        assert probe.log.index("shutdown-requested") < probe.log.index(
+            "authority:false"
+        )
+
+
+# -- positive controls: without shutdown, the mutation *must* land --------
+#
+# Deliberately separate from the cancellation tests above: these assert
+# an endpoint call count of exactly one with exactly `plan.changes`.
+# Sharing an assertion helper that tolerated both zero and one call is
+# precisely how a zero-dispatch result could masquerade as proof that
+# serialization works.
+
+
+async def test_normal_queue_behind_refresh_dispatches_exactly_once() -> None:
+    """Positive control for the refresh path: the authority check is
+    reached, returns true, and the frozen plan is dispatched once."""
+    client = _CallLogClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
+            make_torrent(hash=HASH_B, name="Beta", state="pausedUP"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        plan_hashes = [c.hash for c in _current_plan(app).changes]
+        assert plan_hashes == [HASH_A]  # Beta is skipped: already stopped
+        probe = _AuthorityProbe(app)
+
+        client.block_reads = True
+        app._start_periodic_refresh()
+        await pilot.pause()
+        await asyncio_wait_for_event(client.read_entered)
+
+        await pilot.click(app.screen.query_one("#preview-apply", Button))
+        await pilot.pause()
+        await _await_flag(
+            probe.entered, "the mutation worker to enter apply_bulk_plan"
+        )
+        # Queued behind the read: nothing dispatched yet.
+        assert probe.evaluated.is_set() is False
+        assert client.paused_hashes == []
+
+        client.block_reads = False
+        client.read_release.set()
+        await _await_flag(
+            probe.evaluated, "the post-lock authority check to be evaluated"
+        )
+        await _await_flag(probe.returned, "the mutation worker to return")
+        await _settle(app, pilot)
+
+        # The guard was reached and allowed the dispatch.
+        assert probe.verdicts == [True], probe.log
+        # Exactly once, with exactly the frozen plan.
+        assert client.pause_calls == 1
+        assert client.paused_hashes == [plan_hashes]
+        assert HASH_B not in client.paused_hashes[0]  # skipped hash absent
+        # Serialization ordering, and the post-mutation refresh.
+        _assert_serialized_after(client.log, "read")
+        assert client.max_depth == 1, client.log
+        assert app.controller.max_concurrent_remote_operations == 1
+        assert "+read" in client.log[client.log.index("-pause") :], client.log
+
+
+async def test_normal_queue_behind_details_dispatches_exactly_once() -> None:
+    """Positive control for the tracker-detail path."""
+    client = _CallLogClient(
+        torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
+        trackers_by_hash={HASH_A: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _settle(app, pilot)
+        await _select_all_and_open_preview(app, pilot)
+        plan_hashes = [c.hash for c in _current_plan(app).changes]
+        probe = _AuthorityProbe(app)
+
+        client.log.clear()
         client.block_trackers = True
         app.action_refresh_details()
         await pilot.pause()
@@ -564,16 +795,26 @@ async def test_shutdown_while_queued_behind_details_sends_nothing() -> None:
 
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
-
-        await app.action_quit()
-        await pilot.pause()
+        await _await_flag(
+            probe.entered, "the mutation worker to enter apply_bulk_plan"
+        )
+        assert probe.evaluated.is_set() is False
+        assert client.paused_hashes == []
 
         client.block_trackers = False
         client.tracker_release.set()
-        await _drain_workers(app)
+        await _await_flag(
+            probe.evaluated, "the post-lock authority check to be evaluated"
+        )
+        await _await_flag(probe.returned, "the mutation worker to return")
+        await _settle(app, pilot)
 
-        assert client.paused_hashes == []
-        assert "+pause" not in client.log
+        assert probe.verdicts == [True], probe.log
+        assert client.pause_calls == 1
+        assert client.paused_hashes == [plan_hashes]
+        _assert_serialized_after(client.log, "trackers")
+        assert client.max_depth == 1, client.log
+        assert app.controller.max_concurrent_remote_operations == 1
 
 
 async def test_max_simultaneous_remote_client_operations_is_one() -> None:
@@ -1359,6 +1600,7 @@ async def test_cancelled_before_dispatch_is_distinct_from_unavailable() -> None:
         await _goto_torrents(app, pilot)
         await _select_all_and_open_preview(app, pilot)
         selected_before = set(app.controller.state.selected_hashes)
+        probe = _AuthorityProbe(app)
 
         client.block_reads = True
         app._start_periodic_refresh()
@@ -1366,14 +1608,19 @@ async def test_cancelled_before_dispatch_is_distinct_from_unavailable() -> None:
         await asyncio_wait_for_event(client.read_entered)
         await pilot.click(app.screen.query_one("#preview-apply", Button))
         await pilot.pause()
+        await _await_flag(
+            probe.entered, "the mutation worker to enter apply_bulk_plan"
+        )
 
         await app.action_quit()
         await pilot.pause()
         client.block_reads = False
         client.read_release.set()
-        await _drain_workers(app)
+        await _await_flag(probe.returned, "the mutation worker to return")
 
         # Zero dispatch, and the selection was never treated as submitted.
+        assert probe.verdicts == [False], probe.log
+        assert client.pause_calls == 0
         assert client.paused_hashes == []
         assert app.controller.state.selected_hashes == selected_before
 
