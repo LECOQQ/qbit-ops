@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check ci ci-entrypoint sync
+.PHONY: doctor info help install hooks-install run format lint test check-version check ci ci-entrypoint sync
 
 .sync-stamp: pyproject.toml poetry.lock
 	@poetry install --sync --extras tui --no-interaction
@@ -68,7 +68,10 @@ lint: ## Check Python style and types without modifying files
 test: ## Run Python tests
 	@$(PY) pytest
 
-check: sync lint test ## Run all required quality checks
+check-version: ## Verify pyproject.toml and the Release Please manifest agree
+	@python3 scripts/check_version_sync.py
+
+check: sync lint test check-version ## Run all required quality checks
 
 ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --extras tui --no-interaction --no-ansi

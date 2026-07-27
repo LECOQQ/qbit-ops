@@ -31,7 +31,9 @@ This installs dependencies and the Conventional Commits Git hook.
 
 5. Commit using [Conventional Commits](https://www.conventionalcommits.org)
    (`feat:`, `fix:`, `docs:`, `chore:`, ...) — enforced by the `commit-msg`
-   hook installed via `make install`.
+   hook installed via `make install`. These commits drive the version
+   Release Please proposes next — see
+   [docs/RELEASE.md](docs/RELEASE.md).
 6. Open a pull request describing **what** changed and **why**.
 
 ## Guidelines
