@@ -1,7 +1,12 @@
 {
   "_meta": {
+    "architecture": "amd64",
     "capture_date": "2026-07-27",
     "description": "Real `app_build_info()` snapshot, where the endpoint exists.",
+    "expected_architecture": "amd64",
+    "expected_qbittorrent_version": "v5.2.3",
+    "expected_web_api_version": "2.15.1",
+    "fields_normalized": [],
     "fields_removed": [],
     "image_digest": "sha256:b024436f8ca665d16d9a997d26fd27fdf867ee5566ba09f32764e7b2976d3e02",
     "image_reference": "linuxserver/qbittorrent:5.2.3",

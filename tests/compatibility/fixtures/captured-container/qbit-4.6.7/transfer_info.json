@@ -1,7 +1,12 @@
 {
   "_meta": {
+    "architecture": "amd64",
     "capture_date": "2026-07-27",
     "description": "Real `transfer_info()` snapshot from the disposable instance.",
+    "expected_architecture": "amd64",
+    "expected_qbittorrent_version": "v4.6.7",
+    "expected_web_api_version": "2.9.3",
+    "fields_normalized": [],
     "fields_removed": [],
     "image_digest": "sha256:55f15d44396315551f87294a176efae733b16e283f38980308e46073950257c6",
     "image_reference": "linuxserver/qbittorrent:4.6.7",
