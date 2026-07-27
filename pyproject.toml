@@ -49,14 +49,14 @@ fix = true
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
-include = ["src", "tests", "tooling"]
+include = ["src", "tests", "tooling", "scripts"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-pythonpath = [".", "src"]
+pythonpath = [".", "src", "scripts"]
 testpaths = ["tests"]
 addopts = "-q --maxfail=1 --disable-warnings"
 asyncio_mode = "auto"
