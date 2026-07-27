@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "capture_date": "2026-07-27",
+    "description": "Real `app_version()` string.",
+    "fields_removed": [],
+    "image_digest": "sha256:55f15d44396315551f87294a176efae733b16e283f38980308e46073950257c6",
+    "image_reference": "linuxserver/qbittorrent:4.6.7",
+    "limitations": "n/a",
+    "matrix_id": "qbit-4.6.7",
+    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_version": "v4.6.7",
+    "sanitization": "n/a",
+    "trust": "captured-container",
+    "web_api_version": "2.9.3"
+  },
+  "payload": "v4.6.7"
+}

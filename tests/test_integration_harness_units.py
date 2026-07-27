@@ -1,0 +1,159 @@
+"""Hermeticity and bencode/torrent-corpus unit tests for the Docker harness.
+
+These run in the ordinary test suite (no Docker required, no
+`QBIT_OPS_DOCKER_MATRIX` needed) -- they exercise the harness's pure
+guard logic and deterministic corpus generation directly, including
+controlled sabotage of the guard functions themselves (item 16 of the
+Docker matrix phase spec). Container lifecycle tests that require a
+real Docker daemon live under `tests/integration/` instead, gated by
+`QBIT_OPS_DOCKER_MATRIX=1`.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from tests.integration._bencode import bencode
+from tests.integration._harness import (
+    HarnessError,
+    assert_no_ambient_qbit_ops_config,
+    assert_target_is_disposable,
+    make_hermetic_env,
+)
+from tests.integration._matrix import load_matrix, load_matrix_entry
+from tests.integration._qbit_conf_template import build_webui_password_hash
+from tests.integration._torrent_corpus import (
+    build_complete_torrent,
+    build_incomplete_torrent,
+    build_tracked_torrent,
+)
+
+
+def test_hermetic_env_passes_its_own_guard() -> None:
+    env = make_hermetic_env(
+        host="http://127.0.0.1:18112", username="admin", password="x"
+    )
+    assert_no_ambient_qbit_ops_config(env.as_environ())
+
+
+def test_sabotage_missing_qbit_ops_env_file_fails_closed() -> None:
+    """Item 16: the harness must fail if it could discover the repo `.env`."""
+    env = make_hermetic_env(
+        host="http://127.0.0.1:18112", username="admin", password="x"
+    ).as_environ()
+    del env["QBIT_OPS_ENV_FILE"]
+
+    with pytest.raises(HarnessError, match="QBIT_OPS_ENV_FILE"):
+        assert_no_ambient_qbit_ops_config(env)
+
+
+def test_sabotage_env_file_pointing_at_a_real_file_fails_closed() -> None:
+    """Item 16: a `QBIT_OPS_ENV_FILE` that resolves to a real, existing file
+    (standing in for the repository `.env`) must be rejected."""
+    env = make_hermetic_env(
+        host="http://127.0.0.1:18112", username="admin", password="x"
+    ).as_environ()
+    env["QBIT_OPS_ENV_FILE"] = str(Path(__file__))  # any real, existing file
+
+    with pytest.raises(HarnessError, match="unexpectedly exists"):
+        assert_no_ambient_qbit_ops_config(env)
+
+
+def test_sabotage_real_home_directory_fails_closed() -> None:
+    """Item 16: the harness must fail if HOME could resolve to the user's
+    real HOME config."""
+    env = make_hermetic_env(
+        host="http://127.0.0.1:18112", username="admin", password="x"
+    ).as_environ()
+    env["HOME"] = os.path.expanduser("~")
+
+    with pytest.raises(HarnessError, match="real user HOME"):
+        assert_no_ambient_qbit_ops_config(env)
+
+
+def test_sabotage_non_loopback_host_fails_closed() -> None:
+    """Item 16: a resolved host outside loopback must never be targeted."""
+    with pytest.raises(HarnessError, match="disposable"):
+        assert_target_is_disposable("http://192.168.1.50:8080")
+
+
+def test_disposable_loopback_host_passes() -> None:
+    assert_target_is_disposable("http://127.0.0.1:18112")
+
+
+def test_webui_password_hash_matches_the_reverse_engineered_format() -> None:
+    """Regression: this exact salt/password/hash triple was verified against
+    a real qBittorrent 5.1.4 container's own generated `qBittorrent.conf`
+    (see the Docker matrix implementation note) -- if this ever stops
+    matching, the harness can no longer log in without falling back to
+    scraping a per-boot temporary password."""
+    import base64
+
+    salt = base64.b64decode("uST3wxhBEBMjC2hmKBlb2g==")
+    expected = (
+        "@ByteArray(uST3wxhBEBMjC2hmKBlb2g==:"
+        "P2pJEFs9tYwYTAf0ER5m5M0w5L2qErupVXhEi5q7SktR3vQUPWQ9SMijpaFiOCMFaIN/LxsXJatRuj7SSThRLA==)"
+    )
+    assert (
+        build_webui_password_hash("FixedTestPassword123!", salt=salt)
+        == expected
+    )
+
+
+def test_bencode_matches_bep0003_reference_examples() -> None:
+    assert bencode(3) == b"i3e"
+    assert bencode("spam") == b"4:spam"
+    assert bencode(["spam", "eggs"]) == b"l4:spam4:eggse"
+    assert (
+        bencode({"cow": "moo", "spam": "eggs"}) == b"d3:cow3:moo4:spam4:eggse"
+    )
+
+
+def test_synthetic_torrent_corpus_is_deterministic_and_distinct() -> None:
+    complete_a = build_complete_torrent()
+    complete_b = build_complete_torrent()
+    incomplete = build_incomplete_torrent()
+    tracked = build_tracked_torrent(
+        announce="http://qbit-ops-tracker:6969/announce"
+    )
+
+    assert complete_a.info_hash_hex == complete_b.info_hash_hex
+    assert (
+        len(
+            {
+                complete_a.info_hash_hex,
+                incomplete.info_hash_hex,
+                tracked.info_hash_hex,
+            }
+        )
+        == 3
+    )
+    for name in (
+        "HOME",
+        "/home/",
+        "/Users/",
+        os.environ.get("USER", "\0impossible"),
+    ):
+        assert name not in complete_a.torrent_bytes.decode("latin-1")
+
+
+def test_matrix_manifest_loads_and_has_no_duplicate_ids() -> None:
+    entries = load_matrix()
+    assert len(entries) >= 3
+    ids = [entry.id for entry in entries]
+    assert len(ids) == len(set(ids))
+
+
+def test_matrix_manifest_only_contains_verified_release_lines() -> None:
+    """4.6.x, 5.0.x, and 5.1.x must each be represented -- the phase spec's
+    three required release lines, not an arbitrary set."""
+    release_lines = {entry.release_line for entry in load_matrix()}
+    assert {"4.6.x", "5.0.x", "5.1.x"} <= release_lines
+
+
+def test_unknown_matrix_id_raises_instead_of_running_something_else() -> None:
+    with pytest.raises(KeyError, match="unknown qBittorrent matrix id"):
+        load_matrix_entry("qbit-9.9.9-does-not-exist")

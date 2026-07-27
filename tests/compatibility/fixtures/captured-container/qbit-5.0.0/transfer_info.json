@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "capture_date": "2026-07-27",
+    "description": "Real `transfer_info()` snapshot from the disposable instance.",
+    "fields_removed": [],
+    "image_digest": "sha256:d01b1df556154862eca982d0f2c420073e2e2959c309951fbfddd25525ea28ce",
+    "image_reference": "linuxserver/qbittorrent:5.0.0",
+    "limitations": "Rates reflect the disposable instance's idle synthetic corpus, not a real download/upload workload.",
+    "matrix_id": "qbit-5.0.0",
+    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_version": "v5.0.0",
+    "sanitization": "n/a -- no host/credential fields present in this payload shape.",
+    "trust": "captured-container",
+    "web_api_version": "2.11.2"
+  },
+  "payload": {
+    "connection_status": "firewalled",
+    "dht_nodes": 0,
+    "dl_info_data": 0,
+    "dl_info_speed": 0,
+    "dl_rate_limit": 0,
+    "up_info_data": 0,
+    "up_info_speed": 0,
+    "up_rate_limit": 0
+  }
+}

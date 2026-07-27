@@ -7,31 +7,35 @@ status: draft
 # 🔗 Compatibilité qBittorrent
 
 > **Statut : `draft`.** Ce document définit la **politique** de
-> compatibilité et l'état des preuves au 2026-07. Il ne fixe
-> volontairement **aucune borne de version définitive** : à ce jour,
-> aucune version de qBittorrent n'est vérifiée par exécution. Les bornes
-> seront inscrites ici au fur et à mesure que les phases 5 et 6 du
-> [plan de refactor](audits/2026-07-package-refactor-plan.md) produiront
-> des preuves.
+> compatibilité et l'état des preuves au 2026-07-27. Il ne fixe
+> volontairement **aucune borne de version définitive** : la matrice
+> Docker (§1) a exercé quatre versions **précises**, chacune identifiée
+> par son digest d'image exact — ce n'est pas une plage de versions
+> supportées, et ce document ne publie toujours aucune telle plage.
+> Formulation à utiliser : « container integration tested against exact
+> versions: 4.6.7, 5.0.0, 5.1.4 and 5.2.3 » — jamais « compatible with
+> qBittorrent 4.6–5.2 ».
 
 ---
 
 ## 1. ⚠️ État des preuves — à lire en premier
 
-| Question | Réponse au 2026-07 |
+| Question | Réponse au 2026-07-27 |
 |---|---|
-| Une version de qBittorrent est-elle testée par `qbit-ops` ? | **Non, aucune.** |
-| Y a-t-il un test contre une instance réelle ? | **Non.** |
-| Y a-t-il des fixtures issues de réponses authentiques ? | **Non.** |
-| La CI exerce-t-elle qBittorrent ? | **Non** — `make ci` = lint, Pyright, pytest, `--help`. |
-| Que valent les tests existants ? | Ils prouvent la **logique** de `qbit-ops` (filtres, plans, sûreté, non-fuite de secrets), contre un double écrit à la main. Ils ne prouvent **rien** sur qBittorrent. |
-| `auth_log_in()` est-il testé ? | **Non** — le harnais de test remplace la fabrique de client en entier. |
+| Une version de qBittorrent est-elle testée par `qbit-ops` ? | **Oui, quatre** — `v4.6.7` (Web API 2.9.3), `v5.0.0` (2.11.2), `v5.1.4` (2.11.4), `v5.2.3` (2.15.1, version stable courante au 2026-07-27), chacune contre un conteneur Docker jetable réel et identifié par son digest d'image exact (`tests/integration/qbittorrent-matrix.toml`). |
+| Y a-t-il un test contre une instance réelle ? | **Oui** — `make test-qbit-matrix` / `make test-qbit-version QBIT_MATRIX_ID=<id>` (`tests/integration/`), scénarios de lecture, mutations à bas risque et mutations de tracker, tous exécutés en direct. |
+| Y a-t-il des fixtures issues de réponses authentiques ? | **Oui** — `tests/compatibility/fixtures/captured-container/<matrix-id>/`, capturées et sanitisées par `tests/integration/_capture.py`, avec provenance complète (image, digest, version observée). |
+| La CI exerce-t-elle qBittorrent ? | **Non pour `make ci`** (inchangé : lint, Pyright, pytest, `--help`, aucun Docker). **Oui pour un workflow séparé** (`.github/workflows/qbittorrent-matrix.yml`), déclenché manuellement ou de façon hebdomadaire, jamais sur chaque pull request. |
+| Que valent les tests existants (hors matrice Docker) ? | Ils prouvent la **logique** de `qbit-ops` (filtres, plans, sûreté, non-fuite de secrets), contre un double écrit à la main ou des fixtures `synthetic`/`official-example`. Ils ne prouvent rien sur une instance réelle à eux seuls. |
+| `auth_log_in()` est-il testé ? | **Oui, deux fois** : contre le harnais HTTP hermétique (`tests/test_qbit_library_http_boundary.py`, bibliothèque réelle + réponses simulées) et contre un conteneur qBittorrent réel (`tests/integration/`, chaque scénario commence par un login réel). |
 
 La mention actuelle *« qbit-ops has been validated against qBittorrent
-4.x and 5.x »* (`src/qbit_ops/doctor.py`, `docs/COMMANDS.md`) est une **assertion
-déclarative sans vérification**. Elle est conservée telle quelle dans le
-code tant que la phase 4 n'a pas remplacé le modèle, mais elle ne doit
-pas être lue comme une garantie.
+4.x and 5.x »* (`src/qbit_ops/doctor.py`, `docs/COMMANDS.md`) reste une
+**assertion déclarative distincte** de ce que ce document peut
+désormais justifier : la matrice Docker prouve quatre versions
+**précises**, pas « toute version 4.x/5.x ». Elle est conservée telle
+quelle dans le code tant que la phase compatibilité `doctor` (hors
+périmètre ici) n'a pas remplacé le modèle.
 
 ---
 
@@ -166,22 +170,89 @@ Contrainte non négociable : chaque fixture doit provenir d'une **capture
 réelle** ou d'une source amont citable. Une fixture écrite à la main
 reproduirait exactement le défaut du double actuel.
 
-### 5.2 Par intégration réelle (phase 6 — job CI séparé, Docker)
+### 5.2 Par intégration réelle (job CI séparé, Docker) — livré 2026-07-27, étendu 2026-07-27
 
-| Version qBittorrent | Motif |
-|---|---|
-| dernière 4.6.x | dernier 4.x, endpoints `pause`/`resume` |
-| première 5.0.x | bascule `stop`/`start` |
-| dernière 5.x | état de l'art |
+| Identifiant matrice | Image (digest exact) | Version observée | Web API observée | Motif |
+|---|---|---|---|---|
+| `qbit-4.6.7` | `linuxserver/qbittorrent:4.6.7` (`sha256:55f15d44...`) | `v4.6.7` | `2.9.3` | dernier 4.6.x maintenu, endpoints `pause`/`resume` |
+| `qbit-5.0.0` | `linuxserver/qbittorrent:5.0.0` (`sha256:d01b1df5...`) | `v5.0.0` | `2.11.2` | première 5.0.x, au-dessus du seuil de bascule `stop`/`start` |
+| `qbit-5.1.4` | `linuxserver/qbittorrent:5.1.4` (`sha256:c9990949...`) | `v5.1.4` | `2.11.4` | dernier 5.1.x maintenu |
+| `qbit-5.2.3` | `linuxserver/qbittorrent:5.2.3` (`sha256:b024436f...`) | `v5.2.3` | `2.15.1` | version stable courante au 2026-07-27 (vérifiée via l'API GitHub Releases officielle, pas la mémoire) |
 
-Ce sont les **seules** exécutions capables d'attribuer un palier `TESTED`.
-Elles comblent trois trous que les fixtures ne peuvent pas combler : le
-login réel, l'endpoint effectivement atteint, et le nombre d'appels
-réellement émis.
+Digests complets et provenance dans `tests/integration/qbittorrent-matrix.toml`.
+`linuxserver/qbittorrent` a été choisi car aucune image officielle
+qBittorrent n'existe ; c'est l'image la plus utilisée et maintenue avec
+des tags par version exacte (vérifié via l'API Docker Hub, pas supposé).
+`qbit-5.2.3` a été ajoutée sans remplacer aucune des trois entrées
+historiques (voir la politique de revendication dans `AGENTS.md`).
 
-Contraintes : `make check` doit rester exécutable hors ligne ; aucune
-mutation destructive (pause/start/reannounce et ajout/retrait de tracker
-sur un torrent jetable uniquement).
+Exécuté via `make test-qbit-matrix` (les quatre) / `make test-qbit-version
+QBIT_MATRIX_ID=<id>` (une seule), et par
+`.github/workflows/qbittorrent-matrix.yml` (`workflow_dispatch` +
+hebdomadaire, jamais sur push/PR). Chaque conteneur est jetable,
+hermétique (réseau Docker dédié, `HOME`/`XDG_CONFIG_HOME` temporaires,
+`QBIT_OPS_ENV_FILE` pointant vers un chemin garanti absent,
+identifiants et ports générés par exécution, publication de port
+loopback uniquement), et sa version applicative réellement observée
+est comparée au manifeste **avant** tout test — un tag d'image qui
+dériverait de la version attendue fait échouer la matrice plutôt que de
+continuer silencieusement (prouvé par sabotage : version attendue
+fausse, puis digest d'une autre image, tous deux rejetés avant tout
+test, aucune fuite de ressource).
+
+Preuves obtenues, désormais comblant les trois trous que les fixtures
+seules ne pouvaient pas combler, pour les quatre versions :
+- **login réel** : chaque scénario commence par un `auth_log_in()` contre
+  le vrai conteneur ;
+- **endpoint effectivement atteint** : instrumenté sans mock
+  (`tests/integration/_instrumentation.py` enveloppe
+  `QbittorrentSession.request` sans le remplacer) — confirme
+  `torrents/pause`+`torrents/resume` sur `qbit-4.6.7` (Web API < 2.11.0)
+  et `torrents/stop`+`torrents/start` sur `qbit-5.0.0`/`qbit-5.1.4`/
+  `qbit-5.2.3` (Web API ≥ 2.11.0), exactement la bascule documentée en §2 ;
+- **nombre d'appels réellement émis** : le `GET /app/webapiVersion`
+  caché (constat P-5) est confirmé présent sur chaque mutation d'état
+  torrent/tracker à plancher de version déclaré, contre les quatre
+  instances réelles, pas seulement contre la bibliothèque simulée.
+
+Aucune différence de forme de payload ni de comportement n'a été
+observée entre `qbit-5.1.4` et `qbit-5.2.3` — aucune branche de
+compatibilité n'a donc été ajoutée au code de production.
+
+Contraintes respectées : `make check` reste exécutable hors ligne (la
+matrice Docker n'en fait jamais partie) ; aucune mutation destructive
+n'a touché autre chose que le corpus synthétique jetable à hash exact
+(`tests/integration/_torrent_corpus.py`) ; aucun tracker public, DHT,
+PeX ou LSD n'a été sollicité côté fonctionnel (désactivés dès le
+premier démarrage via un `qBittorrent.conf` pré-scellé, voir la note
+d'implémentation).
+
+**Ce que cela justifie désormais (palier `TESTED` au sens de §9,
+"container integration tested")** : les quatre versions exactes
+ci-dessus, pour les capacités listées dans
+`tests/integration/qbittorrent-matrix.toml` (`read_only`, `mutations`,
+`tracker_mutations`, `capture`). **Ce que cela ne justifie pas** : une
+affirmation de support pour toute version 4.6.x/5.0.x/5.1.x/5.2.x autre
+que ces quatre digests précis, ni pour la ligne 4.5.x. Formulation
+correcte : « container integration tested against exact versions:
+4.6.7, 5.0.0, 5.1.4 and 5.2.3 » — jamais « compatible with qBittorrent
+4.6–5.2 ».
+
+### 5.3 Détection de fraîcheur (pas une mise à jour automatique)
+
+`scripts/check_qbit_matrix_freshness.py` compare la version la plus
+élevée du manifeste à la dernière release stable connue de
+`qbittorrent/qBittorrent` (API GitHub Releases publique, non
+authentifiée, aucun secret requis). Il ne modifie **jamais** le
+manifeste et ne marque **jamais** une version plus récente comme
+supportée — un résultat `STALE` signifie « revue de matrice requise »,
+jamais « qbit-ops est incompatible ». Un échec réseau (`UNKNOWN`) est
+explicitement distingué d'une matrice obsolète (`STALE`). Exécuté comme
+job séparé (`freshness-check`) dans
+`.github/workflows/qbittorrent-matrix.yml`, dont l'échec ne fait jamais
+échouer le workflow ; jamais exécuté par `make check`. Testé
+unitairement avec accès réseau entièrement simulé
+(`tests/test_check_qbit_matrix_freshness.py`).
 
 ---
 
@@ -327,8 +398,14 @@ compatibilité, qui restent inchangés par cette section.
   de test produit `UNTESTED_NEWER` (avertissement), pas `unsupported`.
 
 **Application immédiate** : au 2026-07-27, la frontière qBittorrent et
-les fixtures de compatibilité (`tests/compatibility/`) sont
-`payload fixture tested`. Aucune version, aucune capacité, n'est
-`container integration tested`, `supported` ou `unsupported` au sens
-de cette section — et ce document continue de ne publier aucune plage
-de version qBittorrent supportée.
+l'ensemble des fixtures de compatibilité (`tests/compatibility/`) sont
+`payload fixture tested`. Les quatre versions exactes de la matrice
+Docker (§5.2) — `qbit-4.6.7`, `qbit-5.0.0`, `qbit-5.1.4`, `qbit-5.2.3`,
+chacune identifiée par son digest d'image — sont désormais
+`container integration tested` pour les capacités `read_only`,
+`mutations`, `tracker_mutations` et `capture`. Aucune version n'est
+`supported` au sens du palier `TESTED`/`SUPPORTED_UNTESTED` de §4 tant
+que `doctor` n'a pas été étendu pour s'appuyer sur ces preuves (hors
+périmètre de cette phase) ; aucune version n'est `unsupported`. Ce
+document continue de ne publier aucune plage de version qBittorrent
+supportée — quatre digests précis ne sont pas une plage.
