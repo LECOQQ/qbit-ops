@@ -1,18 +1,18 @@
-"""Characterize `app.__version__` resolution (constat A-2).
+"""Characterize `qbit_ops.__version__` resolution (constat A-2).
 
-`app/__init__.py` used to read the Poetry version from `pyproject.toml`
+`qbit_ops/__init__.py` used to read the Poetry version from `pyproject.toml`
 via a path relative to this file's own location
-(`Path(__file__).resolve().parents[1]`) -- correct only for the current
-flat `app/` layout. A future move to `src/qbit_ops/` would silently
-change that path's meaning without raising, since
-`_resolve_version()` fell back to `importlib.metadata` (returning
-`0.0.0` outside an installation) rather than failing loudly.
+(`Path(__file__).resolve().parents[1]`) -- correct only for the old flat
+`app/` layout. The move to `src/qbit_ops/` would have silently changed
+that path's meaning without raising, since `_resolve_version()` fell
+back to `importlib.metadata` (returning `0.0.0` outside an installation)
+rather than failing loudly.
 
 The resolver now reads installed distribution metadata first, with an
 explicit, non-version-shaped development fallback -- see
 `docs/audits/2026-07-package-refactor-plan.md` (constat A-2, phase 2a).
-These tests call `app._resolve_version()` directly (never reloading the
-`app` module or mutating its already-resolved `__version__`), so a
+These tests call `qbit_ops._resolve_version()` directly (never reloading
+the `qbit_ops` module or mutating its already-resolved `__version__`), so a
 monkeypatched `importlib.metadata.version` cannot leak into any other
 test in the suite.
 """
@@ -27,8 +27,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-import app
-from app.main import app as cli_app
+import qbit_ops
+from qbit_ops.main import app as cli_app
 
 
 def test_installed_metadata_returns_expected_version(
@@ -41,7 +41,7 @@ def test_installed_metadata_returns_expected_version(
         lambda name: "9.9.9" if name == "qbit-ops" else "wrong-package",
     )
 
-    assert app._resolve_version() == "9.9.9"
+    assert qbit_ops._resolve_version() == "9.9.9"
 
 
 def test_editable_install_metadata_follows_same_code_path(
@@ -61,7 +61,7 @@ def test_editable_install_metadata_follows_same_code_path(
         lambda name: "0.2.0.dev0+editable",
     )
 
-    assert app._resolve_version() == "0.2.0.dev0+editable"
+    assert qbit_ops._resolve_version() == "0.2.0.dev0+editable"
 
 
 def test_unavailable_distribution_metadata_uses_development_fallback(
@@ -79,7 +79,7 @@ def test_unavailable_distribution_metadata_uses_development_fallback(
 
     monkeypatch.setattr(importlib.metadata, "version", _raise)
 
-    resolved = app._resolve_version()
+    resolved = qbit_ops._resolve_version()
 
     assert resolved == "0+unknown"
     assert resolved != "0.0.0"
@@ -101,11 +101,11 @@ def test_unrelated_metadata_exception_is_not_silently_converted(
     monkeypatch.setattr(importlib.metadata, "version", _raise)
 
     with pytest.raises(ValueError):
-        app._resolve_version()
+        qbit_ops._resolve_version()
 
 
 def test_package_import_never_reads_repository_pyproject_toml() -> None:
-    """`app/__init__.py` must not open `pyproject.toml` at all.
+    """`qbit_ops/__init__.py` must not open `pyproject.toml` at all.
 
     An AST-based check (not a plain substring search, so a mention in a
     docstring or comment cannot cause a false failure): the old resolver
@@ -117,7 +117,7 @@ def test_package_import_never_reads_repository_pyproject_toml() -> None:
     """
     import ast
 
-    source = Path(app.__file__).read_text(encoding="utf-8")
+    source = Path(qbit_ops.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     imported_modules: set[str] = set()
@@ -137,14 +137,15 @@ def test_package_import_never_reads_repository_pyproject_toml() -> None:
 def test_version_resolution_independent_of_package_directory_depth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolution must not depend on how deep `app/` sits under the repo root.
+    """Resolution must not depend on how deep the package sits under the
+    repo root.
 
     A fake, arbitrarily deep `__file__` proves nothing in the resolver's
     control flow consults the package's own path -- the defect the old
     `parents[1]` lookup had.
     """
     monkeypatch.setattr(
-        app,
+        qbit_ops,
         "__file__",
         "/somewhere/very/deeply/nested/src/qbit_ops/__init__.py",
     )
@@ -154,7 +155,7 @@ def test_version_resolution_independent_of_package_directory_depth(
         lambda name: "1.2.3",
     )
 
-    assert app._resolve_version() == "1.2.3"
+    assert qbit_ops._resolve_version() == "1.2.3"
 
 
 def test_version_resolution_independent_of_current_working_directory(
@@ -171,7 +172,7 @@ def test_version_resolution_independent_of_current_working_directory(
     nested_cwd.mkdir(parents=True)
 
     result = subprocess.run(
-        [sys.executable, "-c", "import app; print(app.__version__)"],
+        [sys.executable, "-c", "import qbit_ops; print(qbit_ops.__version__)"],
         cwd=nested_cwd,
         capture_output=True,
         text=True,
@@ -183,8 +184,9 @@ def test_version_resolution_independent_of_current_working_directory(
 
 
 def test_cli_root_invocation_exposes_the_resolved_version() -> None:
-    """The CLI's own diagnostics still surface `app.__version__` unchanged."""
+    """The CLI's own diagnostics still surface `qbit_ops.__version__`
+    unchanged."""
     result = CliRunner().invoke(cli_app)
 
     assert result.exit_code == 0
-    assert app.__version__ in result.stdout
+    assert qbit_ops.__version__ in result.stdout

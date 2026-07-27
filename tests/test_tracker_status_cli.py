@@ -13,7 +13,7 @@ import json
 
 from typer.testing import CliRunner
 
-from app.main import TrackerStatusExitCode, app
+from qbit_ops.main import TrackerStatusExitCode, app
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_A = "a" * 40

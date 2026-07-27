@@ -21,7 +21,7 @@ tell outcomes apart without parsing error strings.
 
 ## Shared error categories
 
-`app.errors.ErrorCategory` classifies *why* a command failed,
+`qbit_ops.errors.ErrorCategory` classifies *why* a command failed,
 independent of rendering or exit code:
 
 | Category         | Meaning                                                             |
@@ -43,10 +43,10 @@ category maps to different codes across commands (`unavailable` is `3`
 for `status`/`trackers status`/`explain`, but `1` everywhere else). See
 [Exit-code policy](#exit-code-policy).
 
-Every handled failure is recorded as an `app.errors.AppError` (`category`,
+Every handled failure is recorded as an `qbit_ops.errors.AppError` (`category`,
 `code`, `message`, optional `remediation`, optional `target`) before it is
-rendered — `app.main._fail()`, `_fail_status_usage()`, and
-`_fail_ambiguous_hash()` all build one. `app.main.last_app_error` always
+rendered — `qbit_ops.main._fail()`, `_fail_status_usage()`, and
+`_fail_ambiguous_hash()` all build one. `qbit_ops.main.last_app_error` always
 holds the most recently constructed `AppError`, so tests (and, later, a
 TUI) can assert on structured fields instead of parsing stderr text. See
 [TUI-ready mapping](#tui-ready-mapping).
@@ -77,12 +77,12 @@ qBittorrent and then relabelled as a generic remote failure:
 
 - `--hash`/`--tracker`/`--source`/`--target`/`--new-passkey`: rejected
   when empty or whitespace-only, via the shared
-  `app.errors.require_non_blank()` — see `torrents inspect`, every
+  `qbit_ops.errors.require_non_blank()` — see `torrents inspect`, every
   bulk torrent mutation, `explain torrent`/`explain tracker`, and
   every `trackers` mutation command.
 - Contradictory filter combinations (`--completed --incomplete`,
   `--active --inactive`) and unknown `--state` values: rejected by
-  `app.torrents.build_torrent_filter()`.
+  `qbit_ops.torrents.build_torrent_filter()`.
 - A blank/whitespace `--tracker` used as a *filter* (`torrents list`,
   `trackers status`, every bulk mutation's `--tracker`) is rejected by
   the same `build_torrent_filter()` call, before any client is
@@ -93,7 +93,7 @@ qBittorrent and then relabelled as a generic remote failure:
   contributed by this occurrence" rather than an error, consistent
   with `build_torrent_filter()`'s existing, tested behavior.
 - Unsupported `--format` combinations: rejected by
-  `app.main._validate_format_support()` against the `FORMAT_SUPPORT`
+  `qbit_ops.main._validate_format_support()` against the `FORMAT_SUPPORT`
   table (see [docs/COMMANDS.md](COMMANDS.md#format-support-matrix)).
 - `status --watch`'s own option combinations (`--quiet` with `--watch`,
   an unsupported `--format`, a non-finite `--interval`): rejected by
@@ -105,7 +105,7 @@ any network call — verified in `tests/test_errors.py`.
 
 ## Exit-code policy
 
-Two layers, matching `app.main.EXIT_CODE_TABLE`:
+Two layers, matching `qbit_ops.main.EXIT_CODE_TABLE`:
 
 ### Shared process-level principles
 
@@ -127,7 +127,7 @@ the authoritative mapping:
 ```
 
 Numeric exit codes must always be interpreted in the context of the
-invoked command — see `app.main.EXIT_CODE_TABLE` and
+invoked command — see `qbit_ops.main.EXIT_CODE_TABLE` and
 [docs/COMMANDS.md](COMMANDS.md#exit-codes) for the exact per-command
 tables. This phase intentionally did not redesign any existing exit
 code purely for cross-command uniformity; it only added the shared `70`
@@ -157,7 +157,7 @@ distinct from `3` by design.
 One project-wide rule for fatal command errors: **a fatal error is
 reported on stderr only; stdout stays empty.** No command emits a
 partial or malformed success payload — every collection happens inside
-the same guarded block as client creation (`app.main.qbit_error_boundary()`),
+the same guarded block as client creation (`qbit_ops.main.qbit_error_boundary()`),
 strictly before any rendering begins, so a failure never has partial
 output to leave behind. This applies identically to every `--format`;
 a machine-readable consumer parsing stdout for JSON/JSONL/CSV can
@@ -172,7 +172,7 @@ and `status`'s existing per-command silence-contract tests).
 
 ## Internal-error behavior
 
-Every registered command is wrapped by `app.main._catch_internal_errors`,
+Every registered command is wrapped by `qbit_ops.main._catch_internal_errors`,
 the outermost boundary: it re-raises `typer.Exit` and `KeyboardInterrupt`
 untouched, and converts anything else into a concise `Internal error:
 <ExceptionType>: <message>` line on stderr plus `ExitCode.INTERNAL`
@@ -180,7 +180,7 @@ untouched, and converts anything else into a concise `Internal error:
 never converted into `unavailable`/`3` or a command's own warning/
 critical code.
 
-`app.main.qbit_error_boundary()` — used around client creation plus one
+`qbit_ops.main.qbit_error_boundary()` — used around client creation plus one
 domain call in most commands — only degrades `ConfigError`,
 `QbitAuthenticationError`, `QbitConnectionError`, and
 `(qbittorrentapi.APIError, OSError)` into a rendered, categorized
@@ -245,7 +245,7 @@ broke" should check for `70` first.
 
 ## TUI-ready mapping
 
-`app.errors.AppError` is the application-layer representation a future
+`qbit_ops.errors.AppError` is the application-layer representation a future
 TUI can consume without parsing rendered text:
 
 ```python

@@ -1,8 +1,9 @@
 """Collect and represent a filter-aware tracker status report.
 
-Mirrors `app.doctor`/`app.status`'s collection/render split: this module
-stays free of Typer and Rich so it can be reused by any future interface.
-It reuses `app.torrents.select_torrents` for the shared, cheap torrent
+Mirrors `qbit_ops.doctor`/`qbit_ops.status`'s collection/render split:
+this module stays free of Typer and Rich so it can be reused by any
+future interface.
+It reuses `qbit_ops.torrents.select_torrents` for the shared, cheap torrent
 filters (category/state/completed/active/stalled/errored) but performs
 its own per-torrent `torrents_trackers()` collection rather than going
 through `select_torrents`'s `tracker` filter -- that filter narrows the
@@ -12,7 +13,7 @@ through `select_torrents`'s `tracker` filter -- that filter narrows the
 torrent list.
 
 Tracker identities are always `host` or `host:port`
-(`app.trackers.normalize_tracker_host`), never a full announce URL: a
+(`qbit_ops.trackers.normalize_tracker_host`), never a full announce URL: a
 private tracker's announce URL commonly embeds a passkey in its path or
 query string, and nothing in this module's output (table, JSON, JSONL,
 CSV, or exception/log text) may render one. DHT/PeX/LSD pseudo-tracker
@@ -36,9 +37,13 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from app.qbit_fields import get_field_as_string
-from app.torrents import TorrentFilter, select_torrents, torrent_filter_to_dict
-from app.trackers import (
+from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.torrents import (
+    TorrentFilter,
+    select_torrents,
+    torrent_filter_to_dict,
+)
+from qbit_ops.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
     compute_tracker_aggregate_health,

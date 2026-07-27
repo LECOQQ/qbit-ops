@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.explain import (
+from qbit_ops.explain import (
     ExplanationSeverity,
     build_torrent_explanation,
     evidence_to_dict,
@@ -12,8 +12,8 @@ from app.explain import (
     explanation_report_to_dict,
     finding_to_dict,
 )
-from app.selectors import AmbiguousTorrentHashError
-from app.torrents import get_safe_tracker_details
+from qbit_ops.selectors import AmbiguousTorrentHashError
+from qbit_ops.torrents import get_safe_tracker_details
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40
@@ -340,7 +340,7 @@ def test_torrent_explanation_uses_at_most_one_tracker_lookup() -> None:
 # `explain_torrent` (client-calling, ambiguity-aware) is now a thin wrapper
 # around `build_torrent_explanation` (pure, zero-API) -- the TUI's `e`
 # binding calls the builder directly with already-fetched data (see
-# `app.tui.state.TuiController.build_explanation`), so both interfaces must
+# `qbit_ops.tui.state.TuiController.build_explanation`), so both interfaces must
 # produce identical findings for identical evidence, with no second,
 # TUI-only rule catalogue.
 

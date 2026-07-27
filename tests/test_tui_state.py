@@ -1,6 +1,6 @@
 """Non-Textual tests for the TUI's pure state/refresh controller.
 
-These exercise `app.tui.state.TuiController` directly against
+These exercise `qbit_ops.tui.state.TuiController` directly against
 `tests.support.FakeQbitClient` -- no terminal, no Textual `App`, no
 event loop. Interface-level (Pilot) tests live in `tests/test_tui_app.py`.
 """
@@ -11,15 +11,15 @@ from typing import Any
 
 import pytest
 
-from app.config import ConfigError
-from app.errors import (
+from qbit_ops.config import ConfigError
+from qbit_ops.errors import (
     ErrorCategory,
     QbitAuthenticationError,
     QbitConnectionError,
 )
-from app.execution import MutationStatus
-from app.torrents import build_torrent_filter
-from app.tui.state import ConnectionState, TuiController, Workspace
+from qbit_ops.execution import MutationStatus
+from qbit_ops.torrents import build_torrent_filter
+from qbit_ops.tui.state import ConnectionState, TuiController, Workspace
 from tests.support import FakeQbitClient, make_torrent
 
 
@@ -110,7 +110,7 @@ def test_filter_change_performs_zero_api_calls() -> None:
 def test_filter_handles_uncategorized_token_against_cached_raw_items() -> None:
     """Regression: re-filtering must use raw items, not display-formatted
     `SelectedTorrent.category`, or the `uncategorized` token would never
-    match anything (see app.app_services.TuiRefreshResult's docstring).
+    match anything (see qbit_ops.app_services.TuiRefreshResult's docstring).
     """
     client = FakeQbitClient(torrents=[make_torrent(name="Alpha", category="")])
     controller = _controller(client)
@@ -637,7 +637,7 @@ def test_filter_change_does_not_auto_reconcile_selection() -> None:
     category filter is exact-match -- typing "films" one letter at a
     time would otherwise transiently wipe a selection before the user
     finishes typing the very filter that keeps it visible. The caller
-    (`app.tui.app`) reconciles once, explicitly, at each real commit
+    (`qbit_ops.tui.app`) reconciles once, explicitly, at each real commit
     point (Apply/Clear/Cancel) via `reconcile_selection()` -- see
     `test_reconcile_selection_removes_hidden_hashes_on_demand`.
     """
@@ -855,7 +855,7 @@ def test_classify_plan_status_no_changes_is_truthful() -> None:
 
 def test_apply_bulk_plan_propagates_failure_untruthfully_unclaimed() -> None:
     """A failed apply must never be silently swallowed -- the caller
-    (app.tui.app) needs the exception to classify and report failure
+    (qbit_ops.tui.app) needs the exception to classify and report failure
     truthfully instead of assuming success."""
 
     class _FailingClient(FakeQbitClient):

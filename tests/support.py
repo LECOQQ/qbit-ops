@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.config import QbitConfig
+from qbit_ops.config import QbitConfig
 
 
 class FakeQbitClient:

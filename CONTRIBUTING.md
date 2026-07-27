@@ -40,7 +40,7 @@ This installs dependencies and the Conventional Commits Git hook.
 - Preserve raw qBittorrent tracker URLs for API calls; only normalize for
   comparison.
 - Never read secrets from CLI arguments — use `.env` / environment
-  variables, consistent with `app/config.py`.
+  variables, consistent with `src/qbit_ops/config.py`.
 - Document new commands in [docs/COMMANDS.md](docs/COMMANDS.md) and add a
   one-line feature bullet to the README if user-facing.
 
@@ -48,4 +48,4 @@ This installs dependencies and the Conventional Commits Git hook.
 
 Open a GitHub issue with steps to reproduce, expected vs. actual behavior,
 and your qBittorrent version (4.x vs 5.x tracker state naming differs — see
-`app/torrents.py`).
+`src/qbit_ops/torrents.py`).

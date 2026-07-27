@@ -1,18 +1,18 @@
 """Classify raw qBittorrent torrent states into a stable public vocabulary.
 
-Extracted from `app.torrents`/`app.status` (mirroring the Phase 2
-extraction of `app.qbit_fields`) so both modules can depend on the same
-state classification without an import cycle: `app.status` and the
-torrent-filter pipeline in `app.torrents` both need it, and `app.torrents`
-must not import `app.status` (which itself needs low-level torrent field
-access). No Typer, no Rich.
+Extracted from `qbit_ops.torrents`/`qbit_ops.status` (mirroring the
+Phase 2 extraction of `qbit_ops.qbit_fields`) so both modules can depend
+on the same state classification without an import cycle:
+`qbit_ops.status` and the torrent-filter pipeline in `qbit_ops.torrents`
+both need it, and `qbit_ops.torrents` must not import `qbit_ops.status`
+(which itself needs low-level torrent field access). No Typer, no Rich.
 """
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from app.qbit_fields import get_field_as_float, get_field_as_string
+from qbit_ops.qbit_fields import get_field_as_float, get_field_as_string
 
 TorrentStateGroup = Literal[
     "downloading",

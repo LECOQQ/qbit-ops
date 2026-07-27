@@ -14,8 +14,8 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from app.qbit_fields import get_field_as_string
-from app.torrent_states import (
+from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_completed_torrent,
@@ -120,7 +120,7 @@ def build_status_snapshot_from_data(
     Performs zero API calls itself: every value is derived from data the
     caller already fetched. This is the seam a caller collecting a
     torrent list for another purpose in the same cycle (e.g. a TUI's
-    periodic refresh, see `app.app_services`) uses to avoid a second,
+    periodic refresh, see `qbit_ops.app_services`) uses to avoid a second,
     redundant `torrents_info()`/`transfer_info()` call --
     `collect_status_snapshot` itself is just this function plus the four
     API calls that feed it.

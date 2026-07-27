@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from app.qbit_fields import get_field_as_string
+from qbit_ops.qbit_fields import get_field_as_string
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ def resolve_torrent_hash(
 
     Matching is case-insensitive against each torrent's `hash` field,
     read through the same field-access helpers as the rest of
-    `app.torrents` so unusual torrent objects (mappings or
+    `qbit_ops.torrents` so unusual torrent objects (mappings or
     attribute-based) behave identically. A complete hash is simply an
     unambiguous prefix equal to the full hash, so both cases share one
     code path.

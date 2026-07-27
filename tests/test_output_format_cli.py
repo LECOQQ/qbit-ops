@@ -2,7 +2,7 @@
 
 Phase 2.1 consistency pass: `--output` was removed everywhere in favor of
 one `--format table|json|jsonl|csv` option. `FORMAT_SUPPORT` in
-`app/main.py` is the single source of truth for which formats each
+`qbit_ops/main.py` is the single source of truth for which formats each
 command actually supports; these tests parametrize over that same table
 so the implementation, its validation, and its tests cannot drift apart.
 """
@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from app.config import ConfigError, QbitConfig
-from app.main import FORMAT_SUPPORT, ExitCode, app
-from app.ui import OutputFormat
+from qbit_ops.config import ConfigError, QbitConfig
+from qbit_ops.main import FORMAT_SUPPORT, ExitCode, app
+from qbit_ops.ui import OutputFormat
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"

@@ -1,7 +1,7 @@
 """Collect and represent a qbit-ops diagnostic report.
 
 This is the `doctor` "service": it must remain callable without Typer and
-without Rich, mirroring `app.status`'s collection/render split, so it can
+without Rich, mirroring `qbit_ops.status`'s collection/render split, so it can
 be reused by a future TUI without pulling in CLI or presentation
 concerns.
 
@@ -9,7 +9,7 @@ Collection performs a bounded, documented number of remote calls: at most
 one authenticated login (`auth_log_in()`, performed by the caller before
 `collect_doctor_report()` is invoked) plus up to four read calls
 (`app_version`, `app_web_api_version`, `transfer_info`, `torrents_info`)
-made here — the same bounded budget `app.status.collect_status_snapshot`
+made here — the same bounded budget `qbit_ops.status.collect_status_snapshot`
 uses, never a per-torrent call.
 """
 
@@ -22,9 +22,9 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
-from app.config import QbitConfig
-from app.qbit_fields import get_field_as_string
-from app.torrent_states import classify_torrent_state
+from qbit_ops.config import QbitConfig
+from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
@@ -45,8 +45,8 @@ class CheckStatus(StrEnum):
 class ConnectionOutcome(StrEnum):
     """Classify the result of one client-creation/login attempt.
 
-    Kept independent from `app.main`'s `QbitConnectionError`/
-    `QbitAuthenticationError` so this module never imports `app.main`
+    Kept independent from `qbit_ops.main`'s `QbitConnectionError`/
+    `QbitAuthenticationError` so this module never imports `qbit_ops.main`
     (which imports this module) — the caller classifies its own
     exceptions into this enum before calling `collect_doctor_report()`.
     """
@@ -638,7 +638,7 @@ def _transfer_info_check(
 def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
     """Build the torrent-state-vocabulary runtime check.
 
-    Reuses `app.torrent_states.classify_torrent_state` so the notion of
+    Reuses `qbit_ops.torrent_states.classify_torrent_state` so the notion of
     an "unrecognized" torrent state can never diverge from `status`,
     which classifies its own torrents through the same function.
     """

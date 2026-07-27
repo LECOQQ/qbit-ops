@@ -1,6 +1,6 @@
 """Test the CLI-level mutation confirmation policy and secret redaction.
 
-Covers the execution-safety model introduced alongside `app.execution`:
+Covers the execution-safety model introduced alongside `qbit_ops.execution`:
 dry-run-by-default, risk-tiered confirmation, `--yes`, non-interactive
 refusal, cancellation semantics, and passkey redaction in prompts and
 verbose output.
@@ -9,7 +9,7 @@ verbose output.
 import pytest
 from typer.testing import CliRunner
 
-from app.main import ExitCode, app
+from qbit_ops.main import ExitCode, app
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_HASH = "abc123def456000000000000000000000000000a"
@@ -25,7 +25,7 @@ def _client_with_tracker(tracker_url: str) -> FakeQbitClient:
 
 
 def _make_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
 
 
 # --- Dry-run is the default for every mutation command ------------------

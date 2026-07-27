@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from app.doctor import (
+from qbit_ops.doctor import (
     CheckStatus,
     ConnectionOutcome,
     collect_doctor_report,
@@ -217,7 +217,7 @@ def test_unsupported_major_version_warns_not_fails() -> None:
 
 def test_unknown_torrent_states_warn() -> None:
     """Ensure an unrecognized torrent state produces a warning, reusing
-    `app.status.classify_torrent_state`."""
+    `qbit_ops.status.classify_torrent_state`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(state="uploading"),

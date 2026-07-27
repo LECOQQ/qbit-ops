@@ -10,7 +10,7 @@ import json
 
 from typer.testing import CliRunner
 
-from app.main import ExplainExitCode, app
+from qbit_ops.main import ExplainExitCode, app
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_A = "a" * 40
@@ -99,7 +99,7 @@ def test_explain_torrent_ambiguous_hash_fails_clearly(
 
     result = runner.invoke(app, ["explain", "torrent", "--hash", "abc"])
 
-    from app.main import ExitCode
+    from qbit_ops.main import ExitCode
 
     assert result.exit_code == ExitCode.ERROR
     assert "matches" in result.stderr

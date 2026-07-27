@@ -5,8 +5,8 @@ Owns the shared, structured torrent-filter model (`TorrentFilter`,
 (`select_torrents`), reused by every read command and bulk mutation that
 targets more than a single hash. Kept free of Typer and Rich so it can be
 reused by any future interface (CLI, TUI) without pulling in presentation
-concerns -- mirrors `app.selectors` for hash resolution and
-`app.status`/`app.doctor` for their own collection/render splits.
+concerns -- mirrors `qbit_ops.selectors` for hash resolution and
+`qbit_ops.status`/`qbit_ops.doctor` for their own collection/render splits.
 """
 
 from collections.abc import Callable, Sequence
@@ -14,19 +14,19 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Literal
 
-from app.qbit_fields import (
+from qbit_ops.qbit_fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
 )
-from app.selectors import TorrentNotFoundError, resolve_torrent_hash
-from app.torrent_states import (
+from qbit_ops.selectors import TorrentNotFoundError, resolve_torrent_hash
+from qbit_ops.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_completed_torrent,
     is_stopped_state,
 )
-from app.trackers import (
+from qbit_ops.trackers import (
     classify_raw_tracker_status,
     describe_tracker_url,
     get_raw_tracker_status,
@@ -58,7 +58,7 @@ class TorrentFilter:
     Repeated `--category`/`--state` values combine with OR within the
     same field; different fields combine with AND. `tracker`, when set,
     is always already normalized to `host` or `host:port`
-    (`app.trackers.normalize_tracker_host`) by `build_torrent_filter` --
+    (`qbit_ops.trackers.normalize_tracker_host`) by `build_torrent_filter` --
     never a full URL, so a passkey embedded in a tracker's path or query
     string can never reach this model. `categories` holds the raw
     requested tokens (not display-normalized); `states` holds only
@@ -267,7 +267,7 @@ def select_torrents_from_items(
 
     Never calls the qBittorrent API -- the caller has already fetched
     `torrents` (typically once per refresh cycle, e.g. a TUI's periodic
-    tick, see `app.app_services`) and wants to (re-)apply filters to it
+    tick, see `qbit_ops.app_services`) and wants to (re-)apply filters to it
     without a second `torrents_info()` round-trip. This never resolves a
     `--tracker` filter, which needs a per-torrent `torrents_trackers()`
     lookup this function deliberately cannot perform: pass a filter with
@@ -706,7 +706,7 @@ def plan_bulk_torrent_action(
 
     Pure with respect to the qBittorrent instance: this only reads state
     and never mutates it. `torrent_hash` accepts a complete hash or an
-    unambiguous prefix, resolved via `app.selectors.resolve_torrent_hash`.
+    unambiguous prefix, resolved via `qbit_ops.selectors.resolve_torrent_hash`.
     An ambiguous prefix raises `AmbiguousTorrentHashError` before any plan
     is built; an unmatched hash resolves to zero selected torrents, same
     as any other filter that matches nothing.
@@ -950,7 +950,7 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
 def get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     """Extract secret-free structural tracker details for display.
 
-    Mirrors the endpoint shape `inspect_tracker` in `app.trackers`
+    Mirrors the endpoint shape `inspect_tracker` in `qbit_ops.trackers`
     produces: a normalized identity plus structural URL fields, never a
     raw announce URL, passkey, or query value.
     """

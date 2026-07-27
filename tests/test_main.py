@@ -4,8 +4,8 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from app import __version__
-from app.main import ExitCode, _exit_if_no_targeted_matches, app
+from qbit_ops import __version__
+from qbit_ops.main import ExitCode, _exit_if_no_targeted_matches, app
 
 runner = CliRunner()
 

@@ -31,11 +31,11 @@ from typing import Any
 from textual.widgets import Button, Input, Static
 from textual.worker import Worker, WorkerState
 
-import app.tui
-from app.config import ConfigError
-from app.errors import ErrorCategory, QbitConnectionError
-from app.execution import MutationStatus
-from app.tui.app import (
+import qbit_ops.tui
+from qbit_ops.config import ConfigError
+from qbit_ops.errors import ErrorCategory, QbitConnectionError
+from qbit_ops.execution import MutationStatus
+from qbit_ops.tui.app import (
     MUTATION_WORKER_GROUP,
     HelpScreen,
     LastActionBar,
@@ -334,10 +334,10 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
 
     tui_files = sorted(
         path
-        for path in Path(app.tui.__file__).parent.rglob("*.py")
+        for path in Path(qbit_ops.tui.__file__).parent.rglob("*.py")
         if "__pycache__" not in path.parts
     )
-    assert tui_files, "expected at least one .py file under app/tui/"
+    assert tui_files, "expected at least one .py file under qbit_ops/tui/"
 
     for path in tui_files:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -1651,7 +1651,7 @@ def _frozen_plan_for(app: Any) -> Any:
 def test_cancelled_before_dispatch_never_reports_success() -> None:
     """Pure classification check, no UI: a non-dispatched mutation is
     never APPLIED and never carries submitted hashes."""
-    from app.torrents import build_bulk_action_plan_from_snapshot
+    from qbit_ops.torrents import build_bulk_action_plan_from_snapshot
 
     plan = build_bulk_action_plan_from_snapshot(
         [make_torrent(hash=HASH_A, name="Alpha", state="downloading")],

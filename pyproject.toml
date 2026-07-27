@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "qBittorrent administration CLI for homelab operations."
 authors = []
 readme = "README.md"
-packages = [{ include = "app" }]
+packages = [{ include = "qbit_ops", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -18,7 +18,7 @@ textual = { version = ">=8.2.8", optional = true }
 tui = ["textual"]
 
 [tool.poetry.scripts]
-qbit-ops = "app.main:app"
+qbit-ops = "qbit_ops.main:app"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
@@ -49,14 +49,14 @@ fix = true
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
-include = ["app", "tests", "tooling"]
+include = ["src", "tests", "tooling"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 testpaths = ["tests"]
 addopts = "-q --maxfail=1 --disable-warnings"
 asyncio_mode = "auto"

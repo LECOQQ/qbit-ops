@@ -54,15 +54,15 @@ hooks-install: ## Reinstall the Conventional Commits hook
 	@$(PY) pre-commit install --hook-type commit-msg
 
 run: ## Run the application
-	@$(PY) python -m app.main
+	@$(PY) python -m qbit_ops.main
 
 format: ## Format and fix Python files
-	@$(PY) ruff check --fix app tests
-	@$(PY) black app tests
+	@$(PY) ruff check --fix src tests
+	@$(PY) black src tests
 
 lint: ## Check Python style and types without modifying files
-	@$(PY) ruff check app tests
-	@$(PY) black --check app tests
+	@$(PY) ruff check src tests
+	@$(PY) black --check src tests
 	@$(PY) pyright
 
 test: ## Run Python tests

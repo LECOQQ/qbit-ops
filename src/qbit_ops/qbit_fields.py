@@ -1,6 +1,6 @@
 """Read fields from qBittorrent objects, mapping- or attribute-based.
 
-Extracted from `app.torrents` so it can be shared with `app.selectors`
+Extracted from `qbit_ops.torrents` so it can be shared with `qbit_ops.selectors`
 without a circular import (the resolver needs the same safe field
 access as the rest of the torrent domain logic).
 """

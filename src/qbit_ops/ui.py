@@ -19,12 +19,12 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
-from app.doctor import CheckStatus, DoctorReport
-from app.execution import MutationStatus
-from app.explain import Evidence, ExplanationReport, ExplanationSeverity
-from app.selectors import ResolvedTorrent
-from app.status import Health, StatusSnapshot
-from app.trackers import sanitize_tracker_text
+from qbit_ops.doctor import CheckStatus, DoctorReport
+from qbit_ops.execution import MutationStatus
+from qbit_ops.explain import Evidence, ExplanationReport, ExplanationSeverity
+from qbit_ops.selectors import ResolvedTorrent
+from qbit_ops.status import Health, StatusSnapshot
+from qbit_ops.trackers import sanitize_tracker_text
 
 console = Console()
 err_console = Console(stderr=True)
@@ -165,8 +165,9 @@ def confirm(prompt: str) -> bool:
     """Ask a yes/no question on stderr, defaulting to No.
 
     Only meant to be called when the caller has already established the
-    context is an interactive terminal (see `app.execution.ExecutionPolicy`);
-    this does not check `err_console.is_terminal` itself.
+    context is an interactive terminal (see
+    `qbit_ops.execution.ExecutionPolicy`); this does not check
+    `err_console.is_terminal` itself.
     """
     return Confirm.ask(prompt, console=err_console, default=False)
 
@@ -431,7 +432,7 @@ def render_doctor_table(report: DoctorReport) -> None:
 
     Sections are grouped in the order their checks first appear in
     `report.checks` (already deterministic by construction in
-    `app.doctor.collect_doctor_report`) rather than by iterating a set or
+    `qbit_ops.doctor.collect_doctor_report`) rather than by iterating a set or
     dict, so table order never depends on hashing.
     """
     style = _CHECK_STATUS_STYLES[report.overall_status]
@@ -501,9 +502,9 @@ def render_explanation(report: ExplanationReport) -> None:
     stable tabular shape (see docs/COMMANDS.md, "Format Support
     Matrix"), so this builds its own structured text layout instead.
     Evidence/limitation/next-command text is already secret-free by
-    construction (`app.explain` only ever derives it from
-    `app.trackers`/`app.tracker_status`'s sanitized structural data), so
-    nothing here re-sanitizes it.
+    construction (`qbit_ops.explain` only ever derives it from
+    `qbit_ops.trackers`/`qbit_ops.tracker_status`'s sanitized structural
+    data), so nothing here re-sanitizes it.
     """
     style = _EXPLANATION_SEVERITY_STYLES[report.overall_severity]
     console.print(
