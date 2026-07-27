@@ -332,7 +332,14 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
     prefixes = ("plan_", "apply_", "delete_", "remove_", "edit_", "set_")
     offenders: set[str] = set()
 
-    for path in sorted(Path(app.tui.__file__).parent.glob("*.py")):
+    tui_files = sorted(
+        path
+        for path in Path(app.tui.__file__).parent.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    assert tui_files, "expected at least one .py file under app/tui/"
+
+    for path in tui_files:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:

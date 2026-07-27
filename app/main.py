@@ -52,7 +52,6 @@ from app.execution import (
     ExecutionPolicy,
     MutationOperation,
     MutationStatus,
-    is_interactive_terminal,
 )
 from app.explain import (
     ExplanationReport,
@@ -118,6 +117,7 @@ from app.ui import (
     OutputFormat,
     WatchRenderContext,
     confirm,
+    is_interactive_terminal,
     live_status_display,
     print_ambiguous_hash_error,
     print_applied,

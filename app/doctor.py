@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 
 from app.config import QbitConfig
 from app.qbit_fields import get_field_as_string
-from app.status import classify_torrent_state
+from app.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
@@ -638,8 +638,9 @@ def _transfer_info_check(
 def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
     """Build the torrent-state-vocabulary runtime check.
 
-    Reuses `app.status.classify_torrent_state` so the notion of an
-    "unrecognized" torrent state can never diverge from `status`.
+    Reuses `app.torrent_states.classify_torrent_state` so the notion of
+    an "unrecognized" torrent state can never diverge from `status`,
+    which classifies its own torrents through the same function.
     """
     if torrents is None:
         return DoctorCheck(

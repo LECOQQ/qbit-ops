@@ -121,14 +121,3 @@ class ExecutionPolicy:
             "risk) but stderr is not an interactive terminal. Re-run with "
             "--yes to confirm unattended execution."
         )
-
-
-def is_interactive_terminal() -> bool:
-    """Report whether stderr is an interactive TTY.
-
-    A thin seam around `app.ui.err_console.is_terminal` so tests can
-    monkeypatch it without depending on Rich's own detection.
-    """
-    from app.ui import err_console
-
-    return err_console.is_terminal

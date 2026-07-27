@@ -1,0 +1,176 @@
+"""AST-based layering guarantees (R1, R6).
+
+Compile-time guarantees, not just runtime tests -- mirrors
+`tests/test_errors.py`'s and `tests/test_tui_security.py`'s AST
+approach. See `docs/audits/2026-07-package-refactor-plan.md` §2 for the
+full layer-rule catalogue (R1-R8); this file covers the two rules
+required before any package move (T3):
+
+- R1: a module declared pure (no I/O, no client) never imports Typer,
+  Rich, Textual, or `qbittorrentapi` at module level.
+- R6: Textual stays optional -- no production module outside
+  `app/tui/**` imports it at module level. Only a *deferred* import
+  (inside a function body, like `app/main.py`'s `tui` command) is
+  allowed; that is the exact mechanism that keeps the `tui` extra
+  optional (constat A-6 in the architecture inventory, §2.2).
+
+Both scans use `Path.rglob()`, not a one-directory `glob()`, so a
+future subpackage split (e.g. `app/tui/screens/*.py`, or a later
+`app/domain/`) cannot silently fall outside the scan -- see
+`docs/audits/2026-07-package-refactor-plan.md` §4, Phase 9's noted trap
+for `test_tui_security.py`.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import app
+
+APP_PACKAGE_DIR = Path(app.__file__).parent
+TUI_PACKAGE_DIR = APP_PACKAGE_DIR / "tui"
+
+# R1: exactly the modules identified as pure by the architecture audit
+# (docs/audits/2026-07-package-refactor-plan.md §2, R1). Not derived by
+# scanning, because "pure" is a design claim about these specific
+# modules, not a structural property `rglob` could detect on its own.
+_PURE_DOMAIN_MODULE_NAMES = (
+    "torrent_states.py",
+    "selectors.py",
+    "errors.py",
+    "execution.py",
+)
+
+_R1_FORBIDDEN_ROOTS = {"typer", "rich", "textual", "qbittorrentapi"}
+
+
+def _module_level_imported_modules(source: str) -> set[str]:
+    """Return every dotted module path imported at *module top level*.
+
+    Unlike `_module_level_imported_roots`, keeps the full dotted path
+    (e.g. `app.tui.app`, not just `app`), so a caller can check for a
+    specific submodule rather than only its root package.
+    """
+    tree = ast.parse(source)
+    modules: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
+
+
+def _module_level_imported_roots(source: str) -> set[str]:
+    """Return root module names imported at *module top level* only.
+
+    Deliberately restricted to `tree.body` (the module's direct
+    statements) rather than `ast.walk`, so an import deferred inside a
+    function or method body -- e.g. `app/main.py`'s `tui` command
+    importing `app.tui.app`, the sanctioned mechanism that keeps
+    Textual optional -- is never mistaken for a module-level import.
+    """
+    tree = ast.parse(source)
+    roots: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                roots.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def _production_python_files(root: Path) -> list[Path]:
+    """Recursively list production `.py` files, excluding build noise."""
+    return sorted(
+        path for path in root.rglob("*.py") if "__pycache__" not in path.parts
+    )
+
+
+def test_pure_modules_never_import_typer_rich_textual_or_qbittorrentapi() -> (
+    None
+):
+    """R1: rule modules stay importable without Typer, Rich, Textual, or
+    qbittorrentapi."""
+    checked = 0
+    for name in _PURE_DOMAIN_MODULE_NAMES:
+        path = APP_PACKAGE_DIR / name
+        assert path.is_file(), f"expected pure module {name} at {path}"
+        roots = _module_level_imported_roots(path.read_text(encoding="utf-8"))
+        leaked = roots & _R1_FORBIDDEN_ROOTS
+        assert not leaked, (
+            f"{path} imports {leaked} at module level -- a module "
+            "declared pure must never depend on a presentation library "
+            "or the qBittorrent client (R1)."
+        )
+        checked += 1
+
+    assert checked == len(_PURE_DOMAIN_MODULE_NAMES)
+
+
+def test_textual_import_stays_confined_to_the_tui_package() -> None:
+    """R6: no production module outside app/tui/** imports Textual at
+    module level."""
+    files = [
+        path
+        for path in _production_python_files(APP_PACKAGE_DIR)
+        if TUI_PACKAGE_DIR not in path.parents
+    ]
+
+    assert files, "expected at least one production module outside app/tui/"
+    assert any(path.name == "main.py" for path in files), (
+        "expected app/main.py to be part of the scanned set -- an empty "
+        "or wrong scan would make this test vacuously pass"
+    )
+
+    for path in files:
+        roots = _module_level_imported_roots(path.read_text(encoding="utf-8"))
+        assert "textual" not in roots, (
+            f"{path} imports textual at module level -- Textual must "
+            "stay optional; only app/tui/** may import it, and only "
+            "ever as a deferred import elsewhere (R6)."
+        )
+
+
+def test_deferred_tui_import_in_main_is_not_flagged_as_module_level() -> None:
+    """Positive companion: `app/main.py`'s deferred Textual import is allowed.
+
+    Proves the module-level/deferred distinction is real: `app/main.py`
+    does reference `app.tui.app` (inside the `tui` command body), yet
+    the recursive scan above does not flag it.
+    """
+    main_source = (APP_PACKAGE_DIR / "main.py").read_text(encoding="utf-8")
+
+    assert "app.tui.app" in main_source
+    roots = _module_level_imported_roots(main_source)
+    assert "textual" not in roots
+
+    modules = _module_level_imported_modules(main_source)
+    assert not any(
+        module == "app.tui" or module.startswith("app.tui.")
+        for module in modules
+    )
+
+
+def test_production_file_discovery_is_non_empty_and_recursive() -> None:
+    """Guard the scan itself: it must actually inspect nested files.
+
+    A `glob("*.py")` that silently stopped descending into `app/tui/`
+    would make `test_textual_import_stays_confined_to_the_tui_package`
+    vacuously pass once a future split adds a subdirectory. This test
+    fails loudly instead: it asserts the *full* recursive scan (i.e.
+    including `app/tui/**`) finds files nested at least one directory
+    below `app/`.
+    """
+    all_files = _production_python_files(APP_PACKAGE_DIR)
+    nested_files = [
+        path for path in all_files if path.parent != APP_PACKAGE_DIR
+    ]
+
+    assert all_files, "expected at least one production .py file"
+    assert nested_files, (
+        "expected at least one production .py file nested below app/ "
+        "(e.g. app/tui/*.py) -- a non-recursive scan would miss these"
+    )
