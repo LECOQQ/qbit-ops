@@ -796,11 +796,24 @@ internal).
 
 **Cancelled before dispatch.** Because remote access is serialized, an
 Apply can be queued behind an in-flight read. If you quit qbit-ops
-while it is still queued, the request is abandoned before it is sent:
-qBittorrent receives nothing, your selection is left intact, no refresh
-is scheduled, and the outcome is reported as *cancelled before
-dispatch* — deliberately distinct from a remote failure, since nothing
-failed and nothing was sent.
+while it is still queued, the queued operation is abandoned before the
+qBittorrent call is made. Concretely:
+
+* no mutation request is sent — qBittorrent receives nothing;
+* no submitted-selection policy is applied, so your selection is left
+  exactly as it was;
+* no post-mutation refresh is scheduled;
+* no success is reported.
+
+Note what this deliberately does **not** promise: since the only thing
+that revokes an Apply's authority today is quitting the application,
+there is no running interface left to show you the outcome, and none is
+expected. The guarantee here is material, not visual — the action does
+not happen. qbit-ops still carries an internal *cancelled before
+dispatch* representation, kept distinct from a remote failure (nothing
+failed) and from a submitted request (nothing was sent); it is
+defence in depth for any future authority-loss path that does not end
+the process, and it keeps the failure taxonomy honest.
 
 Dismissing a result never re-applies anything. It only applies the
 selection policy:
