@@ -10,6 +10,7 @@ API.
 from __future__ import annotations
 
 import json
+import subprocess
 from unittest.mock import patch
 
 import check_qbit_matrix_freshness as freshness
@@ -108,6 +109,60 @@ def test_main_distinguishes_network_failure_from_staleness(capsys) -> None:
     assert exit_code == 2
     assert "UNKNOWN" in out
     assert "STALE" not in out
+
+
+def _run_shell_pattern(
+    pattern: str, script_exit_code: int
+) -> subprocess.CompletedProcess:
+    """Run one CI-step shell fragment under `bash -e {0}`, exactly as
+    GitHub Actions executes a `run:` block, against a stand-in script
+    that just exits with `script_exit_code` -- no real network call."""
+    script = f"""
+set -e
+fake_check() {{ return {script_exit_code}; }}
+{pattern}
+echo "STEP_COMPLETED exit_code=$exit_code"
+"""
+    return subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, timeout=10
+    )
+
+
+def test_sabotage_bash_dash_e_swallows_the_bare_exit_code_capture() -> None:
+    """F-3, reproduced directly: under `bash -e`, a script line that exits
+    non-zero aborts the step *before* `exit_code=$?` ever runs -- the
+    original, broken pattern in the workflow."""
+    result = _run_shell_pattern(
+        pattern="fake_check\nexit_code=$?", script_exit_code=1
+    )
+    assert result.returncode == 1
+    assert "STEP_COMPLETED" not in result.stdout
+
+
+def test_corrected_pattern_captures_the_exit_code_under_bash_dash_e() -> None:
+    """The fix: `|| exit_code=$?` lets `bash -e` continue past a non-zero
+    exit, and still captures the real code -- for both the failing and
+    the successful case, matching `.github/workflows/qbittorrent-matrix.yml`."""
+    stale = _run_shell_pattern(
+        pattern="fake_check || exit_code=$?\nexit_code=${exit_code:-0}",
+        script_exit_code=1,
+    )
+    assert stale.returncode == 0
+    assert "STEP_COMPLETED exit_code=1" in stale.stdout
+
+    unknown = _run_shell_pattern(
+        pattern="fake_check || exit_code=$?\nexit_code=${exit_code:-0}",
+        script_exit_code=2,
+    )
+    assert unknown.returncode == 0
+    assert "STEP_COMPLETED exit_code=2" in unknown.stdout
+
+    fresh = _run_shell_pattern(
+        pattern="fake_check || exit_code=$?\nexit_code=${exit_code:-0}",
+        script_exit_code=0,
+    )
+    assert fresh.returncode == 0
+    assert "STEP_COMPLETED exit_code=0" in fresh.stdout
 
 
 def test_freshness_check_never_writes_to_the_matrix_manifest(tmp_path) -> None:

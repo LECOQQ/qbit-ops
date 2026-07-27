@@ -12,6 +12,7 @@ Makefile.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,41 @@ from tests.integration._harness import docker_is_available
 from tests.integration._matrix import MatrixEntry, load_matrix
 
 OPT_IN_VARIABLE = "QBIT_OPS_DOCKER_MATRIX"
+
+_CAPTURE_TEST_FILENAME = "test_matrix_capture.py"
+_THIS_DIRECTORY = Path(__file__).parent.resolve()
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Auto-mark every test collected under `tests/integration/`.
+
+    A small, documented collection hook (not filename substring
+    matching elsewhere): every item actually located under this
+    directory is marked `docker` -- it can only ever run with a real
+    Docker daemon and the opt-in above. `test_matrix_capture.py` is
+    additionally marked `capture` (F-7): it is the *only* file allowed
+    to write to `tests/compatibility/fixtures/captured-container/`, so
+    `make test-qbit-matrix`/`make test-qbit-version` explicitly
+    deselect it (`-m "docker and not capture"`) while
+    `make capture-qbit-fixtures` selects only it (`-m capture`).
+
+    `pytest_collection_modifyitems` is a *session-wide* hook: once
+    pytest discovers this conftest.py (which it does for the whole
+    tree, not just this directory), the hook receives every collected
+    item across the entire suite, not only this directory's -- an
+    unconditional `item.add_marker(...)` here would otherwise mark
+    every test in the repository as `docker` (caught empirically: a
+    whole-tree `-m docker` collection matched files with no relation
+    to this package at all). Every item must be filtered by its actual
+    file path first.
+    """
+    for item in items:
+        item_path = Path(item.fspath).resolve()
+        if _THIS_DIRECTORY not in item_path.parents:
+            continue
+        item.add_marker(pytest.mark.docker)
+        if item_path.name == _CAPTURE_TEST_FILENAME:
+            item.add_marker(pytest.mark.capture)
 
 
 def _opted_in() -> bool:

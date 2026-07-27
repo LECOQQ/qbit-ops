@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from textual.widgets import Button, Input, Static
 from textual.worker import Worker, WorkerState
 
@@ -54,6 +55,8 @@ from tests.test_tui_app import (
     _settle,
     asyncio_wait_for_event,
 )
+
+pytestmark = pytest.mark.tui
 
 HASH_A = "a" * 40
 HASH_B = "b" * 40
