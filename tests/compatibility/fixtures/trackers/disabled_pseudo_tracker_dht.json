@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "DHT pseudo-tracker entry, disabled -- qBittorrent represents this as a bracketed sentinel string, not a URL.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- this is qBittorrent's own documented sentinel, not a real host",
+    "fields_removed": [],
+    "limitations": "Synthetic; the sentinel format ('** [DHT] **') is documented qBittorrent behavior, verified in the architecture audit's tracker section, but this exact payload is constructed, not captured."
+  },
+  "payload": {
+    "url": "** [DHT] **",
+    "status": 0,
+    "msg": ""
+  }
+}

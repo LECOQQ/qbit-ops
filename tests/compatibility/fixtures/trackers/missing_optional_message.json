@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A working tracker with no 'msg' field at all (not even an empty string).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": ["msg"],
+    "limitations": "Synthetic; deliberately incomplete to prove the optional-field fallback."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 2
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "Torrent in the error state.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "hash": "ffffffffffffffffffffffffffffffffffffffff",
+    "name": "sample-linux-image.iso",
+    "state": "error",
+    "progress": 0.05,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 0.0,
+    "dlspeed": 0,
+    "upspeed": 0,
+    "save_path": "/downloads/linux",
+    "added_on": 1696000000
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A pre-release-style application version string (with a suffix beyond three-part semver).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "Synthetic; does not represent any real qBittorrent pre-release build."
+  },
+  "payload": "v5.1.0-alpha1"
+}

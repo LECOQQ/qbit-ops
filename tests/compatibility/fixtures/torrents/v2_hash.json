@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A BitTorrent v2/hybrid-shaped infohash (64 hex characters / 256 bits, the SHA-256 v2 infohash length) -- qbit_ops.qbit.fields/qbit_ops.selectors treat 'hash' as an opaque string, so this proves nothing assumes the v1 40-character length.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "Synthetic; not a real v2 infohash, and this project has not verified what qBittorrent's torrents_info() actually reports in the 'hash' field for a v2/hybrid torrent (v1-equivalent truncated hash vs full v2 hash) -- this fixture only proves qbit-ops's own string handling is length-agnostic, not a claim about qBittorrent's real behavior."
+  },
+  "payload": {
+    "hash": "777777777777777777777777777777777777777777777777777777777777777a",
+    "name": "sample-linux-image.iso",
+    "state": "downloading",
+    "progress": 0.2,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 0.0,
+    "dlspeed": 0,
+    "upspeed": 0,
+    "save_path": "/downloads/linux",
+    "added_on": 1691000000
+  }
+}

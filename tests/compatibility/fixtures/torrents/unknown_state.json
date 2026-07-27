@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "'forcedMetaDL' is a real qBittorrent torrent state (metadata download, forced) that docs/audits/2026-07-codebase-architecture-inventory.md notes is not in any of qbit_ops.torrent_states's classification sets -- it must classify as 'unknown', not raise.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "The state name itself is real (documented by the architecture audit as unclassified); the surrounding torrent fields are synthetic, not captured."
+  },
+  "payload": {
+    "hash": "4444444444444444444444444444444444444444",
+    "name": "sample-linux-image.iso",
+    "state": "forcedMetaDL",
+    "progress": 0.0,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 0.0,
+    "dlspeed": 0,
+    "upspeed": 0,
+    "save_path": "/downloads/linux",
+    "added_on": 1694000000
+  }
+}

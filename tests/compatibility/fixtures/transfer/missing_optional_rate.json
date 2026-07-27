@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "transfer_info() with the upload rate field entirely absent.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": ["up_info_speed"],
+    "limitations": "Synthetic; deliberately incomplete to prove the optional-field fallback (defaults to 0)."
+  },
+  "payload": {
+    "dl_info_speed": 1048576
+  }
+}

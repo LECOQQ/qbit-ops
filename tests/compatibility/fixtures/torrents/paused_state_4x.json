@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "Paused torrent using the qBittorrent 4.x `paused*` state vocabulary.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "Synthetic; represents the documented 4.x vocabulary, not a real capture."
+  },
+  "payload": {
+    "hash": "dddddddddddddddddddddddddddddddddddddddd",
+    "name": "sample-linux-image.iso",
+    "state": "pausedUP",
+    "progress": 1.0,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 1.2,
+    "dlspeed": 0,
+    "upspeed": 0,
+    "save_path": "/downloads/linux",
+    "added_on": 1698000000
+  }
+}

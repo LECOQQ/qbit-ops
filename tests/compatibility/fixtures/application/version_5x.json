@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "trust": "official-example",
+    "description": "A well-formed qBittorrent application version string, in the exact shape documented in qbittorrentapi's own README/changelog conventions (leading 'v', three-part semver).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "The version string format is the documented convention, not a capture from a running 5.0.1 instance -- see tests/compatibility/README.md for what 'official-example' means here."
+  },
+  "payload": "v5.0.1"
+}

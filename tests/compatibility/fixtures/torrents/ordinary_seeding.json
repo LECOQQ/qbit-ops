@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "Ordinary seeding torrent (Web API 4.x vocabulary state).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a -- constructed directly",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "name": "sample-linux-image.iso",
+    "state": "uploading",
+    "progress": 1.0,
+    "category": "linux",
+    "size": 4700372992,
+    "ratio": 2.5,
+    "dlspeed": 0,
+    "upspeed": 524288,
+    "save_path": "/downloads/linux",
+    "added_on": 1699000000
+  }
+}

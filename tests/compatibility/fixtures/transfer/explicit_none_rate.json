@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "transfer_info() with the download rate field present but explicitly null.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "Synthetic; no known qBittorrent version returns an explicit null here -- exists to characterize qbit-ops's own tolerance."
+  },
+  "payload": {
+    "dl_info_speed": null,
+    "up_info_speed": 262144
+  }
+}

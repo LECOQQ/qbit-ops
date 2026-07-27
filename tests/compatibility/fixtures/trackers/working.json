@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A working tracker endpoint (status=2, TrackerStatus.WORKING).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "URL uses the example.org-style placeholder host per RFC 2606; no real tracker or passkey.",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 2,
+    "msg": ""
+  }
+}

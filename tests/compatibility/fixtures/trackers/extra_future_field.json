@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A working tracker carrying one field qbit-ops never reads, simulating a future qbittorrent-api/qBittorrent release adding a new column (e.g. peer/seed counts).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": [],
+    "limitations": "Synthetic; the extra field mirrors qBittorrent's documented num_peers/num_seeds tracker fields, which qbit-ops does not currently consume, not an invented name."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 2,
+    "msg": "",
+    "num_peers": 12,
+    "num_seeds": 34
+  }
+}

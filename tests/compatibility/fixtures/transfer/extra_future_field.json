@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "transfer_info() carrying additional real qBittorrent fields qbit-ops does not read (connection status, DHT node count).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "n/a",
+    "fields_removed": [],
+    "limitations": "Synthetic; field names mirror qBittorrent's documented transfer_info() schema, but this exact payload is constructed, not captured."
+  },
+  "payload": {
+    "dl_info_speed": 1048576,
+    "up_info_speed": 262144,
+    "connection_status": "connected",
+    "dht_nodes": 42
+  }
+}

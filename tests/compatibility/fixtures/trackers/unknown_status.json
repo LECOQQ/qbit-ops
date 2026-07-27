@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A tracker status code outside the seven documented qbittorrentapi.definitions.TrackerStatus values (0-6) -- must classify as UNKNOWN, never guessed.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": [],
+    "limitations": "Synthetic; status code 99 is invented specifically to be out of the documented range -- it does not represent any real qBittorrent release."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 99,
+    "msg": ""
+  }
+}

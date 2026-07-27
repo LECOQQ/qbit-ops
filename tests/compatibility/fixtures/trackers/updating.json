@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A tracker mid-announce (status=3, TrackerStatus.UPDATING) -- classified HEALTHY, not WARNING (see app/trackers.py's comment on why).",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 3,
+    "msg": ""
+  }
+}

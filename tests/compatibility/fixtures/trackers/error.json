@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "trust": "synthetic",
+    "description": "A tracker reporting NOT_WORKING (status=4), with a plain-text error message.",
+    "qbittorrent_version": null,
+    "web_api_version": null,
+    "qbittorrent_api_version": null,
+    "sanitization": "placeholder host only",
+    "fields_removed": [],
+    "limitations": "Synthetic; not validated against a real response."
+  },
+  "payload": {
+    "url": "https://tracker.example/announce",
+    "status": 4,
+    "msg": "unregistered torrent"
+  }
+}
