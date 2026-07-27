@@ -20,7 +20,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from tests.integration._matrix import MatrixEntry
@@ -119,12 +119,18 @@ def assert_target_is_disposable(
     `host` is the exact string qbit-ops's `QBIT_HOST` would receive --
     this must never be a LAN address, a real hostname, or anything
     other than the loopback interface a disposable container was
-    published to.
+    published to. Parses the URL and compares the exact hostname
+    (F-17) -- a substring/`in` check would accept a lookalike host such
+    as `127.0.0.1.evil.example`, which contains the loopback address as
+    a substring but resolves somewhere else entirely.
     """
-    if expected_loopback_host not in host:
+    import urllib.parse
+
+    hostname = urllib.parse.urlsplit(host).hostname
+    if hostname != expected_loopback_host:
         raise HarnessError(
-            f"refusing to target {host!r}: not a loopback/disposable address "
-            f"(expected {expected_loopback_host!r} in the host string)"
+            f"refusing to target {host!r}: parsed hostname {hostname!r} "
+            f"is not the exact disposable host {expected_loopback_host!r}"
         )
 
 
@@ -174,9 +180,13 @@ class RunningQbitContainer:
     downloads_dir: Path
     host: str
     username: str
-    password: str
-    observed_version: str
-    observed_web_api_version: str
+    # Excluded from repr (F-16): random per run and discarded at
+    # teardown, but a dataclass repr would otherwise print it in any
+    # pytest assertion failure message involving this object.
+    password: str = field(repr=False)
+    observed_version: str = field(default="")
+    observed_web_api_version: str = field(default="")
+    observed_architecture: str = field(default="")
 
 
 def _wait_for_webui(host: str, timeout_seconds: float = 60.0) -> None:
@@ -204,11 +214,16 @@ def _wait_for_webui(host: str, timeout_seconds: float = 60.0) -> None:
 def start_matrix_container(
     entry: MatrixEntry, *, run_id: str
 ) -> RunningQbitContainer:
-    """Start one disposable, hermetic qBittorrent container for `entry`.
+    """Start one disposable qBittorrent container for `entry`, on a
+    dedicated Docker network (application-level outbound isolation --
+    public egress is not technically blocked by the network itself;
+    see the module docstring).
 
-    Fails closed (raises `HarnessError`) if the observed `app_version()`
-    does not match `entry.expected_version` -- a mismatched image tag
-    must never be silently accepted as "close enough".
+    Fails closed (raises `HarnessError`, with full cleanup and no
+    fixture capture) if any of the observed application version, Web
+    API version, or container architecture do not match `entry`'s
+    expected values -- none of the three may be silently accepted as
+    "close enough" (independent-review findings F-2 and F-6).
     """
     if not docker_is_available():
         raise HarnessError(
@@ -295,21 +310,41 @@ def start_matrix_container(
         observed_version, observed_web_api_version = _read_versions(
             host, username=FIXED_WEBUI_USERNAME, password=password
         )
+        observed_architecture = _read_image_architecture(
+            entry.image_reference_with_digest
+        )
     except Exception:
         _cleanup_failed_start(
             container_name, network_name, config_root, downloads_dir
         )
         raise
 
+    mismatches: list[str] = []
     if observed_version != entry.expected_version:
+        mismatches.append(
+            f"application version: expected {entry.expected_version!r}, "
+            f"observed {observed_version!r}"
+        )
+    if observed_web_api_version != entry.expected_web_api_version:
+        mismatches.append(
+            "Web API version: expected "
+            f"{entry.expected_web_api_version!r}, observed "
+            f"{observed_web_api_version!r}"
+        )
+    if observed_architecture != entry.expected_architecture:
+        mismatches.append(
+            f"architecture: expected {entry.expected_architecture!r}, "
+            f"observed {observed_architecture!r}"
+        )
+
+    if mismatches:
         _cleanup_failed_start(
             container_name, network_name, config_root, downloads_dir
         )
         raise HarnessError(
-            f"matrix entry {entry.id!r} expected qBittorrent "
-            f"{entry.expected_version!r}, container reported "
-            f"{observed_version!r}: refusing to run the matrix against "
-            "an unverified version"
+            f"matrix entry {entry.id!r} failed verification before any "
+            "compatibility scenario ran, and no fixture was captured: "
+            + "; ".join(mismatches)
         )
 
     return RunningQbitContainer(
@@ -324,6 +359,7 @@ def start_matrix_container(
         password=password,
         observed_version=observed_version,
         observed_web_api_version=observed_web_api_version,
+        observed_architecture=observed_architecture,
     )
 
 
@@ -337,6 +373,31 @@ def _read_versions(
     )
     client.auth_log_in()
     return str(client.app_version()), str(client.app_web_api_version())
+
+
+def _read_image_architecture(image_reference_with_digest: str) -> str:
+    """Return the architecture Docker actually resolved and ran on this host.
+
+    A container's own `docker inspect` does not expose an
+    `.Architecture` field at all (verified empirically -- only image
+    inspection does). `image_reference_with_digest` is a
+    multi-architecture *index* digest (F-6 in the independent review):
+    it guarantees immutability, not a pinned architecture. Docker
+    itself resolves that index to one concrete, single-architecture
+    image at pull/run time, matching the host -- `docker image
+    inspect` on the same reference reports that already-resolved
+    image's real architecture, which is what this function returns.
+    """
+    result = _run_docker(
+        [
+            "image",
+            "inspect",
+            "--format",
+            "{{.Architecture}}",
+            image_reference_with_digest,
+        ]
+    )
+    return result.stdout.strip()
 
 
 def _force_remove_container(name: str) -> None:

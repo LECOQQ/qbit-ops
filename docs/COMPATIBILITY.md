@@ -184,19 +184,22 @@ Digests complets et provenance dans `tests/integration/qbittorrent-matrix.toml`.
 qBittorrent n'existe ; c'est l'image la plus utilisée et maintenue avec
 des tags par version exacte (vérifié via l'API Docker Hub, pas supposé).
 `qbit-5.2.3` a été ajoutée sans remplacer aucune des trois entrées
-historiques (voir la politique de revendication dans `AGENTS.md`).
+historiques (voir la politique de revendication en §10).
 
 Exécuté via `make test-qbit-matrix` (les quatre) / `make test-qbit-version
 QBIT_MATRIX_ID=<id>` (une seule), et par
-`.github/workflows/qbittorrent-matrix.yml` (`workflow_dispatch` +
-hebdomadaire, jamais sur push/PR). Chaque conteneur est jetable,
-hermétique (réseau Docker dédié, `HOME`/`XDG_CONFIG_HOME` temporaires,
-`QBIT_OPS_ENV_FILE` pointant vers un chemin garanti absent,
-identifiants et ports générés par exécution, publication de port
-loopback uniquement), et sa version applicative réellement observée
-est comparée au manifeste **avant** tout test — un tag d'image qui
-dériverait de la version attendue fait échouer la matrice plutôt que de
-continuer silencieusement (prouvé par sabotage : version attendue
+`.github/workflows/qbittorrent-matrix.yml` (cadence détaillée ci-dessous,
+jamais sur push/PR). Chaque conteneur est jetable, sur un réseau
+Docker dédié. La **configuration** est hermétique
+(`HOME`/`XDG_CONFIG_HOME` temporaires, `QBIT_OPS_ENV_FILE` pointant
+vers un chemin garanti absent, identifiants et ports générés par
+exécution, publication de port loopback uniquement) — le **réseau**,
+lui, ne l'est pas : voir la réserve F-1 ci-dessous. Sa version
+applicative réellement observée, sa version Web API observée, et son
+architecture observée sont comparées au manifeste **avant** tout test
+— un tag d'image ou une architecture qui dériveraient de l'attendu
+font échouer la matrice plutôt que de continuer silencieusement
+(prouvé par sabotage : version attendue
 fausse, puis digest d'une autre image, tous deux rejetés avant tout
 test, aucune fuite de ressource).
 
@@ -226,6 +229,21 @@ n'a touché autre chose que le corpus synthétique jetable à hash exact
 PeX ou LSD n'a été sollicité côté fonctionnel (désactivés dès le
 premier démarrage via un `qBittorrent.conf` pré-scellé, voir la note
 d'implémentation).
+
+⚠️ **Réserve F-1 — isolation réseau applicative, pas réseau** : le
+conteneur tourne sur un réseau Docker **dédié**, pas **interne**
+(`docker network inspect` confirme `Internal=false`) ; la sortie
+Internet publique depuis le conteneur a été prouvée possible
+(`wget https://api.github.com` réussit). DHT/PeX/LSD/UPnP sont
+désactivés côté application, et le corpus synthétique ne porte aucune
+annonce vers un tracker public — mais rien n'empêche techniquement une
+sortie réseau. Ajouter `--internal` a été testé et **rejeté** : cela
+bloque bien l'egress mais rend aussi le port publié en loopback
+injoignable, cassant le harnais entier (`qbit-ops` s'y connecte depuis
+l'hôte). Ne jamais qualifier ce réseau d'« hermétique » ou
+d'« isolé » — seule la **configuration** (voir §5.2 plus haut,
+`HOME`/`.env`/identifiants) l'est. Une isolation réseau opposable
+exigerait un relais de publication, hors périmètre de cette phase.
 
 **Ce que cela justifie désormais (palier `TESTED` au sens de §9,
 "container integration tested")** : les quatre versions exactes
@@ -378,8 +396,10 @@ compatibilité, qui restent inchangés par cette section.
   application).
 - **`container integration tested`** — une capacité de §3 a été
   exercée par un appel réel contre une instance qBittorrent réelle,
-  dans un conteneur Docker jetable et hermétique, avec un résultat
-  passant enregistré. Correspond au palier `TESTED` de §4 pour la
+  dans un conteneur jetable sur un réseau Docker dédié (isolation
+  réseau **applicative**, pas imposée par le réseau lui-même — voir la
+  réserve ci-dessous), avec un résultat passant enregistré. Correspond
+  au palier `TESTED` de §4 pour la
   version Web API observée. **Aucune version n'a ce statut
   aujourd'hui** — c'est l'objet de la future matrice Docker (§5.2),
   non encore commencée par cette phase.
@@ -409,3 +429,60 @@ que `doctor` n'a pas été étendu pour s'appuyer sur ces preuves (hors
 périmètre de cette phase) ; aucune version n'est `unsupported`. Ce
 document continue de ne publier aucune plage de version qBittorrent
 supportée — quatre digests précis ne sont pas une plage.
+
+---
+
+## 10. 📏 Politique normative de revendication de compatibilité
+
+> **Ce document, pas `AGENTS.md`, est la source normative de cette
+> politique.** La revue indépendante du 2026-07-27
+> (`docs/audits/2026-07-27-qbittorrent-compatibility-independent-review.md`,
+> constat F-4) a relevé qu'`AGENTS.md` est listé dans `.gitignore` —
+> les huit règles qui suivaient n'y existaient donc, sous forme
+> traçable, pour aucun contributeur ni aucune revue. `AGENTS.md` peut
+> continuer à renvoyer ici, mais ne doit plus jamais être la seule
+> source.
+
+Règles, opposables à toute documentation, sortie `doctor`, ou message
+utilisateur futur :
+
+1. `tests/integration/qbittorrent-matrix.toml` est la **source
+   exécutable unique**. Aucune liste de versions dupliquée ailleurs
+   n'a d'autorité.
+2. Seules les versions **exactement exécutées avec succès** peuvent
+   être qualifiées de `container integration tested`.
+3. Une version corrective (patch) réussie n'est **jamais** une preuve
+   pour toute sa ligne de version (ex. : `5.2.3` ne prouve rien sur
+   `5.2.0`–`5.2.2` ni sur un futur `5.2.4`).
+4. Les fixtures `synthetic`/`official-example` ne sont **jamais** une
+   preuve de version — voir §9.
+5. Un tag d'image mutable (`latest`, un tag flottant) n'est **jamais**
+   une preuve — seul un digest observé et vérifié à l'exécution en
+   est une.
+6. Le digest d'image, l'architecture, la version applicative et la
+   version Web API doivent tous être **observés sur le conteneur réel
+   et vérifiés**, jamais seulement copiés depuis le manifeste attendu
+   (voir §5.2, constat F-2/F-6).
+7. `supported` est **strictement plus fort** que
+   `container integration tested` et exige la politique de support
+   complète de §4 — jamais utilisé pour décrire une simple exécution
+   réussie.
+8. Une version **non testée** n'est **jamais** déclarée incompatible au
+   seul motif de son absence du manifeste ; « plus récente que les
+   preuves actuelles » est une information, pas un défaut (voir §19 —
+   note : la numérotation `doctor` de la revue indépendante référence
+   une future phase, non traitée ici).
+9. La version stable courante de qBittorrent doit être évaluée dans la
+   matrice **avant** toute publication publique de `qbit-ops`.
+
+Formulation la plus forte actuellement soutenue par les preuves :
+
+> Container integration tested against the exact qBittorrent versions
+> 4.6.7, 5.0.0, 5.1.4 and 5.2.3 on amd64.
+
+Formulations **interdites**, quel que soit le contexte (documentation,
+`README`, sortie `doctor`, message de commit) :
+
+- « compatible with qBittorrent 4.6–5.2 »
+- « supports qBittorrent 4.x and 5.x »
+- « all qBittorrent 5.x versions are supported »

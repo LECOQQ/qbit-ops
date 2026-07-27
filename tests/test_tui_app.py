@@ -35,6 +35,7 @@ import threading
 import time
 from typing import Any
 
+import pytest
 from textual.pilot import Pilot
 from textual.widgets import (
     Button,
@@ -69,6 +70,8 @@ from qbit_ops.tui.app import (
 )
 from qbit_ops.tui.state import ConnectionState, Workspace
 from tests.support import FakeQbitClient, make_torrent
+
+pytestmark = pytest.mark.tui
 
 LARGE_INTERVAL = 999.0  # effectively disables the periodic timer mid-test
 WIDE_SIZE = (140, 40)
