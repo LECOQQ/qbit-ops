@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_string, get_transfer_rates
 from qbit_ops.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
@@ -303,12 +303,17 @@ def snapshot_to_csv_rows(
 
 
 def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
-    """Build transfer rates from an already-fetched `transfer_info()` result."""
+    """Build transfer rates from an already-fetched `transfer_info()` result.
+
+    Routes through `qbit_ops.qbit.fields.get_transfer_rates` (constat
+    P-2) instead of calling `.get()` on `transfer_info` directly: a
+    malformed non-mapping payload now fails with an explicit `TypeError`
+    there rather than an accidental `AttributeError` here.
+    """
+    download, upload = get_transfer_rates(transfer_info)
     return TransferRates(
-        download_bytes_per_second=_as_int(
-            transfer_info.get("dl_info_speed", 0)
-        ),
-        upload_bytes_per_second=_as_int(transfer_info.get("up_info_speed", 0)),
+        download_bytes_per_second=download,
+        upload_bytes_per_second=upload,
     )
 
 
@@ -415,14 +420,6 @@ def _get_optional_value(client: Any, method_name: str) -> str | None:
         return None
 
     return str(value)
-
-
-def _as_int(value: Any) -> int:
-    """Convert a qBittorrent numeric field to int, defaulting to zero."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _redact_host(host: str) -> str:

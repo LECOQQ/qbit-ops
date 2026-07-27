@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_string
 
 
 @dataclass(frozen=True)

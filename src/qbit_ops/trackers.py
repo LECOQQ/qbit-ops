@@ -17,11 +17,19 @@ never seen.
 """
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from qbit_ops.qbit.fields import (
+    get_active_tracker_urls,
+    get_field_as_float,
+    get_field_as_int,
+    get_field_as_string,
+    get_raw_tracker_status,
+)
 
 TrackerMatchMode = Literal["exact", "without-query"]
 
@@ -546,7 +554,7 @@ def list_tracker_usage(
 
     for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         normalized_trackers = {
@@ -605,11 +613,11 @@ def inspect_tracker(
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
         raw_trackers = list(client.torrents_trackers(torrent_hash))
-        active_tracker_count = len(_get_active_tracker_urls(raw_trackers))
+        active_tracker_count = len(get_active_tracker_urls(raw_trackers))
 
         matching_endpoints: list[dict[str, Any]] = []
         for raw_tracker in raw_trackers:
-            url = _get_field_as_string(raw_tracker, "url")
+            url = get_field_as_string(raw_tracker, "url")
             if url == "":
                 continue
 
@@ -619,7 +627,7 @@ def inspect_tracker(
 
             raw_status = get_raw_tracker_status(raw_tracker)
             health, enabled = classify_raw_tracker_status(raw_status)
-            raw_message = _get_field_as_string(raw_tracker, "msg")
+            raw_message = get_field_as_string(raw_tracker, "msg")
             message = (
                 sanitize_tracker_text(raw_message) if raw_message else None
             )
@@ -641,10 +649,10 @@ def inspect_tracker(
                 {
                     "hash": torrent_hash,
                     "name": torrent_name,
-                    "state": _get_field_as_string(torrent, "state"),
-                    "size": _get_field_as_int(torrent, "size"),
-                    "progress": _get_field_as_float(torrent, "progress"),
-                    "ratio": _get_field_as_float(torrent, "ratio"),
+                    "state": get_field_as_string(torrent, "state"),
+                    "size": get_field_as_int(torrent, "size"),
+                    "progress": get_field_as_float(torrent, "progress"),
+                    "ratio": get_field_as_float(torrent, "ratio"),
                     "active_tracker_count": active_tracker_count,
                     "matching_endpoints": matching_endpoints,
                 }
@@ -687,7 +695,7 @@ def export_tracker_state(
     for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         normalized_trackers = sorted(
@@ -739,7 +747,7 @@ def plan_tracker_addition(
 
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
 
@@ -801,7 +809,7 @@ def plan_tracker_removal(
 
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         matching_tracker_urls = _get_matching_tracker_urls(
@@ -871,7 +879,7 @@ def plan_tracker_replacement(
 
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         matching_source_urls = _get_matching_tracker_urls(
@@ -1131,7 +1139,7 @@ def plan_tracker_passkey_replacement(
 
         torrent_hash = _get_torrent_hash(torrent)
         torrent_name = _get_torrent_name(torrent)
-        trackers = _get_active_tracker_urls(
+        trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
 
@@ -1223,16 +1231,6 @@ def apply_tracker_passkey_replacement(
             ) from error
 
 
-def _get_active_tracker_urls(trackers: Any) -> list[str]:
-    """Extract non-disabled tracker URLs from qBittorrent tracker objects."""
-    return [
-        tracker_url
-        for tracker in trackers
-        if not _is_disabled_tracker(tracker)
-        and (tracker_url := _get_field_as_string(tracker, "url")) != ""
-    ]
-
-
 def _get_matching_tracker_urls(
     trackers: list[str],
     tracker: str,
@@ -1246,33 +1244,6 @@ def _get_matching_tracker_urls(
         for tracker_url in trackers
         if normalize_tracker_url(tracker_url, match_mode) == normalized_tracker
     ]
-
-
-def _is_disabled_tracker(tracker: Any) -> bool:
-    """Return whether qBittorrent reports a tracker as disabled."""
-    status = _get_field_as_string(tracker, "status").strip().lower()
-    return status in {"0", "disabled"}
-
-
-def get_raw_tracker_status(raw_tracker: Any) -> int | str | None:
-    """Read a tracker's raw `status` field, preserving its original type.
-
-    Shared by `inspect_tracker` and
-    `qbit_ops.tracker_status.collect_tracker_status` so both feed
-    `classify_raw_tracker_status` the exact same raw shape.
-    """
-    if isinstance(raw_tracker, Mapping):
-        value = raw_tracker.get("status")
-    else:
-        value = getattr(raw_tracker, "status", None)
-
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, int):
-        return value
-    return str(value)
 
 
 def _ensure_distinct_tracker_identity(
@@ -1292,7 +1263,7 @@ def _ensure_distinct_tracker_identity(
 
 def _get_torrent_hash(torrent: Any) -> str:
     """Extract the torrent hash from a qBittorrent torrent object."""
-    torrent_hash = _get_field_as_string(torrent, "hash")
+    torrent_hash = get_field_as_string(torrent, "hash")
     if torrent_hash == "":
         raise RuntimeError("Unable to read torrent hash from qBittorrent data.")
 
@@ -1301,50 +1272,8 @@ def _get_torrent_hash(torrent: Any) -> str:
 
 def _get_torrent_name(torrent: Any) -> str:
     """Extract the torrent name from a qBittorrent torrent object."""
-    torrent_name = _get_field_as_string(torrent, "name")
+    torrent_name = get_field_as_string(torrent, "name")
     if torrent_name == "":
         return _get_torrent_hash(torrent)
 
     return torrent_name
-
-
-def _get_field_as_int(item: Any, field_name: str) -> int:
-    """Read an integer field from an object or mapping."""
-    value: Any
-    if isinstance(item, Mapping):
-        value = item.get(field_name, 0)
-    else:
-        value = getattr(item, field_name, 0)
-
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _get_field_as_float(item: Any, field_name: str) -> float:
-    """Read a float field from an object or mapping."""
-    value: Any
-    if isinstance(item, Mapping):
-        value = item.get(field_name, 0.0)
-    else:
-        value = getattr(item, field_name, 0.0)
-
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _get_field_as_string(item: Any, field_name: str) -> str:
-    """Read a string field from an object or mapping."""
-    value: Any
-    if isinstance(item, Mapping):
-        value = item.get(field_name, "")
-    else:
-        value = getattr(item, field_name, "")
-
-    if value is None:
-        return ""
-
-    return str(value)

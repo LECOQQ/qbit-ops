@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from qbit_ops.qbit_fields import (
+from qbit_ops.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,

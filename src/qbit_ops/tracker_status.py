@@ -37,7 +37,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_string, get_raw_tracker_status
 from qbit_ops.torrents import (
     TorrentFilter,
     select_torrents,
@@ -47,7 +47,6 @@ from qbit_ops.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
     compute_tracker_aggregate_health,
-    get_raw_tracker_status,
     normalize_tracker_host,
     sanitize_tracker_text,
 )

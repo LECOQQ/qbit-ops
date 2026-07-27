@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Literal
 
-from qbit_ops.qbit_fields import (
+from qbit_ops.qbit.fields import (
+    get_active_tracker_urls,
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_raw_tracker_status,
+    is_disabled_tracker,
 )
 from qbit_ops.selectors import TorrentNotFoundError, resolve_torrent_hash
 from qbit_ops.torrent_states import (
@@ -29,7 +32,6 @@ from qbit_ops.torrent_states import (
 from qbit_ops.trackers import (
     classify_raw_tracker_status,
     describe_tracker_url,
-    get_raw_tracker_status,
     has_tracker_host,
     normalize_tracker_host,
     sanitize_tracker_text,
@@ -234,7 +236,7 @@ def select_torrents(
     candidate_total = len(candidates)
     for index, torrent in enumerate(candidates, start=1):
         torrent_hash = get_field_as_string(torrent, "hash")
-        active_trackers = _get_active_tracker_urls(
+        active_trackers = get_active_tracker_urls(
             client.torrents_trackers(torrent_hash)
         )
         if on_progress is not None:
@@ -940,7 +942,7 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
             {
                 "url": tracker_url,
                 "status": get_field_as_string(tracker, "status"),
-                "disabled": _is_disabled_tracker(tracker),
+                "disabled": is_disabled_tracker(tracker),
             }
         )
 
@@ -980,19 +982,3 @@ def get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
         )
 
     return tracker_details
-
-
-def _get_active_tracker_urls(trackers: Any) -> list[str]:
-    """Extract non-disabled tracker URLs from qBittorrent tracker objects."""
-    return [
-        tracker_url
-        for tracker in trackers
-        if not _is_disabled_tracker(tracker)
-        and (tracker_url := get_field_as_string(tracker, "url")) != ""
-    ]
-
-
-def _is_disabled_tracker(tracker: Any) -> bool:
-    """Return whether qBittorrent reports a tracker as disabled."""
-    status = get_field_as_string(tracker, "status").strip().lower()
-    return status in {"0", "disabled"}

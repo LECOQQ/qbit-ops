@@ -8,6 +8,11 @@ reasoning behind this module's existence and its deliberately small
 scope: it exists to remove two concrete duplications (client creation,
 recoverable-failure classification), not to become a generic service
 layer.
+
+`create_qbit_client` itself now lives in `qbit_ops.qbit.client` (the
+qBittorrent boundary, see `docs/audits/2026-07-package-refactor-plan.md`
+Phase 3) and is re-exported here by narrow delegation so every existing
+call site and test seam keeps working unchanged.
 """
 
 from __future__ import annotations
@@ -15,10 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import qbittorrentapi
-
-from qbit_ops.config import load_qbit_config
 from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_ops.qbit.client import create_qbit_client
 from qbit_ops.status import StatusSnapshot, build_status_snapshot_from_data
 from qbit_ops.torrents import (
     TorrentFilter,
@@ -26,49 +29,13 @@ from qbit_ops.torrents import (
     select_torrents_from_items,
 )
 
-
-def create_qbit_client() -> Any:
-    """Create and authenticate a qBittorrent API client.
-
-    Relocated verbatim from `qbit_ops.main._create_qbit_client` (Phase 9
-    found its body had no Typer dependency despite living in the CLI
-    module) -- `qbit_ops.main` re-exports this under the same private name so
-    every existing call site and test seam
-    (`tests/conftest.py::configure_qbit_backend` monkeypatches
-    `qbit_ops.main._create_qbit_client` by string path) keeps working
-    unchanged. Never prints or exits: raises `QbitAuthenticationError`/
-    `QbitConnectionError` for the caller to render or classify.
-    """
-    config = load_qbit_config()
-    client = qbittorrentapi.Client(
-        host=config.host,
-        username=config.username,
-        password=config.password,
-    )
-
-    try:
-        client.auth_log_in()
-    except Exception as error:
-        if _is_qbit_error(error, {"LoginFailed"}):
-            raise QbitAuthenticationError(
-                "Authentication to qBittorrent failed. Check QBIT_USER and "
-                "QBIT_PASSWORD."
-            ) from error
-        if _is_qbit_error(error, {"APIConnectionError"}):
-            raise QbitConnectionError(
-                f"Unable to connect to qBittorrent at {config.host}."
-            ) from error
-
-        raise QbitConnectionError(
-            f"Unable to initialize qBittorrent client: {error}"
-        ) from error
-
-    return client
-
-
-def _is_qbit_error(error: Exception, class_names: set[str]) -> bool:
-    """Return whether an exception matches expected qBittorrent errors."""
-    return type(error).__name__ in class_names
+__all__ = [
+    "create_qbit_client",
+    "RecoverableFailure",
+    "classify_recoverable_qbit_failure",
+    "TuiRefreshResult",
+    "collect_tui_refresh",
+]
 
 
 @dataclass(frozen=True)

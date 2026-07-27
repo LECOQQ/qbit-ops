@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from qbit_ops.config import QbitConfig
-from qbit_ops.qbit_fields import get_field_as_string
+from qbit_ops.qbit.fields import get_field_as_string
 from qbit_ops.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
