@@ -34,6 +34,15 @@ ProgressCallback = Callable[[int, int], None]
 MAX_DISPLAYED_HASH_CANDIDATES = 10
 
 
+def is_interactive_terminal() -> bool:
+    """Report whether stderr is an interactive TTY.
+
+    A thin seam around `err_console.is_terminal` so tests can
+    monkeypatch it without depending on Rich's own detection.
+    """
+    return err_console.is_terminal
+
+
 class OutputFormat(StrEnum):
     """Expose the shared machine/human output formats for read commands."""
 

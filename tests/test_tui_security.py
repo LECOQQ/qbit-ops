@@ -48,7 +48,22 @@ _FORBIDDEN_TRACKERS_NAMES = {
 
 
 def _tui_module_files() -> list[Path]:
-    return sorted(TUI_PACKAGE_DIR.glob("*.py"))
+    """List every TUI production module, including future subdirectories.
+
+    Uses `rglob`, not a one-directory `glob`, so a future split of
+    `app/tui/app.py` into `app/tui/widgets/*.py` and
+    `app/tui/screens/*.py` (see
+    `docs/audits/2026-07-package-refactor-plan.md`, Phase 9) cannot make
+    this security boundary silently vacuous by leaving new files
+    unscanned.
+    """
+    files = sorted(
+        path
+        for path in TUI_PACKAGE_DIR.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    assert files, f"expected at least one .py file under {TUI_PACKAGE_DIR}"
+    return files
 
 
 def _imported_names_by_module(source: str) -> dict[str, set[str]]:
@@ -142,6 +157,30 @@ def test_tui_modules_never_import_ui_module() -> None:
             f"{path} must never import app.ui -- see "
             "app.tui.app._format_byte_rate for the sanctioned duplicate."
         )
+
+
+def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
+    """Prove a nested file survives the same discovery pattern
+    `_tui_module_files` uses.
+
+    Builds a synthetic `tui/` tree with a `screens/` subdirectory --
+    exactly the shape Phase 9 (`docs/audits/2026-07-package-refactor-plan.md`)
+    plans to move `app/tui/app.py`'s modal screens into. A one-directory
+    `glob("*.py")` would miss `screens/help.py` here and make every
+    security assertion above silently vacuous once that split happens;
+    `rglob` must not.
+    """
+    root = tmp_path / "tui"
+    (root / "screens").mkdir(parents=True)
+    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "screens" / "help.py").write_text("y = 2\n", encoding="utf-8")
+
+    discovered = sorted(
+        path for path in root.rglob("*.py") if "__pycache__" not in path.parts
+    )
+
+    assert root / "screens" / "help.py" in discovered
+    assert len(discovered) == 2
 
 
 def test_tui_state_module_never_imports_textual() -> None:
