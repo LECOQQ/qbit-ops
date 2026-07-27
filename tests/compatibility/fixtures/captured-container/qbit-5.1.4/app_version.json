@@ -1,7 +1,12 @@
 {
   "_meta": {
+    "architecture": "amd64",
     "capture_date": "2026-07-27",
     "description": "Real `app_version()` string.",
+    "expected_architecture": "amd64",
+    "expected_qbittorrent_version": "v5.1.4",
+    "expected_web_api_version": "2.11.4",
+    "fields_normalized": [],
     "fields_removed": [],
     "image_digest": "sha256:c9990949e968e99333f47f49da7d16e81ba6e1469c8c46807a65b984c9e8b6ff",
     "image_reference": "linuxserver/qbittorrent:5.1.4",
