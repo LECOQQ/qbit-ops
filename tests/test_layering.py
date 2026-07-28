@@ -134,9 +134,11 @@ def test_textual_import_stays_confined_to_the_tui_package() -> None:
     assert (
         files
     ), "expected at least one production module outside qbit_ops/tui/"
-    assert any(path.name == "main.py" for path in files), (
-        "expected qbit_ops/main.py to be part of the scanned set -- an empty "
-        "or wrong scan would make this test vacuously pass"
+    assert any(
+        path.name == "app.py" and path.parent.name == "cli" for path in files
+    ), (
+        "expected qbit_ops/cli/app.py to be part of the scanned set -- an "
+        "empty or wrong scan would make this test vacuously pass"
     )
 
     for path in files:
@@ -149,14 +151,17 @@ def test_textual_import_stays_confined_to_the_tui_package() -> None:
 
 
 def test_deferred_tui_import_in_main_is_not_flagged_as_module_level() -> None:
-    """Positive companion: `qbit_ops/main.py`'s deferred Textual import
-    is allowed.
+    """Positive companion: `qbit_ops/cli/commands/tui.py`'s deferred
+    Textual import is allowed.
 
     Proves the module-level/deferred distinction is real:
-    `qbit_ops/main.py` does reference `qbit_ops.tui.app` (inside the
-    `tui` command body), yet the recursive scan above does not flag it.
+    `qbit_ops/cli/commands/tui.py` does reference `qbit_ops.tui.app`
+    (inside the `tui` command body), yet the recursive scan above does
+    not flag it.
     """
-    main_source = (APP_PACKAGE_DIR / "main.py").read_text(encoding="utf-8")
+    main_source = (APP_PACKAGE_DIR / "cli" / "commands" / "tui.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "qbit_ops.tui.app" in main_source
     roots = _module_level_imported_roots(main_source)

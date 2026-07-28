@@ -45,8 +45,8 @@ for `status`/`trackers status`/`explain`, but `1` everywhere else). See
 
 Every handled failure is recorded as an `qbit_ops.errors.AppError` (`category`,
 `code`, `message`, optional `remediation`, optional `target`) before it is
-rendered — `qbit_ops.main._fail()`, `_fail_status_usage()`, and
-`_fail_ambiguous_hash()` all build one. `qbit_ops.main.last_app_error` always
+rendered — `qbit_ops.cli.error_boundary.fail()`, `fail_status_usage()`, and
+`fail_ambiguous_hash()` all build one. `qbit_ops.cli.error_boundary.last_app_error` always
 holds the most recently constructed `AppError`, so tests (and, later, a
 TUI) can assert on structured fields instead of parsing stderr text. See
 [TUI-ready mapping](#tui-ready-mapping).
@@ -55,7 +55,8 @@ TUI) can assert on structured fields instead of parsing stderr text. See
 
 A **fatal error** stops the command before it produces its normal
 result: invalid input, an unreachable qBittorrent instance, a rejected
-login, an internal defect. It is always reported through `_fail()` (or
+login, an internal defect. It is always reported through
+`qbit_ops.cli.error_boundary.fail()` (or
 an equivalent helper) and always exits non-zero.
 
 An **operational finding** is a successfully collected report whose
@@ -93,7 +94,8 @@ qBittorrent and then relabelled as a generic remote failure:
   contributed by this occurrence" rather than an error, consistent
   with `build_torrent_filter()`'s existing, tested behavior.
 - Unsupported `--format` combinations: rejected by
-  `qbit_ops.main._validate_format_support()` against the `FORMAT_SUPPORT`
+  `qbit_ops.cli.validation.validate_format_support()` against the
+  `FORMAT_SUPPORT`
   table (see [docs/COMMANDS.md](COMMANDS.md#format-support-matrix)).
 - `status --watch`'s own option combinations (`--quiet` with `--watch`,
   an unsupported `--format`, a non-finite `--interval`): rejected by
@@ -105,7 +107,7 @@ any network call — verified in `tests/test_errors.py`.
 
 ## Exit-code policy
 
-Two layers, matching `qbit_ops.main.EXIT_CODE_TABLE`:
+Two layers, matching `qbit_ops.cli.exit_codes.EXIT_CODE_TABLE`:
 
 ### Shared process-level principles
 
@@ -127,7 +129,7 @@ the authoritative mapping:
 ```
 
 Numeric exit codes must always be interpreted in the context of the
-invoked command — see `qbit_ops.main.EXIT_CODE_TABLE` and
+invoked command — see `qbit_ops.cli.exit_codes.EXIT_CODE_TABLE` and
 [docs/COMMANDS.md](COMMANDS.md#exit-codes) for the exact per-command
 tables. This phase intentionally did not redesign any existing exit
 code purely for cross-command uniformity; it only added the shared `70`
@@ -157,7 +159,8 @@ distinct from `3` by design.
 One project-wide rule for fatal command errors: **a fatal error is
 reported on stderr only; stdout stays empty.** No command emits a
 partial or malformed success payload — every collection happens inside
-the same guarded block as client creation (`qbit_ops.main.qbit_error_boundary()`),
+the same guarded block as client creation
+(`qbit_ops.cli.error_boundary.qbit_error_boundary()`),
 strictly before any rendering begins, so a failure never has partial
 output to leave behind. This applies identically to every `--format`;
 a machine-readable consumer parsing stdout for JSON/JSONL/CSV can
@@ -172,7 +175,8 @@ and `status`'s existing per-command silence-contract tests).
 
 ## Internal-error behavior
 
-Every registered command is wrapped by `qbit_ops.main._catch_internal_errors`,
+Every registered command is wrapped by
+`qbit_ops.cli.error_boundary.catch_internal_errors`,
 the outermost boundary: it re-raises `typer.Exit` and `KeyboardInterrupt`
 untouched, and converts anything else into a concise `Internal error:
 <ExceptionType>: <message>` line on stderr plus `ExitCode.INTERNAL`
@@ -180,13 +184,13 @@ untouched, and converts anything else into a concise `Internal error:
 never converted into `unavailable`/`3` or a command's own warning/
 critical code.
 
-`qbit_ops.main.qbit_error_boundary()` — used around client creation plus one
-domain call in most commands — only degrades `ConfigError`,
-`QbitAuthenticationError`, `QbitConnectionError`, and
+`qbit_ops.cli.error_boundary.qbit_error_boundary()` — used around client
+creation plus one domain call in most commands — only degrades
+`ConfigError`, `QbitAuthenticationError`, `QbitConnectionError`, and
 `(qbittorrentapi.APIError, OSError)` into a rendered, categorized
-`_fail()`. A bare `RuntimeError`, `TypeError`, `AssertionError`, or any
+`fail()`. A bare `RuntimeError`, `TypeError`, `AssertionError`, or any
 other exception not in that set is deliberately left to propagate to
-`_catch_internal_errors` instead of being silently relabelled as a
+`catch_internal_errors` instead of being silently relabelled as a
 remote failure. `status`'s one-shot collection
 (`_collect_status_snapshot_safely()`) and its `--watch` collection
 (`_collect_status_snapshot_for_watch()`) apply the same discipline for

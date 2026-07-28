@@ -15,8 +15,9 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-import qbit_ops.main as m
-from qbit_ops.main import DoctorExitCode, app
+import qbit_ops.cli.rendering as m
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import DoctorExitCode
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -143,7 +144,7 @@ def test_authentication_failure_exits_two(
 ) -> None:
     """Ensure a rejected login fails CONN002 specifically, while CONN001
     (reachability) still passes."""
-    from qbit_ops.main import QbitAuthenticationError
+    from qbit_ops.errors import QbitAuthenticationError
 
     configure_qbit_backend(
         config=CLEAN_CONFIG,

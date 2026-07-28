@@ -19,14 +19,14 @@ from qbit_ops.backup import (
     diff_backup_exports,
     redact_backup_diff,
 )
-from qbit_ops.main import app
+from qbit_ops.cli.app import app
+from qbit_ops.cli.rendering import print_error
 from qbit_ops.trackers import (
     SafeTrackerIdentity,
     describe_tracker_url,
     redact_tracker_identity,
     sanitize_tracker_text,
 )
-from qbit_ops.ui import print_error
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_A = "a" * 40
@@ -272,7 +272,9 @@ def test_add_if_present_confirmation_never_leaks_secrets(
     runner: CliRunner, configure_qbit_backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Items 8-10: `add-if-present` preview/confirmation never leaks."""
-    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.is_interactive_terminal", lambda: True
+    )
     client = _client_with_secret_tracker(status=2)
     configure_qbit_backend(client=client)
 
@@ -298,7 +300,9 @@ def test_remove_confirmation_never_leaks_secrets(
     runner: CliRunner, configure_qbit_backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Items 8-10: `remove` preview/confirmation never leaks."""
-    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.is_interactive_terminal", lambda: True
+    )
     client = _client_with_secret_tracker(status=2)
     configure_qbit_backend(client=client)
 
@@ -316,7 +320,9 @@ def test_replace_confirmation_never_leaks_secrets(
     runner: CliRunner, configure_qbit_backend, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Items 8-10: `replace` preview/confirmation never leaks."""
-    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.is_interactive_terminal", lambda: True
+    )
     client = _client_with_secret_tracker(status=2)
     configure_qbit_backend(client=client)
 
@@ -422,7 +428,9 @@ def test_progress_descriptions_never_leak_secrets(
     """Item 13: progress bar/spinner text never embeds tracker data (it is
     always a static message, but this pins that down for every tracker
     read command)."""
-    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.is_interactive_terminal", lambda: True
+    )
     configure_qbit_backend(client=_client_with_secret_tracker())
 
     for argv in (

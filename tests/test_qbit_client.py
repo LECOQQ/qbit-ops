@@ -3,7 +3,7 @@
 `qbit_ops.qbit.client.create_qbit_client` is now the single place that
 constructs a `qbittorrentapi.Client` and classifies its login
 exceptions -- see `docs/audits/2026-07-package-refactor-plan.md` (Phase
-3). `qbit_ops.app_services` and `qbit_ops.main._create_qbit_client`
+3). `qbit_ops.app_services` and `qbit_ops.cli.error_boundary.create_qbit_client`
 re-export it unchanged, so this file characterizes the canonical path
 directly rather than through either re-export.
 """
@@ -34,12 +34,13 @@ class _FakeClient:
 
 
 def test_create_qbit_client_is_the_single_re_exported_path() -> None:
-    """`app_services` and `main` re-export the exact same function object."""
+    """`app_services` and `cli.error_boundary` re-export the exact same
+    function object."""
     import qbit_ops.app_services as app_services
-    import qbit_ops.main as main_module
+    import qbit_ops.cli.error_boundary as error_boundary
 
     assert app_services.create_qbit_client is create_qbit_client
-    assert main_module._create_qbit_client is create_qbit_client
+    assert error_boundary.create_qbit_client is create_qbit_client
 
 
 def test_create_qbit_client_passes_configuration_unchanged(
@@ -243,9 +244,11 @@ def test_is_qbit_error_false_for_bare_os_error() -> None:
     assert is_qbit_error(OSError("connection reset")) is False
 
 
-def test_main_module_no_longer_imports_qbittorrentapi_directly() -> None:
-    """`qbit_ops.main` must not import `qbittorrentapi` at all (constat
-    A-6/A-8).
+def test_error_boundary_module_no_longer_imports_qbittorrentapi_directly() -> (
+    None
+):
+    """`qbit_ops.cli.error_boundary` must not import `qbittorrentapi` at
+    all (constat A-6/A-8).
 
     A static source check: the module now reaches `qbittorrentapi`'s
     exception type only indirectly, through
@@ -254,9 +257,11 @@ def test_main_module_no_longer_imports_qbittorrentapi_directly() -> None:
     import ast
     from pathlib import Path
 
-    import qbit_ops.main
+    import qbit_ops.cli.error_boundary
 
-    source = Path(qbit_ops.main.__file__).read_text(encoding="utf-8")
+    source = Path(qbit_ops.cli.error_boundary.__file__).read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(source)
     imported_modules: set[str] = set()
     for node in ast.walk(tree):

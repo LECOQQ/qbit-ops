@@ -19,7 +19,7 @@ textual = { version = ">=8.2.8", optional = true }
 tui = ["textual"]
 
 [tool.poetry.scripts]
-qbit-ops = "qbit_ops.main:app"
+qbit-ops = "qbit_ops.cli.app:app"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"

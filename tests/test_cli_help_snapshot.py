@@ -8,8 +8,8 @@ terminal snapshot, so the tests stay stable across Typer/Rich decoration
 changes, terminal width, or harmless whitespace -- see
 `docs/audits/2026-07-package-refactor-plan.md` §5 (T1) and §7.
 
-`qbit_ops.main.EXIT_CODE_TABLE` is the single source of truth for the set of
-registered commands (already used the same way by
+`qbit_ops.cli.exit_codes.EXIT_CODE_TABLE` is the single source of truth
+for the set of registered commands (already used the same way by
 `tests/test_errors.py::test_exit_code_table_matches_registered_commands`),
 so this file's parametrization cannot drift from the actual CLI surface.
 """
@@ -19,7 +19,8 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from qbit_ops.main import EXIT_CODE_TABLE, app
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE
 
 runner = CliRunner()
 

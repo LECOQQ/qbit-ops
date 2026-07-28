@@ -81,12 +81,27 @@ def _imported_names_by_module(source: str) -> dict[str, set[str]]:
     return imports
 
 
-def test_tui_modules_never_import_app_main() -> None:
+def test_tui_modules_never_import_the_cli_package() -> None:
+    """A TUI module must never depend on the CLI layer.
+
+    Updated for the CLI reorganization (see docs/ARCHITECTURE.md):
+    `qbit_ops.main` no longer exists -- the equivalent, and now broader,
+    boundary is that no TUI module may import `qbit_ops.cli` or any of
+    its submodules (`cli.app`, `cli.commands.*`, `cli.rendering`,
+    `cli.error_boundary`, `cli.validation`) -- see
+    `docs/TUI_ARCHITECTURE_REVIEW.md` §12.
+    """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "qbit_ops.main" not in imports, (
-            f"{path} must never import qbit_ops.main -- a TUI must not depend "
-            "on the CLI module (docs/TUI_ARCHITECTURE_REVIEW.md §12)."
+        leaked = {
+            module
+            for module in imports
+            if module == "qbit_ops.cli" or module.startswith("qbit_ops.cli.")
+        }
+        assert not leaked, (
+            f"{path} must never import the CLI package ({leaked}) -- a TUI "
+            "must not depend on the CLI layer "
+            "(docs/TUI_ARCHITECTURE_REVIEW.md §12)."
         )
 
 
@@ -146,15 +161,18 @@ def test_tui_modules_never_import_backup_module() -> None:
 def test_tui_modules_never_import_ui_module() -> None:
     """TUI widgets must never import the CLI's Rich rendering helpers.
 
-    `qbit_ops.ui` renders for a Rich `Console`/CLI confirmation prompts, not
-    a Textual widget tree -- a TUI consuming it would be "scraping
-    Rich-rendered output" by another name. Pure formatting duplicated
-    locally instead (see `qbit_ops.tui.app._format_byte_rate`).
+    `qbit_ops.cli.rendering` (formerly `qbit_ops.ui`) renders for a Rich
+    `Console`/CLI confirmation prompts, not a Textual widget tree -- a
+    TUI consuming it would be "scraping Rich-rendered output" by
+    another name. Pure formatting duplicated locally instead (see
+    `qbit_ops.tui.app._format_byte_rate`). Subsumed by, but kept
+    alongside, the broader `test_tui_modules_never_import_the_cli_package`
+    check above for an explicit, positive pin on this specific module.
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "qbit_ops.ui" not in imports, (
-            f"{path} must never import qbit_ops.ui -- see "
+        assert "qbit_ops.cli.rendering" not in imports, (
+            f"{path} must never import qbit_ops.cli.rendering -- see "
             "qbit_ops.tui.app._format_byte_rate for the sanctioned duplicate."
         )
 

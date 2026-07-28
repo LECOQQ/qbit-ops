@@ -12,7 +12,7 @@ import re
 
 from typer.testing import CliRunner
 
-from qbit_ops.main import app
+from qbit_ops.cli.app import app
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 

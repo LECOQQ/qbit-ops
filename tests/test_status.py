@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from qbit_ops.cli.rendering import format_byte_rate
 from qbit_ops.status import (
     Health,
     StatusAlert,
@@ -19,7 +20,6 @@ from qbit_ops.status import (
     status_exit_code,
     watch_status,
 )
-from qbit_ops.ui import format_byte_rate
 from tests.support import FakeQbitClient, make_torrent
 
 

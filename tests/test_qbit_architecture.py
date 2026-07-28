@@ -63,8 +63,10 @@ def test_qbittorrentapi_import_is_confined_to_the_qbit_boundary() -> None:
     assert (
         files
     ), "expected at least one production module outside qbit_ops/qbit/"
-    assert any(path.name == "main.py" for path in files), (
-        "expected qbit_ops/main.py to be part of the scanned set -- an "
+    assert any(
+        path.name == "app.py" and path.parent.name == "cli" for path in files
+    ), (
+        "expected qbit_ops/cli/app.py to be part of the scanned set -- an "
         "empty or wrong scan would make this test vacuously pass"
     )
 
@@ -118,8 +120,9 @@ def test_no_production_module_imports_the_tests_package() -> None:
 def test_client_construction_exists_in_exactly_one_canonical_location() -> None:
     """`create_qbit_client` must be *defined* only in
     `qbit_ops/qbit/client.py` -- `qbit_ops.app_services` and
-    `qbit_ops.main` only re-export the same function object (proven
-    elsewhere, `tests/test_qbit_client.py`), never redefine it."""
+    `qbit_ops.cli.error_boundary` only re-export the same function
+    object (proven elsewhere, `tests/test_qbit_client.py`), never
+    redefine it."""
     files = _production_python_files(PACKAGE_DIR)
 
     defining_files: list[str] = []

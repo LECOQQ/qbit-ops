@@ -364,7 +364,7 @@ not.
 **No mutation is reachable from the TUI.** It shares the exact same
 `TorrentFilter` vocabulary and safe torrent/tracker data as the rest of
 the CLI (`qbit_ops.torrents`, `qbit_ops.status`, `qbit_ops.app_services`) but never
-imports any `plan_*`/`apply_*` mutation function, `qbit_ops.main`, or any
+imports any `plan_*`/`apply_*` mutation function, `qbit_ops.cli`, or any
 raw-tracker-URL-producing helper — enforced by a static (AST) test,
 not just a runtime one (`tests/test_tui_security.py`).
 
@@ -1584,7 +1584,7 @@ raw URL never has one to accidentally render.
 ## Format Support Matrix
 
 Every read-only command shares one `--format` option and one
-`qbit_ops.ui.OutputFormat` enum (`table | json | jsonl | csv`). `--output` no
+`qbit_ops.cli.rendering.OutputFormat` enum (`table | json | jsonl | csv`). `--output` no
 longer exists anywhere in the CLI — this was an intentional pre-1.0 break,
 not an alias (see `docs/DECISIONS.md`, 2026-07-24).
 
@@ -1679,7 +1679,7 @@ feedback on stderr — a spinner or a progress bar, never both — when
 Progress is disabled — silently, with no fallback text — whenever any of
 those does not hold: `--format json|jsonl|csv`, a non-interactive stderr
 (piped, redirected, CI, cron), or `--quiet`. This is decided once per
-command by `qbit_ops.ui.progress_enabled()` and never re-implemented inline.
+command by `qbit_ops.cli.rendering.progress_enabled()` and never re-implemented inline.
 
 Progress is always **transient**: it never survives in the final
 scrollback. Before a table, a mutation preview, a confirmation prompt, a
@@ -1691,11 +1691,11 @@ completion, on a raised exception, and on `Ctrl+C`.
 
 ### Spinner vs. progress bar
 
-* **Spinner** (`qbit_ops.ui.transient_spinner`) — one pending remote request,
+* **Spinner** (`qbit_ops.cli.rendering.transient_spinner`) — one pending remote request,
   or a bounded collection fetched with a single call, where there is
   nothing meaningful to count per item (`Loading torrents…`,
   `Checking connection…`).
-* **Progress bar** (`qbit_ops.ui.transient_progress`) — a collection has
+* **Progress bar** (`qbit_ops.cli.rendering.transient_progress`) — a collection has
   already been fetched and is then processed item by item with a real,
   known total, typically one extra API call per item
   (`Scanning torrent trackers… 642/1105`).
@@ -1995,7 +1995,7 @@ scanned. Progress reporting never changes this call count (see
 
 `trackers status` reports operational health, not success/failure, using
 its own codes (`qbit_ops.tracker_status.tracker_status_exit_code`, mirrored by
-`qbit_ops.main.TrackerStatusExitCode`):
+`qbit_ops.cli.exit_codes.TrackerStatusExitCode`):
 
 - `0`: `healthy` — includes an empty selection and a report where every
   finding is `disabled`.
@@ -2121,7 +2121,7 @@ on stderr, `ExitCode.ERROR`), before an explanation is ever computed.
 
 `explain torrent`/`explain tracker` share one scheme
 (`qbit_ops.explain.explanation_exit_code`, mirrored by
-`qbit_ops.main.ExplainExitCode`):
+`qbit_ops.cli.exit_codes.ExplainExitCode`):
 
 - `0`: `info` — no warning, critical, or unknown finding.
 - `1`: `warning` or `unknown` — at least one such finding, nothing
@@ -2271,7 +2271,8 @@ in [Status Watch Mode](#status-watch-mode).
 ### `doctor` exit codes
 
 `doctor` also reports a severity, not success/failure, using its own
-codes (`qbit_ops.doctor.doctor_exit_code`, mirrored by `qbit_ops.main.DoctorExitCode`
+codes (`qbit_ops.doctor.doctor_exit_code`, mirrored by
+`qbit_ops.cli.exit_codes.DoctorExitCode`
 for readability at call sites — see [Doctor](#doctor) for the full check
 catalogue and [Exit codes](#overall-status-and-exit-codes) there for
 detail):

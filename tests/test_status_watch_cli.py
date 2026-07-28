@@ -16,13 +16,12 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-import qbit_ops.main as m
-from qbit_ops.main import (
-    DEFAULT_STATUS_WATCH_INTERVAL_SECONDS,
-    ExitCode,
-    StatusExitCode,
-    app,
-)
+import qbit_ops.cli.commands.status as status_module
+import qbit_ops.cli.error_boundary as error_boundary
+import qbit_ops.cli.rendering as rendering
+from qbit_ops.cli.app import app
+from qbit_ops.cli.commands.status import DEFAULT_STATUS_WATCH_INTERVAL_SECONDS
+from qbit_ops.cli.exit_codes import ExitCode, StatusExitCode
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -31,8 +30,10 @@ ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 def _install_backend(
     monkeypatch: pytest.MonkeyPatch, client: FakeQbitClient
 ) -> None:
-    monkeypatch.setattr(m, "load_qbit_config", lambda: make_config())
-    monkeypatch.setattr(m, "_create_qbit_client", lambda: client)
+    monkeypatch.setattr(
+        error_boundary, "load_qbit_config", lambda: make_config()
+    )
+    monkeypatch.setattr(error_boundary, "create_qbit_client", lambda: client)
 
 
 def _stop_after_n_sleeps(
@@ -49,7 +50,7 @@ def _stop_after_n_sleeps(
         if len(delays) >= n:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(m.time, "sleep", _fake_sleep)
+    monkeypatch.setattr(status_module.time, "sleep", _fake_sleep)
     return delays
 
 
@@ -65,7 +66,7 @@ def _capture_watch_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict:
         captured.update(kwargs)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(m, "watch_status", _fake_watch_status)
+    monkeypatch.setattr(status_module, "watch_status", _fake_watch_status)
     return captured
 
 
@@ -169,7 +170,7 @@ def test_table_watch_creates_exactly_one_live_display(
     _stop_after_n_sleeps(monkeypatch, 3)
 
     enter_count = 0
-    real_live_status_display = m.live_status_display
+    real_live_status_display = rendering.live_status_display
 
     def _spying_live_status_display():
         nonlocal enter_count
@@ -186,7 +187,9 @@ def test_table_watch_creates_exactly_one_live_display(
 
         return _Wrapper()
 
-    monkeypatch.setattr(m, "live_status_display", _spying_live_status_display)
+    monkeypatch.setattr(
+        rendering, "live_status_display", _spying_live_status_display
+    )
 
     result = runner.invoke(app, ["status", "--watch"])
 
@@ -203,7 +206,7 @@ def test_table_watch_updates_the_display_instead_of_appending(
     _stop_after_n_sleeps(monkeypatch, 3)
 
     update_calls = []
-    real_live_status_display = m.live_status_display
+    real_live_status_display = rendering.live_status_display
 
     def _spying_live_status_display():
         with real_live_status_display() as update:
@@ -217,7 +220,9 @@ def test_table_watch_updates_the_display_instead_of_appending(
     from contextlib import contextmanager
 
     monkeypatch.setattr(
-        m, "live_status_display", contextmanager(_spying_live_status_display)
+        rendering,
+        "live_status_display",
+        contextmanager(_spying_live_status_display),
     )
 
     result = runner.invoke(app, ["status", "--watch"])
@@ -239,8 +244,8 @@ def test_table_watch_never_uses_transient_spinner_or_progress(
     def _fail_if_called(*_args: object, **_kwargs: object):
         raise AssertionError("transient progress helper must not be used")
 
-    monkeypatch.setattr(m, "transient_spinner", _fail_if_called)
-    monkeypatch.setattr(m, "transient_progress", _fail_if_called)
+    monkeypatch.setattr(rendering, "transient_spinner", _fail_if_called)
+    monkeypatch.setattr(rendering, "transient_progress", _fail_if_called)
 
     result = runner.invoke(app, ["status", "--watch"])
 
@@ -280,7 +285,7 @@ def test_table_watch_interruption_during_collection_closes_cleanly(
     # iteration still completes and sleeps once before the second collect
     # raises, so sleep must be faked too, or this test would really wait
     # out the default 5s interval.
-    monkeypatch.setattr(m.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(status_module.time, "sleep", lambda seconds: None)
 
     result = runner.invoke(app, ["status", "--watch"])
 
@@ -313,7 +318,7 @@ def test_jsonl_watch_emits_one_valid_object_per_line(
 def test_emit_status_jsonl_flushes_stdout_after_writing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `_emit_status_jsonl` explicitly flushes after every line.
+    """Ensure `emit_status_jsonl` explicitly flushes after every line.
 
     Exercised directly (not through `CliRunner`, which swaps `sys.stdout`
     for its own capture buffer during `invoke()` — a patch applied
@@ -331,10 +336,10 @@ def test_emit_status_jsonl_flushes_stdout_after_writing(
         def flush(self) -> None:
             events.append("flush")
 
-    monkeypatch.setattr(m.sys, "stdout", _FakeStdout())
+    monkeypatch.setattr(rendering.sys, "stdout", _FakeStdout())
 
     snapshot = build_unavailable_snapshot(code="x", message="y")
-    m._emit_status_jsonl(snapshot)
+    rendering.emit_status_jsonl(snapshot)
 
     assert "flush" in events
     assert events.index("flush") > events.index(

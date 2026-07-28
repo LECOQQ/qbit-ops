@@ -16,9 +16,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import ExitCode
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.validation import FORMAT_SUPPORT
 from qbit_ops.config import ConfigError, QbitConfig
-from qbit_ops.main import FORMAT_SUPPORT, ExitCode, app
-from qbit_ops.ui import OutputFormat
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"

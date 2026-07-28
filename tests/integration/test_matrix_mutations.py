@@ -14,7 +14,7 @@ import time
 from packaging.version import Version
 from typer.testing import CliRunner
 
-from qbit_ops.main import app
+from qbit_ops.cli.app import app
 from tests.integration._instrumentation import record_http_requests
 
 runner = CliRunner()
