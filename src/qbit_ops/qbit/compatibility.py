@@ -99,6 +99,31 @@ class CompatibilityEvidence:
             key=lambda entry: Version(entry.expected_version.removeprefix("v")),
         )
 
+    def oldest(self) -> QbitMatrixEntry:
+        """Return the entry with the lowest `expected_version`."""
+        return min(
+            self.entries,
+            key=lambda entry: Version(entry.expected_version.removeprefix("v")),
+        )
+
+    def entry_for_application_version(
+        self, version: str
+    ) -> QbitMatrixEntry | None:
+        """Return the entry whose `expected_version` exactly matches
+        `version`, or `None` if no entry does.
+
+        Compares normalized version strings (leading `v` stripped from
+        both sides), not `packaging.version.Version` equality -- an
+        exact-evidence match must be a literal, exact release match,
+        the same notion `docs/COMPATIBILITY.md` §10 rule 3 requires
+        ("a patch release is never evidence for its whole line").
+        """
+        normalized = version.removeprefix("v")
+        for entry in self.entries:
+            if entry.expected_version.removeprefix("v") == normalized:
+                return entry
+        return None
+
 
 def load_compatibility_evidence() -> CompatibilityEvidence:
     """Load, validate, and return every packaged compatibility entry.

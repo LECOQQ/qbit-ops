@@ -22,15 +22,39 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
+from packaging.version import InvalidVersion, Version
+
 from qbit_ops.config import QbitConfig
+from qbit_ops.qbit.compatibility import (
+    CompatibilityEvidence,
+    CompatibilityManifestError,
+    QbitMatrixEntry,
+    load_compatibility_evidence,
+)
 from qbit_ops.qbit.fields import get_field_as_string
 from qbit_ops.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
-_RECOGNIZED_MAJOR_VERSIONS = {4, 5}
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 _URL_USERINFO_PATTERN = re.compile(r"://[^/@\s]+:[^/@\s]+@")
+
+# Web API floors already declared by `qbittorrent-api` itself
+# (`version_introduced`) for the two mutation capabilities qbit-ops
+# actually issues that carry a declared floor -- see
+# docs/COMPATIBILITY.md §3. `torrents/addTrackers` and every read
+# endpoint qbit-ops calls have no declared floor, so they are not
+# listed here. The pause/resume vs. stop/start Web API 2.11.0
+# threshold is deliberately excluded: `qbittorrent-api` itself selects
+# the endpoint internally (docs/COMPATIBILITY.md §2), so it is never a
+# capability that can be "missing" from qbit-ops's point of view.
+_REQUIRED_WEB_API_CAPABILITIES: tuple[tuple[str, str], ...] = (
+    ("torrent reannounce (torrents/reannounce)", "2.0.2"),
+    (
+        "tracker edit/remove (torrents/editTracker, torrents/removeTrackers)",
+        "2.2.0",
+    ),
+)
 
 
 class CheckStatus(StrEnum):
@@ -128,17 +152,19 @@ def collect_doctor_report(
         client=client, client_ok=client_ok, config=config
     )
     checks.append(version_check)
-    checks.append(
-        _web_api_version_check(
-            client=client, client_ok=client_ok, config=config
-        )
+    web_api_version_check, web_api_version = _web_api_version_check(
+        client=client, client_ok=client_ok, config=config
     )
+    checks.append(web_api_version_check)
 
     parsed_version, compat_parsable_check = _version_parsable_check(
         qbit_version
     )
     checks.append(compat_parsable_check)
-    checks.append(_version_supported_check(parsed_version))
+    checks.append(
+        _compatibility_evidence_check(parsed_version, web_api_version)
+    )
+    checks.append(_capability_check(web_api_version))
 
     torrents, runtime_listing_check = _torrents_listing_check(
         client=client, client_ok=client_ok, config=config
@@ -446,32 +472,41 @@ def _web_api_version_check(
     client: Any | None,
     client_ok: bool,
     config: QbitConfig | None,
-) -> DoctorCheck:
+) -> tuple[DoctorCheck, str | None]:
     """Build the qBittorrent Web API-version check."""
     if not client_ok or client is None:
-        return DoctorCheck(
-            code="CONN004",
-            section="connectivity",
-            status=CheckStatus.SKIPPED,
-            message="Web API version not checked: not connected.",
+        return (
+            DoctorCheck(
+                code="CONN004",
+                section="connectivity",
+                status=CheckStatus.SKIPPED,
+                message="Web API version not checked: not connected.",
+            ),
+            None,
         )
 
     try:
         version = str(client.app_web_api_version())
     except Exception as error:
-        return DoctorCheck(
-            code="CONN004",
-            section="connectivity",
-            status=CheckStatus.FAIL,
-            message="Failed to read the qBittorrent Web API version.",
-            detail=_redact(error, config),
+        return (
+            DoctorCheck(
+                code="CONN004",
+                section="connectivity",
+                status=CheckStatus.FAIL,
+                message="Failed to read the qBittorrent Web API version.",
+                detail=_redact(error, config),
+            ),
+            None,
         )
 
-    return DoctorCheck(
-        code="CONN004",
-        section="connectivity",
-        status=CheckStatus.PASS,
-        message=f"Web API version: {version}.",
+    return (
+        DoctorCheck(
+            code="CONN004",
+            section="connectivity",
+            status=CheckStatus.PASS,
+            message=f"Web API version: {version}.",
+        ),
+        version,
     )
 
 
@@ -517,42 +552,161 @@ def _version_parsable_check(
     )
 
 
-def _version_supported_check(
+def _compatibility_evidence_check(
     parsed_version: tuple[int, int, int] | None,
+    web_api_version: str | None,
 ) -> DoctorCheck:
-    """Build a transitional, neutral major-version detection check.
+    """Classify the observed qBittorrent version against the packaged
+    compatibility evidence manifest (`qbit_ops.qbit.compatibility`).
 
-    Deliberately does not use the word "supported" and does not
-    generalize the exact Docker matrix evidence
-    (docs/COMPATIBILITY.md #5.2, #10) into a major-version claim --
-    the independent review (constat F-5) found the previous wording
-    ("qBittorrent major version N is supported" /
-    "qbit-ops has been validated against qBittorrent 4.x and 5.x")
-    told every 4.x/5.x user their exact version was supported without
-    any matching evidence. A future matrix-aware `doctor` phase will
-    replace this with per-exact-version evidence; until then this only
-    reports what was actually observed. Unknown or unparsable versions
-    produce a warning, never a failure: qbit-ops does not invent a
-    compatibility guarantee it cannot verify.
+    Replaces the previous transitional, major-version-only check
+    (independent review constat F-5): rather than telling every 4.x/5.x
+    user their exact version is "supported" without matching evidence,
+    this compares the *exact* observed application version against the
+    manifest's exact container-integration-tested entries and reports
+    one of five truthful classifications -- see docs/COMPATIBILITY.md
+    §10 for the wording policy this implements. None of these
+    classifications ever says "supported"/"unsupported"/"incompatible":
+    the strongest claim made is the one the manifest actually backs
+    (exact application + exact Web API match), and every other case is
+    reported as an absence of evidence, never as an absence of
+    compatibility.
     """
     if parsed_version is None:
         return DoctorCheck(
             code="COMPAT002",
             section="compatibility",
             status=CheckStatus.SKIPPED,
-            message="Supported-version check skipped: version unparsable "
-            "or unavailable.",
+            message="Compatibility evidence not checked: version "
+            "unparsable or unavailable.",
         )
 
-    major = parsed_version[0]
-    if major in _RECOGNIZED_MAJOR_VERSIONS:
+    version_string = (
+        f"{parsed_version[0]}.{parsed_version[1]}.{parsed_version[2]}"
+    )
+
+    try:
+        evidence = load_compatibility_evidence()
+    except CompatibilityManifestError as error:
+        return DoctorCheck(
+            code="COMPAT002",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message="Compatibility evidence manifest unavailable.",
+            detail=str(error),
+            remediation=(
+                "This does not mean qbit-ops is incompatible with this "
+                "qBittorrent instance -- the packaged evidence could not "
+                "be read, so no classification could be made either way."
+            ),
+        )
+
+    exact_entry = evidence.entry_for_application_version(version_string)
+    if exact_entry is not None:
+        return _exact_version_evidence_check(
+            exact_entry, version_string, web_api_version
+        )
+
+    return _untested_version_evidence_check(evidence, version_string)
+
+
+def _exact_version_evidence_check(
+    exact_entry: QbitMatrixEntry,
+    version_string: str,
+    web_api_version: str | None,
+) -> DoctorCheck:
+    """Build COMPAT002 for a version that exactly matches a tested entry."""
+    if web_api_version == exact_entry.expected_web_api_version:
         return DoctorCheck(
             code="COMPAT002",
             section="compatibility",
             status=CheckStatus.PASS,
             message=(
-                f"qBittorrent version {major}.x was detected. Exact "
-                "compatibility evidence is evaluated separately -- see "
+                f"Container integration tested against this exact "
+                f"qBittorrent {version_string} and Web API "
+                f"{web_api_version} version, on "
+                f"{exact_entry.expected_architecture}. This says nothing "
+                "about other architectures -- see docs/COMPATIBILITY.md."
+            ),
+        )
+
+    observed_web_api_display = (
+        web_api_version if web_api_version is not None else "unavailable"
+    )
+    return DoctorCheck(
+        code="COMPAT002",
+        section="compatibility",
+        status=CheckStatus.WARNING,
+        message=(
+            f"qBittorrent {version_string} matches an exact "
+            "container-integration-tested release, but the observed "
+            f"Web API version ({observed_web_api_display}) differs from "
+            f"tested evidence ({exact_entry.expected_web_api_version})."
+        ),
+        remediation=(
+            "This is not a failure verdict -- only the application "
+            "version, not this exact Web API version, has been "
+            "container-integration tested. See docs/COMPATIBILITY.md."
+        ),
+    )
+
+
+def _untested_version_evidence_check(
+    evidence: CompatibilityEvidence, version_string: str
+) -> DoctorCheck:
+    """Build COMPAT002 for a version absent from the exact-tested entries."""
+    oldest = evidence.oldest()
+    newest = evidence.latest()
+
+    try:
+        observed = Version(version_string)
+        oldest_version = Version(oldest.expected_version.removeprefix("v"))
+        newest_version = Version(newest.expected_version.removeprefix("v"))
+    except InvalidVersion:
+        # Unreachable in practice: `version_string` is reconstructed from
+        # `_VERSION_PATTERN`'s three captured integer groups, which
+        # `packaging.version.Version` always accepts. Kept as an
+        # explicit fail-closed branch rather than assuming.
+        return DoctorCheck(
+            code="COMPAT002",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message=f"qBittorrent version '{version_string}' could not be "
+            "compared against tested evidence.",
+        )
+
+    oldest_display = oldest.expected_version.removeprefix("v")
+    newest_display = newest.expected_version.removeprefix("v")
+
+    if observed > newest_version:
+        return DoctorCheck(
+            code="COMPAT002",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message=(
+                f"qBittorrent {version_string} is newer than the latest "
+                f"container-tested evidence ({newest_display})."
+            ),
+            remediation=(
+                "This does not mean qbit-ops is incompatible with this "
+                "version -- it has simply not been container-integration "
+                "tested yet. See docs/COMPATIBILITY.md."
+            ),
+        )
+
+    if observed < oldest_version:
+        return DoctorCheck(
+            code="COMPAT002",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message=(
+                f"qBittorrent {version_string} is older than the oldest "
+                f"container-tested evidence ({oldest_display})."
+            ),
+            remediation=(
+                "This does not mean qbit-ops is incompatible with this "
+                "version solely because of its age -- it has simply not "
+                "been container-integration tested. See "
                 "docs/COMPATIBILITY.md."
             ),
         )
@@ -560,17 +714,78 @@ def _version_supported_check(
     return DoctorCheck(
         code="COMPAT002",
         section="compatibility",
-        status=CheckStatus.WARNING,
+        status=CheckStatus.PASS,
         message=(
-            f"qBittorrent major version {major} is outside the "
-            "currently recognized 4.x/5.x range."
+            f"qBittorrent {version_string} is exact version not "
+            f"container-integration tested (between tested evidence "
+            f"{oldest_display} and {newest_display}); no incompatibility "
+            "is known. See docs/COMPATIBILITY.md."
         ),
-        remediation=(
-            "This does not mean qbit-ops is incompatible with this "
-            "version -- no exact-version evidence has been evaluated "
-            "either way. See docs/COMPATIBILITY.md for the versions "
-            "qbit-ops has been container-integration tested against."
-        ),
+    )
+
+
+def _capability_check(web_api_version: str | None) -> DoctorCheck:
+    """Report whether the Web API version exposes the capabilities
+    qbit-ops's mutation commands actually rely on.
+
+    Deliberately separate from `COMPAT002` (compatibility evidence):
+    this is a property of the Web API version alone, backed by
+    `qbittorrent-api`'s own declared floors, not by the Docker matrix
+    -- a version absent from the matrix is not itself a capability
+    problem, and a capability floor is not itself compatibility
+    evidence. Never invents a floor beyond the two documented in
+    docs/COMPATIBILITY.md §3.
+    """
+    if web_api_version is None:
+        return DoctorCheck(
+            code="COMPAT003",
+            section="compatibility",
+            status=CheckStatus.SKIPPED,
+            message="Required Web API capabilities not checked: Web API "
+            "version unavailable.",
+        )
+
+    try:
+        observed = Version(web_api_version)
+    except InvalidVersion:
+        return DoctorCheck(
+            code="COMPAT003",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message=(
+                f"Web API version '{web_api_version}' has an unrecognized "
+                "format; required-capability check could not run."
+            ),
+        )
+
+    missing = [
+        f"{capability} (requires Web API >= {floor})"
+        for capability, floor in _REQUIRED_WEB_API_CAPABILITIES
+        if observed < Version(floor)
+    ]
+
+    if missing:
+        return DoctorCheck(
+            code="COMPAT003",
+            section="compatibility",
+            status=CheckStatus.WARNING,
+            message=(
+                "Required capability missing at this Web API version: "
+                + "; ".join(missing)
+                + "."
+            ),
+            remediation=(
+                "The corresponding qbit-ops command(s) would fail against "
+                "this instance -- see docs/COMPATIBILITY.md §3."
+            ),
+        )
+
+    return DoctorCheck(
+        code="COMPAT003",
+        section="compatibility",
+        status=CheckStatus.PASS,
+        message="All Web API capabilities qbit-ops relies on are "
+        "available at this Web API version.",
     )
 
 

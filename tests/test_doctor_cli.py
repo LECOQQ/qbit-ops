@@ -275,7 +275,7 @@ def test_csv_has_the_documented_columns(
         "detail",
         "remediation",
     ]
-    assert len(rows) == 13  # header + 12 checks
+    assert len(rows) == 14  # header + 13 checks
     assert ANSI_ESCAPE_PATTERN.search(result.stdout) is None
 
 
