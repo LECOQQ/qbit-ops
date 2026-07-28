@@ -3,7 +3,7 @@
 Proves the phase's security invariant: no ordinary qbit-ops command
 displays a complete tracker announce URL or tracker credential by
 default. Covers structural sanitization primitives
-(`qbit_ops.trackers.sanitize_tracker_text`/`describe_tracker_url`/
+(`qbit_ops.features.trackers.sanitize_tracker_text`/`describe_tracker_url`/
 `redact_tracker_identity`) and no-leak coverage across every read
 surface, mutation preview/confirmation/summary, stderr/exception path,
 and `backup diff`. Uses unmistakable fake secrets, never real tracker
@@ -15,13 +15,13 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from qbit_ops.backup import (
+from qbit_ops.cli.app import app
+from qbit_ops.cli.rendering import print_error
+from qbit_ops.features.backup import (
     diff_backup_exports,
     redact_backup_diff,
 )
-from qbit_ops.cli.app import app
-from qbit_ops.cli.rendering import print_error
-from qbit_ops.trackers import (
+from qbit_ops.features.trackers import (
     SafeTrackerIdentity,
     describe_tracker_url,
     redact_tracker_identity,

@@ -1,7 +1,7 @@
 """Register the root-level `doctor` command.
 
 Moved from `qbit_ops.main`. No behavior change -- still delegates every
-check's implementation to `qbit_ops.doctor.collect_doctor_report`.
+check's implementation to `qbit_ops.features.doctor.collect_doctor_report`.
 """
 
 from typing import Annotated, Any
@@ -12,13 +12,13 @@ from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
 from qbit_ops.config import ConfigError, QbitConfig
-from qbit_ops.doctor import (
+from qbit_ops.errors import QbitAuthenticationError
+from qbit_ops.features.doctor import (
     ConnectionOutcome,
     DoctorReport,
     collect_doctor_report,
     doctor_exit_code,
 )
-from qbit_ops.errors import QbitAuthenticationError
 
 
 def _collect_doctor_report() -> DoctorReport:

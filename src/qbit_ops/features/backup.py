@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from qbit_ops.config import QbitConfig
-from qbit_ops.torrents import list_torrents_with_trackers
-from qbit_ops.trackers import (
+from qbit_ops.features.torrents import list_torrents_with_trackers
+from qbit_ops.features.trackers import (
     TrackerMatchMode,
     describe_tracker_url,
     list_tracker_usage,

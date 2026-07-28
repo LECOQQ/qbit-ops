@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from qbit_ops.cli.rendering import format_byte_rate
-from qbit_ops.status import (
+from qbit_ops.features.status import (
     Health,
     StatusAlert,
     StatusSnapshot,

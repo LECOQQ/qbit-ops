@@ -36,7 +36,7 @@ from qbit_ops.errors import (
     QbitConnectionError,
 )
 from qbit_ops.qbit.client import is_qbit_error
-from qbit_ops.selectors import AmbiguousTorrentHashError
+from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 
 __all__ = [
     "create_qbit_client",

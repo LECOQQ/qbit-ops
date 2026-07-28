@@ -83,7 +83,7 @@ qBittorrent and then relabelled as a generic remote failure:
   every `trackers` mutation command.
 - Contradictory filter combinations (`--completed --incomplete`,
   `--active --inactive`) and unknown `--state` values: rejected by
-  `qbit_ops.torrents.build_torrent_filter()`.
+  `qbit_ops.features.torrents.build_torrent_filter()`.
 - A blank/whitespace `--tracker` used as a *filter* (`torrents list`,
   `trackers status`, every bulk mutation's `--tracker`) is rejected by
   the same `build_torrent_filter()` call, before any client is

@@ -47,7 +47,7 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
-from qbit_ops.torrents import TorrentFilter
+from qbit_ops.features.torrents import TorrentFilter
 from qbit_ops.tui.app import (
     ActionsScreen,
     ConnectionBanner,

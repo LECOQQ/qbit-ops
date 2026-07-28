@@ -31,13 +31,13 @@ Security boundary (see docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for
 TUI 2 -- see docs/DECISIONS.md, "multi-selection + LOW-risk bulk
 actions"): this module only ever imports safe, structured domain
 outputs, plus exactly the two LOW-risk bulk torrent mutation functions
-TUI 2 needs (`qbit_ops.torrents.apply_bulk_torrent_action`,
+TUI 2 needs (`qbit_ops.features.torrents.apply_bulk_torrent_action`,
 `build_bulk_action_plan_from_snapshot`) -- both act only on
 Pause/Resume/Reannounce, take an already-frozen plan or an explicit
 hash list, and never rescan or accept an unbounded selector. It must
-never import `qbit_ops.torrents.list_torrents_with_trackers`,
-`qbit_ops.torrents._get_tracker_details`,
-`qbit_ops.torrents.plan_bulk_torrent_action`
+never import `qbit_ops.features.torrents.list_torrents_with_trackers`,
+`qbit_ops.features.torrents._get_tracker_details`,
+`qbit_ops.features.torrents.plan_bulk_torrent_action`
 (it always rescans and accepts `--all`, neither of which fits the
 frozen-plan model here), any tracker mutation `plan_*`/`apply_*`
 function, any deletion function, or `qbit_ops.main` -- enforced by
@@ -62,12 +62,12 @@ from qbit_ops.app_services import (
 )
 from qbit_ops.config import ConfigError
 from qbit_ops.errors import AppError, ErrorCategory
-from qbit_ops.execution import MutationStatus
-from qbit_ops.explain import ExplanationReport, build_torrent_explanation
-from qbit_ops.qbit.fields import get_field_as_string
-from qbit_ops.status import StatusSnapshot
-from qbit_ops.torrent_states import is_stopped_state
-from qbit_ops.torrents import (
+from qbit_ops.features.explain import (
+    ExplanationReport,
+    build_torrent_explanation,
+)
+from qbit_ops.features.status import StatusSnapshot
+from qbit_ops.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentBulkAction,
@@ -78,7 +78,10 @@ from qbit_ops.torrents import (
     get_safe_tracker_details,
     select_torrents_from_items,
 )
-from qbit_ops.trackers import sanitize_tracker_text
+from qbit_ops.features.trackers import sanitize_tracker_text
+from qbit_ops.qbit.fields import get_field_as_string
+from qbit_ops.shared.execution import MutationStatus
+from qbit_ops.shared.torrent_states import is_stopped_state
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
@@ -86,9 +89,10 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 class ConnectionState(StrEnum):
     """The TUI's high-level connection/session state.
 
-    Distinct from `qbit_ops.status.Health`: this tracks whether the TUI *can
-    talk to qBittorrent at all*, not the instance's own operational
-    health (which is carried inside `TuiState.status` once connected).
+    Distinct from `qbit_ops.features.status.Health`: this tracks
+    whether the TUI *can talk to qBittorrent at all*, not the
+    instance's own operational health (which is carried inside
+    `TuiState.status` once connected).
     """
 
     CONNECTING = "connecting"
@@ -559,10 +563,10 @@ class TuiController:
         chosen) -- this method never reads `self.state.selected_hashes`
         itself, so a selection change after this call can never affect
         an already-built plan. Delegates every skip-reason decision to
-        `qbit_ops.torrents.build_bulk_action_plan_from_snapshot` (the same
-        rule `plan_bulk_torrent_action`/the CLI uses) against the
-        current `_raw_torrents` snapshot -- no second rule catalogue,
-        no rescan.
+        `qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`
+        (the same rule `plan_bulk_torrent_action`/the CLI uses) against
+        the current `_raw_torrents` snapshot -- no second rule
+        catalogue, no rescan.
         """
         return build_bulk_action_plan_from_snapshot(
             self._raw_torrents, action, torrent_hashes
@@ -723,9 +727,10 @@ class TuiController:
         API calls, deterministic.
 
         Delegates every rule-evaluation decision to
-        `qbit_ops.explain.build_torrent_explanation`, the exact same pure
-        builder `qbit_ops.explain.explain_torrent` (the CLI's entry point)
-        uses -- there is no second, TUI-only explanation catalogue.
+        `qbit_ops.features.explain.build_torrent_explanation`, the
+        exact same pure builder `qbit_ops.features.explain.explain_torrent`
+        (the CLI's entry point) uses -- there is no second, TUI-only
+        explanation catalogue.
         Returns `None` when nothing is focused, or when the focused
         torrent is no longer present in the latest raw snapshot (it
         disappeared) -- the caller must treat that as "not found", never
@@ -773,7 +778,7 @@ class TuiController:
         if request_id != self._detail_request_id:
             return
         # Safe, structural fields only -- never a raw announce URL, path,
-        # query value, or unsanitized message (see qbit_ops.torrents).
+        # query value, or unsanitized message (see qbit_ops.features.torrents).
         self.state.focused_tracker_details = get_safe_tracker_details(
             raw_trackers
         )
@@ -890,15 +895,15 @@ def _count_stopped_torrents(raw_torrents: list[Any]) -> int:
     """Count paused/stopped torrents using the existing state helper.
 
     Deliberately *not* a new classifier and not folded into
-    `qbit_ops.status.TransferCounts`: `classify_torrent_state` already
+    `qbit_ops.features.status.TransferCounts`: `classify_torrent_state` already
     reports every paused/stopped torrent under `downloading` or
     `seeding` (by direction), which is the classification `status`/
     `torrents list` are built around and must not change. The Overview
     wants this as an *additional*, overlapping breakdown for operators
     ("how many of my torrents are just sitting paused"), reusing
-    `qbit_ops.torrent_states.is_stopped_state` (already the single source of
-    truth for the qBittorrent 4 `paused*` vs 5 `stopped*` naming split)
-    rather than inventing a second state vocabulary.
+    `qbit_ops.shared.torrent_states.is_stopped_state` (already the
+    single source of truth for the qBittorrent 4 `paused*` vs 5
+    `stopped*` naming split) rather than inventing a second state vocabulary.
     """
     return sum(
         1
@@ -915,8 +920,9 @@ def _split_skips(
     Audit finding F-3: "the torrent disappeared from the snapshot" and
     "the torrent is already in the requested state" are different facts
     and must never be collapsed into one message. `not_found` is the
-    reason `qbit_ops.torrents.build_bulk_action_plan_from_snapshot` records
-    for a selected hash absent from the planning snapshot.
+    reason
+    `qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`
+    records for a selected hash absent from the planning snapshot.
     """
     not_found = tuple(
         skip for skip in plan.skipped if skip.reason == "not_found"

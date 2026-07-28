@@ -2,8 +2,9 @@
 
 `qbit_ops.qbit.fields` is now the one place allowed to define a
 raw-field or tracker-status-shape helper (constat A-5). Before this
-extraction phase, `qbit_ops.trackers` and `qbit_ops.torrents` each
-carried an independent, byte-for-byte copy of the same functions. This
+extraction phase, `qbit_ops.features.trackers` and
+`qbit_ops.features.torrents` each carried an independent,
+byte-for-byte copy of the same functions. This
 test statically forbids a new copy from reappearing anywhere else under
 `src/qbit_ops/`, mirroring `tests/test_layering.py`'s AST approach.
 """

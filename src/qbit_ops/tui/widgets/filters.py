@@ -17,7 +17,7 @@ from textual.widgets import (
     Static,
 )
 
-from qbit_ops.torrents import TorrentFilter, build_torrent_filter
+from qbit_ops.features.torrents import TorrentFilter, build_torrent_filter
 
 
 class FiltersPanel(Vertical):

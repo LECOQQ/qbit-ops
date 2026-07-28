@@ -13,6 +13,25 @@ layer.
 qBittorrent boundary, see `docs/audits/2026-07-package-refactor-plan.md`
 Phase 3) and is re-exported here by narrow delegation so every existing
 call site and test seam keeps working unchanged.
+
+Package-cleanup phase (`features/`/`shared/` split, see
+docs/ARCHITECTURE.md): this module deliberately stayed at the package
+root rather than moving into `features/` or `shared/` (Outcome C of
+that phase's `app_services.py` decision tree). It mixes two genuinely
+different responsibilities: `classify_recoverable_qbit_failure` is a
+shared classifier both the CLI's `status` command and the TUI's
+refresh worker call, while `TuiRefreshResult`/`collect_tui_refresh` is
+refresh orchestration with exactly one consumer today
+(`qbit_ops.tui.state`) -- distinct from
+`qbit_ops.features.status.collect_status_snapshot`, which the CLI
+actually uses for its own refresh. Moving the whole module into
+`shared/` would misrepresent the TUI-only refresh half as a generic
+primitive; moving it into `features/` would misrepresent the
+dual-consumer classifier as one feature's private orchestration.
+Splitting the module would resolve this but is out of scope for that
+phase. See `tests/test_package_layout.py::
+test_app_services_remains_at_the_package_root_documented` for the
+pinned location.
 """
 
 from __future__ import annotations
@@ -21,13 +40,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
-from qbit_ops.qbit.client import create_qbit_client
-from qbit_ops.status import StatusSnapshot, build_status_snapshot_from_data
-from qbit_ops.torrents import (
+from qbit_ops.features.status import (
+    StatusSnapshot,
+    build_status_snapshot_from_data,
+)
+from qbit_ops.features.torrents import (
     TorrentFilter,
     TorrentSelection,
     select_torrents_from_items,
 )
+from qbit_ops.qbit.client import create_qbit_client
 
 __all__ = [
     "create_qbit_client",
@@ -90,7 +112,8 @@ class TuiRefreshResult:
     qBittorrent items, not `torrents.matched`: `SelectedTorrent.category`
     is already display-formatted (e.g. `(uncategorized)`), and
     re-filtering against the formatted value would silently break the
-    `uncategorized` filter token -- see `qbit_ops.torrents._category_matches`.
+    `uncategorized` filter token -- see
+    `qbit_ops.features.torrents._category_matches`.
     """
 
     status: StatusSnapshot
@@ -107,8 +130,8 @@ def collect_tui_refresh(
 
     Calls `app_version()`, `app_web_api_version()`, `transfer_info()`,
     and `torrents_info()` exactly once each -- the same bounded budget
-    `qbit_ops.status.collect_status_snapshot` already uses -- and feeds the
-    single `torrents_info()` result to both the status counters
+    `qbit_ops.features.status.collect_status_snapshot` already uses --
+    and feeds the single `torrents_info()` result to both the status counters
     (`build_status_snapshot_from_data`) and the unfiltered torrent
     snapshot (`select_torrents_from_items`, `TorrentFilter()`, i.e. every
     torrent). Never calls `torrents_trackers()`; raises unchanged on any

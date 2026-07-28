@@ -35,7 +35,7 @@ import qbit_ops
 assert qbit_ops.__file__.startswith(sys.argv[1]), qbit_ops.__file__
 
 from qbit_ops.config import QbitConfig
-from qbit_ops.doctor import (
+from qbit_ops.features.doctor import (
     CheckStatus,
     ConnectionOutcome,
     collect_doctor_report,
@@ -105,7 +105,7 @@ def test_doctor_compatibility_evidence_works_from_a_built_wheel(
             if name.startswith("qbit_ops/"):
                 archive.extract(name, extracted)
 
-    assert (extracted / "qbit_ops" / "doctor.py").exists()
+    assert (extracted / "qbit_ops" / "features" / "doctor.py").exists()
     assert (
         extracted / "qbit_ops" / "data" / "qbittorrent-matrix.toml"
     ).exists()

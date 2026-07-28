@@ -324,7 +324,7 @@ def test_emit_status_jsonl_flushes_stdout_after_writing(
     for its own capture buffer during `invoke()` — a patch applied
     before that swap would silently target the wrong object).
     """
-    from qbit_ops.status import build_unavailable_snapshot
+    from qbit_ops.features.status import build_unavailable_snapshot
 
     events: list[str] = []
 

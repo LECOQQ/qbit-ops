@@ -16,10 +16,14 @@ from typing import Any
 from rich.text import Text
 
 from qbit_ops.errors import ErrorCategory
-from qbit_ops.execution import MutationStatus
-from qbit_ops.explain import Evidence, ExplanationFinding, ExplanationReport
-from qbit_ops.explain import ExplanationSeverity as Severity
-from qbit_ops.torrents import BulkTorrentActionPlan, SelectedTorrent
+from qbit_ops.features.explain import (
+    Evidence,
+    ExplanationFinding,
+    ExplanationReport,
+)
+from qbit_ops.features.explain import ExplanationSeverity as Severity
+from qbit_ops.features.torrents import BulkTorrentActionPlan, SelectedTorrent
+from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.state import MutationUiResult, TuiState, _split_skips
 
 NARROW_WIDTH_THRESHOLD = 100
@@ -39,7 +43,7 @@ def _format_local_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
     Refresh times default to local time, not UTC, with the timezone
     label always shown so a UTC-configured host is not silently
     ambiguous. `moment` is always timezone-aware (`datetime.now(UTC)`
-    upstream, see `qbit_ops.status`), so `.astimezone()` with no `tz`
+    upstream, see `qbit_ops.features.status`), so `.astimezone()` with no `tz`
     converts it to the system's local timezone -- exactly what
     `datetime.astimezone(tz=None)` already means. `tz` exists purely
     for deterministic tests: passing a fixed `tzinfo` (e.g. a
@@ -174,8 +178,8 @@ def _format_endpoint(endpoint: dict[str, Any]) -> str:
     Deliberately does *not* also append a synthetic "disabled" suffix
     from `endpoint["enabled"]`: `health` is already `"disabled"`
     whenever `enabled` is `False` for a classifiable status
-    (`qbit_ops.trackers`'s single status->health mapping), so doing both
-    previously produced a duplicated "disabled disabled".
+    (`qbit_ops.features.trackers`'s single status->health mapping), so
+    doing both previously produced a duplicated "disabled disabled".
     """
     identity = str(endpoint["tracker"])
     health = str(endpoint["health"])
@@ -227,9 +231,9 @@ def _format_explain_text(
     header.append(f"[{style}]{report.overall_severity.value.title()}[/{style}]")
 
     # A single-finding report's summary is, by construction
-    # (`qbit_ops.explain.build_torrent_explanation`), always the finding's
-    # own `explanation` -- printing both would show the same sentence
-    # twice. Only show the summary here when it says something the
+    # (`qbit_ops.features.explain.build_torrent_explanation`), always
+    # the finding's own `explanation` -- printing both would show the
+    # same sentence twice. Only show the summary here when it says something the
     # first finding block does not already say.
     if not report.findings or report.summary != report.findings[0].explanation:
         header.append("")
@@ -505,18 +509,19 @@ def _format_finding(finding: ExplanationFinding) -> str:
 
 
 # Evidence codes that carry a raw byte-per-second rate, per
-# `qbit_ops.explain._build_torrent_finding`'s `common_evidence` tuple.
+# `qbit_ops.features.explain._build_torrent_finding`'s `common_evidence` tuple.
 _RATE_EVIDENCE_CODES = frozenset({"download_rate", "upload_rate"})
 
 
 def _format_evidence(evidence: Evidence) -> str:
     """Render one evidence row with a humanized value where possible.
 
-    Never changes the underlying `Evidence`/JSON model (`qbit_ops.explain`'s
-    `evidence_to_dict` is untouched) and never invents a value this
-    formatting doesn't already have -- purely cosmetic, keyed off
-    `evidence.code` (a stable identifier `qbit_ops.explain` already assigns,
-    not inferred from the label text).
+    Never changes the underlying `Evidence`/JSON model
+    (`qbit_ops.features.explain`'s `evidence_to_dict` is untouched) and
+    never invents a value this formatting doesn't already have --
+    purely cosmetic, keyed off `evidence.code` (a stable identifier
+    `qbit_ops.features.explain` already assigns, not inferred from the
+    label text).
     """
     label = f"{evidence.label}:"
     return f"  {label:<15} {_format_evidence_value(evidence)}"

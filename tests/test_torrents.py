@@ -4,8 +4,7 @@ from typing import Any
 
 import pytest
 
-from qbit_ops.selectors import AmbiguousTorrentHashError
-from qbit_ops.torrents import (
+from qbit_ops.features.torrents import (
     TorrentBulkAction,
     TorrentFilter,
     apply_bulk_torrent_action,
@@ -20,6 +19,7 @@ from qbit_ops.torrents import (
     torrent_filter_to_dict,
     validate_torrent_selector,
 )
+from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 
 
 class FakeQbitClient:

@@ -1,7 +1,7 @@
 """Compatibility contract tests: transfer_info() payload fixtures.
 
 Exercises `qbit_ops.qbit.fields.get_transfer_rates` -- the exact
-function `qbit_ops.status` routes through (constat P-2).
+function `qbit_ops.features.status` routes through (constat P-2).
 """
 
 from __future__ import annotations

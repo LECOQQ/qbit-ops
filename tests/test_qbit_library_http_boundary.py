@@ -18,8 +18,8 @@ This distinguishes two different "call counts" that earlier
 documentation conflated:
 
 - **qbit-ops's own call count** -- how many `client.*()` methods
-  `qbit_ops.torrents`/`qbit_ops.status`/etc. call. This is what
-  `tests/test_progress_call_parity.py` and `FakeQbitClient.calls`
+  `qbit_ops.features.torrents`/`qbit_ops.features.status`/etc. call.
+  This is what `tests/test_progress_call_parity.py` and `FakeQbitClient.calls`
   measure, and it is unaffected by anything in this file.
 - **HTTP requests qbittorrentapi issues internally** -- what actually
   goes over the wire for one `client.*()` call. This file measures
@@ -133,7 +133,7 @@ def test_torrents_start_and_torrents_resume_are_the_same_method(
 ) -> None:
     """P-4: the installed qbittorrent-api aliases `torrents_resume` to
     `torrents_start` (verified directly against the library, not
-    inferred) -- `qbit_ops.torrents._call_bulk_torrent_action`'s
+    inferred) -- `qbit_ops.features.torrents._call_bulk_torrent_action`'s
     `getattr(client, "torrents_start", None)` fallback to
     `client.torrents_resume(...)` is therefore dead: `torrents_start` is
     never absent from a real client."""

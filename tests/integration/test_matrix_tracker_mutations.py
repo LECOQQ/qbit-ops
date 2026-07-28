@@ -170,7 +170,7 @@ def test_add_if_present_and_replace_round_trip(hermetic_env, seeded_corpus):
     # branch (verified: replacing onto an *already-present* target
     # instead takes its `torrents_remove_trackers`-only branch, since
     # editTracker onto a duplicate URL is unnecessary -- see
-    # `qbit_ops.trackers.apply_tracker_replacement`).
+    # `qbit_ops.features.trackers.apply_tracker_replacement`).
     with record_http_requests() as rec:
         result = _invoke(
             hermetic_env,

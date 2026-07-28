@@ -3,7 +3,7 @@
 Moved from `qbit_ops.main`: `list`, `categories`, `inspect`, `pause`,
 `resume`, `start`, `reannounce`. No behavior change -- filter options,
 selection, and mutation planning are unchanged calls into
-`qbit_ops.torrents`/`qbit_ops.execution`.
+`qbit_ops.features.torrents`/`qbit_ops.shared.execution`.
 """
 
 from typing import Annotated
@@ -20,9 +20,7 @@ from qbit_ops.cli.validation import (
     validate_format_support,
     validate_hash_option,
 )
-from qbit_ops.execution import MutationOperation
-from qbit_ops.selectors import AmbiguousTorrentHashError
-from qbit_ops.torrents import (
+from qbit_ops.features.torrents import (
     STATE_FILTER_VALUES,
     TorrentBulkAction,
     apply_bulk_torrent_action,
@@ -34,6 +32,8 @@ from qbit_ops.torrents import (
     select_torrents,
     validate_torrent_selector,
 )
+from qbit_ops.shared.execution import MutationOperation
+from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 

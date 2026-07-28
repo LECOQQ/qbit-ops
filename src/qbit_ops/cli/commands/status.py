@@ -15,7 +15,7 @@ from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
 from qbit_ops.config import ConfigError
-from qbit_ops.status import (
+from qbit_ops.features.status import (
     StatusSnapshot,
     build_unavailable_snapshot,
     collect_status_snapshot,

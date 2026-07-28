@@ -2,7 +2,7 @@
 
 Exercises the exact production boundary functions the CLI and TUI use
 (`qbit_ops.qbit.fields.get_field_as_*`,
-`qbit_ops.torrent_states.classify_torrent_state`) against fixture
+`qbit_ops.shared.torrent_states.classify_torrent_state`) against fixture
 payloads -- never a separate fixture-only parsing path.
 """
 
@@ -13,7 +13,10 @@ from qbit_ops.qbit.fields import (
     get_field_as_int,
     get_field_as_string,
 )
-from qbit_ops.torrent_states import classify_torrent_state, is_stopped_state
+from qbit_ops.shared.torrent_states import (
+    classify_torrent_state,
+    is_stopped_state,
+)
 from tests.compatibility._fixture_loader import load_fixture
 
 
