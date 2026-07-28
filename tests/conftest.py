@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-import qbit_ops.main
+import qbit_ops.cli.error_boundary
 from qbit_ops.config import QbitConfig
 from tests.support import make_config
 
@@ -23,12 +23,12 @@ def runner() -> CliRunner:
 def configure_qbit_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> ConfigureQbitBackend:
-    """Return a function that stubs `qbit_ops.main`'s qBittorrent client wiring.
+    """Return a function that stubs the CLI's qBittorrent client wiring.
 
-    This replaces `qbit_ops.main.load_qbit_config` and
-    `qbit_ops.main._create_qbit_client` directly, which is the smallest seam
-    that lets CLI tests exercise every command without a real
-    qBittorrent instance or `.env` file.
+    This replaces `qbit_ops.cli.error_boundary.load_qbit_config` and
+    `qbit_ops.cli.error_boundary.create_qbit_client` directly, which is the
+    smallest seam that lets CLI tests exercise every command without a
+    real qBittorrent instance or `.env` file.
 
     Returns the list of kwargs each `_create_qbit_client()` call
     received, so tests can assert on the call path itself (e.g.
@@ -53,13 +53,13 @@ def configure_qbit_backend(
                 raise config_error
 
             monkeypatch.setattr(
-                "qbit_ops.main.load_qbit_config",
+                "qbit_ops.cli.error_boundary.load_qbit_config",
                 _raise_config_error,
             )
             return calls
 
         monkeypatch.setattr(
-            "qbit_ops.main.load_qbit_config",
+            "qbit_ops.cli.error_boundary.load_qbit_config",
             lambda: config or make_config(),
         )
 
@@ -70,7 +70,7 @@ def configure_qbit_backend(
                 raise client_error
 
             monkeypatch.setattr(
-                "qbit_ops.main._create_qbit_client",
+                "qbit_ops.cli.error_boundary.create_qbit_client",
                 _raise_client_error,
             )
             return calls
@@ -80,7 +80,7 @@ def configure_qbit_backend(
             return client
 
         monkeypatch.setattr(
-            "qbit_ops.main._create_qbit_client",
+            "qbit_ops.cli.error_boundary.create_qbit_client",
             _fake_create_qbit_client,
         )
         return calls
@@ -94,14 +94,17 @@ def configure_qbit_backend_by_reference(
 ) -> ConfigureQbitBackend:
     """Same seam as `configure_qbit_backend`, patched by module reference.
 
-    `configure_qbit_backend` patches `"qbit_ops.main.load_qbit_config"` and
-    `"qbit_ops.main._create_qbit_client"` by dotted string, which couples
+    `configure_qbit_backend` patches
+    `"qbit_ops.cli.error_boundary.load_qbit_config"` and
+    `"qbit_ops.cli.error_boundary.create_qbit_client"` by dotted string,
+    which couples
     every test using it to that exact module path (constant A-7 in
     `docs/audits/2026-07-codebase-architecture-inventory.md`) -- a
     future package move breaks every such patch simultaneously. This
-    fixture patches the same two names on the imported `qbit_ops.main`
-    module object instead, so a future migration only has to update the
-    single `import qbit_ops.main` above rather than every string literal
+    fixture patches the same two names on the imported
+    `qbit_ops.cli.error_boundary` module object instead, so a future
+    migration only has to update the single `import
+    qbit_ops.cli.error_boundary` above rather than every string literal
     across the suite. Not a replacement: existing tests keep using
     `configure_qbit_backend` unchanged; new tests may opt into this one.
     """
@@ -121,14 +124,14 @@ def configure_qbit_backend_by_reference(
                 raise config_error
 
             monkeypatch.setattr(
-                qbit_ops.main,
+                qbit_ops.cli.error_boundary,
                 "load_qbit_config",
                 _raise_config_error,
             )
             return calls
 
         monkeypatch.setattr(
-            qbit_ops.main,
+            qbit_ops.cli.error_boundary,
             "load_qbit_config",
             lambda: config or make_config(),
         )
@@ -140,8 +143,8 @@ def configure_qbit_backend_by_reference(
                 raise client_error
 
             monkeypatch.setattr(
-                qbit_ops.main,
-                "_create_qbit_client",
+                qbit_ops.cli.error_boundary,
+                "create_qbit_client",
                 _raise_client_error,
             )
             return calls
@@ -151,8 +154,8 @@ def configure_qbit_backend_by_reference(
             return client
 
         monkeypatch.setattr(
-            qbit_ops.main,
-            "_create_qbit_client",
+            qbit_ops.cli.error_boundary,
+            "create_qbit_client",
             _fake_create_qbit_client,
         )
         return calls

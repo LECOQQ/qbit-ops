@@ -5,7 +5,9 @@ import typer
 from typer.testing import CliRunner
 
 from qbit_ops import __version__
-from qbit_ops.main import ExitCode, _exit_if_no_targeted_matches, app
+from qbit_ops.cli.app import app
+from qbit_ops.cli.commands._shared import exit_if_no_targeted_matches
+from qbit_ops.cli.exit_codes import ExitCode
 
 runner = CliRunner()
 
@@ -21,11 +23,11 @@ def test_main_prints_project_identity() -> None:
 def test_exit_if_no_targeted_matches_exits_with_no_match_code() -> None:
     """Ensure targeted commands expose a no-match exit code."""
     with pytest.raises(typer.Exit) as error:
-        _exit_if_no_targeted_matches(0)
+        exit_if_no_targeted_matches(0)
 
     assert error.value.exit_code == ExitCode.NO_MATCH
 
 
 def test_exit_if_no_targeted_matches_allows_successful_matches() -> None:
     """Ensure targeted commands keep success when matches exist."""
-    _exit_if_no_targeted_matches(1)
+    exit_if_no_targeted_matches(1)

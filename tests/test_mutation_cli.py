@@ -9,7 +9,8 @@ verbose output.
 import pytest
 from typer.testing import CliRunner
 
-from qbit_ops.main import ExitCode, app
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import ExitCode
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_HASH = "abc123def456000000000000000000000000000a"
@@ -25,7 +26,9 @@ def _client_with_tracker(tracker_url: str) -> FakeQbitClient:
 
 
 def _make_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("qbit_ops.main.is_interactive_terminal", lambda: True)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.is_interactive_terminal", lambda: True
+    )
 
 
 # --- Dry-run is the default for every mutation command ------------------

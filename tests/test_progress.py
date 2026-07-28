@@ -1,4 +1,4 @@
-"""Test the shared transient progress-feedback API in `qbit_ops.ui`.
+"""Test the shared transient progress-feedback API in `qbit_ops.cli.rendering`.
 
 Covers the presentation-only progress policy introduced alongside
 `progress_enabled()`/`transient_spinner()`/`transient_progress()`: when
@@ -14,8 +14,8 @@ import io
 import pytest
 from rich.console import Console
 
-import qbit_ops.ui as ui
-from qbit_ops.ui import (
+import qbit_ops.cli.rendering as ui
+from qbit_ops.cli.rendering import (
     OutputFormat,
     progress_enabled,
     transient_progress,

@@ -14,8 +14,8 @@ from collections.abc import Callable
 import pytest
 from typer.testing import CliRunner
 
-import qbit_ops.main as m
-from qbit_ops.main import app
+import qbit_ops.cli.rendering as m
+from qbit_ops.cli.app import app
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_HASH = "abc123def456000000000000000000000000000a"

@@ -11,6 +11,10 @@ Section 4 of the migration-prerequisite brief: prove, before a future
   without calling the command body at all);
 - invoking a non-TUI command never pulls in Textual.
 
+Updated for the CLI reorganization (see docs/ARCHITECTURE.md): the
+console entrypoint now resolves to `qbit_ops.cli.app:app`, the CLI
+composition root, instead of the former `qbit_ops.main:app`.
+
 Module-import assertions run in a fresh subprocess (mirroring
 `tests/test_errors.py`'s
 `test_app_errors_importable_without_typer_or_rich_in_a_fresh_process`),
@@ -38,8 +42,8 @@ def _run(script: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_console_script_entry_point_targets_app_main_app() -> None:
-    """The installed `qbit-ops` script must resolve to `qbit_ops.main:app`.
+def test_console_script_entry_point_targets_cli_app_app() -> None:
+    """The installed `qbit-ops` script must resolve to `qbit_ops.cli.app:app`.
 
     Reads installed distribution metadata (`importlib.metadata`), not
     `pyproject.toml` -- this is the same mechanism `pipx`/an installed
@@ -54,11 +58,11 @@ def test_console_script_entry_point_targets_app_main_app() -> None:
         f"found {[ep.value for ep in matches]}"
     )
     entry_point = matches[0]
-    assert entry_point.value == "qbit_ops.main:app"
+    assert entry_point.value == "qbit_ops.cli.app:app"
 
-    import qbit_ops.main
+    import qbit_ops.cli.app
 
-    assert entry_point.load() is qbit_ops.main.app
+    assert entry_point.load() is qbit_ops.cli.app.app
 
 
 def test_importing_core_package_never_imports_textual() -> None:
@@ -78,9 +82,9 @@ def test_importing_core_package_never_imports_textual() -> None:
     assert "ok" in result.stdout
 
 
-def test_importing_cli_module_defers_tui_and_textual_until_requested() -> None:
-    """`import qbit_ops.main` must not import `qbit_ops.tui` or Textual by
-    itself.
+def test_importing_cli_app_defers_tui_and_textual_until_requested() -> None:
+    """`import qbit_ops.cli.app` must not import `qbit_ops.tui` or Textual
+    by itself.
 
     A second statement in the same process then imports `qbit_ops.tui.app`
     directly, proving Textual *is* actually available (the `tui` extra
@@ -90,7 +94,7 @@ def test_importing_cli_module_defers_tui_and_textual_until_requested() -> None:
     """
     script = (
         "import sys\n"
-        "import qbit_ops.main\n"
+        "import qbit_ops.cli.app\n"
         "assert 'qbit_ops.tui' not in sys.modules, sorted(sys.modules)\n"
         "assert not any(\n"
         "    name == 'textual' or name.startswith('textual.')\n"
@@ -115,7 +119,7 @@ def test_non_tui_command_invocation_never_imports_textual() -> None:
     script = (
         "import sys\n"
         "from typer.testing import CliRunner\n"
-        "from qbit_ops.main import app\n"
+        "from qbit_ops.cli.app import app\n"
         "result = CliRunner().invoke(app, ['status', '--help'])\n"
         "assert result.exit_code == 0, result.output\n"
         "assert not any(\n"
@@ -145,4 +149,4 @@ def test_pyproject_console_script_matches_the_installed_entry_point() -> None:
     )
     scripts = pyproject["tool"]["poetry"]["scripts"]
 
-    assert scripts == {"qbit-ops": "qbit_ops.main:app"}
+    assert scripts == {"qbit-ops": "qbit_ops.cli.app:app"}

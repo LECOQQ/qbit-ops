@@ -28,7 +28,7 @@ import pytest
 from typer.testing import CliRunner
 
 import qbit_ops
-from qbit_ops.main import app as cli_app
+from qbit_ops.cli.app import app as cli_app
 
 
 def test_installed_metadata_returns_expected_version(

@@ -21,7 +21,8 @@ import json
 
 from typer.testing import CliRunner
 
-from qbit_ops.main import ExitCode, StatusExitCode, app
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import ExitCode, StatusExitCode
 from tests.support import FakeQbitClient, make_config, make_torrent
 
 runner = CliRunner()

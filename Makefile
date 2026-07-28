@@ -54,7 +54,7 @@ hooks-install: ## Reinstall the Conventional Commits hook
 	@$(PY) pre-commit install --hook-type commit-msg
 
 run: ## Run the application
-	@$(PY) python -m qbit_ops.main
+	@$(PY) python -m qbit_ops.cli.app
 
 format: ## Format and fix Python files
 	@$(PY) ruff check --fix src tests

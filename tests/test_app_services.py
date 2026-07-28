@@ -1,7 +1,8 @@
 """Characterize `classify_recoverable_qbit_failure`'s classification contract.
 
-This is the single shared recoverable/internal boundary `qbit_ops.main`'s
-status/watch collection and the TUI's refresh worker both apply (see
+This is the single shared recoverable/internal boundary the CLI's
+status/watch collection (`qbit_ops.cli.commands.status`) and the TUI's
+refresh worker both apply (see
 `qbit_ops.app_services`). An unclassifiable exception must return `None`
 so the caller lets it propagate as an internal error -- never silently
 degraded to "unavailable" by a broad catch-all.

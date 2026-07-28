@@ -16,8 +16,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-import qbit_ops.main as main_module
-from qbit_ops.main import EXIT_CODE_TABLE, ExitCode, app
+import qbit_ops.cli.commands.tui as tui_module
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE, ExitCode
 
 
 @pytest.fixture
@@ -49,7 +50,9 @@ def test_tui_missing_extra_fails_before_creating_a_client(
     def _fail_if_called() -> None:
         client_created["called"] = True
 
-    monkeypatch.setattr("qbit_ops.main._create_qbit_client", _fail_if_called)
+    monkeypatch.setattr(
+        "qbit_ops.cli.error_boundary.create_qbit_client", _fail_if_called
+    )
 
     result = runner.invoke(app, ["tui"])
 
@@ -117,13 +120,14 @@ def test_tui_help_works(runner: CliRunner) -> None:
 
 
 def test_app_main_source_never_imports_textual_at_module_level() -> None:
-    """`qbit_ops/main.py` must only import Textual lazily, inside `tui()`.
+    """`qbit_ops/cli/commands/tui.py` must only import Textual lazily,
+    inside `tui()`.
 
     A static check, independent of what other test modules already
     loaded into `sys.modules` in this process: every other command must
     remain importable/runnable without ever loading Textual.
     """
-    source = Path(main_module.__file__).read_text(encoding="utf-8")
+    source = Path(tui_module.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     for node in tree.body:  # module-level statements only, not nested
@@ -146,7 +150,7 @@ def test_status_doctor_and_torrents_list_never_import_textual() -> None:
     script = (
         "import sys\n"
         "from typer.testing import CliRunner\n"
-        "from qbit_ops.main import app\n"
+        "from qbit_ops.cli.app import app\n"
         "runner = CliRunner()\n"
         'runner.invoke(app, ["status", "--quiet"])\n'
         'runner.invoke(app, ["doctor"])\n'

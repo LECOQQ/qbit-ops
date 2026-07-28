@@ -20,8 +20,9 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE, ExitCode
 from qbit_ops.errors import AppError, ErrorCategory
-from qbit_ops.main import EXIT_CODE_TABLE, ExitCode, app
 from tests.support import FakeQbitClient, make_torrent
 
 pytestmark = pytest.mark.usefixtures("configure_qbit_backend")
@@ -169,22 +170,24 @@ def test_authentication_distinct_from_unavailable(
     configure_qbit_backend,
 ) -> None:
     """Ensure auth and connection failures record different categories."""
-    import qbit_ops.main as main_module
+    import qbit_ops.cli.error_boundary as error_boundary
     from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitAuthenticationError("Authentication failed.")
     )
     runner.invoke(app, ["torrents", "list"])
-    assert main_module.last_app_error is not None
-    assert main_module.last_app_error.category == ErrorCategory.AUTHENTICATION
+    assert error_boundary.last_app_error is not None
+    assert (
+        error_boundary.last_app_error.category == ErrorCategory.AUTHENTICATION
+    )
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect.")
     )
     runner.invoke(app, ["torrents", "list"])
-    assert main_module.last_app_error is not None
-    assert main_module.last_app_error.category == ErrorCategory.UNAVAILABLE
+    assert error_boundary.last_app_error is not None
+    assert error_boundary.last_app_error.category == ErrorCategory.UNAVAILABLE
 
 
 # --- 8: critical operational reports still serialize normally --------------
@@ -268,7 +271,7 @@ def test_internal_error_does_not_leak_credentials(
 
 def test_ambiguous_hash_error_has_remediation() -> None:
     """Ensure the ambiguous-hash `AppError` carries actionable remediation."""
-    import qbit_ops.main as main_module
+    import qbit_ops.cli.error_boundary as error_boundary
     from qbit_ops.selectors import AmbiguousTorrentHashError, ResolvedTorrent
 
     error = AmbiguousTorrentHashError(
@@ -280,10 +283,10 @@ def test_ambiguous_hash_error_has_remediation() -> None:
     )
 
     with pytest.raises(typer.Exit):
-        main_module._fail_ambiguous_hash(error)
+        error_boundary.fail_ambiguous_hash(error)
 
-    assert main_module.last_app_error is not None
-    assert main_module.last_app_error.remediation is not None
+    assert error_boundary.last_app_error is not None
+    assert error_boundary.last_app_error.remediation is not None
 
 
 # --- 12: machine-readable fatal errors never produce partial success JSON --
@@ -332,15 +335,17 @@ def test_app_error_is_constructed_for_a_handled_failure(
     configure_qbit_backend,
 ) -> None:
     """Ensure `_fail()` actually records a structured `AppError`."""
-    import qbit_ops.main as main_module
+    import qbit_ops.cli.error_boundary as error_boundary
 
     configure_qbit_backend(client=FakeQbitClient())
     runner.invoke(
         app, ["torrents", "inspect", "--hash", "abc", "--format", "csv"]
     )
 
-    assert isinstance(main_module.last_app_error, AppError)
-    assert main_module.last_app_error.category == ErrorCategory.DOMAIN_FAILURE
+    assert isinstance(error_boundary.last_app_error, AppError)
+    assert (
+        error_boundary.last_app_error.category == ErrorCategory.DOMAIN_FAILURE
+    )
 
 
 # --- Exit-code table completeness -------------------------------------------
@@ -377,7 +382,7 @@ def test_exit_code_table_matches_registered_commands() -> None:
 
 def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
     """Ensure `qbit_ops/errors.py` never imports Typer, Rich, or
-    `qbit_ops.main`.
+    `qbit_ops.cli` (the CLI layer).
 
     A static source check, independent of what other test modules have
     already imported into `sys.modules` in this process (see the
@@ -400,7 +405,10 @@ def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
         for module in imported_modules
         for root in forbidden_roots
     )
-    assert "qbit_ops.main" not in imported_modules
+    assert not any(
+        module == "qbit_ops.cli" or module.startswith("qbit_ops.cli.")
+        for module in imported_modules
+    )
 
 
 def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
@@ -410,8 +418,8 @@ def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
 
     Proves the dependency direction a future TUI relies on: `qbit_ops.errors`
     (domain/application error model) must never pull in the CLI layer
-    (`qbit_ops.main`, Typer command registration) or a rendering library, so
-    a TUI can depend on it directly instead of on `qbit_ops.main`. Runs in a
+    (`qbit_ops.cli`, Typer command registration) or a rendering library, so
+    a TUI can depend on it directly instead of on `qbit_ops.cli`. Runs in a
     fresh subprocess so already-imported modules from the rest of this
     test session cannot mask a real dependency.
     """
@@ -422,7 +430,7 @@ def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
         "    name == 'typer' or name.startswith('typer.')\n"
         "    or name == 'rich' or name.startswith('rich.')\n"
         "    or name == 'click' or name.startswith('click.')\n"
-        "    or name == 'qbit_ops.main'\n"
+        "    or name == 'qbit_ops.cli' or name.startswith('qbit_ops.cli.')\n"
         "    for name in sys.modules\n"
         "), sorted(sys.modules)\n"
         "print('ok', AppError, ErrorCategory)\n"
