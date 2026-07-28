@@ -40,12 +40,11 @@ from qbit_ops.tui.app import (
     MUTATION_WORKER_GROUP,
     HelpScreen,
     LastActionBar,
-    MutationUiResult,
     PreviewScreen,
     ResultScreen,
-    _classify_mutation_error,
-    _format_result_text,
 )
+from qbit_ops.tui.formatting import _format_result_text
+from qbit_ops.tui.state import MutationUiResult, _classify_mutation_error
 from tests.support import FakeQbitClient, make_torrent
 from tests.test_tui_app import (
     WIDE_SIZE,

@@ -64,6 +64,8 @@ from qbit_ops.tui.app import (
     ResultScreen,
     WorkspaceTabs,
     _columns_for_width,
+)
+from qbit_ops.tui.formatting import (
     _format_byte_rate,
     _format_local_time,
     _truncate,
@@ -2693,7 +2695,13 @@ async def test_overview_connection_uses_injected_timezone() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
 
-        with patch("qbit_ops.tui.app._format_local_time") as mocked:
+        # Patched at `qbit_ops.tui.widgets.overview`, not
+        # `qbit_ops.tui.app`: the TUI reorg moved `OverviewPanel`'s
+        # `_format_local_time` call there (its new canonical module),
+        # so that is where the name is actually looked up at call time.
+        with patch(
+            "qbit_ops.tui.widgets.overview._format_local_time"
+        ) as mocked:
             mocked.side_effect = (
                 lambda moment, tz=None: f"stub-time {fixed_tz.tzname(moment)}"
             )

@@ -78,6 +78,7 @@ from qbit_ops.torrents import (
     get_safe_tracker_details,
     select_torrents_from_items,
 )
+from qbit_ops.trackers import sanitize_tracker_text
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
@@ -904,3 +905,147 @@ def _count_stopped_torrents(raw_torrents: list[Any]) -> int:
         for torrent in raw_torrents
         if is_stopped_state(get_field_as_string(torrent, "state"))
     )
+
+
+def _split_skips(
+    plan: BulkTorrentActionPlan,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """Split a plan's skips into (already-satisfied, not-found).
+
+    Audit finding F-3: "the torrent disappeared from the snapshot" and
+    "the torrent is already in the requested state" are different facts
+    and must never be collapsed into one message. `not_found` is the
+    reason `qbit_ops.torrents.build_bulk_action_plan_from_snapshot` records
+    for a selected hash absent from the planning snapshot.
+    """
+    not_found = tuple(
+        skip for skip in plan.skipped if skip.reason == "not_found"
+    )
+    satisfied = tuple(
+        skip for skip in plan.skipped if skip.reason != "not_found"
+    )
+    return satisfied, not_found
+
+
+_PAST_TENSE_ACTION: dict[TorrentBulkAction, str] = {
+    "pause": "paused",
+    "resume": "resumed",
+    "start": "started",
+    "reannounce": "reannounced",
+}
+
+
+@dataclass(frozen=True)
+class MutationUiResult:
+    """One completed Apply's truthful, safe, structured outcome.
+
+    Deliberately small and immutable (audit finding R-3): it exists so a
+    mutation that really was submitted can still be reported even when
+    its `PreviewScreen` is no longer the active screen -- never as a
+    generic notification-history framework. Carries only safe data:
+    counts, full canonical hashes the TUI already holds, a semantic
+    error category, and an already-sanitized message. No exception
+    object, no traceback, no tracker data.
+    """
+
+    operation_id: int
+    action: TorrentBulkAction
+    status: MutationStatus
+    planned_hashes: tuple[str, ...]
+    submitted_hashes: tuple[str, ...]
+    satisfied_hashes: tuple[str, ...]
+    not_found_hashes: tuple[str, ...]
+    completed_at: datetime
+    error_category: ErrorCategory | None = None
+    error_message: str | None = None
+    cancelled_before_dispatch: bool = False
+    """The Apply lost authority while queued behind the shared remote
+    lock and was abandoned *before* any qBittorrent call (closure review
+    finding N-2). Deliberately a distinct fact rather than a reuse of
+    `error_category`: nothing failed remotely, nothing was submitted,
+    and the operator did not cancel the Preview either. Kept TUI-local
+    (not added to the shared `MutationStatus`) because the CLI has no
+    equivalent queue-then-shutdown window, so its public schemas are
+    unaffected.
+
+    Deliberately *not* expected to be rendered on today's only trigger:
+    `should_proceed` is `lambda: self.is_running`, so the sole way to
+    lose authority is quitting -- and `_on_mutation_worker_state_changed`
+    returns early once `is_running` is false, precisely so a late result
+    cannot touch a tearing-down app. The material guarantee is that no
+    mutation call happens; the representation is defence in depth for a
+    future non-shutdown authority-loss path, and keeps the outcome
+    taxonomy honest (final closure report, finding D-4)."""
+
+    @classmethod
+    def from_plan(
+        cls,
+        plan: BulkTorrentActionPlan,
+        status: MutationStatus,
+        *,
+        operation_id: int,
+        error_category: ErrorCategory | None = None,
+        error_message: str | None = None,
+        cancelled_before_dispatch: bool = False,
+    ) -> MutationUiResult:
+        satisfied, not_found = _split_skips(plan)
+        submitted = tuple(change.hash for change in plan.changes)
+        nothing_sent = error_category is not None or cancelled_before_dispatch
+        return cls(
+            operation_id=operation_id,
+            action=plan.action,
+            status=status,
+            planned_hashes=submitted
+            + tuple(skip.hash for skip in plan.skipped),
+            submitted_hashes=(() if nothing_sent else submitted),
+            satisfied_hashes=tuple(skip.hash for skip in satisfied),
+            not_found_hashes=tuple(skip.hash for skip in not_found),
+            completed_at=datetime.now(UTC),
+            error_category=error_category,
+            error_message=error_message,
+            cancelled_before_dispatch=cancelled_before_dispatch,
+        )
+
+
+def _classify_mutation_error(
+    error: Exception,
+) -> tuple[ErrorCategory, str]:
+    """Classify an Apply failure into one semantic category + message.
+
+    Outer-first (audit findings F-4/F-5), then `__cause__` as fallback
+    context only -- see `QbitOpsTuiApp._classify_mutation_outcome` for
+    the full documented ladder and why the order matters. All returned
+    text is already safe to render: `ConfigError`/`QbitAuthenticationError`/
+    `QbitConnectionError` messages are qbit-ops' own wording, and the
+    recoverable classifier reuses the same messages the refresh path
+    shows in its banner.
+    """
+    classified = _classify_one_mutation_error(error)
+    if classified is not None:
+        return classified
+
+    cause = error.__cause__
+    if isinstance(cause, Exception):
+        classified = _classify_one_mutation_error(cause)
+        if classified is not None:
+            return classified
+
+    return (
+        ErrorCategory.INTERNAL,
+        f"{type(error).__name__}: {sanitize_tracker_text(str(error))}",
+    )
+
+
+def _classify_one_mutation_error(
+    error: Exception,
+) -> tuple[ErrorCategory, str] | None:
+    """One rung of the ladder: classify `error` itself, or `None`."""
+    if isinstance(error, ConfigError):
+        return (ErrorCategory.CONFIGURATION, str(error))
+
+    failure = classify_recoverable_qbit_failure(error)
+    if failure is None:
+        return None
+    if failure.code == "authentication_failed":
+        return (ErrorCategory.AUTHENTICATION, failure.message)
+    return (ErrorCategory.UNAVAILABLE, failure.message)
