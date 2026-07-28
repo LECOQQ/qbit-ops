@@ -44,17 +44,15 @@ def test_canonical_matrix_lives_under_the_runtime_package() -> None:
 
 
 def test_no_executable_consumer_references_the_old_test_path() -> None:
-    """The manifest used to live at `tests/integration/qbittorrent-matrix.toml`.
-    No `.py`/`.yml`/Makefile consumer may hardcode that path any longer --
-    only historical audit prose under `docs/audits/` may still mention it."""
+    """No `.py`/`.yml`/Makefile consumer may hardcode the manifest's old
+    pre-packaging location any longer -- only historical audit prose
+    under `docs/audits/` may still mention it. The old path is built
+    from parts rather than written as a literal string in this file, so
+    this guard (now itself a tracked, `git grep`-visible file) never
+    flags its own source as an offender."""
+    old_path = "/".join(["tests", "integration", "qbittorrent-matrix.toml"])
     result = subprocess.run(
-        [
-            "git",
-            "grep",
-            "-l",
-            "--fixed-strings",
-            "tests/integration/qbittorrent-matrix.toml",
-        ],
+        ["git", "grep", "-l", "--fixed-strings", old_path],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -106,9 +104,10 @@ def test_documentation_consistency_check_uses_the_package_loader() -> None:
 
 
 def test_makefile_help_reads_the_packaged_manifest_path() -> None:
+    old_path = "/".join(["tests", "integration", "qbittorrent-matrix.toml"])
     makefile = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert "src/qbit_ops/data/qbittorrent-matrix.toml" in makefile
-    assert "tests/integration/qbittorrent-matrix.toml" not in makefile
+    assert old_path not in makefile
 
 
 def test_built_wheel_contains_the_packaged_manifest() -> None:

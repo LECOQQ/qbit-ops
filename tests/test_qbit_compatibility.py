@@ -73,10 +73,42 @@ def test_latest_returns_the_highest_expected_version() -> None:
     assert evidence.latest().id == "qbit-5.2.3"
 
 
+def test_oldest_returns_the_lowest_expected_version() -> None:
+    evidence = load_compatibility_evidence()
+    assert evidence.oldest().id == "qbit-4.6.7"
+
+
 def test_entry_raises_key_error_on_unknown_id() -> None:
     evidence = load_compatibility_evidence()
     with pytest.raises(KeyError, match="unknown qBittorrent matrix id"):
         evidence.entry("qbit-9.9.9-does-not-exist")
+
+
+def test_entry_for_application_version_finds_exact_match() -> None:
+    evidence = load_compatibility_evidence()
+    match = evidence.entry_for_application_version("5.2.3")
+    assert match is not None
+    assert match.id == "qbit-5.2.3"
+    match_with_v_prefix = evidence.entry_for_application_version("v5.2.3")
+    assert match_with_v_prefix is not None
+    assert match_with_v_prefix.id == "qbit-5.2.3"
+
+
+def test_entry_for_application_version_returns_none_for_untested_version() -> (
+    None
+):
+    evidence = load_compatibility_evidence()
+    assert evidence.entry_for_application_version("5.0.1") is None
+    assert evidence.entry_for_application_version("9.9.9") is None
+
+
+def test_entry_for_application_version_does_not_match_a_patch_sibling() -> None:
+    """A patch release adjacent to an exact tested entry must not match
+    -- docs/COMPATIBILITY.md §10 rule 3: one patch release is never
+    evidence for its whole line."""
+    evidence = load_compatibility_evidence()
+    assert evidence.entry_for_application_version("5.2.2") is None
+    assert evidence.entry_for_application_version("5.2.4") is None
 
 
 def test_importing_the_module_does_not_parse_the_manifest() -> None:

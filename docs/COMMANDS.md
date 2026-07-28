@@ -212,10 +212,47 @@ order:
 | `CONN003` | connectivity | qBittorrent application version is readable (`app_version()`). |
 | `CONN004` | connectivity | Web API version is readable (`app_web_api_version()`). |
 | `COMPAT001` | compatibility | The qBittorrent version string is parsable. |
-| `COMPAT002` | compatibility | The qBittorrent major version (4 or 5) was detected (transitional, neutral wording -- exact compatibility evidence is evaluated separately, see `docs/COMPATIBILITY.md`). |
+| `COMPAT002` | compatibility | Matrix-aware compatibility evidence: classifies the observed exact application version against the packaged compatibility manifest (`qbit_ops.qbit.compatibility`) -- see [Compatibility evidence (COMPAT002/COMPAT003)](#compatibility-evidence-compat002compat003) below. |
+| `COMPAT003` | compatibility | Required Web API capabilities: whether the observed Web API version exposes the capabilities qbit-ops's mutation commands actually rely on (reannounce, tracker edit/remove) -- independent of COMPAT002, since a version absent from the matrix is not itself a capability problem. |
 | `RUNTIME001` | runtime | Torrent listing succeeds (`torrents_info()`). |
 | `RUNTIME002` | runtime | Global transfer info succeeds (`transfer_info()`). |
 | `RUNTIME003` | runtime | Every torrent's state is recognized (reuses `qbit_ops.status.classify_torrent_state`, the exact same vocabulary `status`/`status --watch` use). |
+
+### Compatibility evidence (COMPAT002/COMPAT003)
+
+`COMPAT002` reads the packaged compatibility evidence manifest
+(`qbit_ops.qbit.compatibility.load_compatibility_evidence()`, backed by
+`qbit_ops/data/qbittorrent-matrix.toml` -- see `docs/COMPATIBILITY.md`
+§10) and compares the *exact* observed application version against it.
+There is no second, duplicated list of versions in `doctor.py` --
+`COMPAT002` always reads the same packaged manifest every other
+consumer does. Five outcomes, none of which ever says
+`supported`/`unsupported`/`compatible`/`incompatible`:
+
+| Case | Status | Wording |
+| --- | --- | --- |
+| Exact application version **and** exact Web API version both match a tested entry | `pass` | "Container integration tested against this exact qBittorrent \<version\> and Web API \<version\> version, on \<architecture\>." (never claims other architectures are incompatible) |
+| Exact application version matches, but the observed Web API differs from that entry's recorded evidence | `warning` | "...matches an exact container-integration-tested release, but the observed Web API version (...) differs from tested evidence (...)." |
+| Version strictly between the oldest and newest tested entries, itself untested | `pass` | "...is exact version not container-integration tested (between tested evidence \<oldest\> and \<newest\>); no incompatibility is known." (never infers support for the intervening range) |
+| Version newer than the newest tested entry | `warning` | "...is newer than the latest container-tested evidence (...)." |
+| Version older than the oldest tested entry | `warning` | "...is older than the oldest container-tested evidence (...)." |
+
+An unparsable/unavailable version leaves `COMPAT002` `skipped` (via
+`COMPAT001`'s existing contract, unchanged). If the packaged manifest
+itself cannot be read, `COMPAT002` is `warning`, never a crash.
+
+`COMPAT003` is a **separate concern**: given only the observed Web API
+version, it checks whether the two capabilities qbit-ops's mutation
+commands actually depend on -- `torrents/reannounce` (Web API ≥
+`2.0.2`) and `torrents/editTracker`/`torrents/removeTrackers` (Web API
+≥ `2.2.0`), both declared floors from `qbittorrent-api` itself, see
+`docs/COMPATIBILITY.md` §3 -- are available. A version absent from the
+compatibility matrix is not itself a capability failure, and a real
+capability floor is not itself compatibility evidence: an untested-but-
+plausible version (`COMPAT002` `pass`) can still be missing a real,
+version-gated capability (`COMPAT003` `warning`), and the two checks
+are free to disagree. No endpoint threshold beyond those two documented
+floors is invented here.
 
 ### Status vocabulary and skip semantics
 
@@ -234,7 +271,7 @@ every configuration check report normally). A check is only ever
 — invalid configuration skips every connectivity/compatibility/runtime
 check; a failed connection skips authentication onward; a failed
 authentication skips the two version reads and everything depending on
-them; an unreadable version skips the supported-version-range check
+them; an unreadable version skips `COMPAT002`'s evidence classification
 (never inventing a compatibility verdict for a version it never saw —
 an unparsable or unrecognized version string is a `warning`, never a
 `fail`, for the same reason). **`skipped` never independently

@@ -29,13 +29,14 @@ status: draft
 | Que valent les tests existants (hors matrice Docker) ? | Ils prouvent la **logique** de `qbit-ops` (filtres, plans, sûreté, non-fuite de secrets), contre un double écrit à la main ou des fixtures `synthetic`/`official-example`. Ils ne prouvent rien sur une instance réelle à eux seuls. |
 | `auth_log_in()` est-il testé ? | **Oui, deux fois** : contre le harnais HTTP hermétique (`tests/test_qbit_library_http_boundary.py`, bibliothèque réelle + réponses simulées) et contre un conteneur qBittorrent réel (`tests/integration/`, chaque scénario commence par un login réel). |
 
-La mention actuelle *« qbit-ops has been validated against qBittorrent
-4.x and 5.x »* (`src/qbit_ops/doctor.py`, `docs/COMMANDS.md`) reste une
-**assertion déclarative distincte** de ce que ce document peut
-désormais justifier : la matrice Docker prouve quatre versions
-**précises**, pas « toute version 4.x/5.x ». Elle est conservée telle
-quelle dans le code tant que la phase compatibilité `doctor` (hors
-périmètre ici) n'a pas remplacé le modèle.
+**Mise à jour (2026-07-27, phase `doctor` matrice-aware)** : la mention
+générique *« qbit-ops has been validated against qBittorrent 4.x and
+5.x »* a été retirée (déjà fait par la phase de remédiation
+précédente, constat F-5) et **remplacée** par une classification par
+preuve exacte, lue depuis le manifeste packagé — `doctor` cite
+désormais directement les quatre versions exactes de la matrice quand
+la version observée correspond, au lieu d'une affirmation générale par
+version majeure. Détail complet en §6.
 
 ---
 
@@ -276,23 +277,51 @@ unitairement avec accès réseau entièrement simulé
 
 ## 6. 🩺 Ce que `doctor` doit vérifier
 
-État actuel et cible :
+État implémenté le 2026-07-27 (phase `doctor` matrice-aware), puis reste
+à faire :
 
-| Code | Aujourd'hui | Cible (phase 7) |
-|---|---|---|
-| `CONN003` | affiche la version applicative | inchangé |
-| `CONN004` | affiche la version Web API | inchangé |
-| `COMPAT001` | la chaîne de version applicative est analysable | étendu à la version **Web API** |
-| `COMPAT002` | `major in {4, 5}` | remplacé par le **palier** de la version Web API |
-| `COMPAT003` | — | **nouveau** : capacités disponibles vs capacités requises |
-| `RUNTIME001` | `torrents/info` répond | inchangé |
-| `RUNTIME002` | `transfer/info` répond | inchangé |
-| `RUNTIME003` | tous les états torrent sont reconnus | inchangé |
-| `RUNTIME004` | — | **nouveau** : champs obligatoires présents sur un échantillon de `torrents/info` |
+| Code | État |
+|---|---|
+| `CONN003` | affiche la version applicative — inchangé |
+| `CONN004` | affiche la version Web API — inchangé |
+| `COMPAT001` | la chaîne de version applicative est analysable — inchangé |
+| `COMPAT002` | **implémenté** : classification par preuve exacte contre `qbit_ops.qbit.compatibility.load_compatibility_evidence()` — voir §6.1 |
+| `COMPAT003` | **implémenté** : capacités Web API requises (`reannounce` ≥ 2.0.2, édition/suppression de tracker ≥ 2.2.0) disponibles à la version observée — voir §6.1 |
+| `RUNTIME001` | `torrents/info` répond — inchangé |
+| `RUNTIME002` | `transfer/info` répond — inchangé |
+| `RUNTIME003` | tous les états torrent sont reconnus — inchangé |
+| `RUNTIME004` | — **non implémenté**, reste à faire : champs obligatoires présents sur un échantillon de `torrents/info` |
 
 Principe conservé : une version inconnue ou non analysable produit un
 `warning`, **jamais** un `fail`. `qbit-ops` n'invente pas une garantie
 qu'il n'a pas.
+
+### 6.1 Modèle implémenté pour `COMPAT002`/`COMPAT003`
+
+Le modèle réellement livré est plus simple que le système de paliers
+Web API (`TESTED`/`SUPPORTED_UNTESTED`/`UNTESTED_NEWER`/`UNSUPPORTED`)
+esquissé en §4 — celui-ci reste un modèle **conceptuel**, non
+implémenté par cette phase. `COMPAT002` compare directement la version
+applicative **exacte** observée aux entrées exactes du manifeste
+packagé (`src/qbit_ops/data/qbittorrent-matrix.toml`) :
+
+| Cas | Statut | Formulation |
+|---|---|---|
+| Version applicative **et** Web API exactes correspondent à une entrée testée | `pass` | « Container integration tested against this exact qBittorrent \<version\> and Web API \<version\> version, on \<architecture\>. » |
+| Version applicative exacte correspond, mais la Web API observée diffère de la preuve enregistrée | `warning` | « ...matches an exact container-integration-tested release, but the observed Web API version (...) differs from tested evidence (...). » |
+| Version strictement entre la plus ancienne et la plus récente entrée testée, elle-même non testée | `pass` | « ...is exact version not container-integration tested (between tested evidence \<oldest\> and \<newest\>); no incompatibility is known. » |
+| Version plus récente que la plus récente entrée testée | `warning` | « ...is newer than the latest container-tested evidence (...). » |
+| Version plus ancienne que la plus ancienne entrée testée | `warning` | « ...is older than the oldest container-tested evidence (...). » |
+
+Aucune de ces formulations n'utilise `supported`/`unsupported`/
+`compatible`/`incompatible`. `COMPAT003` est un contrôle **séparé** :
+il ne dépend que de la version Web API observée et des deux planchers
+déjà documentés en §3 (`reannounce` : 2.0.2 ; `editTracker`/
+`removeTrackers` : 2.2.0) — l'absence d'une version du manifeste n'est
+jamais en soi un échec de capacité, et un plancher de capacité n'est
+jamais en soi une preuve de compatibilité. Détail complet, tests et
+preuves de sabotage : `docs/COMMANDS.md` § « Compatibility evidence
+(COMPAT002/COMPAT003) ».
 
 ---
 
@@ -423,12 +452,15 @@ l'ensemble des fixtures de compatibilité (`tests/compatibility/`) sont
 Docker (§5.2) — `qbit-4.6.7`, `qbit-5.0.0`, `qbit-5.1.4`, `qbit-5.2.3`,
 chacune identifiée par son digest d'image — sont désormais
 `container integration tested` pour les capacités `read_only`,
-`mutations`, `tracker_mutations` et `capture`. Aucune version n'est
-`supported` au sens du palier `TESTED`/`SUPPORTED_UNTESTED` de §4 tant
-que `doctor` n'a pas été étendu pour s'appuyer sur ces preuves (hors
-périmètre de cette phase) ; aucune version n'est `unsupported`. Ce
-document continue de ne publier aucune plage de version qBittorrent
-supportée — quatre digests précis ne sont pas une plage.
+`mutations`, `tracker_mutations` et `capture`. **Mise à jour
+(2026-07-27)** : `doctor` s'appuie désormais sur ces preuves via
+`COMPAT002`/`COMPAT003` (§6), mais selon le modèle par preuve exacte de
+§6.1, **pas** le système de paliers `TESTED`/`SUPPORTED_UNTESTED` de
+§4 — celui-ci reste conceptuel, non implémenté. Aucune version n'est
+donc `supported` au sens du palier §4 ; aucune version n'est
+`unsupported`. Ce document continue de ne publier aucune plage de
+version qBittorrent supportée — quatre digests précis ne sont pas une
+plage.
 
 ---
 
