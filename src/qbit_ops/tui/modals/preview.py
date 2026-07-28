@@ -16,7 +16,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
-from qbit_ops.torrents import BulkTorrentActionPlan
+from qbit_ops.features.torrents import BulkTorrentActionPlan
 from qbit_ops.tui.formatting import _format_preview_text
 
 if TYPE_CHECKING:

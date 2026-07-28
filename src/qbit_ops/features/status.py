@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from qbit_ops.qbit.fields import get_field_as_string, get_transfer_rates
-from qbit_ops.torrent_states import (
+from qbit_ops.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_completed_torrent,

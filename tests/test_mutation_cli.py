@@ -1,8 +1,9 @@
 """Test the CLI-level mutation confirmation policy and secret redaction.
 
-Covers the execution-safety model introduced alongside `qbit_ops.execution`:
-dry-run-by-default, risk-tiered confirmation, `--yes`, non-interactive
-refusal, cancellation semantics, and passkey redaction in prompts and
+Covers the execution-safety model introduced alongside
+`qbit_ops.shared.execution`: dry-run-by-default, risk-tiered
+confirmation, `--yes`, non-interactive refusal, cancellation semantics,
+and passkey redaction in prompts and
 verbose output.
 """
 

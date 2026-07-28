@@ -37,8 +37,8 @@ class StatusExitCode(IntEnum):
 
     Deliberately separate from `ExitCode`: `status` reports operational
     health rather than success/failure, so its exit codes carry
-    different semantics (0-3 map to `qbit_ops.status.Health`; 4 is reserved
-    for invalid local configuration or invalid CLI usage). Other
+    different semantics (0-3 map to `qbit_ops.features.status.Health`;
+    4 is reserved for invalid local configuration or invalid CLI usage). Other
     commands keep `ExitCode` until a later consolidation decision.
 
     `status --watch` does **not** use this health mapping: a running
@@ -60,7 +60,7 @@ class StatusExitCode(IntEnum):
 class DoctorExitCode(IntEnum):
     """Define exit codes specific to the `doctor` command.
 
-    `0`/`1`/`2` mirror `qbit_ops.doctor.doctor_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_ops.features.doctor.doctor_exit_code`'s
     pass/warning/failure mapping exactly (kept here only for readability
     at call sites and in tests). `3` is intentionally unused: doctor has
     no condition that needs a fourth severity tier. `4` is reserved for
@@ -82,7 +82,7 @@ class DoctorExitCode(IntEnum):
 class TrackerStatusExitCode(IntEnum):
     """Define exit codes specific to the `trackers status` command.
 
-    Mirrors `qbit_ops.tracker_status.tracker_status_exit_code`'s
+    Mirrors `qbit_ops.features.tracker_status.tracker_status_exit_code`'s
     healthy/warning/critical/unavailable mapping exactly (kept here only
     for readability at call sites and in tests). Deliberately its own
     scheme rather than `ExitCode`: `2` here means CRITICAL, not
@@ -104,7 +104,7 @@ class TrackerStatusExitCode(IntEnum):
 class ExplainExitCode(IntEnum):
     """Define exit codes specific to the `explain` command group.
 
-    `0`/`1`/`2` mirror `qbit_ops.explain.explanation_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_ops.features.explain.explanation_exit_code`'s
     info/warning-or-unknown/critical mapping exactly (kept here only for
     readability at call sites and in tests). `3` (`TARGET_UNAVAILABLE`)
     is used when there is nothing to explain at all -- an unresolved

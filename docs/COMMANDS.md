@@ -216,7 +216,7 @@ order:
 | `COMPAT003` | compatibility | Required Web API capabilities: whether the observed Web API version exposes the capabilities qbit-ops's mutation commands actually rely on (reannounce, tracker edit/remove) -- independent of COMPAT002, since a version absent from the matrix is not itself a capability problem. |
 | `RUNTIME001` | runtime | Torrent listing succeeds (`torrents_info()`). |
 | `RUNTIME002` | runtime | Global transfer info succeeds (`transfer_info()`). |
-| `RUNTIME003` | runtime | Every torrent's state is recognized (reuses `qbit_ops.status.classify_torrent_state`, the exact same vocabulary `status`/`status --watch` use). |
+| `RUNTIME003` | runtime | Every torrent's state is recognized (reuses `qbit_ops.features.status.classify_torrent_state`, the exact same vocabulary `status`/`status --watch` use). |
 
 ### Compatibility evidence (COMPAT002/COMPAT003)
 
@@ -330,7 +330,7 @@ stderr. `CFG003` reports that `QBIT_HOST` embeds credentials without
 ever printing the credentials themselves. A connection/authentication
 error's underlying exception text — which can otherwise carry the
 configured host verbatim — is passed through one redaction funnel
-(`qbit_ops.doctor._redact`) that strips URL userinfo and the exact configured
+(`qbit_ops.features.doctor._redact`) that strips URL userinfo and the exact configured
 password before it becomes a check's `detail`.
 
 ### Out of scope
@@ -363,7 +363,7 @@ not.
 
 **No mutation is reachable from the TUI.** It shares the exact same
 `TorrentFilter` vocabulary and safe torrent/tracker data as the rest of
-the CLI (`qbit_ops.torrents`, `qbit_ops.status`, `qbit_ops.app_services`) but never
+the CLI (`qbit_ops.features.torrents`, `qbit_ops.features.status`, `qbit_ops.app_services`) but never
 imports any `plan_*`/`apply_*` mutation function, `qbit_ops.cli`, or any
 raw-tracker-URL-producing helper — enforced by a static (AST) test,
 not just a runtime one (`tests/test_tui_security.py`).
@@ -457,7 +457,7 @@ different dimensions, not three slices of one total):
   formatting.
 * **Activity** — total, downloading, seeding, stopped, checking — a
   torrent's current transfer state, reusing the existing
-  `qbit_ops.torrent_states` classifier (no second one).
+  `qbit_ops.shared.torrent_states` classifier (no second one).
 * **Completion** — completed / incomplete, by progress — independent of
   Activity: a completed torrent can be seeding *or* stopped.
 * **Attention** — stalled, errored, unknown — conditions worth an
@@ -902,7 +902,7 @@ e   Explain
 Opens a modal, evidence-based explanation of the focused torrent's
 current state — the exact same rule catalogue, finding codes,
 severities, and evidence/limitation semantics `explain torrent` uses on
-the CLI (`qbit_ops.explain.build_torrent_explanation`, shared by both
+the CLI (`qbit_ops.features.explain.build_torrent_explanation`, shared by both
 interfaces; there is no second, TUI-only explanation catalogue). Only
 meaningful in the Torrents workspace; a safe notification ("No torrent
 focused.") when nothing is focused, never a crash.
@@ -1005,7 +1005,7 @@ same `StatusSnapshot`/`SelectedTorrent`/`inspect_torrent`/
 `ExplanationReport`-shaped data the rest of the CLI already uses.
 Tracker identities and messages are always the same structural,
 secret-free fields `trackers inspect` renders
-(`qbit_ops.torrents.get_safe_tracker_details`): a normalized `host[:port]`
+(`qbit_ops.features.torrents.get_safe_tracker_details`): a normalized `host[:port]`
 identity, health, scheme, path *shape*, and query parameter *names* —
 never a raw announce URL, path value, query value, userinfo, or
 unsanitized tracker message. Explain's evidence and suggested commands
@@ -1014,11 +1014,11 @@ state) — a suggested command is always a display-only, dry-run-safe
 string, never `--no-dry-run`/`--yes`, and is never executed by the TUI.
 Copy hash copies only the full canonical hash string, never a details
 block or tracker data. The only mutation surface reachable from the TUI
-is exactly two functions — `qbit_ops.torrents.build_bulk_action_plan_from_snapshot`
+is exactly two functions — `qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`
 (pure, builds a plan from an already-fetched snapshot) and
 `apply_bulk_torrent_action` (mutates exactly a frozen plan's hashes) —
 covering only Pause/Resume/Reannounce; every tracker mutation function,
-`qbit_ops.torrents.plan_bulk_torrent_action` (always rescans, accepts
+`qbit_ops.features.torrents.plan_bulk_torrent_action` (always rescans, accepts
 `--all`), and any deletion function remain fully out of reach,
 enforced by a static (AST) test, not just a runtime one
 (`tests/test_tui_security.py`). See
@@ -1078,8 +1078,8 @@ instance and does not take a filter.
 
 ### Torrent Filters
 
-One structured, Typer/Rich-free filter model (`qbit_ops.torrents.TorrentFilter`)
-and one filtering pipeline (`qbit_ops.torrents.select_torrents`) back `torrents
+One structured, Typer/Rich-free filter model (`qbit_ops.features.torrents.TorrentFilter`)
+and one filtering pipeline (`qbit_ops.features.torrents.select_torrents`) back `torrents
 list` and all four bulk mutation commands (`pause`/`resume`/`start`/
 `reannounce`) — filter semantics can never drift between listing and
 mutating.
@@ -1118,7 +1118,7 @@ impossible are rejected before any qBittorrent API call:
 
 #### API-call behavior
 
-The filtering pipeline (`qbit_ops.torrents.select_torrents`) always loads
+The filtering pipeline (`qbit_ops.features.torrents.select_torrents`) always loads
 torrents with exactly one `torrents_info()` call, then applies every
 cheap, torrent-info-only filter first:
 
@@ -1178,7 +1178,7 @@ poetry run qbit-ops torrents list --category "(uncategorized)"
 
 A stable public vocabulary, not raw qBittorrent state strings — reuses the
 same classification `status`/`status --watch`/`doctor` already use
-(`qbit_ops.torrent_states.classify_torrent_state`), so a torrent's group can
+(`qbit_ops.shared.torrent_states.classify_torrent_state`), so a torrent's group can
 never disagree between commands:
 
 ```text
@@ -1339,7 +1339,7 @@ qbit-ops torrents reannounce --hash abc123
 status`, and `trackers export` never render a complete tracker announce
 URL, passkey, or query value, in any format (`table`/`json`/`jsonl`/
 `csv`). All four report the normalized `host[:port]` identity
-(`qbit_ops.trackers.normalize_tracker_host`) plus, for `inspect`/`status`, a
+(`qbit_ops.features.trackers.normalize_tracker_host`) plus, for `inspect`/`status`, a
 structural breakdown (scheme, path *shape*, query parameter *names* —
 never values). Only the four bulk mutation commands
 (`add-if-present`/`remove`/`replace`/`replace-passkey`) take a raw
@@ -1577,7 +1577,7 @@ status`, `trackers inspect`, `trackers export`, and `torrents list
 --tracker` — has no `--match` and no raw-URL comparison mode at all:
 none of them need qBittorrent's literal stored URL to act on, so they
 always match by the normalized `host[:port]` identity
-(`qbit_ops.trackers.normalize_tracker_host`), the same one everywhere. This
+(`qbit_ops.features.trackers.normalize_tracker_host`), the same one everywhere. This
 is also why they can be safe by default: a command that never needs the
 raw URL never has one to accidentally render.
 
@@ -1740,7 +1740,7 @@ exact same plan used for the preview and for the real application — see
 
 Every mutating command (`torrents pause/resume/start/reannounce`, `trackers
 add-if-present/remove/replace/replace-passkey`) is classified into exactly
-one risk tier, defined once in `qbit_ops.execution.MUTATION_RISK` so it cannot
+one risk tier, defined once in `qbit_ops.shared.execution.MUTATION_RISK` so it cannot
 drift between the CLI, its tests, and this table:
 
 | Risk | Commands | Confirmation | `--yes` |
@@ -1776,7 +1776,7 @@ Execution contract, identical across every mutating command:
 ### Mutation status vocabulary
 
 Every mutation command's summary ends with a `status` row using exactly
-one of these five values (`qbit_ops.execution.MutationStatus`):
+one of these five values (`qbit_ops.shared.execution.MutationStatus`):
 
 | Status | Meaning | Exit code |
 | --- | --- | --- |
@@ -1908,7 +1908,7 @@ identical to `torrents list`.
 ### Tracker identity
 
 Every tracker is identified as `host` or `host:port`
-(`qbit_ops.trackers.normalize_tracker_host`) — never a full announce URL. This
+(`qbit_ops.features.trackers.normalize_tracker_host`) — never a full announce URL. This
 is the exact same function `torrents list --tracker` and the bulk
 mutation commands use, so "the same tracker" always means the same thing
 across every command. Scheme, path, query string, and userinfo (where a
@@ -1994,7 +1994,7 @@ scanned. Progress reporting never changes this call count (see
 ### Exit codes
 
 `trackers status` reports operational health, not success/failure, using
-its own codes (`qbit_ops.tracker_status.tracker_status_exit_code`, mirrored by
+its own codes (`qbit_ops.features.tracker_status.tracker_status_exit_code`, mirrored by
 `qbit_ops.cli.exit_codes.TrackerStatusExitCode`):
 
 - `0`: `healthy` — includes an empty selection and a report where every
@@ -2034,8 +2034,8 @@ shown with `--dry-run`, never `--no-dry-run` or `--yes`.
 
 There is no generic rule engine: a small, fixed catalogue of deterministic
 rules is evaluated over data other commands already collect (torrent
-state groups from `qbit_ops.torrent_states`, tracker health from
-`qbit_ops.trackers`/`qbit_ops.tracker_status`). A finding never claims a cause its
+state groups from `qbit_ops.shared.torrent_states`, tracker health from
+`qbit_ops.features.trackers`/`qbit_ops.features.tracker_status`). A finding never claims a cause its
 evidence does not support — where qbit-ops cannot classify something
 (an unrecognized torrent state or tracker status), the finding says so
 explicitly (`unknown` severity) rather than guessing. No confidence
@@ -2045,7 +2045,7 @@ percentage is ever computed or shown (see `docs/PHILOSOPHY.md` §9).
 
 Resolves `--hash` with the same unique-prefix resolver every other
 hash-driven command uses (see [Torrents](#torrents)). Exactly one
-finding is produced per torrent, since `qbit_ops.torrent_states`' state
+finding is produced per torrent, since `qbit_ops.shared.torrent_states`' state
 groups are mutually exclusive by construction:
 
 | Code | Trigger | Severity |
@@ -2069,7 +2069,7 @@ computed only from the endpoints this one torrent already reported.
 
 Resolves `--tracker` to a normalized `host[:port]` identity the same way
 `trackers status --tracker` does, and reuses
-`qbit_ops.tracker_status.collect_tracker_status` directly — no separate
+`qbit_ops.features.tracker_status.collect_tracker_status` directly — no separate
 collection pass. Because that collector scans every torrent surviving
 the (here, absent) cheap filters, it never scopes API calls to the
 requested tracker alone, only the *report*.
@@ -2094,7 +2094,7 @@ endpoint counts may be incomplete.
 
 Both commands return nothing to explain — no torrent hash resolves, or
 no observation exists at all for the requested tracker identity — the
-same way `qbit_ops.torrents.inspect_torrent` signals "no match": internally,
+same way `qbit_ops.features.torrents.inspect_torrent` signals "no match": internally,
 `None`. The CLI renders this distinctly from every severity-based
 finding:
 
@@ -2120,7 +2120,7 @@ on stderr, `ExitCode.ERROR`), before an explanation is ever computed.
 ### `explain` exit codes
 
 `explain torrent`/`explain tracker` share one scheme
-(`qbit_ops.explain.explanation_exit_code`, mirrored by
+(`qbit_ops.features.explain.explanation_exit_code`, mirrored by
 `qbit_ops.cli.exit_codes.ExplainExitCode`):
 
 - `0`: `info` — no warning, critical, or unknown finding.
@@ -2213,7 +2213,7 @@ Summary:
 mutations can now combine multiple filters, `filter` collapses to three
 cases (`hash`/`all`/`filter`) and `value` renders every active filter via
 the same concise, secret-free description used by `torrents list`'s
-`Filter:` line (`qbit_ops.torrents.describe_torrent_filter`) — never a raw
+`Filter:` line (`qbit_ops.features.torrents.describe_torrent_filter`) — never a raw
 tracker URL. `match` is gone entirely: `--tracker` is hostname-matched now,
 so there is no comparison mode left to report.
 
@@ -2271,7 +2271,7 @@ in [Status Watch Mode](#status-watch-mode).
 ### `doctor` exit codes
 
 `doctor` also reports a severity, not success/failure, using its own
-codes (`qbit_ops.doctor.doctor_exit_code`, mirrored by
+codes (`qbit_ops.features.doctor.doctor_exit_code`, mirrored by
 `qbit_ops.cli.exit_codes.DoctorExitCode`
 for readability at call sites — see [Doctor](#doctor) for the full check
 catalogue and [Exit codes](#overall-status-and-exit-codes) there for

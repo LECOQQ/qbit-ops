@@ -178,7 +178,7 @@ class TrackerHealth(StrEnum):
     """Classify the health of one tracker endpoint or aggregate.
 
     Shared between `inspect_tracker` (per-endpoint) and
-    `qbit_ops.tracker_status` (per-endpoint and aggregated) so the two
+    `qbit_ops.features.tracker_status` (per-endpoint and aggregated) so the two
     read-only tracker views can never disagree about what a raw status
     code means.
     """
@@ -248,8 +248,9 @@ def compute_tracker_aggregate_health(
 ) -> TrackerHealth:
     """Compute one tracker identity's aggregate health from endpoint counts.
 
-    Shared by `qbit_ops.tracker_status.collect_tracker_status` (aggregating
-    across torrents for one tracker identity) and `qbit_ops.explain`
+    Shared by `qbit_ops.features.tracker_status.collect_tracker_status`
+    (aggregating across torrents for one tracker identity) and
+    `qbit_ops.features.explain`
     (aggregating one torrent's own tracker endpoints) so both agree on
     what a mix of endpoint healths means.
 
@@ -443,7 +444,8 @@ def normalize_tracker_host(value: str) -> str:
     string (where a passkey would live) are always discarded and never
     reach a match, a log, or rendered output.
 
-    Also the tracker-identity function for `qbit_ops.tracker_status`, so
+    Also the tracker-identity function for
+    `qbit_ops.features.tracker_status`, so
     `trackers status`'s aggregate identities and `--tracker` on any
     command always agree on what "the same tracker" means. Deliberately
     does not collapse a scheme's default port (`https://host:443` stays
@@ -541,8 +543,8 @@ def list_tracker_usage(
     restorable-backup artifact, which legitimately needs raw tracker
     data (see docs/DECISIONS.md). No CLI command renders this
     function's output directly; `trackers list` uses
-    `qbit_ops.tracker_status.collect_tracker_status` instead, which is safe
-    by construction.
+    `qbit_ops.features.tracker_status.collect_tracker_status` instead,
+    which is safe by construction.
 
     Calls `client.torrents_trackers()` once per torrent, so
     `on_progress(completed, total)` reports real, known progress through

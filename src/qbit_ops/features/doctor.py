@@ -1,16 +1,17 @@
 """Collect and represent a qbit-ops diagnostic report.
 
 This is the `doctor` "service": it must remain callable without Typer and
-without Rich, mirroring `qbit_ops.status`'s collection/render split, so it can
-be reused by a future TUI without pulling in CLI or presentation
-concerns.
+without Rich, mirroring `qbit_ops.features.status`'s collection/render
+split, so it can be reused by a future TUI without pulling in CLI or
+presentation concerns.
 
 Collection performs a bounded, documented number of remote calls: at most
 one authenticated login (`auth_log_in()`, performed by the caller before
 `collect_doctor_report()` is invoked) plus up to four read calls
 (`app_version`, `app_web_api_version`, `transfer_info`, `torrents_info`)
-made here — the same bounded budget `qbit_ops.status.collect_status_snapshot`
-uses, never a per-torrent call.
+made here — the same bounded budget
+`qbit_ops.features.status.collect_status_snapshot` uses, never a
+per-torrent call.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from qbit_ops.qbit.compatibility import (
     load_compatibility_evidence,
 )
 from qbit_ops.qbit.fields import get_field_as_string
-from qbit_ops.torrent_states import classify_torrent_state
+from qbit_ops.shared.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
@@ -869,9 +870,10 @@ def _transfer_info_check(
 def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
     """Build the torrent-state-vocabulary runtime check.
 
-    Reuses `qbit_ops.torrent_states.classify_torrent_state` so the notion of
-    an "unrecognized" torrent state can never diverge from `status`,
-    which classifies its own torrents through the same function.
+    Reuses `qbit_ops.shared.torrent_states.classify_torrent_state` so
+    the notion of an "unrecognized" torrent state can never diverge
+    from `status`, which classifies its own torrents through the same
+    function.
     """
     if torrents is None:
         return DoctorCheck(

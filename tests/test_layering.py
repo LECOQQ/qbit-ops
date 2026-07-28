@@ -48,10 +48,10 @@ def test_canonical_production_root_is_src_qbit_ops() -> None:
 # scanning, because "pure" is a design claim about these specific
 # modules, not a structural property `rglob` could detect on its own.
 _PURE_DOMAIN_MODULE_NAMES = (
-    "torrent_states.py",
-    "selectors.py",
+    "shared/torrent_states.py",
+    "shared/selectors.py",
     "errors.py",
-    "execution.py",
+    "shared/execution.py",
 )
 
 _R1_FORBIDDEN_ROOTS = {"typer", "rich", "textual", "qbittorrentapi"}

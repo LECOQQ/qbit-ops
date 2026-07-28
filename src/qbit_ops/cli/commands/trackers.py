@@ -3,7 +3,7 @@
 Moved from `qbit_ops.main`: `add-if-present`, `list`, `status`,
 `inspect`, `replace`, `replace-passkey`, `export`, `remove`. No
 behavior change -- tracker planning/sanitization stays in
-`qbit_ops.trackers`/`qbit_ops.tracker_status`.
+`qbit_ops.features.trackers`/`qbit_ops.features.tracker_status`.
 """
 
 from enum import StrEnum
@@ -25,13 +25,12 @@ from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
 from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
-from qbit_ops.execution import MutationOperation
-from qbit_ops.torrents import build_torrent_filter
-from qbit_ops.tracker_status import (
+from qbit_ops.features.torrents import build_torrent_filter
+from qbit_ops.features.tracker_status import (
     collect_tracker_status,
     tracker_status_exit_code,
 )
-from qbit_ops.trackers import (
+from qbit_ops.features.trackers import (
     apply_tracker_addition,
     apply_tracker_passkey_replacement,
     apply_tracker_removal,
@@ -43,6 +42,7 @@ from qbit_ops.trackers import (
     plan_tracker_removal,
     plan_tracker_replacement,
 )
+from qbit_ops.shared.execution import MutationOperation
 
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
 

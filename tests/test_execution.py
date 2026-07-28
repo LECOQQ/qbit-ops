@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from qbit_ops.cli.app import app
-from qbit_ops.execution import (
+from qbit_ops.shared.execution import (
     MUTATION_RISK,
     ExecutionDecision,
     ExecutionPolicy,

@@ -3,12 +3,12 @@
 Security boundary (docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for TUI
 2 -- see docs/DECISIONS.md): this module and every other module under
 `qbit_ops/tui/` must never import `qbit_ops.main`,
-`qbit_ops.torrents.plan_bulk_torrent_action` (always rescans, accepts
+`qbit_ops.features.torrents.plan_bulk_torrent_action` (always rescans, accepts
 `--all`), any tracker mutation `plan_*`/`apply_*` function, any deletion
 function,
-`qbit_ops.torrents.list_torrents_with_trackers`, or
-`qbit_ops.torrents._get_tracker_details`. It may import exactly
-`qbit_ops.torrents.build_bulk_action_plan_from_snapshot`/
+`qbit_ops.features.torrents.list_torrents_with_trackers`, or
+`qbit_ops.features.torrents._get_tracker_details`. It may import exactly
+`qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`/
 `apply_bulk_torrent_action` (LOW-risk Pause/Resume/Reannounce only,
 frozen-plan-in, frozen-plan-out, never a live rescan). Widgets only
 ever render safe, structured domain outputs (`StatusSnapshot`,
@@ -67,7 +67,7 @@ terminal-support limitation, not a qbit-ops bug -- see
 Checkbox pairs (Completed+Incomplete, Active+Inactive) with exclusive
 `RadioSet`s, and gained visible Apply/Clear/Cancel buttons alongside
 the existing bindings. `e` opens an Explain modal for the focused
-torrent, built by the same pure, zero-API `qbit_ops.explain.
+torrent, built by the same pure, zero-API `qbit_ops.features.explain.
 build_torrent_explanation` the CLI's `explain torrent` delegates to --
 see `TuiController.build_explanation` and `action_explain`.
 
@@ -84,8 +84,8 @@ for LOW-risk torrent mutations only (Pause/Resume/Reannounce) --
 *visible* rows, `a` opens `ActionsScreen`. Choosing an action there
 freezes `tuple(sorted(selected_hashes))` into a `BulkTorrentActionPlan`
 (`TuiController.build_bulk_plan`, pure, zero API calls, reusing
-`qbit_ops.torrents.build_bulk_action_plan_from_snapshot` -- no second rule
-catalogue) shown in `PreviewScreen`; only an explicit Apply there
+`qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot` -- no
+second rule catalogue) shown in `PreviewScreen`; only an explicit Apply there
 dispatches a `MUTATION_WORKER_GROUP` worker
 (`TuiController.apply_bulk_plan`) that consumes exactly that frozen
 plan, never a live re-read of `selected_hashes`. Selection is always a
@@ -138,13 +138,13 @@ from qbit_ops.app_services import (
     TuiRefreshResult,
     create_qbit_client,
 )
-from qbit_ops.execution import MutationStatus
-from qbit_ops.explain import ExplanationReport
-from qbit_ops.torrents import (
+from qbit_ops.features.explain import ExplanationReport
+from qbit_ops.features.torrents import (
     BulkTorrentActionPlan,
     TorrentBulkAction,
     describe_torrent_filter,
 )
+from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.formatting import (
     _COLUMN_WIDTHS,
     NARROW_WIDTH_THRESHOLD,

@@ -41,40 +41,38 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
-from qbit_ops.doctor import (
+from qbit_ops.features.doctor import (
     CheckStatus,
     DoctorReport,
     doctor_report_to_csv_rows,
     doctor_report_to_json_dict,
 )
-from qbit_ops.execution import MutationStatus
-from qbit_ops.explain import (
+from qbit_ops.features.explain import (
     Evidence,
     ExplanationReport,
     ExplanationSeverity,
     explanation_report_to_dict,
 )
-from qbit_ops.selectors import ResolvedTorrent
-from qbit_ops.status import (
+from qbit_ops.features.status import (
     Health,
     StatusSnapshot,
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
 )
-from qbit_ops.torrents import (
+from qbit_ops.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentSelection,
     describe_torrent_filter,
     torrent_filter_to_dict,
 )
-from qbit_ops.tracker_status import (
+from qbit_ops.features.tracker_status import (
     TRACKER_STATUS_CSV_FIELDNAMES,
     TrackerStatusReport,
     tracker_status_report_to_csv_rows,
     tracker_status_report_to_dict,
 )
-from qbit_ops.trackers import (
+from qbit_ops.features.trackers import (
     PasskeyReplacementPlan,
     TrackerAdditionPlan,
     TrackerRemovalPlan,
@@ -82,6 +80,8 @@ from qbit_ops.trackers import (
     redact_tracker_identity,
     sanitize_tracker_text,
 )
+from qbit_ops.shared.execution import MutationStatus
+from qbit_ops.shared.selectors import ResolvedTorrent
 
 console = Console()
 err_console = Console(stderr=True)
@@ -223,7 +223,7 @@ def confirm(prompt: str) -> bool:
 
     Only meant to be called when the caller has already established the
     context is an interactive terminal (see
-    `qbit_ops.execution.ExecutionPolicy`); this does not check
+    `qbit_ops.shared.execution.ExecutionPolicy`); this does not check
     `err_console.is_terminal` itself.
     """
     return Confirm.ask(prompt, console=err_console, default=False)
@@ -520,8 +520,8 @@ def render_doctor_table(report: DoctorReport) -> None:
 
     Sections are grouped in the order their checks first appear in
     `report.checks` (already deterministic by construction in
-    `qbit_ops.doctor.collect_doctor_report`) rather than by iterating a set or
-    dict, so table order never depends on hashing.
+    `qbit_ops.features.doctor.collect_doctor_report`) rather than by
+    iterating a set or dict, so table order never depends on hashing.
     """
     style = _CHECK_STATUS_STYLES[report.overall_status]
     console.print(
@@ -619,9 +619,9 @@ def render_explanation(report: ExplanationReport) -> None:
     stable tabular shape (see docs/COMMANDS.md, "Format Support
     Matrix"), so this builds its own structured text layout instead.
     Evidence/limitation/next-command text is already secret-free by
-    construction (`qbit_ops.explain` only ever derives it from
-    `qbit_ops.trackers`/`qbit_ops.tracker_status`'s sanitized structural
-    data), so nothing here re-sanitizes it.
+    construction (`qbit_ops.features.explain` only ever derives it from
+    `qbit_ops.features.trackers`/`qbit_ops.features.tracker_status`'s
+    sanitized structural data), so nothing here re-sanitizes it.
     """
     style = _EXPLANATION_SEVERITY_STYLES[report.overall_severity]
     console.print(
@@ -844,7 +844,7 @@ def print_torrent_selection(
     """Print a torrent selection, one shared shape for every filter.
 
     JSON/JSONL always include a normalized `filters` representation
-    (`qbit_ops.torrents.torrent_filter_to_dict`) alongside the usual
+    (`qbit_ops.features.torrents.torrent_filter_to_dict`) alongside the usual
     `summary`/`torrents` -- a schema addition, not a removal, over the
     previous filter-specific payloads (see docs/DECISIONS.md for the
     unification this replaces).

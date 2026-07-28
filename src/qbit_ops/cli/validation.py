@@ -4,8 +4,8 @@ Moved verbatim from `qbit_ops.main`: rejecting an unsupported `--format`
 or a blank `--hash`/`--tracker`/etc. before any qBittorrent API call.
 Deliberately narrow -- this is not a second domain validation layer;
 domain rules (torrent filter combinations, tracker template shape,
-mutation planning) stay in their own modules (`qbit_ops.torrents`,
-`qbit_ops.trackers`, ...).
+mutation planning) stay in their own modules (`qbit_ops.features.torrents`,
+`qbit_ops.features.trackers`, ...).
 """
 
 from qbit_ops.cli.error_boundary import fail

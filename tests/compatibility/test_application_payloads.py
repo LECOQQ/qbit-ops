@@ -1,13 +1,13 @@
 """Compatibility contract tests: application/version payload fixtures.
 
-Exercises `qbit_ops.doctor._version_parsable_check` -- the exact
+Exercises `qbit_ops.features.doctor._version_parsable_check` -- the exact
 function `doctor`'s COMPAT001 check uses to parse `app_version()`'s
 raw string.
 """
 
 from __future__ import annotations
 
-from qbit_ops.doctor import CheckStatus, _version_parsable_check
+from qbit_ops.features.doctor import CheckStatus, _version_parsable_check
 from tests.compatibility._fixture_loader import load_fixture
 
 

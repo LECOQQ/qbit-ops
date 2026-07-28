@@ -17,8 +17,8 @@ from qbit_ops.errors import (
     QbitAuthenticationError,
     QbitConnectionError,
 )
-from qbit_ops.execution import MutationStatus
-from qbit_ops.torrents import build_torrent_filter
+from qbit_ops.features.torrents import build_torrent_filter
+from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.state import ConnectionState, TuiController, Workspace
 from tests.support import FakeQbitClient, make_torrent
 

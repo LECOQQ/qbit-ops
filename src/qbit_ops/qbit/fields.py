@@ -16,15 +16,15 @@ already identified by the audit:
 
 - `get_transfer_rates` routes `transfer_info()` field access through
   the same tolerant accessor the rest of the project uses, instead of
-  the raw `.get()` call `qbit_ops.status` used to make directly
-  (constat P-2) -- a malformed non-mapping payload now fails with an
-  explicit `TypeError` here rather than an accidental `AttributeError`
-  three frames deeper.
+  the raw `.get()` call `qbit_ops.features.status` used to make
+  directly (constat P-2) -- a malformed non-mapping payload now fails
+  with an explicit `TypeError` here rather than an accidental
+  `AttributeError` three frames deeper.
 - `is_disabled_tracker`/`is_disabled_tracker_status` replace two
   identical, independently fragile `_is_disabled_tracker()` copies
-  (`qbit_ops.trackers` and `qbit_ops.torrents`, constat A-5) that
-  stringified the raw `status` field *before* comparing it, which
-  breaks silently if qbittorrent-api ever returns
+  (`qbit_ops.features.trackers` and `qbit_ops.features.torrents`,
+  constat A-5) that stringified the raw `status` field *before*
+  comparing it, which breaks silently if qbittorrent-api ever returns
   `qbittorrentapi.definitions.TrackerStatus.DISABLED` (an `IntEnum`)
   instead of a plain `0`: `str(TrackerStatus.DISABLED)` is
   `"TrackerStatus.DISABLED"`, not `"0"` (constat P-3, verified against
@@ -100,8 +100,8 @@ def get_transfer_rates(transfer_info: Any) -> tuple[int, int]:
 def get_raw_tracker_status(raw_tracker: Any) -> int | str | None:
     """Read a tracker's raw `status` field, preserving its original type.
 
-    Shared by `qbit_ops.trackers.inspect_tracker`,
-    `qbit_ops.tracker_status.collect_tracker_status`, and
+    Shared by `qbit_ops.features.trackers.inspect_tracker`,
+    `qbit_ops.features.tracker_status.collect_tracker_status`, and
     `is_disabled_tracker` below, so every caller feeds
     `classify_raw_tracker_status`/`is_disabled_tracker_status` the
     exact same raw shape.
@@ -143,8 +143,8 @@ def is_disabled_tracker(tracker: Any) -> bool:
     """Return whether qBittorrent reports a tracker as disabled.
 
     The single canonical replacement for the two identical
-    `_is_disabled_tracker()` copies previously in `qbit_ops.trackers`
-    and `qbit_ops.torrents` (constat A-5) -- both fed a mutation-plan
+    `_is_disabled_tracker()` copies previously in `qbit_ops.features.trackers`
+    and `qbit_ops.features.torrents` (constat A-5) -- both fed a mutation-plan
     filter (`_get_active_tracker_urls`), so a stringification bug here
     would have silently included a disabled tracker in a mutation plan
     (constat P-3).
@@ -156,8 +156,9 @@ def get_active_tracker_urls(trackers: Any) -> list[str]:
     """Extract non-disabled tracker URLs from qBittorrent tracker objects.
 
     The single canonical replacement for two identical
-    `_get_active_tracker_urls()` copies previously in `qbit_ops.trackers`
-    and `qbit_ops.torrents` (constat A-5).
+    `_get_active_tracker_urls()` copies previously in
+    `qbit_ops.features.trackers` and `qbit_ops.features.torrents`
+    (constat A-5).
     """
     return [
         tracker_url

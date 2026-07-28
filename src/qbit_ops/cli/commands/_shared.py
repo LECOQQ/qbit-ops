@@ -16,7 +16,7 @@ import typer
 
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.exit_codes import ExitCode
-from qbit_ops.execution import (
+from qbit_ops.shared.execution import (
     MUTATION_RISK,
     ExecutionDecision,
     ExecutionPolicy,
@@ -38,7 +38,7 @@ def run_mutation(
 ) -> bool:
     """Run the shared confirm/apply/refuse flow for an already-built plan.
 
-    Centralizes `qbit_ops.execution.ExecutionPolicy` decisions for every
+    Centralizes `qbit_ops.shared.execution.ExecutionPolicy` decisions for every
     mutation command: low-risk commands apply real changes immediately
     (no `confirmation_message` needed); medium/high-risk commands show
     the plan, then confirm, then apply exactly that plan (no rescan).

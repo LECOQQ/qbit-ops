@@ -176,8 +176,8 @@ def test_no_application_module_outside_cli_and_tui_imports_cli() -> None:
     ]
     assert files
     assert any(path.name == "doctor.py" for path in files), (
-        "expected qbit_ops/doctor.py to be part of the scanned set -- an "
-        "empty or wrong scan would make this test vacuously pass"
+        "expected qbit_ops/features/doctor.py to be part of the scanned "
+        "set -- an empty or wrong scan would make this test vacuously pass"
     )
 
     offenders: dict[str, set[str]] = {}

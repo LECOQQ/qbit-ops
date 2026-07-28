@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor
+.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor clean
 
 .sync-stamp: pyproject.toml poetry.lock
 	@poetry install --sync --extras tui --no-interaction
@@ -90,6 +90,19 @@ ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 
 ci-entrypoint: ## Verify the CLI entrypoint responds
 	@$(PY) qbit-ops --help
+
+clean: ## Remove locally generated, reproducible artifacts (safe, idempotent -- never touches .venv, .git, .env, or committed fixtures)
+	@find src tests scripts -type d -name "__pycache__" -exec rm -rf {} +
+	@find src tests scripts -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+	@rm -rf .pytest_cache .ruff_cache .mypy_cache
+	@if [ -d .pyright ]; then rm -rf .pyright; fi
+	@rm -f .coverage
+	@rm -f .coverage.*
+	@rm -rf htmlcov
+	@rm -rf build dist
+	@find . -maxdepth 2 -type d -name "*.egg-info" \
+		-not -path "./.venv/*" -not -path "./venv/*" -exec rm -rf {} +
+	@printf 'Cleaned local caches and build artifacts.\n'
 
 docker-matrix-doctor: ## Check Docker is available for the qBittorrent version matrix
 	@if ! command -v docker >/dev/null 2>&1; then \

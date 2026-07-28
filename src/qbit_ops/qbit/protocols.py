@@ -78,7 +78,8 @@ class QbitAppInfoReader(Protocol):
 
 @runtime_checkable
 class QbitTorrentMutator(Protocol):
-    """LOW-risk torrent state mutations (see `qbit_ops.execution.MutationRisk`).
+    """LOW-risk torrent state mutations (see
+    `qbit_ops.shared.execution.MutationRisk`).
 
     The only mutation surface the TUI is allowed to reach (see
     `tests/test_tui_security.py`).

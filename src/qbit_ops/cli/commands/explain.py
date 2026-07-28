@@ -13,13 +13,13 @@ from qbit_ops.cli.exit_codes import ExplainExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
 from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
-from qbit_ops.explain import (
+from qbit_ops.features.explain import (
     explain_torrent,
     explain_tracker,
     explanation_exit_code,
 )
-from qbit_ops.selectors import AmbiguousTorrentHashError
-from qbit_ops.trackers import normalize_tracker_host
+from qbit_ops.features.trackers import normalize_tracker_host
+from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 
 explain_app = typer.Typer(
     help="Explain torrent or tracker state using deterministic evidence."

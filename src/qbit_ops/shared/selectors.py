@@ -63,7 +63,7 @@ def resolve_torrent_hash(
 
     Matching is case-insensitive against each torrent's `hash` field,
     read through the same field-access helpers as the rest of
-    `qbit_ops.torrents` so unusual torrent objects (mappings or
+    `qbit_ops.features.torrents` so unusual torrent objects (mappings or
     attribute-based) behave identically. A complete hash is simply an
     unambiguous prefix equal to the full hash, so both cases share one
     code path.

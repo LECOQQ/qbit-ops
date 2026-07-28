@@ -115,8 +115,9 @@ def test_status_json_reports_unavailable_health_on_connection_failure(
 
     `status` never raises on a connection failure -- it degrades to a
     valid, schema-conformant snapshot with `health: "unavailable"` and a
-    dedicated exit code (see `qbit_ops.status.EXIT_CODE_BY_HEALTH`), which is
-    qbit-ops' contract for "unavailable" rather than a fatal CLI error.
+    dedicated exit code (see
+    `qbit_ops.features.status.EXIT_CODE_BY_HEALTH`), which is qbit-ops'
+    contract for "unavailable" rather than a fatal CLI error.
     """
     from qbit_ops.errors import QbitConnectionError
 

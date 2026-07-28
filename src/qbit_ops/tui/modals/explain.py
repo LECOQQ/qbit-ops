@@ -15,7 +15,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-from qbit_ops.explain import ExplanationReport
+from qbit_ops.features.explain import ExplanationReport
 from qbit_ops.tui.formatting import _format_explain_text
 
 if TYPE_CHECKING:
