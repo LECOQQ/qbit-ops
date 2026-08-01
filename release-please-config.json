@@ -12,6 +12,10 @@
           "type": "toml",
           "path": "pyproject.toml",
           "jsonpath": "$.tool.commitizen.version"
+        },
+        {
+          "type": "generic",
+          "path": "README.md"
         }
       ]
     }
