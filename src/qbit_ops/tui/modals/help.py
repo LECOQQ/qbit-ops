@@ -1,8 +1,4 @@
-"""`HelpScreen` -- the dedicated `?` help modal.
-
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change.
-"""
+"""`HelpScreen` -- the dedicated `?` help modal."""
 
 from __future__ import annotations
 

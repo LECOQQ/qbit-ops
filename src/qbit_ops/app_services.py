@@ -2,36 +2,9 @@
 
 Kept free of Typer, Rich, and Textual so both interfaces can create a
 qBittorrent client, classify its failures, and collect a one-fetch
-refresh snapshot without importing each other's presentation layer. See
-docs/TUI_ARCHITECTURE_REVIEW.md (Phase 9) for the architectural
-reasoning behind this module's existence and its deliberately small
-scope: it exists to remove two concrete duplications (client creation,
-recoverable-failure classification), not to become a generic service
-layer.
-
-`create_qbit_client` itself now lives in `qbit_ops.qbit.client` (the
-qBittorrent boundary, see `docs/audits/2026-07-package-refactor-plan.md`
-Phase 3) and is re-exported here by narrow delegation so every existing
-call site and test seam keeps working unchanged.
-
-Package-cleanup phase (`features/`/`shared/` split, see
-docs/ARCHITECTURE.md): this module deliberately stayed at the package
-root rather than moving into `features/` or `shared/` (Outcome C of
-that phase's `app_services.py` decision tree). It mixes two genuinely
-different responsibilities: `classify_recoverable_qbit_failure` is a
-shared classifier both the CLI's `status` command and the TUI's
-refresh worker call, while `TuiRefreshResult`/`collect_tui_refresh` is
-refresh orchestration with exactly one consumer today
-(`qbit_ops.tui.state`) -- distinct from
-`qbit_ops.features.status.collect_status_snapshot`, which the CLI
-actually uses for its own refresh. Moving the whole module into
-`shared/` would misrepresent the TUI-only refresh half as a generic
-primitive; moving it into `features/` would misrepresent the
-dual-consumer classifier as one feature's private orchestration.
-Splitting the module would resolve this but is out of scope for that
-phase. See `tests/test_package_layout.py::
-test_app_services_remains_at_the_package_root_documented` for the
-pinned location.
+refresh snapshot without importing each other's presentation layer.
+See docs/ARCHITECTURE.md for why this stays at the package root
+instead of moving into `features/` or `shared/`.
 """
 
 from __future__ import annotations
@@ -64,10 +37,8 @@ __all__ = [
 class RecoverableFailure:
     """One recognized, recoverable failure -- never a real programming defect.
 
-    `code` matches the existing `StatusAlert`/unavailable-snapshot
-    vocabulary (`authentication_failed`, `qbittorrent_unavailable`) so a
-    caller can build a `build_unavailable_snapshot(code=..., message=...)`
-    without re-deriving the mapping.
+    `code` matches the `StatusAlert`/unavailable-snapshot vocabulary
+    (`authentication_failed`, `qbittorrent_unavailable`).
     """
 
     code: str
@@ -79,16 +50,11 @@ def classify_recoverable_qbit_failure(
 ) -> RecoverableFailure | None:
     """Classify an exception as a recoverable connection/auth failure.
 
-    Returns `None` when `error` is not one of the recognized recoverable
-    categories (`QbitAuthenticationError`, `QbitConnectionError`, or a
-    bare `OSError` from a post-login qBittorrent API call --
-    `qbittorrentapi.APIConnectionError` and everything derived from it
-    are themselves `OSError` subclasses). Callers must let a `None`
-    result propagate as an unexpected internal error rather than
-    silently degrading it to "unavailable" -- this is the single shared
-    classification `qbit_ops.main`'s status/watch collection and the TUI's
-    refresh worker both apply, so the recoverable/internal boundary
-    cannot drift between the two interfaces.
+    Returns `None` when `error` is not `QbitAuthenticationError`,
+    `QbitConnectionError`, or a bare `OSError` (which covers
+    `qbittorrentapi.APIConnectionError` and its subclasses). Callers
+    must let a `None` result propagate as an internal error rather than
+    silently degrading it to "unavailable".
     """
     if isinstance(error, QbitAuthenticationError):
         return RecoverableFailure("authentication_failed", str(error))
@@ -101,19 +67,13 @@ def classify_recoverable_qbit_failure(
 class TuiRefreshResult:
     """One TUI periodic refresh's collected data.
 
-    Deliberately narrow, not a general `InstanceSnapshot`: it exists
-    only to make the one-fetch invariant in `collect_tui_refresh`
-    explicit and testable, per docs/TUI_ARCHITECTURE_REVIEW.md's
-    decision against a broader snapshot abstraction. `raw_torrents` is
-    the exact list `torrents_info()` returned this cycle -- kept
-    alongside the already-built, unfiltered `torrents` selection so a
-    caller (the TUI controller) can re-apply a `TorrentFilter` in
-    memory without a second API call. It is intentionally the raw
-    qBittorrent items, not `torrents.matched`: `SelectedTorrent.category`
-    is already display-formatted (e.g. `(uncategorized)`), and
-    re-filtering against the formatted value would silently break the
-    `uncategorized` filter token -- see
-    `qbit_ops.features.torrents._category_matches`.
+    `raw_torrents` is the raw `torrents_info()` result, kept alongside
+    the unfiltered `torrents` selection so the TUI controller can
+    re-apply a `TorrentFilter` in memory without a second API call.
+    Re-filtering must use `raw_torrents`, not `torrents.matched`:
+    `SelectedTorrent.category` is display-formatted (e.g.
+    `(uncategorized)`) and would silently break the `uncategorized`
+    filter token -- see `qbit_ops.features.torrents._category_matches`.
     """
 
     status: StatusSnapshot
@@ -129,15 +89,10 @@ def collect_tui_refresh(
     """Collect one refresh cycle's worth of data with exactly four API calls.
 
     Calls `app_version()`, `app_web_api_version()`, `transfer_info()`,
-    and `torrents_info()` exactly once each -- the same bounded budget
-    `qbit_ops.features.status.collect_status_snapshot` already uses --
-    and feeds the single `torrents_info()` result to both the status counters
-    (`build_status_snapshot_from_data`) and the unfiltered torrent
-    snapshot (`select_torrents_from_items`, `TorrentFilter()`, i.e. every
-    torrent). Never calls `torrents_trackers()`; raises unchanged on any
-    failure -- callers (the TUI refresh worker) apply
-    `classify_recoverable_qbit_failure` themselves, since only they know
-    whether to degrade or propagate.
+    and `torrents_info()` exactly once each, feeding the single
+    `torrents_info()` result to both the status counters and the
+    unfiltered torrent selection. Raises unchanged on any failure;
+    callers apply `classify_recoverable_qbit_failure` themselves.
     """
     qbittorrent_version = getattr(client, "app_version", lambda: None)()
     api_version = getattr(client, "app_web_api_version", lambda: None)()

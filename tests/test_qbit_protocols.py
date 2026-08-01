@@ -114,7 +114,7 @@ def test_torrents_start_is_deliberately_absent_from_the_mutator_protocol() -> (
     None
 ):
     """`torrents_start` is probed via `getattr(client, ..., None)` in
-    production (constat P-4), an optional-attribute pattern a `Protocol`
-    cannot express -- it must not be declared here."""
+    production, an optional-attribute pattern a `Protocol` cannot
+    express -- it must not be declared here."""
     assert "torrents_start" not in vars(QbitTorrentMutator)
     assert "torrents_start" not in vars(QbitClient)

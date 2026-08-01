@@ -67,7 +67,6 @@ def test_disabled_dht_pseudo_tracker_is_disabled() -> None:
 
 
 def test_disabled_real_tracker_with_int_status_is_disabled() -> None:
-    """Constat P-3 baseline: a plain int 0 status must classify disabled."""
     fixture = load_fixture("trackers", "disabled_real_tracker_int_status")
 
     assert is_disabled_tracker(fixture.payload) is True
@@ -75,15 +74,14 @@ def test_disabled_real_tracker_with_int_status_is_disabled() -> None:
 
 
 def test_enum_like_disabled_status_is_still_classified_disabled() -> None:
-    """Constat P-3's exact defect: an `IntEnum`-shaped status (mirroring
-    qbittorrentapi.definitions.TrackerStatus's real `(int, Enum)` bases,
-    not `enum.IntEnum` -- see tests/test_qbit_fields.py) must still
-    classify disabled, not active, in a mutation-plan filter."""
+    """Mirrors qbittorrentapi.definitions.TrackerStatus's real
+    `(int, Enum)` bases, not `enum.IntEnum` -- an `IntEnum`-shaped
+    status must still classify disabled, not active."""
 
     class _TrackerStatusLike(int, enum.Enum):
         DISABLED = 0
 
-    assert str(_TrackerStatusLike.DISABLED) != "0"  # the trap P-3 describes
+    assert str(_TrackerStatusLike.DISABLED) != "0"  # not "0" for this base
     assert is_disabled_tracker_status(_TrackerStatusLike.DISABLED) is True
 
     tracker = {

@@ -59,11 +59,8 @@ class ExecutionDecision(StrEnum):
 class MutationStatus(StrEnum):
     """The terminal, user-facing outcome shown in a mutation summary.
 
-    Distinct from `ExecutionDecision`: a decision is made only when a
-    plan has at least one real change. `NO_MATCH` and `NO_CHANGES` are
-    reported *before* any decision is made (see
-    `docs/COMMANDS.md#mutation-risk--confirmation-policy`) — an empty or
-    already-satisfied plan is never shown as `APPLIED`.
+    `NO_MATCH` and `NO_CHANGES` are reported before any `ExecutionDecision`
+    is made -- an empty or already-satisfied plan is never shown as `APPLIED`.
     """
 
     PREVIEW = "preview"

@@ -1,8 +1,8 @@
 """Own CLI-facing input validation and parameter normalization.
 
-Moved verbatim from `qbit_ops.main`: rejecting an unsupported `--format`
-or a blank `--hash`/`--tracker`/etc. before any qBittorrent API call.
-Deliberately narrow -- this is not a second domain validation layer;
+Rejects an unsupported `--format` or a blank `--hash`/`--tracker`/etc.
+before any qBittorrent API call. Deliberately narrow -- this is not a
+second domain validation layer;
 domain rules (torrent filter combinations, tracker template shape,
 mutation planning) stay in their own modules (`qbit_ops.features.torrents`,
 `qbit_ops.features.trackers`, ...).
@@ -15,9 +15,9 @@ from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
 # Every read-only command uses the same `qbit_ops.cli.rendering.OutputFormat`
 # enum and the same `--format` option, but not every command can
 # meaningfully render every format (see docs/COMMANDS.md "Format Support
-# Matrix" and docs/DECISIONS.md, 2026-07-24). This table is the single
-# source of truth: both `validate_format_support` and the CLI test suite
-# read it, so the implementation, its validation, and its tests cannot
+# Matrix"). This table is the single source of truth: both
+# `validate_format_support` and the CLI test suite read it, so the
+# implementation, its validation, and its tests cannot
 # drift apart.
 FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "status": frozenset(OutputFormat),

@@ -1,11 +1,10 @@
 """Pure, presentation-only helpers shared by `qbit_ops.tui` widgets/modals.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). Every function here takes already-safe structured domain data
+Every function here takes already-safe structured domain data
 (`TuiState`, `SelectedTorrent`, `BulkTorrentActionPlan`,
 `MutationUiResult`, `ExplanationReport`/`Evidence`) and renders it as a
 string/`Text` -- never a qBittorrent call, never a widget mount, never
-a mutation. No behavior change from the pre-split module.
+a mutation.
 """
 
 from __future__ import annotations
@@ -38,19 +37,11 @@ _SEVERITY_STYLES: dict[Severity, str] = {
 
 
 def _format_local_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
-    """Format a timestamp in the local system timezone.
+    """Format a timestamp in the local system timezone, label included.
 
-    Refresh times default to local time, not UTC, with the timezone
-    label always shown so a UTC-configured host is not silently
-    ambiguous. `moment` is always timezone-aware (`datetime.now(UTC)`
-    upstream, see `qbit_ops.features.status`), so `.astimezone()` with no `tz`
-    converts it to the system's local timezone -- exactly what
-    `datetime.astimezone(tz=None)` already means. `tz` exists purely
-    for deterministic tests: passing a fixed `tzinfo` (e.g. a
-    `zoneinfo.ZoneInfo` or a fixed-offset `timezone`) verifies the
-    conversion/label logic without depending on the CI machine's own
-    system timezone (which may legitimately be UTC, making a bug and
-    a UTC host indistinguishable by output alone).
+    `moment` is always timezone-aware; `tz` exists only for
+    deterministic tests, to pin the conversion without depending on
+    the CI host's own system timezone.
     """
     local = moment.astimezone(tz)
     tz_label = local.tzname() or "local"
@@ -71,11 +62,10 @@ def _shorten_hash(full_hash: str) -> str:
 def _format_byte_rate(bytes_per_second: int) -> str:
     """Format a byte rate using binary units, e.g. '12.4 MiB/s'.
 
-    A deliberate small duplicate of `qbit_ops.ui.format_byte_rate`: TUI
-    modules must never import from `qbit_ops.ui` (a CLI/Rich rendering
-    module, see the security boundary in `qbit_ops.tui.app`'s module
-    docstring), and this pure formatting function is too small to
-    justify promoting it to a third, shared module.
+    A deliberate small duplicate of
+    `qbit_ops.cli.rendering.format_byte_rate`: TUI modules must never
+    import from `qbit_ops.cli` (see the security boundary in
+    `qbit_ops.tui.app`), and it's too small to justify a shared module.
     """
     value = float(max(bytes_per_second, 0))
     units = ("B", "KiB", "MiB", "GiB", "TiB")
@@ -91,11 +81,11 @@ def _format_byte_rate(bytes_per_second: int) -> str:
     return f"{value:.1f} {unit}/s"
 
 
-# Column display order -- "a user-oriented column order", per the
-# visual-polish phase: Name first (always shown, gets the remaining
-# width), then operational columns, Category last (shown only once
-# width permits). Row *identity* (the DataTable row `key=`) is always
-# the full torrent hash regardless of which columns are visible.
+# User-oriented column order: Name first (always shown, gets the
+# remaining width), then operational columns, Category last (shown
+# only once width permits). Row *identity* (the DataTable row `key=`)
+# is always the full torrent hash regardless of which columns are
+# visible.
 _ALL_COLUMNS: tuple[str, ...] = (
     "Name",
     "State",
@@ -121,8 +111,7 @@ _COLUMN_WIDTHS: dict[str, int] = {
 
 # A heavier glyph (U+2714, "heavy check mark") than a plain "✓", plus
 # bold+color, so a selected row's marker reads clearly at a glance
-# instead of blending into the row -- requested after dogfooding found
-# the previous plain "✓" too easy to miss.
+# instead of blending into the row.
 _SELECTED_MARK = "✔"
 _UNSELECTED_MARK = " "
 
@@ -136,13 +125,9 @@ def _selection_cell(selected: bool) -> Text:
 def _columns_for_width(width: int) -> tuple[str, ...]:
     """Pick which table columns to show, in order, for a given App width.
 
-    `Sel` (the selection marker, TUI 2) is always shown at every width
-    -- multi-selection must never lose its only visual indicator just
-    because the terminal is narrow. Progressive disclosure otherwise:
-    Name/State/Progress are always shown; Down/Up appear at normal
-    width; Ratio/Category only once the terminal is comfortably wide.
-    Details, Filters, Search, Copy, and Explain never depend on which
-    columns happen to be visible.
+    `Sel` is always shown, at every width. Otherwise progressive
+    disclosure: Name/State/Progress always; Down/Up at normal width;
+    Ratio/Category only once comfortably wide.
     """
     if width < NARROW_WIDTH_THRESHOLD:
         base = ("Name", "State", "Progress")
@@ -171,15 +156,10 @@ def _torrent_row_values(
 def _format_endpoint(endpoint: dict[str, Any]) -> str:
     """Render one safe, structural tracker endpoint as one aligned line.
 
-    Never a raw URL, path, query value, userinfo, or passkey. Shows
-    identity and health/status as separate, clearly labeled columns,
-    and a sanitized message only when one is present -- never a bare
-    status word with nothing identifying which tracker it belongs to.
-    Deliberately does *not* also append a synthetic "disabled" suffix
-    from `endpoint["enabled"]`: `health` is already `"disabled"`
-    whenever `enabled` is `False` for a classifiable status
-    (`qbit_ops.features.trackers`'s single status->health mapping), so
-    doing both previously produced a duplicated "disabled disabled".
+    Never a raw URL, path, query value, userinfo, or passkey. Doesn't
+    also append a synthetic "disabled" suffix from `endpoint["enabled"]`:
+    `health` is already `"disabled"` in that case, so doing both would
+    duplicate it.
     """
     identity = str(endpoint["tracker"])
     health = str(endpoint["health"])
@@ -266,13 +246,11 @@ def _format_preview_text(
 ) -> str:
     """Render a frozen `BulkTorrentActionPlan` for the Preview modal.
 
-    Display-only: reads `plan`'s already-computed counts/changes/
-    skips, never recomputes or rescans anything. `snapshot_at` is the
-    periodic refresh the plan's torrent data came from -- shown so an
-    operator can judge freshness, never "now" (no clock is read here).
-    `stale` renders the same warning wording `_format_explain_text`
-    already uses, plus the explicit rebuild instruction (audit finding
-    R-2) -- the preview stays fully readable, only Apply is withdrawn.
+    Display-only: reads `plan`'s already-computed counts/changes/skips,
+    never recomputes or rescans. `snapshot_at` is the refresh the
+    plan's data came from, shown for freshness -- never "now". `stale`
+    adds a warning and disables Apply; the preview itself stays fully
+    readable.
     """
     action_label = plan.action.title()
     satisfied, not_found = _split_skips(plan)
@@ -346,12 +324,9 @@ _ERROR_HEADINGS: dict[ErrorCategory, tuple[str, str]] = {
 def _format_result_text(outcome: MutationUiResult) -> str:
     """Render one truthful `MutationUiResult`.
 
-    Never claims more certainty than qBittorrent's bulk endpoints can
-    provide: APPLIED says the request was *submitted* for exactly the
-    planned hashes and that a refresh will show the observable state --
-    it is not a per-hash confirmation (documented accepted limitation).
-    NO_MATCH and NO_CHANGES are kept strictly distinct (audit finding
-    F-3): "we could not find them" is not "they were already fine".
+    Never claims more certainty than qBittorrent's bulk endpoints can:
+    APPLIED means *submitted*, not a per-hash confirmation. NO_MATCH
+    ("not found") and NO_CHANGES ("already fine") are kept distinct.
     """
     if outcome.error_category is not None:
         heading, explanation = _ERROR_HEADINGS[outcome.error_category]
@@ -424,11 +399,8 @@ def _format_result_text(outcome: MutationUiResult) -> str:
 def _format_last_action_line(outcome: MutationUiResult) -> str:
     """One compact, persistent line summarising the latest mutation.
 
-    Reuses the same truthful vocabulary as the Result modal -- notably
-    "submitted", never "applied to each torrent" -- and distinguishes
-    every outcome the TUI can produce: submitted, no-change, no-match,
-    cancelled-before-dispatch, and each error category. Safe structured
-    data only; short enough to stay readable at 80 columns.
+    Reuses the Result modal's vocabulary ("submitted", never "applied
+    to each torrent"); short enough to stay readable at 80 columns.
     """
     when = _format_local_time(outcome.completed_at)
     action = outcome.action.title()
@@ -453,8 +425,8 @@ def _format_last_action_line(outcome: MutationUiResult) -> str:
 
 
 def _format_result_notification(outcome: MutationUiResult) -> str:
-    """One-line fallback shown when the Result modal cannot be (audit
-    finding R-3) -- a submitted mutation must never vanish silently."""
+    """One-line fallback shown when the Result modal cannot be reached
+    -- a submitted mutation must never vanish silently."""
     if outcome.cancelled_before_dispatch:
         return (
             f"{outcome.action.title()} cancelled before dispatch -- "
@@ -516,12 +488,9 @@ _RATE_EVIDENCE_CODES = frozenset({"download_rate", "upload_rate"})
 def _format_evidence(evidence: Evidence) -> str:
     """Render one evidence row with a humanized value where possible.
 
-    Never changes the underlying `Evidence`/JSON model
-    (`qbit_ops.features.explain`'s `evidence_to_dict` is untouched) and
-    never invents a value this formatting doesn't already have --
-    purely cosmetic, keyed off `evidence.code` (a stable identifier
-    `qbit_ops.features.explain` already assigns, not inferred from the
-    label text).
+    Purely cosmetic, keyed off the stable `evidence.code` (never
+    inferred from the label text) -- never changes the underlying
+    `Evidence`/JSON model or invents a value it doesn't already have.
     """
     label = f"{evidence.label}:"
     return f"  {label:<15} {_format_evidence_value(evidence)}"

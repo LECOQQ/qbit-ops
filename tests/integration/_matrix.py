@@ -1,14 +1,9 @@
 """Test-side adapter over the packaged qBittorrent compatibility manifest.
 
-The canonical parsing and single source of truth now live in
-`qbit_ops.qbit.compatibility` (packaged under `qbit_ops/data/`, loaded
-via `importlib.resources` -- works from an installed wheel, no
-repository checkout required). This module does not re-parse the
-manifest; it only re-exports `QbitMatrixEntry` as `MatrixEntry` (the
-name the rest of `tests/integration/` already imports) and adds the
-handful of loader convenience wrappers Docker harness code and CI use,
-translating package-loader errors into the exception types this test
-suite already expects.
+Re-exports `QbitMatrixEntry` as `MatrixEntry` and adds loader
+convenience wrappers used by the Docker harness and CI, translating
+`qbit_ops.qbit.compatibility` errors into the exception types this
+test suite expects.
 """
 
 from __future__ import annotations
@@ -67,10 +62,7 @@ def load_matrix(path: Path | None = None) -> list[MatrixEntry]:
 def latest_matrix_entry() -> MatrixEntry:
     """Return the matrix entry with the highest `expected_version`.
 
-    Used to select "the current stable entry" for the weekly CI cadence
-    and CLI-driven `scope=latest` dispatch -- computed from the
-    manifest, never a second hardcoded "latest" id (see
-    docs/TESTING.md, CI cadence policy).
+    Computed from the manifest, never a second hardcoded "latest" id.
     """
     try:
         return load_compatibility_evidence().latest()

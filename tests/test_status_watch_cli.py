@@ -83,7 +83,6 @@ def test_watch_defaults_to_the_documented_positive_interval(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure omitting --interval with --watch uses the documented default."""
     _install_backend(monkeypatch, _make_client())
     captured = _capture_watch_kwargs(monkeypatch)
 
@@ -100,7 +99,6 @@ def test_invalid_interval_values_are_rejected_before_any_api_call(
     monkeypatch: pytest.MonkeyPatch,
     bad_interval: str,
 ) -> None:
-    """Ensure zero, negative, NaN, and infinite intervals are all rejected."""
     client = _make_client()
     _install_backend(monkeypatch, client)
 
@@ -118,7 +116,6 @@ def test_watch_rejects_unsupported_formats_before_any_api_call(
     monkeypatch: pytest.MonkeyPatch,
     output_format: str,
 ) -> None:
-    """Ensure --watch only ever accepts table or jsonl."""
     client = _make_client()
     _install_backend(monkeypatch, client)
 
@@ -134,7 +131,6 @@ def test_watch_rejects_quiet_before_any_api_call(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure --watch --quiet fails fast instead of running silently forever."""
     client = _make_client()
     _install_backend(monkeypatch, client)
 
@@ -148,7 +144,6 @@ def test_interval_without_watch_is_rejected(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure --interval alone (no --watch) is treated as invalid usage."""
     client = _make_client()
     _install_backend(monkeypatch, client)
 
@@ -165,7 +160,6 @@ def test_table_watch_creates_exactly_one_live_display(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure one Rich Live display is created, not one per iteration."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 3)
 
@@ -201,7 +195,6 @@ def test_table_watch_updates_the_display_instead_of_appending(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure multiple iterations reuse the same display via update calls."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 3)
 
@@ -237,7 +230,6 @@ def test_table_watch_never_uses_transient_spinner_or_progress(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the watch loop never reaches for the transient progress API."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 2)
 
@@ -256,7 +248,6 @@ def test_table_watch_interruption_emits_no_traceback_and_exits_zero(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure Ctrl+C during table watch is a clean, documented exit."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 2)
 
@@ -271,7 +262,6 @@ def test_table_watch_interruption_during_collection_closes_cleanly(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure Ctrl+C mid-collection (not just mid-sleep) exits cleanly."""
 
     class _InterruptingClient(FakeQbitClient):
         def torrents_info(self):
@@ -301,7 +291,6 @@ def test_jsonl_watch_emits_one_valid_object_per_line(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure each JSONL watch line independently parses as JSON."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 3)
 
@@ -318,11 +307,9 @@ def test_jsonl_watch_emits_one_valid_object_per_line(
 def test_emit_status_jsonl_flushes_stdout_after_writing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `emit_status_jsonl` explicitly flushes after every line.
-
-    Exercised directly (not through `CliRunner`, which swaps `sys.stdout`
-    for its own capture buffer during `invoke()` — a patch applied
-    before that swap would silently target the wrong object).
+    """Exercised directly (not through `CliRunner`, which swaps `sys.stdout` for
+    its own capture buffer during `invoke()` -- a patch applied before that swap
+    would silently target the wrong object).
     """
     from qbit_ops.features.status import build_unavailable_snapshot
 
@@ -351,7 +338,6 @@ def test_jsonl_watch_keeps_stderr_empty_on_successful_iterations(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure successful JSONL watch iterations never write to stderr."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 3)
 
@@ -365,7 +351,6 @@ def test_jsonl_watch_output_contains_no_ansi_escape_sequences(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure JSONL watch output is plain text, no Rich/ANSI decoration."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 3)
 
@@ -378,7 +363,6 @@ def test_jsonl_watch_interrupted_output_ends_after_a_complete_line(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure interruption never leaves a partial JSON line in stdout."""
     _install_backend(monkeypatch, _make_client())
     _stop_after_n_sleeps(monkeypatch, 4)
 
@@ -398,7 +382,6 @@ def test_one_shot_status_table_is_unaffected_by_watch_support(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure plain `status` (no --watch) still returns a single snapshot."""
     _install_backend(monkeypatch, _make_client())
 
     result = runner.invoke(app, ["status"])
@@ -412,7 +395,6 @@ def test_one_shot_status_json_is_unaffected_by_watch_support(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure plain `status --format json` still emits exactly one document."""
     _install_backend(monkeypatch, _make_client())
 
     result = runner.invoke(app, ["status", "--format", "json"])
@@ -426,7 +408,6 @@ def test_one_shot_status_quiet_is_unaffected_by_watch_support(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure plain `status --quiet` still suppresses all normal output."""
     _install_backend(monkeypatch, FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--quiet"])

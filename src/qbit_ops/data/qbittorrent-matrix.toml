@@ -22,10 +22,9 @@
 #
 # A version is only added here once a real image has been pulled and its
 # *observed* `app_version()` has been verified to match `expected_version`
-# below (see docs/audits/2026-07-package-refactor-plan.md, Docker matrix
-# implementation note).
+# below.
 #
-# Architecture note (independent-review finding F-6): every `image_digest`
+# Architecture note: every `image_digest`
 # below is a multi-architecture *index* digest (confirmed via
 # `docker manifest inspect`), not a mono-architecture manifest digest -- it
 # guarantees immutability (a retag upstream would be detected, `docker run`

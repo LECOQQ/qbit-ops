@@ -1,8 +1,7 @@
 """`FiltersScreen` -- the sole access path to filters.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -26,26 +25,16 @@ class FiltersScreen(ModalScreen[None]):
     """The sole access path to filters, at every terminal width.
 
     Filters apply live, locally, as the user edits them (zero
-    qBittorrent calls -- see `QbitOpsTuiApp._apply_filters_from_panel`),
-    but Apply/Cancel/Clear are three distinct, deterministic
-    interactions, each reachable both by binding and by a visible
-    button (`FiltersPanel`'s `Apply`/`Clear`/`Cancel`):
+    qBittorrent calls). Apply/Cancel/Clear are three distinct,
+    deterministic interactions, each reachable by binding and button:
+    Apply (`Enter`) closes, already in effect; Cancel (`Escape`)
+    reverts to `original_filters` then closes; Clear (`ctrl+r`) resets
+    to no filter and stays open.
 
-    * Apply (`Enter`, or the Apply button) -- already in effect; closes.
-    * Cancel (`Escape`, or the Cancel button) -- revert to the filter
-      that was active when this screen opened, then close.
-    * Clear (`ctrl+r`, or the Clear button) -- reset to no filter at
-      all; the modal stays open so the operator can keep adjusting.
-
-    `enter`/`escape` are deliberately *not* bound here: both are already
-    `priority=True` bindings on `QbitOpsTuiApp`, and Textual resolves an
-    App's own priority bindings before a Screen's -- even the Screen on
-    top of the stack -- so a same-key Screen-level binding here would
-    simply never fire (verified empirically). `action_activate`/
-    `action_dismiss_overlay` on the App special-case `FiltersScreen`
-    instead -- see their docstrings. The visible buttons exist
-    specifically so Apply/Cancel/Clear are not *only* discoverable via
-    a keyboard shortcut.
+    `enter`/`escape` are not bound here: both are `priority=True` on
+    `QbitOpsTuiApp`, which always wins over a same-key Screen binding,
+    so `action_activate`/`action_dismiss_overlay` special-case
+    `FiltersScreen` instead.
     """
 
     BINDINGS = [
@@ -126,9 +115,7 @@ class FiltersScreen(ModalScreen[None]):
         # including the category `Input`. Left alone, every keystroke
         # right after opening Filters goes to the scroll container
         # (which only understands up/down/page keys) instead of any
-        # actual field -- verified empirically; this is what made
-        # Filters look entirely unresponsive to the keyboard. Focus the
-        # category `Input` explicitly instead.
+        # actual field. Focus the category `Input` explicitly instead.
         self.query_one(".f-category", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

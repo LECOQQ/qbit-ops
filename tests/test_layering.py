@@ -2,23 +2,19 @@
 
 Compile-time guarantees, not just runtime tests -- mirrors
 `tests/test_errors.py`'s and `tests/test_tui_security.py`'s AST
-approach. See `docs/audits/2026-07-package-refactor-plan.md` §2 for the
-full layer-rule catalogue (R1-R8); this file covers the two rules
-required before any package move (T3):
+approach. This file covers two rules:
 
 - R1: a module declared pure (no I/O, no client) never imports Typer,
   Rich, Textual, or `qbittorrentapi` at module level.
 - R6: Textual stays optional -- no production module outside
   `qbit_ops/tui/**` imports it at module level. Only a *deferred* import
-  (inside a function body, like `qbit_ops/main.py`'s `tui` command) is
-  allowed; that is the exact mechanism that keeps the `tui` extra
-  optional (constat A-6 in the architecture inventory, §2.2).
+  (inside a function body, like `qbit_ops/cli/commands/tui.py`'s `tui`
+  command) is allowed; that is the exact mechanism that keeps the `tui`
+  extra optional.
 
 Both scans use `Path.rglob()`, not a one-directory `glob()`, so a
 future subpackage split (e.g. `qbit_ops/tui/screens/*.py`, or a later
-`qbit_ops/domain/`) cannot silently fall outside the scan -- see
-`docs/audits/2026-07-package-refactor-plan.md` §4, Phase 9's noted trap
-for `test_tui_security.py`.
+`qbit_ops/domain/`) cannot silently fall outside the scan.
 """
 
 from __future__ import annotations
@@ -43,10 +39,10 @@ def test_canonical_production_root_is_src_qbit_ops() -> None:
     assert APP_PACKAGE_DIR.parent.name == "src"
 
 
-# R1: exactly the modules identified as pure by the architecture audit
-# (docs/audits/2026-07-package-refactor-plan.md §2, R1). Not derived by
-# scanning, because "pure" is a design claim about these specific
-# modules, not a structural property `rglob` could detect on its own.
+# R1: exactly the modules that must stay pure (no I/O, no client).
+# Not derived by scanning, because "pure" is a design claim about
+# these specific modules, not a structural property `rglob` could
+# detect on its own.
 _PURE_DOMAIN_MODULE_NAMES = (
     "shared/torrent_states.py",
     "shared/selectors.py",

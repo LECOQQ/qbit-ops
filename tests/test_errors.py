@@ -43,7 +43,6 @@ def test_explain_torrent_blank_hash_rejected_before_api_call(
     configure_qbit_backend,
     blank_hash: str,
 ) -> None:
-    """Ensure a blank/whitespace `--hash` never reaches qBittorrent."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(app, ["explain", "torrent", "--hash", blank_hash])
@@ -58,7 +57,6 @@ def test_explain_tracker_blank_tracker_rejected_before_api_call(
     configure_qbit_backend,
     blank_tracker: str,
 ) -> None:
-    """Ensure a blank/whitespace `--tracker` never reaches qBittorrent."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(
@@ -75,7 +73,6 @@ def test_torrents_inspect_blank_hash_rejected_before_api_call(
     configure_qbit_backend,
     blank_hash: str,
 ) -> None:
-    """Ensure `torrents inspect --hash` validates locally first."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(app, ["torrents", "inspect", "--hash", blank_hash])
@@ -90,7 +87,6 @@ def test_trackers_inspect_blank_tracker_rejected_before_api_call(
     configure_qbit_backend,
     blank_tracker: str,
 ) -> None:
-    """Ensure `trackers inspect --tracker` validates locally first."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(
@@ -105,7 +101,6 @@ def test_bulk_mutation_blank_hash_rejected_before_api_call(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a blank `--hash` on a bulk mutation validates locally first."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(app, ["torrents", "pause", "--hash", "   "])
@@ -121,7 +116,6 @@ def test_ambiguous_hash_distinct_from_not_found(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an ambiguous prefix and an unresolved hash exit differently."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="aaaa1111", name="one"),
@@ -147,7 +141,6 @@ def test_not_found_distinct_from_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an unresolved target and a connection failure exit differently."""
     from qbit_ops.errors import QbitConnectionError
 
     not_found_client = FakeQbitClient(torrents=[])
@@ -169,7 +162,6 @@ def test_authentication_distinct_from_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure auth and connection failures record different categories."""
     import qbit_ops.cli.error_boundary as error_boundary
     from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
 
@@ -197,7 +189,6 @@ def test_critical_tracker_status_still_serializes_normally(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a critical `trackers status` report serializes normally."""
     client = FakeQbitClient(
         torrents=[make_torrent()],
         trackers_by_hash={
@@ -226,7 +217,6 @@ def test_internal_runtime_error_is_not_converted_to_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a bare `RuntimeError` becomes internal, not `unavailable`."""
     configure_qbit_backend(client_error=RuntimeError("unexpected bug"))
 
     result = runner.invoke(app, ["torrents", "list"])
@@ -238,7 +228,6 @@ def test_internal_type_error_is_not_converted_to_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a bare `TypeError` becomes internal, not `unavailable`."""
     configure_qbit_backend(client_error=TypeError("unexpected bug"))
 
     result = runner.invoke(app, ["torrents", "list"])
@@ -253,7 +242,6 @@ def test_internal_error_does_not_leak_credentials(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an internal error's message never echoes a credential."""
     configure_qbit_backend(
         client_error=RuntimeError(
             "bug near http://admin:super-secret-password@localhost:8080"
@@ -270,7 +258,6 @@ def test_internal_error_does_not_leak_credentials(
 
 
 def test_ambiguous_hash_error_has_remediation() -> None:
-    """Ensure the ambiguous-hash `AppError` carries actionable remediation."""
     import qbit_ops.cli.error_boundary as error_boundary
     from qbit_ops.shared.selectors import (
         AmbiguousTorrentHashError,
@@ -299,7 +286,6 @@ def test_fatal_error_produces_no_stdout_json(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a fatal error never emits a partial/malformed JSON payload."""
     from qbit_ops.errors import QbitConnectionError
 
     configure_qbit_backend(
@@ -319,7 +305,6 @@ def test_invalid_format_rejected_before_client_creation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an unsupported `--format` fails before any client is created."""
     calls = configure_qbit_backend(client=FakeQbitClient())
 
     result = runner.invoke(
@@ -337,7 +322,6 @@ def test_app_error_is_constructed_for_a_handled_failure(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure `_fail()` actually records a structured `AppError`."""
     import qbit_ops.cli.error_boundary as error_boundary
 
     configure_qbit_backend(client=FakeQbitClient())
@@ -355,11 +339,8 @@ def test_app_error_is_constructed_for_a_handled_failure(
 
 
 def test_exit_code_table_matches_registered_commands() -> None:
-    """Ensure `EXIT_CODE_TABLE` covers exactly the registered CLI commands.
-
-    Mirrors `test_execution.py`'s registered-command walk so the exit-
-    code documentation table cannot silently drift from the actual CLI
-    surface.
+    """Mirrors `test_execution.py`'s registered-command walk so the exit-code
+    documentation table cannot silently drift from the actual CLI surface.
     """
     registered: set[str] = set()
     for group in app.registered_commands:
@@ -384,12 +365,9 @@ def test_exit_code_table_matches_registered_commands() -> None:
 
 
 def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
-    """Ensure `qbit_ops/errors.py` never imports Typer, Rich, or
-    `qbit_ops.cli` (the CLI layer).
-
-    A static source check, independent of what other test modules have
-    already imported into `sys.modules` in this process (see the
-    subprocess-based test below for the dynamic guarantee).
+    """A static source check, independent of what other test modules have
+    already imported into `sys.modules` in this process (see the subprocess-
+    based test below for the dynamic guarantee).
     """
     import qbit_ops.errors
 
@@ -417,14 +395,12 @@ def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
 def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
     None
 ):
-    """Ensure a minimal module can import `qbit_ops.errors` without Typer/Rich.
-
-    Proves the dependency direction a future TUI relies on: `qbit_ops.errors`
+    """Proves the dependency direction a future TUI relies on: `qbit_ops.errors`
     (domain/application error model) must never pull in the CLI layer
-    (`qbit_ops.cli`, Typer command registration) or a rendering library, so
-    a TUI can depend on it directly instead of on `qbit_ops.cli`. Runs in a
-    fresh subprocess so already-imported modules from the rest of this
-    test session cannot mask a real dependency.
+    (`qbit_ops.cli`, Typer command registration) or a rendering library, so a
+    TUI can depend on it directly instead of on `qbit_ops.cli`. Runs in a fresh
+    subprocess so already- imported modules from the rest of this test session
+    cannot mask a real dependency.
     """
     script = (
         "import sys\n"

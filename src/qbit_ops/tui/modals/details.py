@@ -1,8 +1,7 @@
 """`DetailsScreen` -- the narrow-layout modal Details view.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -25,16 +24,11 @@ class DetailsScreen(ModalScreen[None]):
     """A modal Details panel -- the narrow-layout's access path to the
     focused torrent's details, opened by `enter`.
 
-    Explicitly binds `c` (copy hash), delegating straight to
-    `QbitOpsTuiApp.action_copy_hash` -- Textual restricts a *non*-
-    priority key's binding lookup to `Screen._modal_binding_chain` while
-    a `ModalScreen` is on top of the stack, which does **not** include
-    the App's own `BINDINGS` (only `priority=True` ones bypass this, via
-    a separate lookup -- see `FiltersScreen`'s docstring for that other
-    case). A plain `Binding("c", "copy_hash", ...)` left only on the App
-    would silently never fire while this screen is open -- verified
-    empirically. `q`/`r`/`e` are deliberately not re-bound here: only
-    Copy hash is a documented Details-view action (see docs/COMMANDS.md).
+    Explicitly rebinds `c` (copy hash) here delegating to
+    `QbitOpsTuiApp.action_copy_hash`: a non-priority App binding is
+    unreachable while a `ModalScreen` is on top (see `FiltersScreen`
+    for the `priority=True` exception). `q`/`r`/`e` are deliberately
+    not re-bound -- only copy hash is a documented Details action.
     """
 
     BINDINGS = [

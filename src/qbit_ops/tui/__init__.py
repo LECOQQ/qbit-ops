@@ -1,6 +1,7 @@
-"""Read-only interactive TUI for qbit-ops (TUI 1).
+"""Read-only interactive TUI for qbit-ops.
 
-Lazily imported by `qbit_ops.main`'s `tui` command so ordinary CLI commands
-never import Textual. See docs/TUI_ARCHITECTURE_REVIEW.md for the
-architecture and docs/COMMANDS.md for user-facing documentation.
+Lazily imported by `qbit_ops.cli.commands.tui`'s `tui` command so
+ordinary CLI commands never import Textual. See
+docs/ARCHITECTURE.md for the architecture and docs/COMMANDS.md for
+user-facing documentation.
 """

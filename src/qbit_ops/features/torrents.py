@@ -1,13 +1,9 @@
 """List and select qBittorrent torrents.
 
-Owns the shared, structured torrent-filter model (`TorrentFilter`,
-`SelectedTorrent`, `TorrentSelection`) and its one filtering pipeline
-(`select_torrents`), reused by every read command and bulk mutation that
-targets more than a single hash. Kept free of Typer and Rich so it can be
-reused by any future interface (CLI, TUI) without pulling in presentation
-concerns -- mirrors `qbit_ops.shared.selectors` for hash resolution and
-`qbit_ops.features.status`/`qbit_ops.features.doctor` for their own
-collection/render splits.
+Owns the shared `TorrentFilter`/`SelectedTorrent`/`TorrentSelection` model
+and the one filtering pipeline (`select_torrents`), reused by every read
+command and bulk mutation. Kept free of Typer and Rich so both the CLI
+and the TUI can reuse it without pulling in presentation concerns.
 """
 
 from collections.abc import Callable, Sequence
@@ -60,13 +56,9 @@ class TorrentFilter:
 
     Repeated `--category`/`--state` values combine with OR within the
     same field; different fields combine with AND. `tracker`, when set,
-    is always already normalized to `host` or `host:port`
-    (`qbit_ops.features.trackers.normalize_tracker_host`) by
-    `build_torrent_filter` -- never a full URL, so a passkey embedded in
-    a tracker's path or query string can never reach this model.
-    `categories` holds the raw
-    requested tokens (not display-normalized); `states` holds only
-    values from `STATE_FILTER_VALUES`.
+    is always pre-normalized to `host` or `host:port` -- never a full
+    URL, so a passkey can never reach this model. `categories` holds raw
+    requested tokens; `states` holds only `STATE_FILTER_VALUES` values.
     """
 
     categories: tuple[str, ...] = ()
@@ -103,16 +95,12 @@ _EMPTY_TORRENT_FILTER = TorrentFilter()
 class SelectedTorrent:
     """One torrent selected by `select_torrents`.
 
-    Carries the complete infohash (never truncated) plus enough fields
-    for list rendering, mutation plans, previews, and future `explain`/
-    TUI consumers. `tracker_count` is `None` when tracker data was not
-    collected for this selection (no `--tracker` filter was present) --
-    distinct from `0`, which means tracker data *was* collected and the
-    torrent legitimately has no active trackers. `download_rate`/
-    `upload_rate` (bytes/second, from qBittorrent's own `dlspeed`/
-    `upspeed` fields already present on every `torrents_info()` item --
-    no extra API call) were added for the TUI's per-row rate column
-    (pre-1.0 additive field, see docs/DECISIONS.md).
+    Carries the complete infohash plus fields for list rendering,
+    mutation plans, and TUI consumers. `tracker_count` is `None` when
+    tracker data wasn't collected (no `--tracker` filter), distinct
+    from `0` (collected, but no active trackers). `download_rate`/
+    `upload_rate` come straight from qBittorrent's own `dlspeed`/
+    `upspeed` fields -- no extra API call.
     """
 
     hash: str
@@ -151,14 +139,11 @@ def build_torrent_filter(
 ) -> TorrentFilter:
     """Validate and build a `TorrentFilter` from raw CLI-style inputs.
 
-    The single seam between CLI options (independent boolean flags for
-    each polarity) and the structured tri-state model. Rejects the two
-    locally-provable contradictions (`--completed --incomplete`,
-    `--active --inactive`) and any unrecognized `--state` value before
-    any qBittorrent API call; every other combination is accepted and
-    combines with AND, even where it can never match anything (e.g.
-    `--state downloading --stalled`) -- not every combination that
-    yields zero matches is a contradiction worth rejecting.
+    Rejects the two locally-provable contradictions (`--completed
+    --incomplete`, `--active --inactive`) and any unrecognized `--state`
+    value before any qBittorrent API call. Every other combination is
+    accepted and combines with AND, even where it can never match
+    anything -- not every zero-match combination is a contradiction.
     """
     if completed and incomplete:
         raise ValueError("Use --completed or --incomplete, not both.")
@@ -209,15 +194,10 @@ def select_torrents(
 ) -> TorrentSelection:
     """Select torrents by structured filter criteria.
 
-    The shared filtering pipeline: load once via `torrents_info()`, apply
-    every cheap (torrent-info-only) filter first, and only then call
-    `client.torrents_trackers()` -- at most once per surviving candidate,
-    and only when `filters.tracker` is set. A filter-less or
-    non-tracker-filtered selection never calls `torrents_trackers()` at
-    all. `on_progress` reports real, known progress over exactly the
-    calls actually made: a single (total, total) completion when no
-    tracker lookup is needed, or one advance per candidate tracker
-    lookup otherwise.
+    Loads once via `torrents_info()`, applies every cheap filter first,
+    and only then calls `client.torrents_trackers()` -- at most once per
+    surviving candidate, and only when `filters.tracker` is set.
+    `on_progress` reports real progress over the calls actually made.
     """
     all_torrents = list(client.torrents_info())
 
@@ -269,14 +249,11 @@ def select_torrents_from_items(
 ) -> TorrentSelection:
     """Apply only the cheap, `torrents_info()`-shaped filters in memory.
 
-    Never calls the qBittorrent API -- the caller has already fetched
-    `torrents` (typically once per refresh cycle, e.g. a TUI's periodic
-    tick, see `qbit_ops.app_services`) and wants to (re-)apply filters to it
-    without a second `torrents_info()` round-trip. This never resolves a
-    `--tracker` filter, which needs a per-torrent `torrents_trackers()`
-    lookup this function deliberately cannot perform: pass a filter with
-    `tracker=None` here, and use `select_torrents` (with a client)
-    instead when a tracker filter is required.
+    Never calls the qBittorrent API -- for callers re-applying filters to
+    an already-fetched snapshot. Cannot resolve a `--tracker` filter
+    (needs a per-torrent `torrents_trackers()` lookup); pass
+    `tracker=None` here and use `select_torrents` instead when a tracker
+    filter is required.
     """
     if filters.requires_tracker_data:
         raise ValueError(
@@ -565,13 +542,11 @@ class BulkTorrentSkip:
 class BulkTorrentActionPlan:
     """The result of planning a bulk torrent action, before it is applied.
 
-    `changes` and `skipped` are collected unconditionally (not gated by a
-    `verbose` flag) since the CLI layer needs full detail to render a
-    confirmation preview; whether to *print* that detail is a rendering
-    decision, not a planning one. `torrent_hash` is the resolved full
-    hash when `--hash` selected the target, always `None` otherwise;
-    `filters` is always the exact `TorrentFilter` used (empty when
-    `--hash` or `--all` was used instead).
+    `changes`/`skipped` are always collected in full -- the CLI needs
+    full detail for a confirmation preview, and whether to print it is a
+    rendering decision, not a planning one. `torrent_hash` is the
+    resolved full hash when `--hash` selected the target, `None`
+    otherwise; `filters` is empty when `--hash` or `--all` was used.
     """
 
     action: TorrentBulkAction
@@ -592,13 +567,11 @@ def validate_torrent_selector(
 ) -> None:
     """Ensure a bulk torrent selector is safe and unambiguous.
 
-    `--hash` always resolves to a single torrent, so it never combines
-    with `--all` or any filter. `--all` is an explicit acknowledgement of
-    whole-instance scope, so it never combines with a filter either
-    (there is no validation-only meaning that would justify it). One or
-    more filters may otherwise define a bulk selection on their own --
-    but at least one of `--hash`, `--all`, or a filter is always
-    required, so no selector can ever silently mean the whole seedbox.
+    `--hash` never combines with `--all` or a filter; `--all` (an
+    explicit acknowledgement of whole-instance scope) never combines
+    with a filter either. Otherwise one or more filters may define the
+    selection, but at least one of `--hash`, `--all`, or a filter is
+    always required -- no selector can silently mean the whole seedbox.
     """
     if torrent_hash is not None:
         if select_all or not filters.is_empty:
@@ -708,13 +681,11 @@ def plan_bulk_torrent_action(
 ) -> BulkTorrentActionPlan:
     """Plan a bulk torrent action against a filtered torrent selection.
 
-    Pure with respect to the qBittorrent instance: this only reads state
-    and never mutates it. `torrent_hash` accepts a complete hash or an
-    unambiguous prefix, resolved via
-    `qbit_ops.shared.selectors.resolve_torrent_hash`. An ambiguous
-    prefix raises `AmbiguousTorrentHashError` before any plan
-    is built; an unmatched hash resolves to zero selected torrents, same
-    as any other filter that matches nothing.
+    Read-only: never mutates the qBittorrent instance. `torrent_hash`
+    accepts a complete hash or an unambiguous prefix; an ambiguous
+    prefix raises `AmbiguousTorrentHashError` before any plan is built,
+    while an unmatched hash resolves to zero selected torrents, same as
+    any other filter that matches nothing.
     """
     selection, resolved_hash = select_torrents_for_mutation(
         client,
@@ -759,24 +730,13 @@ def build_bulk_action_plan_from_snapshot(
     """Build a `BulkTorrentActionPlan` from an explicit hash selection
     against an already-fetched torrent snapshot -- zero API calls.
 
-    The TUI's multi-selection counterpart to `plan_bulk_torrent_action`:
-    that function always resolves its own selector (`--hash`/`--all`/
-    filters) via a fresh `torrents_info()` scan, which does not fit an
-    explicit, already-known set of full hashes the caller (e.g. a TUI
-    that just refreshed) already has in memory. Reuses the exact same
-    skip-reason rule (`_bulk_action_skip_reason`) and result shapes
-    (`BulkTorrentChange`/`BulkTorrentSkip`/`BulkTorrentActionPlan`) as
-    the CLI planner -- there is only one skip-reason rule catalogue.
-
-    A selected hash no longer present in `raw_torrents` is reported as
-    a skip (reason `"not_found"`), never silently dropped and never
-    substituted -- the caller can tell "excluded because satisfied"
-    apart from "excluded because it disappeared". `torrent_hash`/
-    `select_all`/`filters` on the returned plan are placeholders
-    (`None`/`False`/empty): they describe *how* a CLI selector was
-    built, which does not apply to an explicit hash set, and
-    `apply_bulk_torrent_action` never reads them anyway (only
-    `action`/`changes`).
+    The TUI's counterpart to `plan_bulk_torrent_action`, for callers
+    that already hold a snapshot and a known hash set instead of doing a
+    fresh `torrents_info()` scan. A selected hash missing from
+    `raw_torrents` is reported as a skip (`"not_found"`), never dropped
+    or substituted. `torrent_hash`/`select_all`/`filters` on the result
+    are placeholders -- they describe a CLI selector, which doesn't
+    apply to an explicit hash set.
     """
     by_hash: dict[str, Any] = {
         get_field_as_string(item, "hash").lower(): item for item in raw_torrents
@@ -845,16 +805,10 @@ def _call_bulk_torrent_action(
 ) -> None:
     """Call the qBittorrent API for a bulk torrent action.
 
-    Calls `torrents_start` directly for "resume"/"start" rather than
-    probing for it with `getattr(client, "torrents_start", None)` and
-    falling back to `torrents_resume` (constat P-4): the installed
-    qbittorrent-api aliases `torrents_resume = torrents_start` (the same
-    bound method, verified in `tests/test_qbit_library_http_boundary.py`),
-    so `torrents_start` is never absent on a real client and the
-    fallback branch was unreachable dead code. qbittorrent-api itself
-    already negotiates the underlying `start`/`resume` endpoint by Web
-    API version internally -- this project does not duplicate that
-    negotiation.
+    Calls `torrents_start` directly for "resume"/"start": the installed
+    qbittorrent-api aliases `torrents_resume = torrents_start`, so the
+    method is never absent on a real client (verified in
+    `tests/test_qbit_library_http_boundary.py`).
     """
     if action == "pause":
         client.torrents_pause(torrent_hashes)
@@ -890,10 +844,8 @@ def _build_torrent_details(
 
     Uses `get_safe_tracker_details`, not `_get_tracker_details`: this
     feeds `torrents inspect`, an ordinary read command, so trackers must
-    be reduced to secret-free structural fields the same way
-    `trackers inspect` does. Raw announce URLs are only ever returned by
-    `list_torrents_with_trackers`, which feeds the sensitive `backup
-    export` artifact.
+    be secret-free. Raw announce URLs are only ever returned by
+    `list_torrents_with_trackers`, for the sensitive `backup export`.
     """
     trackers = get_safe_tracker_details(client.torrents_trackers(torrent_hash))
     active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])

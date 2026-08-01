@@ -1,10 +1,7 @@
 """Unit tests for `scripts/check_qbit_matrix_freshness.py`.
 
-All network access is mocked -- these run in the ordinary offline
-`make check` suite. The freshness checker itself is never invoked with
-real network access here; see the Docker matrix implementation note
-for the live smoke check performed manually against the real GitHub
-API.
+All network access is mocked, so this runs in the ordinary offline
+`make check` suite.
 """
 
 from __future__ import annotations
@@ -84,8 +81,6 @@ def test_main_reports_fresh_when_matrix_matches_latest(capsys) -> None:
 def test_sabotage_main_reports_stale_when_a_newer_release_exists(
     capsys,
 ) -> None:
-    """Item 10 sabotage: prove the checker actually notices staleness --
-    it must never consider an older matrix entry current."""
     with patch.object(
         freshness, "fetch_latest_stable_version", return_value="9.9.9"
     ):
@@ -114,9 +109,8 @@ def test_main_distinguishes_network_failure_from_staleness(capsys) -> None:
 def _run_shell_pattern(
     pattern: str, script_exit_code: int
 ) -> subprocess.CompletedProcess:
-    """Run one CI-step shell fragment under `bash -e {0}`, exactly as
-    GitHub Actions executes a `run:` block, against a stand-in script
-    that just exits with `script_exit_code` -- no real network call."""
+    """Run one CI-step shell fragment under `bash -e {0}`, as GitHub
+    Actions executes a `run:` block."""
     script = f"""
 set -e
 fake_check() {{ return {script_exit_code}; }}
@@ -129,9 +123,8 @@ echo "STEP_COMPLETED exit_code=$exit_code"
 
 
 def test_sabotage_bash_dash_e_swallows_the_bare_exit_code_capture() -> None:
-    """F-3, reproduced directly: under `bash -e`, a script line that exits
-    non-zero aborts the step *before* `exit_code=$?` ever runs -- the
-    original, broken pattern in the workflow."""
+    """Under `bash -e`, a script line that exits non-zero aborts the step
+    before `exit_code=$?` ever runs."""
     result = _run_shell_pattern(
         pattern="fake_check\nexit_code=$?", script_exit_code=1
     )
@@ -140,9 +133,8 @@ def test_sabotage_bash_dash_e_swallows_the_bare_exit_code_capture() -> None:
 
 
 def test_corrected_pattern_captures_the_exit_code_under_bash_dash_e() -> None:
-    """The fix: `|| exit_code=$?` lets `bash -e` continue past a non-zero
-    exit, and still captures the real code -- for both the failing and
-    the successful case, matching `.github/workflows/qbittorrent-matrix.yml`."""
+    """`|| exit_code=$?` lets `bash -e` continue past a non-zero exit while
+    still capturing the real code."""
     stale = _run_shell_pattern(
         pattern="fake_check || exit_code=$?\nexit_code=${exit_code:-0}",
         script_exit_code=1,
@@ -166,7 +158,7 @@ def test_corrected_pattern_captures_the_exit_code_under_bash_dash_e() -> None:
 
 
 def test_freshness_check_never_writes_to_the_matrix_manifest(tmp_path) -> None:
-    """Item 9: the checker must never modify the matrix file."""
+    """The checker must never modify the matrix file."""
     from tests.integration._matrix import MATRIX_MANIFEST_PATH
 
     before = MATRIX_MANIFEST_PATH.read_text(encoding="utf-8")

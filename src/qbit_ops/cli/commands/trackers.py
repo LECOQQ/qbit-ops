@@ -1,10 +1,4 @@
-"""Register the `trackers` command group.
-
-Moved from `qbit_ops.main`: `add-if-present`, `list`, `status`,
-`inspect`, `replace`, `replace-passkey`, `export`, `remove`. No
-behavior change -- tracker planning/sanitization stays in
-`qbit_ops.features.trackers`/`qbit_ops.features.tracker_status`.
-"""
+"""Register the `trackers` command group."""
 
 from enum import StrEnum
 from typing import Annotated
@@ -48,8 +42,6 @@ trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
 
 
 class TrackerMatchModeOption(StrEnum):
-    """Expose tracker matching modes for Typer options."""
-
     exact = "exact"
     without_query = "without-query"
 
@@ -160,13 +152,10 @@ def list_trackers(
     """List normalized tracker identities in use, with usage counts.
 
     A lightweight inventory: tracker identity (`host[:port]`, never a
-    full announce URL), how many torrents use it, and how many tracker
-    endpoints that represents. Built on the same collection as `trackers
-    status` (see docs/COMMANDS.md, "Tracker Status") but always exits
-    `0` -- unlike `trackers status`, this is a plain inventory with no
-    health concept, so a script depending only on "what trackers exist"
-    is never broken by a degraded tracker elsewhere on the instance. Use
-    `trackers status` for endpoint health classification.
+    full announce URL), torrent count, and endpoint count. Always exits
+    `0` -- unlike `trackers status`, this has no health concept, so a
+    script checking "what trackers exist" is never broken by a degraded
+    tracker elsewhere. Use `trackers status` for health classification.
     """
     validate_format_support("trackers_list", output_format)
     enabled = rendering.progress_enabled(
@@ -308,14 +297,11 @@ def trackers_status_command(
 ) -> None:
     """Report aggregated tracker health across selected torrents.
 
-    Aggregates tracker observations into stable, redacted tracker
-    identities (`host` or `host:port` -- never a full announce URL or
-    passkey) and reports how many torrents/endpoints depend on each and
-    whether it is healthy, degraded, failing, disabled, or unknown.
-    Filters use the same shared vocabulary as `torrents list`; see
-    docs/COMMANDS.md ("Torrent Filters", "Tracker Status"). Exit code
-    reflects overall health (see `TrackerStatusExitCode`), not a plain
-    success/failure result.
+    Aggregates into stable, redacted tracker identities (`host` or
+    `host:port` -- never a full announce URL or passkey) and reports
+    torrent/endpoint counts and health per identity. Filters use the
+    same vocabulary as `torrents list`. Exit code reflects overall
+    health (`TrackerStatusExitCode`), not a plain success/failure.
     """
     validate_format_support("trackers_status", output_format)
     try:
@@ -371,12 +357,10 @@ def inspect_tracker_usage(
 ) -> None:
     """Inspect torrents using a tracker.
 
-    Matches by normalized host[:port] (`--tracker
-    tracker.example`; a full announce URL is also accepted, only its
-    host and port are used) -- the same identity `trackers status` and
-    `torrents list --tracker` use. Every matching endpoint is reduced to
-    secret-free structural fields (raw status, health, enabled, a
-    sanitized message, scheme, path shape, query key names); a full
+    Matches by normalized host[:port] (a full announce URL is also
+    accepted; only its host and port are used) -- the same identity
+    `trackers status` and `torrents list --tracker` use. Every matching
+    endpoint is reduced to secret-free structural fields; a full
     announce URL or passkey is never present in the output.
     """
     validate_format_support("trackers_inspect", output_format)

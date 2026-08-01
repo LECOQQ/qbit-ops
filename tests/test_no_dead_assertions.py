@@ -1,26 +1,22 @@
-"""Guard against reintroducing a dead `assert ... or True` (F-10).
+"""Guard against reintroducing a dead `assert ... or True` anywhere in the
+tracked repository.
 
-The independent review found three such assertions (in
-`test_captured_container_payloads.py` and twice in `test_tui_app.py`);
-all three were removed and replaced with meaningful checks. A first
-regression guard (line-based regex, requiring `assert ...or True` on
-the *same physical line*) was added, but the closure review (F-10,
-sabotage K-13) proved it does not detect the original contributor's
-own multiline form:
+A line-based regex (requiring `assert ... or True` on the *same
+physical line*) does not detect a multiline form:
 
     assert (
         expression
         or True
     )
 
-This module replaces that guard with an AST-based non-vacuity check:
-it walks the real parsed `ast.Assert` nodes, so it is immune to
-formatting (single-line/multiline), cannot match a comment, a string,
-or a docstring example (those never become `ast.Assert` nodes at all),
-and only fires when Python's own AST makes the vacuity unambiguous --
-a boolean-`or` expression, at any nesting/line-wrapping, where at
-least one operand is a literal constant whose truthiness is
-statically `True` (or the whole test is itself such a constant).
+This module uses an AST-based non-vacuity check instead: it walks the
+real parsed `ast.Assert` nodes, so it is immune to formatting
+(single-line/multiline), cannot match a comment, a string, or a
+docstring example (those never become `ast.Assert` nodes at all), and
+only fires when Python's own AST makes the vacuity unambiguous -- a
+boolean-`or` expression, at any nesting/line-wrapping, where at least
+one operand is a literal constant whose truthiness is statically
+`True` (or the whole test is itself such a constant).
 """
 
 from __future__ import annotations
@@ -59,8 +55,7 @@ def _is_truthy_constant(node: ast.expr) -> bool:
     Only `ast.Constant` qualifies -- a name, call, comparison, or any
     other expression is never treated as "constant" here, however
     predictable it might look; that would risk rejecting a valid
-    assertion that merely contains `or` (explicitly forbidden by the
-    phase spec).
+    assertion that merely contains `or`.
     """
     if not isinstance(node, ast.Constant):
         return False
@@ -162,13 +157,12 @@ def test_valid_samples_are_not_flagged(name: str) -> None:
     assert find_dead_assertions(source) == [], (name, source)
 
 
-def test_sabotage_reproduces_the_original_multiline_contributor_form(
+def test_multiline_or_true_form_is_detected(
     tmp_path,
 ) -> None:
-    """F-10 closure-review sabotage (K-13), reproduced and restored here
-    rather than ever landing in tracked source: a multiline
-    `assert (\\n ... \\n or True\\n)` -- exactly the form the line-based
-    regex guard missed -- must be caught by the AST-based guard."""
+    """A multiline `assert (\\n ... \\n or True\\n)` -- the form a
+    line-based regex guard would miss -- must be caught by the
+    AST-based guard."""
     sabotage_file = tmp_path / "sabotage_dead_assertion.py"
     sabotage_file.write_text(
         "def test_example() -> None:\n"

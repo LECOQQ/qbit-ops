@@ -74,10 +74,7 @@ def list_fixtures(category: str) -> list[str]:
 
 
 def load_all_fixtures() -> list[Fixture]:
-    """Load every fixture in every category.
-
-    Used by the provenance and security scan tests.
-    """
+    """Load every fixture in every category."""
     fixtures: list[Fixture] = []
     for category_dir in sorted(FIXTURES_DIR.iterdir()):
         if not category_dir.is_dir():

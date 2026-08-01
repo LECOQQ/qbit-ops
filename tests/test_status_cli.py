@@ -19,7 +19,6 @@ def test_status_exits_healthy_for_a_clean_instance(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a clean instance exits 0 (healthy)."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a", state="uploading", progress=1.0)],
     )
@@ -34,7 +33,6 @@ def test_status_table_shows_aggregate_counts(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the default table view surfaces the expected counts."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a", state="downloading", progress=0.2),
@@ -61,7 +59,6 @@ def test_status_reports_warning_for_stalled_torrents(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure stalled torrents produce health warning and exit code 1."""
     torrents = [make_torrent(hash="a", state="stalledDL")]
     configure_qbit_backend(client=FakeQbitClient(torrents=torrents))
 
@@ -75,7 +72,6 @@ def test_status_reports_critical_for_errored_torrents(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure errored torrents produce health critical and exit code 2."""
     client = FakeQbitClient(torrents=[make_torrent(hash="a", state="error")])
     configure_qbit_backend(client=client)
 
@@ -89,7 +85,6 @@ def test_status_reports_unavailable_on_authentication_failure(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an auth failure produces unavailable and exit code 3."""
     configure_qbit_backend(
         client_error=QbitAuthenticationError(
             "Authentication to qBittorrent failed."
@@ -107,7 +102,6 @@ def test_status_quiet_emits_no_stdout_when_healthy(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet suppresses all normal output on a healthy result."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--quiet"])
@@ -120,7 +114,6 @@ def test_status_quiet_emits_no_stdout_when_warning(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet suppresses all normal output on a warning result."""
     torrents = [make_torrent(hash="a", state="stalledDL")]
     configure_qbit_backend(client=FakeQbitClient(torrents=torrents))
 
@@ -134,7 +127,6 @@ def test_status_quiet_emits_no_stdout_when_critical(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet suppresses all normal output on a critical result."""
     configure_qbit_backend(
         client=FakeQbitClient(torrents=[make_torrent(hash="a", state="error")]),
     )
@@ -149,11 +141,9 @@ def test_status_quiet_creates_client_exactly_once(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet still creates exactly one qBittorrent client.
-
-    `_create_qbit_client()` never shows a connection spinner or banner
-    (see `docs/DECISIONS.md`), so there is no `quiet` flag left to
-    assert on; this instead pins down the call count itself.
+    """`_create_qbit_client()` never shows a connection spinner or banner,
+    so there is no `quiet` flag left to assert on; this instead pins
+    down the call count itself.
     """
     calls = configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
@@ -167,11 +157,8 @@ def test_status_errors_stay_visible_on_stderr_even_when_quiet(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --quiet never silences a genuine connection failure.
-
-    Fixes a Phase 1 regression: errors were only printed when `quiet`
-    was falsy, contradicting Phase 1's own contract ("connection/
-    configuration errors may still emit a concise message on stderr").
+    """A connection/configuration error must still emit a concise message
+    on stderr even when `--quiet` is set.
     """
     configure_qbit_backend(
         client_error=QbitAuthenticationError("Authentication failed."),
@@ -188,7 +175,6 @@ def test_status_quiet_rejects_an_explicit_non_default_format(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure combining --quiet with --format is a validation error."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--quiet", "--format", "json"])
@@ -201,7 +187,6 @@ def test_status_json_is_valid_and_matches_the_schema(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --format json emits one valid document with the right schema."""
     torrents = [make_torrent(hash="a", state="stalledDL")]
     configure_qbit_backend(client=FakeQbitClient(torrents=torrents))
 
@@ -220,7 +205,6 @@ def test_status_json_output_contains_no_ansi_escape_sequences(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure JSON output is free of Rich/ANSI decoration."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--format", "json"])
@@ -232,7 +216,6 @@ def test_status_jsonl_emits_exactly_one_json_object(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --format jsonl emits one parseable object on one line."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(app, ["status", "--format", "jsonl"])
@@ -247,7 +230,6 @@ def test_status_csv_has_a_stable_header_and_numeric_values(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure CSV output has the documented header and numeric rate values."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash="a", state="downloading")],
@@ -268,7 +250,6 @@ def test_status_counts_unknown_torrent_states_instead_of_dropping_them(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a state qbit-ops does not recognize is still counted."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash="a", state="somethingBrandNew")],
@@ -286,7 +267,6 @@ def test_status_never_leaks_configured_credentials(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the configured host's embedded credentials never leak."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     for output_format in ("table", "json", "jsonl", "csv"):

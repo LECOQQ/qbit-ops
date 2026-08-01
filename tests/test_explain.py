@@ -26,7 +26,6 @@ PASSKEY_URL = f"https://tracker.example/announce/{SECRET_PASSKEY}"
 
 
 def test_explanation_exit_code_mapping() -> None:
-    """Ensure the documented severity -> exit code mapping holds."""
     assert explanation_exit_code(ExplanationSeverity.INFO) == 0
     assert explanation_exit_code(ExplanationSeverity.WARNING) == 1
     assert explanation_exit_code(ExplanationSeverity.UNKNOWN) == 1
@@ -37,7 +36,6 @@ def test_explanation_exit_code_mapping() -> None:
 
 
 def test_stalled_upload_explanation() -> None:
-    """Ensure a complete, stalled-upload torrent gets a grounded warning."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -70,7 +68,6 @@ def test_stalled_upload_explanation() -> None:
 
 
 def test_stalled_download_with_healthy_trackers() -> None:
-    """Ensure a stalled download with healthy trackers is not blamed on them."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -95,7 +92,6 @@ def test_stalled_download_with_healthy_trackers() -> None:
 
 
 def test_stalled_download_with_failing_trackers() -> None:
-    """Ensure a stalled download with all-failing trackers surfaces that."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -122,9 +118,10 @@ def test_stalled_download_with_failing_trackers() -> None:
 def test_stalled_download_with_failing_pseudo_tracker_suggests_nothing() -> (
     None
 ):
-    """Ensure a DHT/PeX/LSD pseudo-tracker never appears in a suggested
-    `trackers status --tracker` command, since that command cannot look
-    it up (`trackers status` excludes pseudo-trackers entirely)."""
+    """A DHT/PeX/LSD pseudo-tracker never appears in a suggested `trackers
+    status --tracker` command, since that command cannot look it up
+    (`trackers status` excludes pseudo-trackers entirely).
+    """
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="stalledDL")],
         trackers_by_hash={HASH_A: [{"url": "** [DHT] **", "status": 4}]},
@@ -139,8 +136,6 @@ def test_stalled_download_with_failing_pseudo_tracker_suggests_nothing() -> (
 
 
 def test_error_state_explanation() -> None:
-    """Ensure an errored torrent produces a critical, evidence-backed
-    finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="error")],
         trackers_by_hash={
@@ -167,7 +162,6 @@ def test_error_state_explanation() -> None:
 
 
 def test_checking_state_explanation() -> None:
-    """Ensure a checking torrent gets an informational, non-alarming finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="checkingDL")],
         trackers_by_hash={HASH_A: []},
@@ -183,7 +177,6 @@ def test_checking_state_explanation() -> None:
 
 
 def test_healthy_seeding_explanation() -> None:
-    """Ensure an actively seeding torrent gets a plain informational finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="uploading")],
         trackers_by_hash={
@@ -201,8 +194,6 @@ def test_healthy_seeding_explanation() -> None:
 
 
 def test_healthy_downloading_explanation() -> None:
-    """Ensure an actively downloading torrent gets a plain informational
-    finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="downloading")],
         trackers_by_hash={HASH_A: []},
@@ -217,7 +208,6 @@ def test_healthy_downloading_explanation() -> None:
 
 
 def test_stopped_torrent_is_not_reported_as_healthy_seeding() -> None:
-    """Ensure a paused/stopped torrent is not mislabeled as actively seeding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="stoppedUP")],
         trackers_by_hash={HASH_A: []},
@@ -232,7 +222,6 @@ def test_stopped_torrent_is_not_reported_as_healthy_seeding() -> None:
 
 
 def test_unknown_torrent_state_explanation() -> None:
-    """Ensure an unrecognized state produces an honest UNKNOWN finding."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1", state="totallyNewState")
@@ -251,7 +240,6 @@ def test_unknown_torrent_state_explanation() -> None:
 
 
 def test_torrent_download_and_upload_rates_reach_evidence() -> None:
-    """Ensure the actual dlspeed/upspeed fields are read, not a typo'd name."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -276,14 +264,12 @@ def test_torrent_download_and_upload_rates_reach_evidence() -> None:
 
 
 def test_torrent_not_found_returns_none() -> None:
-    """Ensure an unresolved hash returns None, mirroring `inspect_torrent`."""
     client = FakeQbitClient(torrents=[make_torrent(hash=HASH_A, name="T1")])
 
     assert explain_torrent(client, "deadbeef") is None
 
 
 def test_ambiguous_hash_propagates() -> None:
-    """Ensure an ambiguous prefix raises instead of guessing."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="abc123def456", name="T1"),
@@ -296,7 +282,6 @@ def test_ambiguous_hash_propagates() -> None:
 
 
 def test_tracker_collection_failure_is_a_limitation_not_a_crash() -> None:
-    """Ensure a torrents_trackers() failure degrades gracefully."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="stalledDL")],
         tracker_error_hashes={HASH_A},
@@ -316,7 +301,6 @@ def test_tracker_collection_failure_is_a_limitation_not_a_crash() -> None:
 
 
 def test_torrent_explanation_uses_at_most_one_tracker_lookup() -> None:
-    """Ensure only the resolved torrent's trackers are ever scanned."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -432,7 +416,6 @@ def test_explain_torrent_output_unchanged_after_extraction() -> None:
 
 
 def test_critical_tracker_explanation() -> None:
-    """Ensure an all-failing tracker produces a critical finding."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -458,7 +441,6 @@ def test_critical_tracker_explanation() -> None:
 
 
 def test_mixed_tracker_warning() -> None:
-    """Ensure a mix of healthy/failing endpoints is a warning, not critical."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -480,7 +462,6 @@ def test_mixed_tracker_warning() -> None:
 
 
 def test_disabled_only_tracker_explanation() -> None:
-    """Ensure a disabled-only tracker is informational, not a warning."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -498,7 +479,6 @@ def test_disabled_only_tracker_explanation() -> None:
 
 
 def test_unknown_tracker_states_explanation() -> None:
-    """Ensure unclassifiable states produce an honest UNKNOWN finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -518,7 +498,6 @@ def test_unknown_tracker_states_explanation() -> None:
 
 
 def test_healthy_tracker_explanation() -> None:
-    """Ensure a fully healthy tracker gets a concise informational finding."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -535,7 +514,6 @@ def test_healthy_tracker_explanation() -> None:
 
 
 def test_partial_tracker_collection_failure_adds_a_secondary_finding() -> None:
-    """Ensure a partial collection failure appends its own warning finding."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -564,7 +542,6 @@ def test_partial_tracker_collection_failure_adds_a_secondary_finding() -> None:
 
 
 def test_tracker_with_no_observations_returns_none() -> None:
-    """Ensure a tracker never observed returns None -- target unavailable."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -576,8 +553,6 @@ def test_tracker_with_no_observations_returns_none() -> None:
 
 
 def test_tracker_explanation_reuses_tracker_status_collection() -> None:
-    """Ensure `explain tracker` performs the same bounded scan as
-    `trackers status`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -596,7 +571,6 @@ def test_tracker_explanation_reuses_tracker_status_collection() -> None:
 
 
 def test_tracker_explanation_accepts_a_full_url() -> None:
-    """Ensure `--tracker` accepts a full URL, normalized before matching."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -614,7 +588,6 @@ def test_tracker_explanation_accepts_a_full_url() -> None:
 
 
 def test_next_commands_never_include_mutation_flags() -> None:
-    """Ensure no suggested command appends --no-dry-run or --yes."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="stalledDL")],
         trackers_by_hash={
@@ -632,8 +605,6 @@ def test_next_commands_never_include_mutation_flags() -> None:
 
 
 def test_next_commands_use_resolved_full_hash() -> None:
-    """Ensure a resolved unique prefix expands to the full hash in
-    suggestions."""
     client = FakeQbitClient(torrents=[make_torrent(hash=HASH_A, name="T1")])
 
     report = explain_torrent(client, HASH_A[:8])
@@ -648,7 +619,6 @@ def test_next_commands_use_resolved_full_hash() -> None:
 
 
 def test_torrent_explanation_never_leaks_a_secret() -> None:
-    """Ensure no report field ever contains a raw tracker URL or passkey."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1", state="error")],
         trackers_by_hash={
@@ -670,7 +640,6 @@ def test_torrent_explanation_never_leaks_a_secret() -> None:
 
 
 def test_tracker_explanation_never_leaks_a_secret() -> None:
-    """Ensure no report field ever contains a raw tracker URL or passkey."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="T1")],
         trackers_by_hash={
@@ -695,7 +664,6 @@ def test_tracker_explanation_never_leaks_a_secret() -> None:
 
 
 def test_evidence_and_finding_serialize_to_plain_dicts() -> None:
-    """Ensure the dict converters round-trip through json.dumps cleanly."""
     import json
 
     client = FakeQbitClient(

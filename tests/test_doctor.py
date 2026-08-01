@@ -56,7 +56,6 @@ def _checks_by_code(report: Any) -> dict[str, Any]:
 
 
 def test_report_check_order_is_deterministic() -> None:
-    """Ensure checks always appear in the same fixed, documented order."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -69,7 +68,6 @@ def test_report_check_order_is_deterministic() -> None:
 
 
 def test_all_pass_report_is_healthy() -> None:
-    """Ensure a fully healthy instance produces an all-`pass` report."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -84,7 +82,6 @@ def test_all_pass_report_is_healthy() -> None:
 
 
 def test_config_load_failure_skips_everything_downstream() -> None:
-    """Ensure a config error fails CFG001 and skips every other check."""
     report = collect_doctor_report(
         config=None,
         config_error=RuntimeError("Missing required environment variable(s)"),
@@ -103,8 +100,6 @@ def test_config_load_failure_skips_everything_downstream() -> None:
 
 
 def test_malformed_host_fails_cfg002_but_still_checks_cfg003() -> None:
-    """Ensure an independent local config check keeps running after a
-    sibling check fails."""
     config = make_config(host="not-a-url")
     report = collect_doctor_report(
         config=config,
@@ -121,8 +116,6 @@ def test_malformed_host_fails_cfg002_but_still_checks_cfg003() -> None:
 
 
 def test_embedded_credentials_in_host_warn() -> None:
-    """Ensure userinfo embedded in QBIT_HOST produces a warning, not a
-    failure."""
     report = collect_doctor_report(
         config=EMBEDDED_CREDENTIALS_CONFIG,
         config_error=None,
@@ -138,8 +131,6 @@ def test_embedded_credentials_in_host_warn() -> None:
 
 
 def test_connection_failure_fails_conn001_and_skips_the_rest() -> None:
-    """Ensure an unreachable instance fails CONN001 and skips every check
-    that depends on a live client."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -161,7 +152,6 @@ def test_connection_failure_fails_conn001_and_skips_the_rest() -> None:
 
 
 def test_authentication_failure_passes_reachability_but_fails_auth() -> None:
-    """Ensure a login-rejection still proves the host was reachable."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -184,8 +174,6 @@ def test_authentication_failure_passes_reachability_but_fails_auth() -> None:
 def test_unparsable_version_warns_and_skips_evidence_check(
     qbit_version: str,
 ) -> None:
-    """Ensure an unparsable version string warns instead of failing, and
-    never invents a supported/unsupported verdict."""
     client = FakeQbitClient(
         torrents=[make_torrent(state="uploading")],
         qbittorrent_version=qbit_version,
@@ -204,8 +192,6 @@ def test_unparsable_version_warns_and_skips_evidence_check(
 
 
 def test_version_older_than_oldest_evidence_warns_not_fails() -> None:
-    """Ensure a version older than the oldest tested entry warns rather
-    than fails, and never claims incompatibility solely for age."""
     client = FakeQbitClient(
         torrents=[make_torrent(state="uploading")],
         qbittorrent_version="3.3.16",
@@ -237,7 +223,7 @@ _FORBIDDEN_SUPPORT_CLAIMS = (
 def test_compat002_never_uses_forbidden_support_wording(
     qbit_version: str,
 ) -> None:
-    """F-5: `doctor` must never tell a user their exact major version is
+    """`doctor` must never tell a user their exact major version is
     `supported`, nor generalize the Docker matrix's exact-version
     evidence into a 4.x/5.x major-version claim -- only the matrix
     manifest (docs/COMPATIBILITY.md) may claim exact-version evidence."""
@@ -293,8 +279,6 @@ def test_compat002_exact_match_cites_container_integration_tested() -> None:
 
 
 def test_unknown_torrent_states_warn() -> None:
-    """Ensure an unrecognized torrent state produces a warning, reusing
-    `qbit_ops.features.status.classify_torrent_state`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(state="uploading"),
@@ -315,9 +299,8 @@ def test_unknown_torrent_states_warn() -> None:
 
 
 def test_api_call_failures_are_independent() -> None:
-    """Ensure one failing bounded API call does not erase unrelated
-    diagnostics: torrent listing failure must not prevent transfer info
-    from succeeding, and vice versa."""
+    """A failing torrent-listing call must not prevent transfer info from
+    succeeding, and vice versa."""
 
     class _PartiallyBrokenClient(FakeQbitClient):
         def torrents_info(self) -> list[dict[str, Any]]:
@@ -341,8 +324,7 @@ def test_api_call_failures_are_independent() -> None:
 
 
 def test_client_creation_and_bounded_calls() -> None:
-    """Ensure collection never exceeds the documented bounded API budget:
-    at most one call each to app_version, app_web_api_version,
+    """At most one call each to app_version, app_web_api_version,
     transfer_info, and torrents_info -- never a per-torrent call."""
     client = FakeQbitClient(
         torrents=[make_torrent(state="uploading") for _ in range(5)],
@@ -363,8 +345,6 @@ def test_client_creation_and_bounded_calls() -> None:
 
 
 def test_connection_error_detail_redacts_embedded_password() -> None:
-    """Ensure a password embedded in a connection error message is
-    redacted before it reaches a check's `detail`."""
     report = collect_doctor_report(
         config=EMBEDDED_CREDENTIALS_CONFIG,
         config_error=None,
@@ -382,7 +362,6 @@ def test_connection_error_detail_redacts_embedded_password() -> None:
 
 
 def test_password_replacement_redacts_bare_password_too() -> None:
-    """Ensure a bare (non-URL) password occurrence is also redacted."""
     report = collect_doctor_report(
         config=EMBEDDED_CREDENTIALS_CONFIG,
         config_error=None,
@@ -400,8 +379,6 @@ def test_password_replacement_redacts_bare_password_too() -> None:
 
 
 def test_no_secret_anywhere_in_json_or_csv_serialization() -> None:
-    """Ensure serialized report forms never carry the configured
-    password, matching the redaction proven at the check level."""
     report = collect_doctor_report(
         config=EMBEDDED_CREDENTIALS_CONFIG,
         config_error=None,
@@ -421,9 +398,7 @@ def test_no_secret_anywhere_in_json_or_csv_serialization() -> None:
 
 
 def test_overall_status_ignores_skipped_severity() -> None:
-    """Ensure skipped checks never independently raise severity: with a
-    genuinely healthy connection, extra skips must not appear and the
-    report must stay `pass`."""
+
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -437,7 +412,6 @@ def test_overall_status_ignores_skipped_severity() -> None:
 
 
 def test_json_dict_shape() -> None:
-    """Ensure the JSON structure has the documented top-level shape."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -462,7 +436,6 @@ def test_json_dict_shape() -> None:
 
 
 def test_csv_rows_shape() -> None:
-    """Ensure CSV rows follow the documented column order."""
     report = collect_doctor_report(
         config=CLEAN_CONFIG,
         config_error=None,
@@ -503,10 +476,8 @@ _ALL_EXACT_MATRIX_ENTRIES = tuple(load_compatibility_evidence().entries)
     ids=[entry.id for entry in _ALL_EXACT_MATRIX_ENTRIES],
 )
 def test_every_exact_matrix_entry_matches_pass(entry: Any) -> None:
-    """1/2: every current matrix entry, observed exactly (application and
-    Web API version both matching), reports PASS with the
-    container-integration-tested wording -- reads the manifest through
-    the loader, never a duplicated inline list of versions."""
+    """Reads the manifest through the loader, never a duplicated inline
+    list of versions."""
     version_string = entry.expected_version.removeprefix("v")
     report = _report_for(
         version_string, api_version=entry.expected_web_api_version
@@ -529,14 +500,10 @@ def test_every_exact_matrix_entry_matches_pass(entry: Any) -> None:
 def test_every_matrix_entry_matches_pass_using_captured_fixture_values(
     entry: Any,
 ) -> None:
-    """Closes the loop the manifest-only parametrization above leaves
-    open: drives `collect_doctor_report` with the *real* values a
-    container returned (`tests/compatibility/fixtures/captured-container/`),
-    not the manifest's own `expected_*` strings -- proving the exact-match
-    comparison (string equality after `removeprefix("v")` on the
-    application side; raw string equality on the Web API side) actually
-    holds against production-shaped payloads, not just self-consistent
-    fixtures."""
+    """Drives `collect_doctor_report` with the *real* values a container
+    returned (`tests/compatibility/fixtures/captured-container/`), not
+    the manifest's own `expected_*` strings, proving the exact-match
+    comparison holds against production-shaped payloads."""
     fixtures_by_name = {
         fixture.name: fixture for fixture in load_captured_fixtures(entry.id)
     }
@@ -553,9 +520,7 @@ def test_every_matrix_entry_matches_pass_using_captured_fixture_values(
 
 
 def test_exact_application_version_with_mismatched_web_api_warns() -> None:
-    """3: an exact application-version match whose observed Web API
-    differs from the recorded evidence is a WARNING, never
-    'unsupported'."""
+
     report = _report_for("5.2.3", api_version="2.11.4")  # expects 2.15.1
 
     check = _checks_by_code(report)["COMPAT002"]
@@ -567,9 +532,9 @@ def test_exact_application_version_with_mismatched_web_api_warns() -> None:
 
 
 def test_untested_patch_version_between_entries_is_neutral_pass() -> None:
-    """4/16: a version strictly between two exact tested entries, but
-    itself untested, is a neutral PASS -- never inferred support for
-    the intervening range."""
+    """A version strictly between two exact tested entries, but itself
+    untested, is a neutral PASS -- never inferred support for the
+    intervening range."""
     report = _report_for("5.0.5")  # between qbit-5.0.0 and qbit-5.1.4
 
     check = _checks_by_code(report)["COMPAT002"]
@@ -582,8 +547,7 @@ def test_untested_patch_version_between_entries_is_neutral_pass() -> None:
 
 
 def test_version_newer_than_5_2_3_warns() -> None:
-    """5: a version newer than the newest exact evidence warns, never
-    'incompatible'/'unsupported'."""
+
     report = _report_for("6.0.0")
 
     check = _checks_by_code(report)["COMPAT002"]
@@ -596,8 +560,7 @@ def test_version_newer_than_5_2_3_warns() -> None:
 
 
 def test_version_older_than_4_6_7_warns() -> None:
-    """6: a version older than the oldest exact evidence warns, never
-    'incompatible' solely for age."""
+
     report = _report_for("4.0.0")
 
     check = _checks_by_code(report)["COMPAT002"]
@@ -608,9 +571,7 @@ def test_version_older_than_4_6_7_warns() -> None:
 
 
 def test_malformed_application_version_skips_evidence_check() -> None:
-    """7: a malformed application version never crashes doctor; COMPAT001
-    warns and COMPAT002 is skipped, exactly the existing unparsable-
-    version contract."""
+
     report = _report_for("not-a-real-version")
 
     checks = _checks_by_code(report)
@@ -619,8 +580,7 @@ def test_malformed_application_version_skips_evidence_check() -> None:
 
 
 def test_malformed_web_api_version_warns_capability_without_crashing() -> None:
-    """8: a malformed Web API version never crashes doctor -- COMPAT003
-    warns that the format is unrecognized rather than raising."""
+
     report = _report_for("5.2.3", api_version="not-a-real-version")
 
     check = _checks_by_code(report)["COMPAT003"]
@@ -631,9 +591,6 @@ def test_malformed_web_api_version_warns_capability_without_crashing() -> None:
 def test_missing_packaged_evidence_warns_without_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """9: if the packaged compatibility manifest cannot be read at all,
-    doctor must not crash -- COMPAT002 warns and says nothing about
-    incompatibility."""
 
     def _raise_missing() -> Any:
         raise CompatibilityManifestError("simulated missing package data")
@@ -652,9 +609,8 @@ def test_missing_packaged_evidence_warns_without_crashing(
 def test_empty_packaged_evidence_warns_without_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """10: an empty packaged manifest (the loader's own fail-closed
-    error) must not crash doctor either -- same WARNING contract as any
-    other manifest error."""
+    """An empty packaged manifest (the loader's own fail-closed error)
+    gets the same WARNING contract as any other manifest error."""
 
     def _raise_empty() -> Any:
         raise CompatibilityManifestError(
@@ -686,11 +642,8 @@ def test_empty_packaged_evidence_warns_without_crashing(
 def test_compat002_never_uses_broad_or_absent_support_wording(
     qbit_version: str, api_version: str
 ) -> None:
-    """11: no classification, across every case, ever says an absent
-    exact version is 'unsupported', nor claims a broad supported range
-    -- checked for both compatibility checks (COMPAT002's evidence
-    classification and COMPAT003's capability check), since either
-    could reintroduce blanket "supported" wording."""
+    """Checked for both COMPAT002 and COMPAT003, since either could
+    reintroduce blanket "supported" wording."""
     report = _report_for(qbit_version, api_version=api_version)
     checks = _checks_by_code(report)
 
@@ -710,8 +663,7 @@ def test_compat002_never_uses_broad_or_absent_support_wording(
 
 
 def test_json_schema_is_stable_with_new_checks() -> None:
-    """12: the JSON structure keeps its documented top-level/per-check
-    shape even though the checks it carries changed."""
+
     report = _report_for("5.0.5")
     payload = doctor_report_to_json_dict(report)
 
@@ -732,7 +684,7 @@ def test_json_schema_is_stable_with_new_checks() -> None:
 
 
 def test_csv_rows_are_stable_with_new_checks() -> None:
-    """13: CSV rows keep their documented column order and width."""
+
     report = _report_for("5.0.5")
     rows = doctor_report_to_csv_rows(report)
 
@@ -743,13 +695,12 @@ def test_csv_rows_are_stable_with_new_checks() -> None:
 
 
 def test_compatibility_checks_perform_no_network_or_docker_access() -> None:
-    """14: `doctor`'s compatibility checks never import networking or
-    Docker machinery -- only the packaged evidence loader and
-    `packaging.version`. `urllib.parse` is allowed (pure string
-    parsing for CFG002's URL-shape check, no I/O); only the
-    network-performing `urllib.request` submodule is forbidden. Also
-    guards item 9 of the previous phase's sabotage list applied here:
-    `doctor` must never import from `tests/`."""
+    """`doctor`'s compatibility checks never import networking or Docker
+    machinery -- only the packaged evidence loader and
+    `packaging.version`. `urllib.parse` is allowed (pure string parsing
+    for CFG002's URL-shape check, no I/O); only the network-performing
+    `urllib.request` submodule is forbidden. `doctor` must also never
+    import from `tests/`."""
     import ast
     import inspect
 
@@ -781,11 +732,9 @@ def test_compatibility_checks_perform_no_network_or_docker_access() -> None:
 
 
 def test_doctor_never_hardcodes_a_second_copy_of_the_matrix_versions() -> None:
-    """1: `doctor.py`'s source must not contain a duplicated, hardcoded
-    list of the exact matrix versions -- the evidence classification
-    must be computed from `load_compatibility_evidence()` at runtime,
-    never a second embedded list qbit-ops's own tests can drift from
-    without noticing."""
+    """The evidence classification must be computed from
+    `load_compatibility_evidence()` at runtime, never a second embedded
+    list qbit-ops's own tests can drift from without noticing."""
     import inspect
 
     source = inspect.getsource(doctor_module)
@@ -801,10 +750,8 @@ def test_doctor_never_hardcodes_a_second_copy_of_the_matrix_versions() -> None:
 
 
 def test_untested_version_pass_is_distinct_from_capability_absence() -> None:
-    """17: evidence absence (COMPAT002, neutral) and real capability
-    absence (COMPAT003, a warning) are genuinely separate concerns --
-    an untested-but-plausible version can still be missing a real,
-    version-gated capability, and the two checks must disagree."""
+    """Evidence absence (COMPAT002, neutral) and real capability absence
+    (COMPAT003, a warning) are genuinely separate concerns."""
     report = _report_for("5.0.5", api_version="1.9.0")
 
     checks = _checks_by_code(report)

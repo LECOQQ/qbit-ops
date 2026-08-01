@@ -8,18 +8,11 @@ from qbit_ops.config import QbitConfig
 class FakeQbitClient:
     """Provide the qBittorrent methods needed by CLI-level tests.
 
-    Records `torrents_trackers()` calls so `status` tests can assert
-    that it never scans trackers per torrent (no N+1 pattern), and
-    records bulk mutation calls so `torrents` command tests can assert
-    dry-run performs no mutation and `--no-dry-run` mutates exactly the
-    resolved target.
-
-    `self.calls` is a generic, ordered log of every method call (name
-    plus positional/keyword args) across the whole fake — the single
-    source of truth for asserting that progress instrumentation never
-    adds, removes, or reorders a qBittorrent API call. The narrower
-    per-method counters/lists below are kept for existing call-site
-    tests that only care about one method.
+    `self.calls` is a generic, ordered log of every method call (name plus
+    positional/keyword args) across the whole fake, used to assert that
+    progress instrumentation never adds, removes, or reorders an API call.
+    The narrower per-method counters/lists below serve call-site tests
+    that only care about one method.
     """
 
     def __init__(
@@ -36,8 +29,7 @@ class FakeQbitClient:
         """Store fake instance data returned to callers.
 
         `tracker_error_hashes` names torrents whose `torrents_trackers()`
-        call raises instead of returning data, so tests can exercise
-        `trackers status`'s partial-collection-failure tolerance.
+        call raises instead of returning data.
         """
         self.torrents = torrents or []
         self.trackers_by_hash = trackers_by_hash or {}

@@ -1,14 +1,4 @@
-"""Own the canonical root Typer application: the CLI composition root.
-
-Registers every existing command group unchanged from their previous
-`qbit_ops.main` positions -- see docs/ARCHITECTURE.md for the full
-`cli/` package layout this composes. This is the single canonical
-`app`: the Poetry console-script entrypoint
-(`qbit-ops = "qbit_ops.cli.app:app"`) and `python -m qbit_ops.cli.app`
-both resolve here, and no other module constructs a second root Typer
-application. Deliberately contains no command implementation or
-rendering logic of its own -- see `cli/commands/*.py` for those.
-"""
+"""The canonical root Typer application: the CLI composition root."""
 
 import typer
 
@@ -32,13 +22,9 @@ app.add_typer(torrents_app, name="torrents")
 app.add_typer(trackers_app, name="trackers")
 app.add_typer(explain_app, name="explain")
 
-# Root-level singular commands (not a group): registered via a small
-# `register(app)` function per module, instead of a module-level
-# `@app.command()`, so `cli/commands/*.py` never has to import this
-# composition root back (`app.py` imports command modules, so the
-# reverse import would be circular). The `tui` command's Textual import
-# stays deferred inside `cli/commands/tui.py`'s command body -- nothing
-# here imports Textual.
+# Root-level singular commands are registered via a small `register(app)`
+# function per module so command modules never import this composition
+# root back (avoiding a circular import).
 register_status(app)
 doctor_commands.register(app)
 tui_commands.register(app)

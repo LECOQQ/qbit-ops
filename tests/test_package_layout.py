@@ -181,9 +181,8 @@ def test_qbit_boundary_modules_never_import_features_cli_or_tui() -> None:
 def test_no_executable_import_references_the_old_root_feature_paths() -> None:
     """No production or test module imports a moved feature module from
     its old root path (`qbit_ops.torrents`, not
-    `qbit_ops.features.torrents`) -- historical docs/audits are exempt
-    (see docs/ARCHITECTURE.md, this scan is over executable imports
-    only, via AST, never grep over prose)."""
+    `qbit_ops.features.torrents`) -- this scan is over executable
+    imports only, via AST, never grep over prose."""
     files = _production_python_files(PACKAGE_DIR) + _production_python_files(
         Path(qbit_ops.__file__).parent.parent.parent / "tests"
     )

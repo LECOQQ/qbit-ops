@@ -1,10 +1,6 @@
 """Minimal BEP 0003 bencode encoder for the synthetic torrent corpus.
 
-Written in-house instead of adding a bencode dependency (AGENTS.md: no
-new runtime dependency unless unavoidable; a five-rule encoder is not
-worth a new pinned package). Encoding only -- the harness never needs
-to *decode* bencode, only to produce deterministic `.torrent` bytes and
-tracker responses.
+Encoding only -- the harness never needs to decode bencode.
 """
 
 from __future__ import annotations

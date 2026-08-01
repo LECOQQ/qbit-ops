@@ -1,8 +1,4 @@
-"""`FiltersPanel` -- the shared filter-editing widget.
-
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change.
-"""
+"""`FiltersPanel` -- the shared filter-editing widget."""
 
 from __future__ import annotations
 
@@ -23,14 +19,11 @@ from qbit_ops.features.torrents import TorrentFilter, build_torrent_filter
 class FiltersPanel(Vertical):
     """The shared `TorrentFilter` vocabulary, applied entirely in memory.
 
-    Only ever mounted inside `FiltersScreen` (a modal, at every
-    terminal width). No qBittorrent API call is ever triggered by a
-    change here. Completion and Activity are each an exclusive
-    `RadioSet` (Any/Completed/Incomplete, Any/Active/Inactive) so a
-    contradictory pair (Completed *and* Incomplete) is structurally
-    impossible through the UI -- `build_torrent_filter`'s own
-    completed+incomplete/active+inactive rejection remains as defense
-    in depth, never actually reachable from here.
+    Only ever mounted inside `FiltersScreen`. No qBittorrent API call
+    is ever triggered by a change here. Completion and Activity are
+    each an exclusive `RadioSet`, so a contradictory pair (Completed
+    *and* Incomplete) is structurally impossible through the UI --
+    `build_torrent_filter`'s own rejection of that is defense in depth.
     """
 
     def compose(self) -> ComposeResult:
@@ -65,7 +58,6 @@ class FiltersPanel(Vertical):
             yield Button("Cancel", id="filters-cancel")
 
     def build_filter(self) -> TorrentFilter:
-        """Build a `TorrentFilter` from this panel's own widget values."""
         category_text = self.query_one(".f-category", Input).value
         state_text = self.query_one(".f-state", Input).value
         categories = [
@@ -92,7 +84,6 @@ class FiltersPanel(Vertical):
         )
 
     def sync_from(self, filters: TorrentFilter) -> None:
-        """Reflect an already-applied `TorrentFilter` in this panel."""
         self.query_one(".f-category", Input).value = ", ".join(
             filters.categories
         )

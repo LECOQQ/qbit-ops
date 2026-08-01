@@ -1,8 +1,7 @@
 """`ActionsScreen` -- choose a LOW-risk bulk action for the selection.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -25,11 +24,9 @@ if TYPE_CHECKING:
 class ActionsScreen(ModalScreen[None]):
     """Choose a LOW-risk bulk action for the frozen selection snapshot.
 
-    Only ever opened with a non-empty selection (see
-    `QbitOpsTuiApp.action_open_actions`). No mutation happens here --
-    picking an action just builds a frozen `BulkTorrentActionPlan`
-    (zero API calls) and opens `PreviewScreen`; Cancel/Escape close
-    without any side effect at all.
+    Only ever opened with a non-empty selection. No mutation here --
+    picking an action just builds a frozen plan (zero API calls) and
+    opens `PreviewScreen`; Cancel/Escape close with no side effect.
     """
 
     BINDINGS = [

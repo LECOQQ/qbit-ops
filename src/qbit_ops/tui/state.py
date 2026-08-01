@@ -1,47 +1,15 @@
 """Pure(-ish) TUI state and refresh controller, independent of Textual.
 
-Everything here is directly unit-testable without a terminal or a real
-Textual `App` -- see `tests/test_tui_state.py`. Widgets in `qbit_ops/tui/app.py`
-only ever read `TuiState` and call `TuiController` methods; they never
-reimplement filtering, refresh sequencing, or failure classification.
+Blocking qBittorrent calls are split into `collect_*()` (blocking) /
+`apply_*()` (UI-thread) halves so `qbit_ops.tui.app` can run them off
+the Textual event loop; a monotonic `_detail_request_id` guards
+against a stale background result overwriting a newer one.
 
-Worker-hardening phase (see docs/DECISIONS.md): every method that
-performs a blocking qBittorrent call is split into two halves so
-`qbit_ops.tui.app` can run the blocking half on a Textual thread worker and
-apply the result on the UI thread, never the reverse:
-
-* `collect_refresh()` / `apply_refresh_success()` / `apply_refresh_failure()`
-  -- periodic refresh.
-* `collect_tracker_details()` / `apply_tracker_details_success()` /
-  `apply_tracker_details_failure()` -- focused-torrent tracker details,
-  guarded by a monotonic `_detail_request_id` so a stale background
-  result (an old focus target, or a fetch superseded by a manual
-  refresh) can never overwrite a newer one -- see
-  `begin_focus_change()`/`begin_manual_detail_refresh()`.
-
-`refresh()`/`set_focus()`/`clear_focus()`/`refresh_focused_details()`
-remain as fully synchronous convenience wrappers composing the pieces
-above, used by this module's own test suite (and any future
-non-threaded caller); the real TUI never calls them directly -- it
-calls the granular `collect_*`/`apply_*`/`begin_*` methods itself, from
-the appropriate thread. Both paths share the exact same logic, so
-behavior cannot drift between "convenience" and "threaded" use.
-
-Security boundary (see docs/TUI_ARCHITECTURE_REVIEW.md §10, revised for
-TUI 2 -- see docs/DECISIONS.md, "multi-selection + LOW-risk bulk
-actions"): this module only ever imports safe, structured domain
-outputs, plus exactly the two LOW-risk bulk torrent mutation functions
-TUI 2 needs (`qbit_ops.features.torrents.apply_bulk_torrent_action`,
-`build_bulk_action_plan_from_snapshot`) -- both act only on
-Pause/Resume/Reannounce, take an already-frozen plan or an explicit
-hash list, and never rescan or accept an unbounded selector. It must
-never import `qbit_ops.features.torrents.list_torrents_with_trackers`,
-`qbit_ops.features.torrents._get_tracker_details`,
-`qbit_ops.features.torrents.plan_bulk_torrent_action`
-(it always rescans and accepts `--all`, neither of which fits the
-frozen-plan model here), any tracker mutation `plan_*`/`apply_*`
-function, any deletion function, or `qbit_ops.main` -- enforced by
-`tests/test_tui_security.py`.
+Security boundary (see `docs/ARCHITECTURE.md`): only imports safe,
+structured domain outputs and the two frozen-plan LOW-risk mutation
+functions (Pause/Resume/Reannounce) -- never a rescanning or
+unbounded-selector function, any deletion function, or `qbit_ops.cli`.
+Enforced by `tests/test_tui_security.py`.
 """
 
 from __future__ import annotations
@@ -103,13 +71,12 @@ class ConnectionState(StrEnum):
 
 
 class Workspace(StrEnum):
-    """The TUI's two top-level operator workspaces (Overview-first redesign).
+    """The TUI's two top-level operator workspaces.
 
     Purely a UI-navigation concern -- switching never triggers a
     qBittorrent call and never touches `filters`/`search`/`focused_hash`,
     all of which are preserved across a switch by construction (nothing
-    in `set_workspace` resets them). See docs/DECISIONS.md (Overview
-    redesign phase).
+    in `set_workspace` resets them).
     """
 
     OVERVIEW = "overview"
@@ -120,16 +87,10 @@ class Workspace(StrEnum):
 class TuiState:
     """The TUI's complete state, split into three kinds of field.
 
-    Authoritative (replaced wholesale by a successful refresh):
-        `status`, `torrent_snapshot`, `stopped_count`.
-
-    Derived (recomputed locally from authoritative state + ephemeral UI
-    state, never fetched):
-        `visible`.
-
-    Ephemeral UI state (never persisted, never part of a collected
-    model):
-        everything else.
+    Authoritative, replaced wholesale by a successful refresh:
+    `status`, `torrent_snapshot`, `stopped_count`. Derived, recomputed
+    locally, never fetched: `visible`. Everything else is ephemeral UI
+    state, never persisted.
     """
 
     connection: ConnectionState = ConnectionState.CONNECTING
@@ -148,10 +109,10 @@ class TuiState:
     last_error: AppError | None = None
     workspace: Workspace = Workspace.OVERVIEW
     selected_hashes: set[str] = field(default_factory=set)
-    """Explicit multi-selection for bulk actions (TUI 2) -- full
-    canonical hashes only. Deliberately distinct from `focused_hash`
-    (never implied by focus alone), `visible` (the current filter/
-    search result), and any CLI `--all` concept: `set()` always means
+    """Explicit multi-selection for bulk actions -- full canonical
+    hashes only. Deliberately distinct from `focused_hash` (never
+    implied by focus alone), `visible` (the current filter/search
+    result), and any CLI `--all` concept: `set()` always means
     "nothing selected", never "every torrent" -- see
     `TuiController.select_all_visible`/`reconcile_selection`.
     """
@@ -160,9 +121,9 @@ class TuiState:
         """Look up the focused torrent's live fields from `visible`.
 
         Deliberately a lookup, not a stored copy: name/state/progress/
-        category/rates always come from the latest periodic snapshot,
-        per docs/TUI_ARCHITECTURE_REVIEW.md §10 -- only tracker details
-        are focus-scoped and cached (`focused_tracker_details`).
+        category/rates always come from the latest periodic snapshot --
+        only tracker details are focus-scoped and cached
+        (`focused_tracker_details`).
         """
         if self.focused_hash is None or self.visible is None:
             return None
@@ -176,44 +137,19 @@ class TuiController:
     """Own `TuiState` and every state-mutating operation the TUI needs.
 
     Not a generic state-management framework: one class, direct method
-    calls, no event bus, no reducers. `client_factory` defaults to
-    `qbit_ops.app_services.create_qbit_client` but is injectable for tests
-    (a `tests.support.FakeQbitClient` factory) and for reconnect
-    (calling it again after a recoverable failure).
+    calls, no event bus, no reducers.
 
-    Thread-safety -- **one remote-client coordinator** (audit finding
-    F-2, see docs/audits/2026-07-26-tui-bulk-mutation-remediation.md):
-    `_remote_lock` serializes *every* blocking qBittorrent operation the
-    TUI can reach. There are exactly three such entry points, and all
-    three take it for the whole duration of their call:
+    Thread-safety: `_remote_lock` serializes the three blocking entry
+    points (`collect_refresh`, `collect_tracker_details`,
+    `apply_bulk_plan`) since `qbittorrentapi`'s `requests.Session` is
+    not thread-safe -- provable via `max_concurrent_remote_operations`.
+    `_client_lock` is a separate, narrower lock guarding only lazy
+    client construction; acquisition order is always `_remote_lock`
+    then `_client_lock`.
 
-    * `collect_refresh()`          -- periodic refresh
-    * `collect_tracker_details()`  -- focused/manual tracker details
-    * `apply_bulk_plan()`          -- LOW-risk bulk mutation Apply
-
-    This replaces the pre-TUI-2 posture (documented on `_ensure_client`
-    until this remediation) that a periodic-refresh worker and a
-    focused-detail worker could use the same client concurrently:
-    `qbittorrentapi` is backed by a `requests.Session` whose
-    multithreaded safety is not guaranteed, and a mutation overlapping a
-    read was accepted limitation L-3 plus finding F-2. At most one
-    remote operation now touches the client at a time -- provable via
-    `max_concurrent_remote_operations`.
-
-    The lock is only ever held on a worker thread, never on the UI
-    thread, and never across widget rendering or user input. It is a
-    plain `Lock`, not an `RLock`: no coordinated method calls another,
-    and the post-Apply refresh is dispatched as a *separate* worker from
-    the UI thread only after the mutation worker has already returned
-    (and therefore released the lock), so nesting -- and deadlock --
-    cannot occur. `_client_lock` remains a distinct, narrower lock
-    guarding only lazy client *construction*; the acquisition order is
-    always `_remote_lock` then `_client_lock`, never the reverse.
-
-    Every `apply_*` method mutates `self.state` and must only ever be
-    called from the UI thread; every `collect_*` method performs
-    blocking I/O only and touches no widget or reactive state, so it is
-    safe to call from a background thread.
+    Every `apply_*` method mutates `self.state` and must only run on
+    the UI thread; every `collect_*` method is blocking I/O only and
+    safe on a worker thread.
     """
 
     def __init__(
@@ -237,8 +173,8 @@ class TuiController:
     def max_concurrent_remote_operations(self) -> int:
         """High-water mark of simultaneous remote client operations.
 
-        Instrumentation for the F-2 regression tests: must never exceed
-        `1`. Incremented/decremented inside `_remote_operation()`, so it
+        Regression-test instrumentation: must never exceed `1`.
+        Incremented/decremented inside `_remote_operation()`, so it
         measures actual overlap rather than merely asserting the lock
         exists.
         """
@@ -248,11 +184,10 @@ class TuiController:
     def _remote_operation(self) -> Iterator[Any]:
         """Own the qBittorrent client exclusively for one blocking call.
 
-        Yields the (lazily created) client. Worker threads only -- see
-        the class docstring. The in-flight accounting lives inside the
-        lock, so `max_concurrent_remote_operations` is an honest
-        measurement of overlap, not a restatement of the lock's
-        existence.
+        Yields the (lazily created) client. Worker threads only. The
+        in-flight accounting lives inside the lock, so
+        `max_concurrent_remote_operations` is an honest measurement of
+        overlap, not a restatement of the lock's existence.
         """
         with self._remote_lock:
             self._remote_in_flight += 1
@@ -268,11 +203,9 @@ class TuiController:
         """Lazily create (or reuse) the qBittorrent client.
 
         Guarded by `_client_lock` so two callers racing to reconnect
-        after a failure can never both construct a client at once.
-        Callers performing a *blocking* call must go through
-        `_remote_operation()` instead of calling this directly -- that
-        is what serializes the call itself (see the class docstring);
-        this method only makes construction safe.
+        can never both construct a client at once. A blocking caller
+        must go through `_remote_operation()` instead of calling this
+        directly -- this method only makes construction safe.
         """
         with self._client_lock:
             if self._client is None:
@@ -284,15 +217,12 @@ class TuiController:
     def collect_refresh(self) -> TuiRefreshResult:
         """Perform one periodic refresh's blocking network work only.
 
-        No state mutation -- safe to call from a background thread.
-        Raises unchanged (`ConfigError`, or any qBittorrent/transport
-        exception `qbit_ops.app_services.classify_recoverable_qbit_failure`
-        can classify, or a genuine internal defect); the caller applies
-        the outcome via `apply_refresh_success`/`apply_refresh_failure`
-        on the UI thread. Calling this while `state.connection` is
-        already in a terminal blocking state is the caller's mistake to
-        avoid (mirrors `refresh()`'s guard) -- this method itself has no
-        opinion on when it is appropriate to call.
+        No state mutation -- safe on a background thread. Raises
+        unchanged; the caller applies the outcome via
+        `apply_refresh_success`/`apply_refresh_failure` on the UI
+        thread. Has no opinion on when it's appropriate to call
+        (mirrors `refresh()`'s terminal-state guard, but doesn't
+        enforce it itself).
         """
         with self._remote_operation() as client:
             return collect_tui_refresh(client, host=self._host)
@@ -302,30 +232,14 @@ class TuiController:
     ) -> None:
         """Apply a successful periodic refresh. UI-thread only.
 
-        `reconcile=False` suppresses only the *selection* reconciliation
-        (audit finding F-1): the raw snapshot, status, counts, visible
-        set, and focus are always updated, since a refresh must never
-        show stale data merely because a modal is open. The caller
-        passes `False` while a `FiltersScreen` holds an uncommitted
-        draft -- a category filter is exact-match, so a half-typed
-        "films" transiently matches nothing and would silently destroy
-        a selection the operator patiently built, which is exactly what
-        `set_filters`'s documented deferral exists to prevent. The
-        existing commit points (Apply/Clear/Cancel) reconcile instead;
-        this knowledge lives in `qbit_ops.tui.app`, which owns the screen
-        stack, rather than teaching the controller what a modal is.
-
-        Precisely what is and is not deferred (closure review D-1 --
-        the earlier wording here described the mechanism backwards):
-        `set_filters()` **is** called on every keystroke, by
-        `qbit_ops.tui.app._apply_filters_from_panel` via `on_input_changed`,
-        so `state.filters` genuinely holds the partial draft and
-        `_recompute_visible()` genuinely uses it -- with only "f" typed,
-        `visible` is empty. What the `reconcile` flag defers is *only*
-        the selection reconciliation, never the filter itself. Do not
-        "simplify" this parameter away as redundant: without it, a tick
-        landing mid-typing would drop the whole selection against a
-        filter the operator has not finished writing.
+        `reconcile=False` suppresses only the *selection*
+        reconciliation -- snapshot, status, counts, visible set, and
+        focus are always updated. The caller passes `False` while a
+        `FiltersScreen` holds an uncommitted draft: a category filter
+        is exact-match, so a half-typed "films" transiently matches
+        nothing and would otherwise wipe out a selection the operator
+        is still building. The existing commit points (Apply/Clear/
+        Cancel) reconcile instead.
         """
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
@@ -386,18 +300,12 @@ class TuiController:
         """Perform one periodic refresh tick synchronously.
 
         A no-op once `connection` has reached a terminal blocking state
-        (`AUTH_FAILED`/`CONFIG_FAILED`): neither can self-heal without a
-        process restart, so retrying every tick would be a pointless
-        loop -- see docs/TUI_ARCHITECTURE_REVIEW.md §4/§6.
-
-        A synchronous convenience composing `collect_refresh()` and
-        `apply_refresh_success()`/`apply_refresh_failure()`, kept for
-        this module's own test suite and any non-threaded caller. The
-        real TUI (`qbit_ops.tui.app`) never calls this directly: it calls
-        `collect_refresh()` from a Textual thread worker and applies the
-        result on the UI thread instead, so qBittorrent I/O never blocks
-        the event loop -- see docs/DECISIONS.md (worker hardening
-        phase).
+        (`AUTH_FAILED`/`CONFIG_FAILED`), since neither can self-heal
+        without a restart. A synchronous convenience composing
+        `collect_refresh()` and `apply_refresh_success()`/`_failure()`;
+        the real TUI never calls this directly, instead running
+        `collect_refresh()` on a thread worker and applying the result
+        on the UI thread so I/O never blocks the event loop.
         """
         if self.state.connection in (
             ConnectionState.AUTH_FAILED,
@@ -431,10 +339,7 @@ class TuiController:
 
         Deliberately touches nothing else: `filters`, `search`,
         `focused_hash`, and `focused_tracker_details` all survive a
-        workspace switch untouched, per the Overview redesign's explicit
-        "preserves search and filter state" / "preserves the last
-        focused torrent" requirements. `qbit_ops.tui.app` is responsible for
-        not leaving a widget from the now-hidden workspace focused.
+        workspace switch untouched.
         """
         self.state.workspace = workspace
 
@@ -444,17 +349,11 @@ class TuiController:
         """Apply a new `TorrentFilter`. Zero qBittorrent API calls.
 
         Deliberately does *not* reconcile the selection itself: the
-        Filters modal applies live, on every keystroke (see
-        `qbit_ops.tui.app._apply_filters_from_panel`), and a category filter
-        is an *exact*-match field -- typing "films" one letter at a
-        time transiently matches nothing (`"f"`, `"fi"`, ... never
-        equal "films"), which would otherwise wipe out a selection
-        before the user finishes typing the very filter that would
-        have kept it visible. The caller reconciles explicitly, once,
-        at each real commit point instead (`reconcile_selection()` --
-        see `qbit_ops.tui.app.action_activate`'s `FiltersScreen` branch and
-        `FiltersScreen.action_clear`/`QbitOpsTuiApp.action_dismiss_overlay`'s
-        cancel-revert branch).
+        Filters modal applies live on every keystroke, and a category
+        filter is exact-match, so a half-typed "films" would otherwise
+        wipe the selection before the user finishes typing. The caller
+        reconciles once, explicitly, at each real commit point instead
+        (`reconcile_selection()`).
         """
         self.state.filters = filters
         self._recompute_visible()
@@ -463,22 +362,12 @@ class TuiController:
     def set_search(self, text: str) -> int:
         """Apply read-only search text against name and hash.
 
-        Matches a torrent whose name contains `text` as a case-
-        insensitive substring, OR whose hash starts with `text`
-        case-insensitively (covers both a full hash and a leading
-        prefix) -- no fuzzy scoring, no ambiguity error, since this is a
-        read-only list filter, not a target-selection lookup. Zero
-        qBittorrent API calls. If the currently focused torrent no
-        longer matches, `_reconcile_focus()` clears focus (and any
-        pending detail fetch) for it -- see `clear_focus()`. Returns
-        the number of selected hashes hidden by the new search and
-        dropped from the selection (see `reconcile_selection()`).
-
-        Unlike `set_filters()`, search reconciles live on every
-        keystroke: a substring match only ever *narrows* while typing
-        forward (every prefix of a matching string still matches), so
-        the same transient-wipe risk does not apply the same way, and
-        there is no separate "commit" step in the UI to hook instead.
+        Matches a case-insensitive name substring OR a hash prefix.
+        Zero API calls; a no-longer-matching focus is cleared. Returns
+        the number of selected hashes hidden and dropped. Unlike
+        `set_filters()`, reconciles the selection live on every
+        keystroke: a substring match only ever narrows while typing
+        forward, so `set_filters()`'s transient-wipe risk doesn't apply.
         """
         self.state.search = text
         self._recompute_visible()
@@ -497,10 +386,8 @@ class TuiController:
         """Toggle one torrent's membership in the selection.
 
         Never implied by focus -- this is the only way a torrent enters
-        `selected_hashes`. Selecting a torrent that is not currently
-        visible is the caller's mistake to avoid; this method itself
-        does not check visibility (a toggle always targets one exact,
-        already-known hash, e.g. the currently focused row).
+        `selected_hashes`. Doesn't check visibility; the caller must
+        pass an already-known, currently visible hash.
         """
         if torrent_hash in self.state.selected_hashes:
             self.state.selected_hashes.discard(torrent_hash)
@@ -519,15 +406,10 @@ class TuiController:
     def reconcile_selection(self) -> int:
         """Drop any selected hash no longer visible. UI-thread only.
 
-        The safety-first policy TUI 2 is built on: "the actionable
-        selection is always a subset of the currently visible
-        torrents." Called after every filter/search change and every
-        successful periodic refresh (see `set_filters`/`set_search`/
-        `apply_refresh_success`) -- a torrent that becomes hidden or
-        disappears is never left selectable-but-invisible. Returns the
-        number of hashes removed, so the caller can show a concise
-        "N hidden selections cleared" notification; `0` when nothing
-        changed (the common case), never itself a reason to notify.
+        Enforces "selection ⊆ visible". Called after every filter/
+        search change and every successful refresh. Returns the number
+        of hashes removed, so the caller can notify; `0` (the common
+        case) is never itself a reason to.
         """
         visible = self.visible_hashes()
         hidden = self.state.selected_hashes - visible
@@ -539,12 +421,9 @@ class TuiController:
     def clear_selection_for(self, hashes: Iterable[str]) -> None:
         """Remove exactly `hashes` from the selection.
 
-        Used after a result modal is dismissed to clear only the
-        torrents an applied plan actually acted on (`plan.changes`),
-        per TUI 2's documented dismissal policy -- a skipped or
-        unavailable torrent's selection is left untouched so the
-        operator can reconsider it, rather than being silently cleared
-        alongside the ones that did change.
+        Used after a result modal closes to clear only the torrents a
+        plan actually acted on -- a skipped one is left selected so the
+        operator can reconsider it.
         """
         self.state.selected_hashes -= set(hashes)
 
@@ -557,16 +436,12 @@ class TuiController:
     ) -> BulkTorrentActionPlan:
         """Build a frozen bulk-action plan -- pure, zero API calls.
 
-        `torrent_hashes` must already be an immutable, sorted snapshot
-        (see `QbitOpsTuiApp.action_open_actions`, which captures
-        `tuple(sorted(selected_hashes))` at the moment an action is
-        chosen) -- this method never reads `self.state.selected_hashes`
-        itself, so a selection change after this call can never affect
-        an already-built plan. Delegates every skip-reason decision to
-        `qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`
-        (the same rule `plan_bulk_torrent_action`/the CLI uses) against
-        the current `_raw_torrents` snapshot -- no second rule
-        catalogue, no rescan.
+        `torrent_hashes` must already be an immutable snapshot; this
+        method never reads `self.state.selected_hashes` itself, so a
+        later selection change can't affect an already-built plan.
+        Delegates all skip-reason logic to
+        `build_bulk_action_plan_from_snapshot` (the same rule the CLI
+        uses) against the current `_raw_torrents` -- no rescan.
         """
         return build_bulk_action_plan_from_snapshot(
             self._raw_torrents, action, torrent_hashes
@@ -577,21 +452,12 @@ class TuiController:
     ) -> MutationStatus:
         """Classify a plan before Apply -- pure.
 
-        Follows `qbit_ops.main`'s shared `_run_mutation` mapping for the two
-        cases the CLI can actually produce, with one TUI-specific
-        refinement (audit finding F-3): a selection whose torrents all
-        *disappeared* between the Actions snapshot and the plan build
-        yields `matched > 0` with only `not_found` skips, which the CLI
-        mapping alone would report as `NO_CHANGES` -- i.e. "already
-        satisfied", which is untrue and misleading. Only the TUI can
-        reach that state (its selection is captured ahead of planning,
-        unlike a CLI selector resolved in one pass), so the refinement
-        lives here rather than in the shared
-        `build_bulk_action_plan_from_snapshot` model.
-
-        `NO_MATCH`   -- nothing actionable was *found*.
-        `NO_CHANGES` -- targets were found and already satisfied.
-        `PREVIEW`    -- there is at least one real change to apply.
+        `NO_MATCH` -- nothing actionable found. `NO_CHANGES` -- targets
+        found, already satisfied. `PREVIEW` -- at least one real
+        change. Refines the CLI's mapping for a TUI-only case: a
+        selection that entirely *disappeared* before the plan was
+        built (`matched > 0`, only `not_found` skips) is `NO_MATCH`,
+        not the misleading "already satisfied".
         """
         if plan.matched == 0:
             return MutationStatus.NO_MATCH
@@ -610,30 +476,14 @@ class TuiController:
         """Apply an already-frozen plan. Blocking I/O -- safe on a
         background worker thread, never the UI thread.
 
-        Mutates exactly `plan.changes`; never rescans, never re-reads
-        `selected_hashes`, never substitutes a different target. May
-        raise -- the caller classifies the failure via
-        `classify_recoverable_qbit_failure`, exactly like
-        `collect_refresh`/`collect_tracker_details`.
-
-        Returns whether the mutation was actually dispatched.
-
-        `should_proceed` is a last-moment authority check evaluated
-        **inside** `_remote_operation()`, i.e. *after* the shared remote
-        lock has been acquired and immediately before any qBittorrent
-        call (closure review finding N-2). This placement is the whole
-        point: serializing remote access (F-2) means a mutation can now
-        sit queued behind a blocked read for an unbounded time, so an
-        authority check performed before the wait -- or by the caller
-        before dispatching the worker -- proves nothing about the state
-        of the world when the call would finally go out. The TUI passes
-        `lambda: self.is_running`, so quitting while an Apply is queued
-        means the request is never sent at all.
-
-        When the predicate is false nothing is called, nothing raises,
-        and `False` is returned so the caller can report a
-        cancelled-before-dispatch outcome that is distinct from both a
-        remote failure and a successful submission.
+        Mutates exactly `plan.changes`; never rescans or re-reads
+        `selected_hashes`. Returns whether the mutation was actually
+        dispatched. `should_proceed` is checked *inside*
+        `_remote_operation()`, right before the qBittorrent call, since
+        a mutation can sit queued behind a blocked read for an
+        unbounded time -- an earlier check would prove nothing. When
+        false: nothing is called, and `False` signals a
+        cancelled-before-dispatch outcome.
         """
         with self._remote_operation() as client:
             if should_proceed is not None and not should_proceed():
@@ -647,14 +497,10 @@ class TuiController:
         """Update focus bookkeeping; return a request id for a background
         fetch, or `None` if no fetch is needed.
 
-        A no-op (returns `None`, no state change at all) if
-        `torrent_hash` already matches the current focus -- avoids a
-        redundant re-fetch. Otherwise always bumps
-        `_detail_request_id`, even when clearing focus
-        (`torrent_hash=None`): this invalidates any already-in-flight
-        background fetch for the torrent that was previously focused,
-        so its result is discarded on arrival regardless of how it
-        turns out -- see `apply_tracker_details_success`/`_failure`.
+        A full no-op if `torrent_hash` already matches the current
+        focus -- avoids a redundant re-fetch. Otherwise always bumps
+        `_detail_request_id`, even when clearing focus, invalidating
+        any already-in-flight fetch for the previously focused torrent.
         """
         if torrent_hash == self.state.focused_hash:
             return None
@@ -671,10 +517,8 @@ class TuiController:
         or `None` if nothing is focused.
 
         Always bumps `_detail_request_id`, even though the focused hash
-        is unchanged: this guarantees a slower, already-in-flight
-        *automatic* fetch for the same torrent can never overwrite this
-        newer, explicit request once both eventually complete -- only
-        the result whose id matches the current one is ever applied.
+        is unchanged, so a slower already-in-flight automatic fetch can
+        never overwrite this newer, explicit request.
         """
         if self.state.focused_hash is None:
             return None
@@ -698,11 +542,9 @@ class TuiController:
     def detail_request_id(self) -> int:
         """The current monotonic detail-fetch generation.
 
-        Read-only outside this module -- `qbit_ops.tui.app` uses it only to
-        confirm, at the moment a deferred Explain result is about to be
-        applied, that no newer focus change or manual refresh has
-        superseded the request it was waiting for (see
-        `QbitOpsTuiApp.action_explain`/`_on_detail_worker_state_changed`).
+        Read-only outside this module -- `qbit_ops.tui.app` uses it to
+        confirm a deferred Explain result hasn't been superseded by a
+        newer focus change or manual refresh before applying it.
         """
         return self._detail_request_id
 
@@ -726,15 +568,11 @@ class TuiController:
         """Build an `ExplanationReport` for the focused torrent -- zero
         API calls, deterministic.
 
-        Delegates every rule-evaluation decision to
-        `qbit_ops.features.explain.build_torrent_explanation`, the
-        exact same pure builder `qbit_ops.features.explain.explain_torrent`
-        (the CLI's entry point) uses -- there is no second, TUI-only
-        explanation catalogue.
-        Returns `None` when nothing is focused, or when the focused
-        torrent is no longer present in the latest raw snapshot (it
-        disappeared) -- the caller must treat that as "not found", never
-        open a modal, and notify instead.
+        Delegates to the same `build_torrent_explanation` the CLI's
+        `explain_torrent` uses -- no second, TUI-only catalogue.
+        Returns `None` when nothing is focused or the focused torrent
+        has disappeared from the latest raw snapshot; the caller must
+        treat that as "not found", never open a modal.
         """
         if self.state.focused_hash is None:
             return None
@@ -766,14 +604,11 @@ class TuiController:
     ) -> None:
         """Apply a successful tracker-details fetch. UI-thread only.
 
-        Discarded (a no-op) if `request_id` no longer matches
-        `_detail_request_id`: a newer focus change, manual refresh, or
-        focus-clear happened after this fetch was started. This is the
-        sole mechanism protecting against out-of-order completion for
-        rapid focus movement (A -> B -> C: only C's result ever
-        applies) -- it does not rely on cancelling the background
-        thread, which cannot be done reliably once a blocking network
-        call has started.
+        Discarded if `request_id` no longer matches
+        `_detail_request_id` -- the sole mechanism protecting against
+        out-of-order completion for rapid focus movement (A -> B -> C:
+        only C's result ever applies), since a blocking fetch can't be
+        reliably cancelled once started.
         """
         if request_id != self._detail_request_id:
             return
@@ -815,11 +650,8 @@ class TuiController:
 
         Synchronous convenience composing `begin_focus_change()`,
         `collect_tracker_details()`, and `apply_tracker_details_success()`/
-        `_failure()` -- kept for this module's own test suite. The real
-        TUI never calls this directly: it calls `begin_focus_change()`
-        on the UI thread (fast, no I/O) and dispatches
-        `collect_tracker_details()` to a background worker instead --
-        see docs/DECISIONS.md (worker hardening phase).
+        `_failure()`. The real TUI never calls this directly: it runs
+        the fetch on a background worker instead.
         """
         request_id = self.begin_focus_change(torrent_hash)
         if request_id is None:
@@ -840,8 +672,8 @@ class TuiController:
         """Manually re-fetch tracker details for the currently focused torrent.
 
         No-op when nothing is focused. Never triggered automatically by
-        the periodic refresh tick -- see docs/TUI_ARCHITECTURE_REVIEW.md
-        §10. Synchronous convenience, same caveat as `set_focus()`.
+        the periodic refresh tick. Synchronous convenience, same
+        caveat as `set_focus()`.
         """
         request_id = self.begin_manual_detail_refresh()
         if request_id is None:
@@ -894,16 +726,11 @@ class TuiController:
 def _count_stopped_torrents(raw_torrents: list[Any]) -> int:
     """Count paused/stopped torrents using the existing state helper.
 
-    Deliberately *not* a new classifier and not folded into
-    `qbit_ops.features.status.TransferCounts`: `classify_torrent_state` already
-    reports every paused/stopped torrent under `downloading` or
-    `seeding` (by direction), which is the classification `status`/
-    `torrents list` are built around and must not change. The Overview
-    wants this as an *additional*, overlapping breakdown for operators
-    ("how many of my torrents are just sitting paused"), reusing
-    `qbit_ops.shared.torrent_states.is_stopped_state` (already the
-    single source of truth for the qBittorrent 4 `paused*` vs 5
-    `stopped*` naming split) rather than inventing a second state vocabulary.
+    An additional, overlapping breakdown for the Overview (not folded
+    into `TransferCounts`, which classifies these under
+    `downloading`/`seeding` by direction) -- reuses
+    `is_stopped_state`, the single source of truth for the
+    qBittorrent 4 `paused*` vs 5 `stopped*` naming split.
     """
     return sum(
         1
@@ -917,12 +744,9 @@ def _split_skips(
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     """Split a plan's skips into (already-satisfied, not-found).
 
-    Audit finding F-3: "the torrent disappeared from the snapshot" and
-    "the torrent is already in the requested state" are different facts
-    and must never be collapsed into one message. `not_found` is the
-    reason
-    `qbit_ops.features.torrents.build_bulk_action_plan_from_snapshot`
-    records for a selected hash absent from the planning snapshot.
+    "Disappeared from the snapshot" and "already in the requested
+    state" are different facts and must never collapse into one
+    message.
     """
     not_found = tuple(
         skip for skip in plan.skipped if skip.reason == "not_found"
@@ -945,13 +769,10 @@ _PAST_TENSE_ACTION: dict[TorrentBulkAction, str] = {
 class MutationUiResult:
     """One completed Apply's truthful, safe, structured outcome.
 
-    Deliberately small and immutable (audit finding R-3): it exists so a
-    mutation that really was submitted can still be reported even when
-    its `PreviewScreen` is no longer the active screen -- never as a
-    generic notification-history framework. Carries only safe data:
-    counts, full canonical hashes the TUI already holds, a semantic
-    error category, and an already-sanitized message. No exception
-    object, no traceback, no tracker data.
+    Small and immutable so a submitted mutation can still be reported
+    once its `PreviewScreen` is no longer active. Carries only safe
+    data -- counts, hashes, a semantic error category, a sanitized
+    message -- never an exception, traceback, or tracker data.
     """
 
     operation_id: int
@@ -966,22 +787,12 @@ class MutationUiResult:
     error_message: str | None = None
     cancelled_before_dispatch: bool = False
     """The Apply lost authority while queued behind the shared remote
-    lock and was abandoned *before* any qBittorrent call (closure review
-    finding N-2). Deliberately a distinct fact rather than a reuse of
-    `error_category`: nothing failed remotely, nothing was submitted,
-    and the operator did not cancel the Preview either. Kept TUI-local
-    (not added to the shared `MutationStatus`) because the CLI has no
-    equivalent queue-then-shutdown window, so its public schemas are
-    unaffected.
-
-    Deliberately *not* expected to be rendered on today's only trigger:
-    `should_proceed` is `lambda: self.is_running`, so the sole way to
-    lose authority is quitting -- and `_on_mutation_worker_state_changed`
-    returns early once `is_running` is false, precisely so a late result
-    cannot touch a tearing-down app. The material guarantee is that no
-    mutation call happens; the representation is defence in depth for a
-    future non-shutdown authority-loss path, and keeps the outcome
-    taxonomy honest (final closure report, finding D-4)."""
+    lock and was abandoned *before* any qBittorrent call. Deliberately
+    a distinct fact rather than a reuse of `error_category`: nothing
+    failed remotely, nothing was submitted, and the operator did not
+    cancel the Preview either. Kept TUI-local (not added to the shared
+    `MutationStatus`) because the CLI has no equivalent
+    queue-then-shutdown window."""
 
     @classmethod
     def from_plan(
@@ -1018,13 +829,9 @@ def _classify_mutation_error(
 ) -> tuple[ErrorCategory, str]:
     """Classify an Apply failure into one semantic category + message.
 
-    Outer-first (audit findings F-4/F-5), then `__cause__` as fallback
-    context only -- see `QbitOpsTuiApp._classify_mutation_outcome` for
-    the full documented ladder and why the order matters. All returned
-    text is already safe to render: `ConfigError`/`QbitAuthenticationError`/
-    `QbitConnectionError` messages are qbit-ops' own wording, and the
-    recoverable classifier reuses the same messages the refresh path
-    shows in its banner.
+    Outer exception first, then `__cause__` as fallback. All returned
+    text is already safe to render: these are qbit-ops' own error
+    messages, the same ones the refresh path shows in its banner.
     """
     classified = _classify_one_mutation_error(error)
     if classified is not None:

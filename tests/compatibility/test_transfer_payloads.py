@@ -1,7 +1,7 @@
 """Compatibility contract tests: transfer_info() payload fixtures.
 
-Exercises `qbit_ops.qbit.fields.get_transfer_rates` -- the exact
-function `qbit_ops.features.status` routes through (constat P-2).
+Exercises `qbit_ops.qbit.fields.get_transfer_rates`, the function
+`qbit_ops.features.status` routes through.
 """
 
 from __future__ import annotations
@@ -46,9 +46,6 @@ def test_explicit_none_rate_defaults_to_zero() -> None:
 def test_malformed_non_mapping_transfer_info_raises_explicit_type_error() -> (
     None
 ):
-    """Constat P-2: a non-mapping payload must fail with an explicit,
-    identifiable `TypeError`, not an accidental `AttributeError`."""
-
     class _NotAMapping:
         pass
 

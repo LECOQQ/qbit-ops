@@ -1,12 +1,11 @@
 """Hermetic Docker lifecycle for one qBittorrent matrix entry.
 
 Every function here shells out to the `docker` CLI via `subprocess`
-(no `docker-py` dependency) and only ever touches resources it created
-itself: a dedicated bridge network, a uniquely named container, and
-two temporary directories. Nothing here reads the repository `.env`,
-`~/.config/qbit-ops/.env`, or the real user `HOME` -- see
-`HermeticEnv` and `assert_no_ambient_qbit_ops_config` below, and
-`tests/test_integration_harness_units.py` for the sabotage proof.
+and only ever touches resources it created itself: a dedicated bridge
+network, a uniquely named container, and two temporary directories.
+Nothing here reads the repository `.env`, `~/.config/qbit-ops/.env`,
+or the real user `HOME` -- see `HermeticEnv` and
+`assert_no_ambient_qbit_ops_config` below.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ MATRIX_ID_LABEL = "qbit-ops.matrix-id"
 FIXED_WEBUI_USERNAME = "admin"
 
 # Only ever bind published ports on loopback -- never 0.0.0.0, never a
-# LAN-reachable interface. See item 2 of the phase spec.
+# LAN-reachable interface.
 LOOPBACK_HOST = "127.0.0.1"
 
 
@@ -47,13 +46,11 @@ class HermeticEnv:
 
     `QBIT_OPS_ENV_FILE` is pointed at a path that is guaranteed not to
     exist, inside a throwaway temporary directory -- per
-    `qbit_ops.config._load_env_files`, an explicit
-    `QBIT_OPS_ENV_FILE` short-circuits *all* default `.env` discovery
-    (project `.env`, `~/.config/qbit-ops/.env`), so this alone is
+    `qbit_ops.config._load_env_files`, an explicit `QBIT_OPS_ENV_FILE`
+    short-circuits *all* default `.env` discovery, so this alone is
     sufficient to make ordinary config discovery unreachable. `HOME`
     and `XDG_CONFIG_HOME` are additionally pointed at the same
-    temporary directory as defense in depth, per AGENTS.md's smoke-test
-    isolation rule.
+    temporary directory as defense in depth.
     """
 
     home_dir: Path
@@ -77,12 +74,10 @@ class HermeticEnv:
 def assert_no_ambient_qbit_ops_config(env: dict[str, str]) -> None:
     """Fail closed if `env` could still discover a real `.env` file.
 
-    Guards against the exact incident class AGENTS.md documents: a test
-    silently falling back to `qbit_ops.config`'s ordinary discovery
-    order. Every key this function requires must be present and must
-    point at a path that does not exist yet -- an absent
-    `QBIT_OPS_ENV_FILE` (falling back to default discovery) is a hard
-    failure, not a warning.
+    Guards against a test silently falling back to `qbit_ops.config`'s
+    ordinary discovery order. Every key this function requires must be
+    present and must point at a path that does not exist yet -- an
+    absent `QBIT_OPS_ENV_FILE` is a hard failure, not a warning.
     """
     required = (
         "HOME",
@@ -119,10 +114,10 @@ def assert_target_is_disposable(
     `host` is the exact string qbit-ops's `QBIT_HOST` would receive --
     this must never be a LAN address, a real hostname, or anything
     other than the loopback interface a disposable container was
-    published to. Parses the URL and compares the exact hostname
-    (F-17) -- a substring/`in` check would accept a lookalike host such
-    as `127.0.0.1.evil.example`, which contains the loopback address as
-    a substring but resolves somewhere else entirely.
+    published to. Parses the URL and compares the exact hostname -- a
+    substring/`in` check would accept a lookalike host such as
+    `127.0.0.1.evil.example`, which contains the loopback address as a
+    substring but resolves somewhere else entirely.
     """
     import urllib.parse
 
@@ -180,9 +175,8 @@ class RunningQbitContainer:
     downloads_dir: Path
     host: str
     username: str
-    # Excluded from repr (F-16): random per run and discarded at
-    # teardown, but a dataclass repr would otherwise print it in any
-    # pytest assertion failure message involving this object.
+    # Excluded from repr: a dataclass repr would otherwise print it in
+    # any pytest assertion failure message involving this object.
     password: str = field(repr=False)
     observed_version: str = field(default="")
     observed_web_api_version: str = field(default="")
@@ -214,16 +208,13 @@ def _wait_for_webui(host: str, timeout_seconds: float = 60.0) -> None:
 def start_matrix_container(
     entry: MatrixEntry, *, run_id: str
 ) -> RunningQbitContainer:
-    """Start one disposable qBittorrent container for `entry`, on a
-    dedicated Docker network (application-level outbound isolation --
-    public egress is not technically blocked by the network itself;
-    see the module docstring).
+    """Start one disposable qBittorrent container for `entry`.
 
     Fails closed (raises `HarnessError`, with full cleanup and no
     fixture capture) if any of the observed application version, Web
     API version, or container architecture do not match `entry`'s
     expected values -- none of the three may be silently accepted as
-    "close enough" (independent-review findings F-2 and F-6).
+    "close enough".
     """
     if not docker_is_available():
         raise HarnessError(
@@ -293,10 +284,9 @@ def start_matrix_container(
         # `docker run` can leave a non-running "Created" container
         # behind even when it ultimately fails (e.g. network setup
         # fails *after* the container object is created) -- always
-        # attempt removal too, not just the network. Found via a real
-        # port collision during the Docker matrix phase (see the
-        # implementation note); `_force_remove_container` is a no-op
-        # (check=False) when nothing was actually created.
+        # attempt removal too, not just the network.
+        # `_force_remove_container` is a no-op (check=False) when
+        # nothing was actually created.
         _cleanup_failed_start(
             container_name, network_name, config_root, downloads_dir
         )
@@ -379,11 +369,10 @@ def _read_image_architecture(image_reference_with_digest: str) -> str:
     """Return the architecture Docker actually resolved and ran on this host.
 
     A container's own `docker inspect` does not expose an
-    `.Architecture` field at all (verified empirically -- only image
-    inspection does). `image_reference_with_digest` is a
-    multi-architecture *index* digest (F-6 in the independent review):
-    it guarantees immutability, not a pinned architecture. Docker
-    itself resolves that index to one concrete, single-architecture
+    `.Architecture` field; only image inspection does.
+    `image_reference_with_digest` is a multi-architecture *index*
+    digest: it guarantees immutability, not a pinned architecture.
+    Docker resolves that index to one concrete, single-architecture
     image at pull/run time, matching the host -- `docker image
     inspect` on the same reference reports that already-resolved
     image's real architecture, which is what this function returns.
@@ -418,10 +407,8 @@ def _cleanup_failed_start(
 
     `docker run` can leave a non-running "Created" container behind
     even when it ultimately fails (e.g. network setup fails *after*
-    the container object is created) -- found via a real port
-    collision during the Docker matrix phase (see the implementation
-    note). Always attempt every resource's removal, never just the one
-    that "should" need it.
+    the container object is created) -- always attempt every
+    resource's removal, never just the one that "should" need it.
     """
     _force_remove_container(container_name)
     _force_remove_network(network_name)

@@ -1,12 +1,10 @@
-"""Characterize the current CLI command-tree contract (T1).
+"""Characterize the current CLI command-tree contract.
 
-Protects the command tree before a future `src/qbit_ops/` package move
-or a `main.py` split (phase 8) could silently drop or fail to register a
-command. Deliberately uses semantic assertions (command/option names,
-absence of a traceback, exit status) rather than a byte-for-byte
-terminal snapshot, so the tests stay stable across Typer/Rich decoration
-changes, terminal width, or harmless whitespace -- see
-`docs/audits/2026-07-package-refactor-plan.md` §5 (T1) and §7.
+Protects the command tree against silently dropping or failing to
+register a command. Deliberately uses semantic assertions
+(command/option names, absence of a traceback, exit status) rather
+than a byte-for-byte terminal snapshot, so the tests stay stable across
+Typer/Rich decoration changes, terminal width, or harmless whitespace.
 
 `qbit_ops.cli.exit_codes.EXIT_CODE_TABLE` is the single source of truth
 for the set of registered commands (already used the same way by

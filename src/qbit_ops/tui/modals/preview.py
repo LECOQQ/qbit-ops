@@ -1,8 +1,7 @@
 """`PreviewScreen` -- preview of a frozen bulk-action plan before Apply.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -26,21 +25,14 @@ if TYPE_CHECKING:
 class PreviewScreen(ModalScreen[None]):
     """Preview of a frozen `BulkTorrentActionPlan` before Apply.
 
-    Owns and displays exactly the plan passed at construction --
-    `plan`/`snapshot_at`/`operation_id` never change after `__init__`.
-    The live selection, filters, search, and focus may keep changing in
-    the background while this modal is open; none of that ever mutates
-    this screen's plan (see docs/DECISIONS.md, "frozen plan"
-    invariant).
+    Owns and displays exactly the plan passed at construction -- the
+    live selection/filters/search/focus may keep changing in the
+    background while this modal is open, but never mutates it.
 
-    Staleness (audit finding R-2) is **sticky**: a plan is grounded in
-    exactly one snapshot generation, so once that generation stops
-    being current -- the connection leaves `CONNECTED`, or a refresh
-    fails and marks the state stale -- this preview becomes permanently
-    non-applicable. Recovery deliberately does *not* re-enable it: the
-    operator must close and rebuild the preview from current data,
-    because the plan was computed against torrents whose state is no
-    longer known to be accurate. `mark_stale()` is one-way by design.
+    Staleness is **sticky**: once the snapshot generation this plan is
+    grounded in stops being current, the preview becomes permanently
+    non-applicable. Recovery never re-enables it -- the operator must
+    close and rebuild from current data. `mark_stale()` is one-way.
     """
 
     BINDINGS = [
@@ -83,9 +75,8 @@ class PreviewScreen(ModalScreen[None]):
         self.plan = plan
         self.snapshot_at = snapshot_at
         self.operation_id = operation_id
-        """Immutable identity of the mutation this preview owns (audit
-        finding R-1) -- a completion only ever touches the preview
-        carrying its own id."""
+        """Immutable identity of the mutation this preview owns -- a
+        completion only ever touches the preview carrying its own id."""
         self.applying = False
         self.stale = False
 

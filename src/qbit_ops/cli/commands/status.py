@@ -1,8 +1,4 @@
-"""Register the root-level `status` command.
-
-Moved from `qbit_ops.main`: collecting a bounded status snapshot,
-rendering it, and running `status --watch`. No behavior change.
-"""
+"""Register the root-level `status` command."""
 
 import math
 import time
@@ -35,21 +31,11 @@ def _classify_recoverable_qbit_failure(error: Exception):
 def _collect_status_snapshot_safely() -> StatusSnapshot:
     """Collect a status snapshot, degrading to `unavailable` on failure.
 
-    Errors always reach stderr, regardless of `--quiet` or `--format`:
-    per docs/PLAN.md Phase 1, `--quiet` suppresses successful normal
-    output, never genuine failures. The connection spinner/banner is
-    always suppressed (`quiet=True` below) since the rendered snapshot
-    (or the error message above) already communicates the outcome.
-
-    Only degrades to `unavailable` for *recoverable* failures:
-    `QbitAuthenticationError`, `QbitConnectionError`, and `OSError`
-    (every `qbittorrentapi` exception raised directly from a post-login
-    API call — see `_collect_status_snapshot_for_watch`). Any other
-    exception is an unexpected programming error, not a remote
-    failure, and is deliberately left to propagate to
-    `error_boundary.catch_internal_errors` instead of being silently
-    relabelled as "unavailable" (see docs/ERRORS_AND_EXIT_CODES.md,
-    "Internal error behavior").
+    Only degrades for *recoverable* failures (`QbitAuthenticationError`,
+    `QbitConnectionError`, `OSError`); any other exception is an
+    unexpected programming error and is left to propagate rather than
+    being silently relabelled as "unavailable" (see
+    docs/ERRORS_AND_EXIT_CODES.md).
     """
     try:
         config = error_boundary.load_qbit_config()
@@ -81,17 +67,11 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
 def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
     """Collect one snapshot for `status --watch`.
 
-    Mirrors `_collect_status_snapshot_safely()`'s connection handling via
-    the same shared `qbit_ops.app_services.classify_recoverable_qbit_failure`
-    classifier, but never prints to stderr on this path: the unavailable
-    snapshot's own health/alert already carries the failure, and
-    repeating it there would spam stderr on every retry — see
-    docs/DECISIONS.md.
-
-    Any other exception is an unexpected programming error, not a
-    remote/temporary failure, and is deliberately left to propagate so
-    the watch loop stops instead of silently reporting "unavailable"
-    forever.
+    Unlike `_collect_status_snapshot_safely`, never prints to stderr:
+    the unavailable snapshot's own health/alert already carries the
+    failure, and repeating it would spam stderr on every retry. Any
+    other exception is an unexpected programming error and is left to
+    propagate so the watch loop stops instead of looping forever.
     """
     try:
         client = error_boundary.create_qbit_client()
@@ -110,20 +90,12 @@ def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
 def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
     """Run `status --watch`: repeatedly collect, then render or serialize.
 
-    Reuses `collect_status_snapshot`/`build_unavailable_snapshot`
-    unchanged via `watch_status()` (`qbit_ops/status.py`) — no second status
-    model, no duplicated health calculation, no duplicated alerts or
-    rate formatting. Local invalid configuration is checked exactly
-    once, before the loop starts, and terminates immediately
-    (`StatusExitCode.INVALID_USAGE`); temporary remote failures
+    Local invalid configuration is checked once, before the loop
+    starts, and terminates immediately; temporary remote failures
     discovered *during* the loop instead produce an `unavailable`
-    snapshot each time and the loop keeps retrying — see
-    `_collect_status_snapshot_for_watch`.
-
-    Exit codes here are unrelated to `StatusExitCode`'s health mapping:
-    see `StatusExitCode`'s docstring. A clean `Ctrl+C` exits `0`; an
-    unexpected fatal error exits `ExitCode.ERROR` with a clear message
-    instead of a raw traceback.
+    snapshot each time and the loop keeps retrying. A clean `Ctrl+C`
+    exits `0`; an unexpected fatal error exits `ExitCode.ERROR` with a
+    clear message instead of a raw traceback.
     """
     try:
         config = error_boundary.load_qbit_config()
@@ -173,8 +145,6 @@ def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
 
 
 def register(app: typer.Typer) -> None:
-    """Register the `status` command on the root Typer app."""
-
     @app.command()
     @error_boundary.catch_internal_errors
     def status(

@@ -1,20 +1,10 @@
 """Load and validate the packaged qBittorrent compatibility evidence manifest.
 
-The manifest (`qbit_ops/data/qbittorrent-matrix.toml`) is the single
-executable source of truth for which exact qBittorrent versions
-`qbit-ops` has been container-integration tested against -- see
-`docs/COMPATIBILITY.md` §10. This module is the only production-side
-parser of that file: it reads it via `importlib.resources` so it works
-from an installed wheel, with no repository checkout, no
-`Path(__file__)`-relative lookup, and no working-directory dependency.
-
-Test-only code (the Docker harness under `tests/integration/`) adapts
-`QbitMatrixEntry`/`CompatibilityEvidence` into its own runtime objects,
-but must never re-parse the manifest itself -- see
-`tests/integration/_matrix.py`.
-
-Importing this module never reads or parses the manifest; parsing only
-happens when `load_compatibility_evidence()` is called.
+Read via `importlib.resources` (not a `Path(__file__)`-relative lookup)
+so it works from an installed wheel with no repository checkout. See
+docs/COMPATIBILITY.md §10. Importing this module never reads or parses
+the manifest; parsing only happens when `load_compatibility_evidence()`
+is called.
 """
 
 from __future__ import annotations
@@ -109,14 +99,11 @@ class CompatibilityEvidence:
     def entry_for_application_version(
         self, version: str
     ) -> QbitMatrixEntry | None:
-        """Return the entry whose `expected_version` exactly matches
-        `version`, or `None` if no entry does.
+        """Return the entry whose `expected_version` exactly matches `version`.
 
-        Compares normalized version strings (leading `v` stripped from
-        both sides), not `packaging.version.Version` equality -- an
-        exact-evidence match must be a literal, exact release match,
-        the same notion `docs/COMPATIBILITY.md` §10 rule 3 requires
-        ("a patch release is never evidence for its whole line").
+        A literal string match (leading `v` stripped), not a
+        `packaging.version.Version` equality: a patch release is never
+        evidence for its whole line (docs/COMPATIBILITY.md §10 rule 3).
         """
         normalized = version.removeprefix("v")
         for entry in self.entries:
@@ -128,16 +115,12 @@ class CompatibilityEvidence:
 def load_compatibility_evidence() -> CompatibilityEvidence:
     """Load, validate, and return every packaged compatibility entry.
 
-    Fails closed:
-    - missing or unreadable package data -> `CompatibilityManifestError`;
-    - malformed TOML -> `CompatibilityManifestError`;
-    - zero entries -> `CompatibilityManifestError` (a manifest that
-      proves nothing must never be treated as "no evidence needed");
-    - duplicate entry ids -> `CompatibilityManifestError`;
-    - two entries claiming the identical exact (application version,
-      Web API version) pair -> `CompatibilityManifestError` (redundant
-      or contradictory evidence must be resolved in the manifest, never
-      silently accepted).
+    Fails closed with `CompatibilityManifestError` on missing/unreadable
+    data, malformed TOML, zero entries, duplicate entry ids, or two
+    entries claiming the identical exact (application version, Web API
+    version) pair -- redundant or contradictory evidence is never
+    silently accepted, and a manifest proving nothing is never treated
+    as "no evidence needed".
     """
     return CompatibilityEvidence(
         entries=parse_manifest_text(_read_packaged_manifest_text())
@@ -165,10 +148,7 @@ def parse_manifest_text(text: str) -> tuple[QbitMatrixEntry, ...]:
     """Parse and validate manifest TOML text into immutable entries.
 
     Kept separate from `_read_packaged_manifest_text()` so tests can
-    exercise parsing/validation against arbitrary text (missing,
-    empty, malformed, duplicate) without needing a second file on disk.
-    Not part of the ordinary production path -- `load_compatibility_evidence()`
-    is the one production entry point.
+    exercise parsing/validation against arbitrary text.
     """
     try:
         raw = tomllib.loads(text)
@@ -246,15 +226,7 @@ def _parse_entry(item: dict) -> QbitMatrixEntry:
 
 
 def _validate_version(entry_id: str, field_name: str, value: str) -> None:
-    """Validate a version string via the project's version-parsing policy.
-
-    `packaging.version.Version` is the same parser
-    `tests/integration/_matrix.py` and
-    `scripts/check_qbit_matrix_freshness.py` already use to compare
-    manifest versions (e.g. the Web API 2.11.0 stop/start threshold in
-    `docs/COMPATIBILITY.md` §2) -- reused here rather than a second
-    ad-hoc check.
-    """
+    """Validate a version string via `packaging.version.Version`."""
     try:
         Version(str(value).removeprefix("v"))
     except InvalidVersion as error:

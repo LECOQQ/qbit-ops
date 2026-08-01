@@ -59,7 +59,11 @@ def _load_env_files() -> None:
 
 
 def _get_default_env_files() -> list[Path]:
-    """Return default env files from local project and user config locations."""
+    """Return default env files from local project and user config locations.
+
+    Tests must isolate `HOME`/`XDG_CONFIG_HOME` and the working directory,
+    or this can resolve a real `.env` and hit a live qBittorrent instance.
+    """
     return [
         Path.cwd() / PROJECT_ENV_FILE,
         _get_user_env_file(),

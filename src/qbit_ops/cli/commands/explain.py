@@ -1,7 +1,4 @@
-"""Register the `explain` command group (`torrent`, `tracker`).
-
-Moved from `qbit_ops.main`. No behavior change.
-"""
+"""Register the `explain` command group (`torrent`, `tracker`)."""
 
 from typing import Annotated
 

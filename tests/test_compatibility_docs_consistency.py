@@ -75,10 +75,8 @@ def test_documented_version_and_web_api_match_the_manifest() -> None:
 
 
 def test_the_normative_compatibility_claims_policy_is_tracked() -> None:
-    """F-4: the eight-rule compatibility-claims policy must live in this
-    tracked file (§10), not only in the gitignored `AGENTS.md` -- the
-    independent review found the policy existed nowhere a contributor
-    or reviewer could actually read it."""
+    """The eight-rule compatibility-claims policy must live in this
+    tracked file (§10), not only in the gitignored `AGENTS.md`."""
     text = COMPATIBILITY_DOC.read_text(encoding="utf-8")
     assert "Politique normative de revendication de compatibilité" in text
     assert "container integration tested" in text.lower()
@@ -89,13 +87,12 @@ _CONTEXT_WINDOW_LINES = 6
 
 
 def test_docs_never_claim_a_broad_version_range() -> None:
-    """Item 17 sabotage target: a broad range claim must never appear as
-    an actual assertion in the tracked documentation -- only inside an
-    explicit "never/forbidden say this" example. Looks at a small
-    window of nearby lines (not just the exact matching line), since a
-    "formulations interdites:" heading legitimately introduces a bullet
-    list where the qualifier and the forbidden phrase are on different
-    lines."""
+    """A broad range claim must never appear as an actual assertion in the
+    tracked documentation -- only inside an explicit "never/forbidden
+    say this" example. Looks at a small window of nearby lines (not
+    just the exact matching line), since a "formulations interdites:"
+    heading legitimately introduces a bullet list where the qualifier
+    and the forbidden phrase are on different lines."""
     lines = COMPATIBILITY_DOC.read_text(encoding="utf-8").splitlines()
     broad_claims = [
         "compatible with qBittorrent 4.6",
@@ -133,14 +130,14 @@ def _normalize_whitespace(text: str) -> str:
 def test_test_readmes_never_claim_network_egress_is_technically_blocked() -> (
     None
 ):
-    """F-1 follow-up: the independent review proved the disposable
-    container's public network egress is NOT technically blocked (only
-    application-level DHT/PeX/LSD/UPnP/tracker settings are disabled) --
-    `docs/COMPATIBILITY.md` §5.2 documents this precisely. Both test
-    READMEs must carry the same qualification: every occurrence of
-    "technically blocked" must be part of a "not ... technically
-    blocked" qualification (whitespace/markdown-tolerant), and neither
-    README may claim the Docker network itself is isolated/hermetic."""
+    """The disposable container's public network egress is NOT technically
+    blocked (only application-level DHT/PeX/LSD/UPnP/tracker settings
+    are disabled) -- `docs/COMPATIBILITY.md` §5.2 documents this
+    precisely. Both test READMEs must carry the same qualification:
+    every occurrence of "technically blocked" must be part of a
+    "not ... technically blocked" qualification (whitespace/markdown-
+    tolerant), and neither README may claim the Docker network itself
+    is isolated/hermetic."""
     offenders = []
     for readme in _TEST_READMES_WITH_HERMETICITY_WORDING:
         normalized = _normalize_whitespace(readme.read_text(encoding="utf-8"))

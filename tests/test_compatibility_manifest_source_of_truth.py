@@ -45,11 +45,10 @@ def test_canonical_matrix_lives_under_the_runtime_package() -> None:
 
 def test_no_executable_consumer_references_the_old_test_path() -> None:
     """No `.py`/`.yml`/Makefile consumer may hardcode the manifest's old
-    pre-packaging location any longer -- only historical audit prose
-    under `docs/audits/` may still mention it. The old path is built
-    from parts rather than written as a literal string in this file, so
-    this guard (now itself a tracked, `git grep`-visible file) never
-    flags its own source as an offender."""
+    pre-packaging location any longer. The old path is built from parts
+    rather than written as a literal string in this file, so this guard
+    (now itself a tracked, `git grep`-visible file) never flags its own
+    source as an offender."""
     old_path = "/".join(["tests", "integration", "qbittorrent-matrix.toml"])
     result = subprocess.run(
         ["git", "grep", "-l", "--fixed-strings", old_path],
@@ -59,8 +58,7 @@ def test_no_executable_consumer_references_the_old_test_path() -> None:
     )
     # git grep exits 1 when nothing matches -- that's the expected case
     # once every real reference has moved, so don't `check=True` here.
-    matches = [line for line in result.stdout.splitlines() if line]
-    offenders = [line for line in matches if "docs/audits/" not in line]
+    offenders = [line for line in result.stdout.splitlines() if line]
     assert offenders == [], (
         f"executable/documentary consumer still references the old "
         f"tests/integration path: {offenders}"

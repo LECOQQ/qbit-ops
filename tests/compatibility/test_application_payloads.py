@@ -21,10 +21,9 @@ def test_well_formed_5x_version_string_parses() -> None:
 
 
 def test_web_api_version_string_at_the_stop_start_threshold() -> None:
-    """2.11.0 is the exact threshold qbittorrent-api's own source uses
-    to switch pause/resume to stop/start (see
-    tests/test_qbit_library_http_boundary.py) -- this fixture's value
-    (2.11.4) is just past it."""
+    """2.11.0 is the threshold qbittorrent-api uses to switch
+    pause/resume to stop/start; this fixture's value (2.11.4) is just
+    past it."""
     fixture = load_fixture("application", "web_api_version_2_11")
 
     assert fixture.payload == "2.11.4"
@@ -32,8 +31,6 @@ def test_web_api_version_string_at_the_stop_start_threshold() -> None:
 
 
 def test_prerelease_version_string_is_still_parsable() -> None:
-    """A `-alpha1` suffix must not prevent parsing the leading
-    major.minor.patch triple."""
     fixture = load_fixture("application", "version_prerelease")
 
     parsed, check = _version_parsable_check(fixture.payload)
@@ -52,9 +49,7 @@ def test_malformed_version_string_produces_a_warning_not_a_crash() -> None:
 
 
 def test_missing_version_response_is_skipped_not_a_crash() -> None:
-    """A `None` version (the optional-client-value fallback for a
-    failed `app_version()` call) must produce a SKIPPED check, never
-    raise."""
+    """`None` is the fallback for a failed `app_version()` call."""
     parsed, check = _version_parsable_check(None)
 
     assert parsed is None

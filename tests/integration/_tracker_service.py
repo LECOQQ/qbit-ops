@@ -1,22 +1,11 @@
 """Minimal, disposable, in-network-only BitTorrent tracker HTTP service.
 
-Stdlib-only (`http.server`), no new runtime dependency. Exists purely to
-give qbit-ops's tracker read/mutation paths a real, reachable
-`/announce` endpoint inside the disposable Docker network -- it never
-performs real peer bookkeeping.
-
-Runs as its own disposable container (`python:3.12-alpine`, itself
-pinned by digest in `_harness.py`, executing this file as a script via
-a bind mount) so that its hostname resolves only inside the disposable
-Docker network the harness creates -- never on the host, never on a
-public network. Every `/announce` request is printed to stdout as one
-JSON line, so the harness (running on the host) can recover the
-request log via `docker logs`, without needing a second network path
-into the tracker container.
-
-The `TrackerLog`/`RecordedAnnounce` types and the bencode announce
-response are also unit-testable directly, without Docker, via
-`tests/test_integration_harness_units.py`.
+Stdlib-only (`http.server`); never performs real peer bookkeeping.
+Runs as its own container so its hostname resolves only inside the
+disposable Docker network the harness creates -- never on the host,
+never on a public network. Every `/announce` request is printed to
+stdout as one JSON line so the harness can recover the request log via
+`docker logs`.
 """
 
 from __future__ import annotations
@@ -33,7 +22,7 @@ try:
 except ImportError:
     # Running standalone inside the tracker container (this file and
     # `_bencode.py` are bind-mounted flat, side by side, with no `tests`
-    # package on that path -- see `_harness.py::start_tracker_service`).
+    # package on that path -- see `_harness.py::start_tracker_container`).
     from _bencode import bencode  # type: ignore[import-not-found, no-redef]
 
 FAKE_PLACEHOLDER_PASSKEY = "FAKE_PLACEHOLDER_PASSKEY_0000000000000000"
@@ -55,7 +44,6 @@ class TrackerLog:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def record(self, path: str, query: dict[str, list[str]]) -> None:
-        """Append one recorded request."""
         with self._lock:
             self._requests.append(RecordedAnnounce(path=path, query=query))
 
@@ -77,8 +65,6 @@ def _make_handler(
             query = parse_qs(parsed.query)
             log.record(parsed.path, query)
             if emit_stdout:
-                # One JSON line per request -- recovered by the host-side
-                # harness via `docker logs` when this runs in a container.
                 print(
                     json.dumps({"path": parsed.path, "query": query}),
                     file=sys.stdout,

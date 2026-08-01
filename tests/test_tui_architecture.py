@@ -1,4 +1,4 @@
-"""Static + smoke guarantees for the TUI reorg (see docs/DECISIONS.md).
+"""Static + smoke guarantees for the TUI package layout.
 
 Mirrors `tests/test_cli_architecture.py`'s approach for the CLI split:
 AST-based structural checks (a moved class is defined in exactly one
@@ -167,9 +167,8 @@ def _bound_action_names(source: str) -> set[str]:
 
 
 # Baseline of `QbitOpsTuiApp.BINDINGS` action names, captured before the
-# TUI reorg moved widgets/modals out of `app.py` -- this class's own
-# BINDINGS list was never touched by the move (see docs/DECISIONS.md),
-# so every one of these must still be present verbatim.
+# Widgets/modals live outside `app.py`, but this class's own BINDINGS
+# list must still list every one of these verbatim.
 _EXPECTED_APP_BINDING_ACTIONS = {
     "quit",
     "show_overview",

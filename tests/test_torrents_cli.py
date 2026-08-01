@@ -1,4 +1,4 @@
-"""Test hash-centric torrent selection at the CLI level (Phase 2)."""
+"""Test hash-centric torrent selection at the CLI level."""
 
 from typer.testing import CliRunner
 
@@ -20,7 +20,6 @@ def test_inspect_resolves_a_unique_hash_prefix(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure `torrents inspect --hash` accepts a unique prefix."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=UNIQUE_HASH, name="Debian ISO")],
@@ -42,7 +41,6 @@ def test_pause_with_unique_hash_prefix_selects_one_torrent(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a unique prefix resolves to exactly one mutation target."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, name="A", state="uploading"),
@@ -64,7 +62,6 @@ def test_pause_with_ambiguous_hash_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an ambiguous prefix mutates nothing and fails clearly."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, name="Debian ISO"),
@@ -90,7 +87,6 @@ def test_pause_with_unknown_hash_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an unmatched hash mutates nothing and uses NO_MATCH."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A_HASH, name="A")],
     )
@@ -108,7 +104,6 @@ def test_pause_with_unknown_hash_performs_no_mutation(
 def test_pause_help_no_longer_mentions_name(
     runner: CliRunner,
 ) -> None:
-    """Ensure --name is no longer advertised on mutation commands."""
     result = runner.invoke(app, ["torrents", "pause", "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -120,7 +115,6 @@ def test_pause_rejects_the_removed_name_option(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure passing --name to pause fails clearly, not silently."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(
@@ -136,7 +130,6 @@ def test_pause_hash_is_mutually_exclusive_with_category(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --hash cannot combine with --category."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A_HASH, category="sonarr")],
     )
@@ -163,7 +156,6 @@ def test_pause_hash_dry_run_by_default_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure dry-run resolves the hash but never mutates."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=UNIQUE_HASH, state="uploading")],
     )
@@ -184,7 +176,6 @@ def test_pause_hash_no_dry_run_mutates_only_the_resolved_target(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --no-dry-run mutates exactly the resolved torrent."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, state="uploading"),
@@ -206,7 +197,6 @@ def test_pause_by_category_still_works(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the pre-existing --category selector remains green."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -236,7 +226,6 @@ def test_resume_by_all_still_works(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the pre-existing --all selector remains green."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A_HASH, state="stoppedUP")],
     )
@@ -255,7 +244,6 @@ def test_start_completed_still_works(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the pre-existing --completed selector remains green."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, state="stoppedUP", progress=1.0),
@@ -276,7 +264,6 @@ def test_reannounce_by_tracker_still_works(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure the pre-existing --tracker selector remains green."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A_HASH, state="uploading")],
         trackers_by_hash={
@@ -303,12 +290,6 @@ def test_reannounce_by_tracker_still_works(
 
 
 def test_reannounce_help_exposes_hash(runner: CliRunner) -> None:
-    """Ensure `torrents reannounce --help` documents --hash.
-
-    Phase 2's end-of-phase report claimed --hash was migrated onto
-    reannounce, but no dedicated test exercised it (only --tracker was
-    covered) — this and the next three tests close that specific gap.
-    """
     result = runner.invoke(app, ["torrents", "reannounce", "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -320,7 +301,6 @@ def test_reannounce_with_unique_hash_prefix_selects_one_torrent(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure `reannounce --hash <prefix>` resolves and acts on one torrent."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, name="A", state="uploading"),
@@ -342,7 +322,6 @@ def test_reannounce_with_ambiguous_hash_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an ambiguous prefix mutates nothing for reannounce."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A_HASH, name="Debian ISO"),
@@ -364,7 +343,6 @@ def test_reannounce_with_unknown_hash_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an unmatched hash mutates nothing for reannounce."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A_HASH, name="A")],
     )
@@ -383,7 +361,6 @@ def test_inspect_name_search_remains_functional(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure read-only fuzzy `inspect --name` discovery still works."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=UNIQUE_HASH, name="Debian ISO")],

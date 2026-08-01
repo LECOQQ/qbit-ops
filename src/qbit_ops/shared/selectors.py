@@ -2,9 +2,9 @@
 
 Kept free of Typer and Rich so it stays independently unit-testable and
 reusable by any future interface (CLI, TUI) without pulling in
-presentation concerns. See docs/PHILOSOPHY.md §3: the infohash is the
-primary identifier, and an operation must never silently affect several
-torrents because a selector was ambiguous.
+presentation concerns. The infohash is the primary identifier: an
+operation must never silently affect several torrents because a
+selector was ambiguous.
 """
 
 from collections.abc import Iterable
@@ -61,18 +61,10 @@ def resolve_torrent_hash(
 ) -> ResolvedTorrent:
     """Resolve a complete hash or unique hash prefix to one torrent.
 
-    Matching is case-insensitive against each torrent's `hash` field,
-    read through the same field-access helpers as the rest of
-    `qbit_ops.features.torrents` so unusual torrent objects (mappings or
-    attribute-based) behave identically. A complete hash is simply an
-    unambiguous prefix equal to the full hash, so both cases share one
-    code path.
-
-    Raises `InvalidTorrentSelectorError` for an empty selector,
-    `TorrentNotFoundError` when nothing matches, and
-    `AmbiguousTorrentHashError` when several torrents share the prefix.
-    Candidates in the latter are sorted deterministically by hash, then
-    name.
+    Matching is case-insensitive. Raises `InvalidTorrentSelectorError`
+    for an empty selector, `TorrentNotFoundError` when nothing matches,
+    and `AmbiguousTorrentHashError` when several torrents share the
+    prefix (candidates sorted by hash, then name).
     """
     normalized_value = value.strip().lower()
     if normalized_value == "":

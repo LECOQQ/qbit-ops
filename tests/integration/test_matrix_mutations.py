@@ -89,9 +89,6 @@ def test_dry_run_pause_sends_no_mutation_request(hermetic_env, seeded_corpus):
 def test_dry_run_resume_sends_no_mutation_request(
     hermetic_env, qbit_container, seeded_corpus
 ):
-    """F-13: dry-run Resume/Start was previously untested, unlike dry-run
-    Pause/Stop -- the safety guarantee (no mutation call) must hold
-    symmetrically for every mutation direction."""
     target_hash = seeded_corpus.complete.info_hash_hex
     web_api_version = qbit_container.observed_web_api_version
     above_threshold = _is_at_or_above_stop_start_threshold(web_api_version)
@@ -115,7 +112,6 @@ def test_dry_run_resume_sends_no_mutation_request(
 def test_dry_run_reannounce_sends_no_mutation_request(
     hermetic_env, seeded_corpus
 ):
-    """F-13: dry-run Reannounce was previously untested."""
     target_hash = seeded_corpus.tracked.info_hash_hex
     control_hash = seeded_corpus.complete.info_hash_hex
     control_state_before = _state_of(hermetic_env, control_hash)
@@ -229,9 +225,6 @@ def test_command_result_is_truthful_about_matched_and_modified_counts(
 def test_selection_never_means_all_without_an_exact_hash_or_filter(
     hermetic_env, seeded_corpus
 ):
-    """Calling `pause` with no `--hash`, no filter, and no `--all` must
-    fail closed and match nothing -- selection never silently defaults
-    to the whole instance."""
     result = _invoke(hermetic_env, ["torrents", "pause"])
 
     assert result.exit_code != 0

@@ -1,20 +1,11 @@
 """Own every CLI presentation concern: Rich output, JSON/JSONL/CSV.
 
-Moved verbatim from `qbit_ops.ui` (Rich console/table/progress
-primitives) and from the private `_print_*`/`_render_*`/`_format_*`
-helpers formerly embedded in `qbit_ops.main` (command-specific
-rendering of a plan/report into table, JSON, JSONL, or CSV). No output
-behavior changed by this move: same Rich `Console`s, same stdout/stderr
-routing, same JSON/CSV shapes, same secret-safe tracker identities.
-
 `cli/commands/*.py` must import this module and call its symbols as
-module attributes (`rendering.print_table(...)`, not `from
-qbit_ops.cli.rendering import print_table`) -- every command group
-shares the same interactive-terminal/quiet/progress-feedback policy,
-and tests patch a single seam (e.g. `rendering.is_interactive_terminal`)
-expecting it to affect every command uniformly. A local `from import`
-copy in one command module would silently stop responding to that
-patch. Do not move Textual/TUI rendering into this module.
+module attributes (`rendering.print_table(...)`, not a local `from
+import`): every command group shares the same interactive-terminal/
+quiet/progress-feedback policy, and tests patch a single seam (e.g.
+`rendering.is_interactive_terminal`) expecting it to affect every
+command uniformly. Do not move Textual/TUI rendering into this module.
 """
 
 import csv
@@ -132,18 +123,11 @@ def progress_enabled(
 ) -> bool:
     """Decide whether transient progress feedback should be shown.
 
-    Pure and Rich-free (besides reading `err_console.is_terminal` as a
-    default): takes `interactive` as a parameter so callers, and tests,
-    can simulate a TTY or a piped/non-TTY stream without depending on the
-    real console. `output_format=None` means "not applicable" (mutation
-    commands have no `--format`) and is treated like `table`.
-
-    Progress is enabled only when every condition holds: not `--quiet`,
-    output format is `table` or not applicable, and stderr is an
-    interactive terminal. This is the single source of truth for the
-    policy described in `docs/COMMANDS.md`
-    ("Progress & Spinner Behavior") — command bodies must not
-    re-implement this check inline.
+    Takes `interactive` as a parameter so callers/tests can simulate a
+    TTY or a piped stream without depending on the real console.
+    `output_format=None` means "not applicable" and is treated like
+    `table`. Enabled only when not `--quiet`, format is `table` or N/A,
+    and stderr is an interactive terminal.
     """
     if quiet:
         return False
@@ -161,12 +145,9 @@ def progress_enabled(
 def transient_spinner(message: str, *, enabled: bool) -> Generator[None]:
     """Show a transient spinner on stderr for one pending operation.
 
-    Use for a single remote request or a bounded collection call whose
-    size isn't known up front (`status`, `connection check`, a single
-    `torrents_info()` fetch). No-ops when `enabled` is False — callers
-    decide that via `progress_enabled()`. Rich's `Console.status()`
-    clears its live line on any exit path (normal completion, exception,
-    `KeyboardInterrupt`), so nothing is left in scrollback.
+    No-ops when `enabled` is False. Rich's `Console.status()` clears its
+    live line on any exit path (completion, exception, `KeyboardInterrupt`),
+    so nothing is left in scrollback.
     """
     if not enabled:
         yield
@@ -185,13 +166,9 @@ def transient_progress(
 ) -> Generator[ProgressCallback]:
     """Show a transient Rich progress bar on stderr for a per-item task.
 
-    Use once a collection has already been fetched and items are
-    processed one by one with a real, known total (e.g. one
-    `torrents_trackers()` call per torrent). Yields a callback usable as
-    `advance(completed, total)`. No-ops when `enabled` is False.
-    `transient=True` plus the `with Progress(...)` block guarantee the
-    bar is cleared on normal completion, an exception, or a
-    `KeyboardInterrupt` — nothing is left behind in scrollback.
+    Yields a callback usable as `advance(completed, total)`. No-ops when
+    `enabled` is False. `transient=True` guarantees the bar is cleared on
+    completion, an exception, or `KeyboardInterrupt`.
     """
     if not enabled:
 
@@ -221,21 +198,18 @@ def transient_progress(
 def confirm(prompt: str) -> bool:
     """Ask a yes/no question on stderr, defaulting to No.
 
-    Only meant to be called when the caller has already established the
-    context is an interactive terminal (see
-    `qbit_ops.shared.execution.ExecutionPolicy`); this does not check
+    Only meant to be called once the caller has already established the
+    context is an interactive terminal; this does not check
     `err_console.is_terminal` itself.
     """
     return Confirm.ask(prompt, console=err_console, default=False)
 
 
 def print_cancelled() -> None:
-    """Print the standard cancellation message for a declined mutation."""
     console.print("Operation cancelled.")
 
 
 def print_applied() -> None:
-    """Print the standard confirmation-flow success message after a mutation."""
     console.print("[bold green]Applied.[/bold green]")
 
 
@@ -244,10 +218,8 @@ def print_error(message: str) -> None:
 
     The single rendering funnel for every command's error output, so it
     runs `sanitize_tracker_text` unconditionally: an upstream exception
-    (from `qbittorrentapi`, an HTTP client, or a misconfigured
-    `QBIT_HOST`) may embed a tracker announce URL, credentials, or
-    userinfo, and callers should not each have to remember to sanitize
-    before calling this.
+    may embed a tracker announce URL or credentials, and callers should
+    not each have to remember to sanitize before calling this.
     """
     err_console.print(
         f"[bold red]✗ ERROR[/bold red] {sanitize_tracker_text(message)}"
@@ -290,10 +262,9 @@ _MUTATION_STATUS_LABELS: dict[MutationStatus, str] = {
 def _build_summary_table(rows: dict[str, Any], title: str = "Summary") -> Table:
     """Build a two-column summary table, highlighting the mutation status.
 
-    A `"status"` key, if present, must be a `MutationStatus` — see
-    `docs/COMMANDS.md#mutation-risk--confirmation-policy` for what each
-    value means. It is rendered as a distinct final row instead of a raw
-    field so `NO_MATCH`/`NO_CHANGES` can never be confused with `APPLIED`.
+    A `"status"` key, if present, must be a `MutationStatus`; it is
+    rendered as a distinct final row instead of a raw field so
+    `NO_MATCH`/`NO_CHANGES` can never be confused with `APPLIED`.
     """
     table = Table(
         title=title, show_header=False, box=None, padding=(0, 1, 0, 0)
@@ -314,7 +285,6 @@ def _build_summary_table(rows: dict[str, Any], title: str = "Summary") -> Table:
 
 
 def print_summary(rows: dict[str, Any], title: str = "Summary") -> None:
-    """Print a summary table built by `_build_summary_table`."""
     console.print(_build_summary_table(rows, title))
 
 
@@ -360,7 +330,6 @@ def format_byte_rate(bytes_per_second: int) -> str:
 
 
 def _format_percentage(value: float) -> str:
-    """Format a 0-to-1 ratio as a percentage."""
     return f"{value * 100:.1f}%"
 
 
@@ -370,8 +339,7 @@ class WatchRenderContext:
 
     Deliberately not part of `StatusSnapshot`: refresh interval and
     iteration count are watch-loop bookkeeping, not part of the
-    one-shot status model. `StatusSnapshot.generated_at` already
-    carries the last-refresh timestamp, so it is not duplicated here.
+    one-shot status model.
     """
 
     interval: float
@@ -385,10 +353,8 @@ def build_status_renderable(
 ) -> RenderableType:
     """Build the status view as a single Rich renderable.
 
-    Shared by `render_status_table()` (one-shot, prints once) and
-    `live_status_display()` (`status --watch`, updates a persistent
-    `Live` region in place) so both render identically from the same
-    `StatusSnapshot` and never duplicate the health calculation.
+    Shared by `render_status_table()` and `live_status_display()` so
+    both render identically from the same `StatusSnapshot`.
     """
     style = _HEALTH_STYLES[snapshot.health]
     health_label = f"[{style}]{snapshot.health.value}[/{style}]"
@@ -451,7 +417,6 @@ def build_status_renderable(
 
 
 def render_status_table(snapshot: StatusSnapshot) -> None:
-    """Render a status snapshot as a concise Rich table view."""
     console.print(build_status_renderable(snapshot))
 
 
@@ -461,16 +426,11 @@ def live_status_display() -> (
 ):
     """Show a persistent, in-place status display for `status --watch`.
 
-    Uses Rich `Live` with `screen=False` — no full-screen alternate
-    buffer — so the terminal stays scrollable and remains usable after
-    exit; each refresh replaces the previous render in place instead of
-    appending a new table to scrollback. Distinct from
-    `transient_spinner`/`transient_progress`: this display is
-    intentionally persistent for the lifetime of the watch loop rather
-    than a transient "while working" indicator, and is never used
-    together with them. `Live.__exit__` always restores the cursor and
-    terminal state, on normal completion, an exception, or
-    `KeyboardInterrupt`.
+    Uses Rich `Live` with `screen=False` -- no full-screen alternate
+    buffer -- so the terminal stays scrollable; each refresh replaces
+    the previous render in place instead of appending to scrollback.
+    `Live.__exit__` always restores cursor/terminal state, on normal
+    completion, an exception, or `KeyboardInterrupt`.
     """
     with Live(
         console=console,
@@ -493,7 +453,6 @@ def render_status(
     snapshot: StatusSnapshot,
     output_format: OutputFormat,
 ) -> None:
-    """Render a status snapshot in the requested output format."""
     if output_format == OutputFormat.table:
         render_status_table(snapshot)
         return
@@ -519,9 +478,8 @@ def render_doctor_table(report: DoctorReport) -> None:
     """Render a doctor report as one table per section, grouped in order.
 
     Sections are grouped in the order their checks first appear in
-    `report.checks` (already deterministic by construction in
-    `qbit_ops.features.doctor.collect_doctor_report`) rather than by
-    iterating a set or dict, so table order never depends on hashing.
+    `report.checks` rather than by iterating a set or dict, so table
+    order never depends on hashing.
     """
     style = _CHECK_STATUS_STYLES[report.overall_status]
     console.print(
@@ -560,7 +518,6 @@ def render_doctor_report(
     report: DoctorReport,
     output_format: OutputFormat,
 ) -> None:
-    """Render a doctor report in the requested output format."""
     if output_format == OutputFormat.table:
         render_doctor_table(report)
         return
@@ -570,10 +527,8 @@ def render_doctor_report(
         return
 
     if output_format == OutputFormat.jsonl:
-        # Deliberately one document per invocation, like every other
-        # command's `jsonl` (see docs/DECISIONS.md) rather than one line
-        # per check, even though a per-check stream would also be a
-        # reasonable contract for a checks collection.
+        # One document per invocation, like every other command's jsonl,
+        # not one line per check.
         typer.echo(
             json.dumps(doctor_report_to_json_dict(report), sort_keys=True)
         )
@@ -598,10 +553,8 @@ _BYTE_RATE_EVIDENCE_CODES = {"download_rate", "upload_rate"}
 def _format_evidence_value(item: Evidence) -> str:
     """Format one evidence value for table display.
 
-    JSON/JSONL keep `Evidence.value` raw (an int byte rate, a float
-    progress ratio, ...); only the table renderer applies a per-code
-    human formatting -- a narrow, explicit lookup, not a generic
-    formatting DSL.
+    JSON/JSONL keep `Evidence.value` raw; only the table renderer applies
+    a per-code human formatting.
     """
     if item.code in _BYTE_RATE_EVIDENCE_CODES and isinstance(item.value, int):
         return format_byte_rate(item.value)
@@ -615,13 +568,8 @@ def _format_evidence_value(item: Evidence) -> str:
 def render_explanation(report: ExplanationReport) -> None:
     """Render an explanation report as a concise, terminal-friendly narrative.
 
-    Deliberately not a table (`print_table`): a narrative report has no
-    stable tabular shape (see docs/COMMANDS.md, "Format Support
-    Matrix"), so this builds its own structured text layout instead.
-    Evidence/limitation/next-command text is already secret-free by
-    construction (`qbit_ops.features.explain` only ever derives it from
-    `qbit_ops.features.trackers`/`qbit_ops.features.tracker_status`'s
-    sanitized structural data), so nothing here re-sanitizes it.
+    Deliberately not a table: a narrative report has no stable tabular
+    shape, so this builds its own structured text layout instead.
     """
     style = _EXPLANATION_SEVERITY_STYLES[report.overall_severity]
     console.print(
@@ -688,7 +636,6 @@ def print_csv_rows(fieldnames: list[str], rows: list[tuple[str, ...]]) -> None:
 
 
 def get_optional_client_value(client: Any, method_name: str) -> str:
-    """Read an optional value from a qBittorrent API method."""
     method = getattr(client, method_name, None)
     if method is None:
         return "unknown"
@@ -702,7 +649,6 @@ def get_optional_client_value(client: Any, method_name: str) -> str:
 
 
 def print_json_output(payload: Any) -> None:
-    """Print a JSON payload for audit commands."""
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
@@ -720,12 +666,9 @@ def _torrent_audit_row(
     """Build one torrent audit table row.
 
     `include_tracker_count=False` omits the trailing column entirely
-    rather than rendering a placeholder: a whole selection either
-    collected tracker data for every matched torrent or for none of
-    them (`TorrentSelection.tracker_data_collected`), so "not
-    collected" is a property of the table, not of one cell -- showing a
-    bare `-` per row reads too easily as "zero trackers" instead of
-    "not measured".
+    rather than rendering a placeholder: "not collected" is a property
+    of the whole table, not of one cell, so a bare `-` would read too
+    easily as "zero trackers" instead of "not measured".
     """
     row = [
         torrent["name"],
@@ -794,7 +737,6 @@ def torrent_csv_row(
     *,
     tracker_count_field: str = "tracker_count",
 ) -> tuple[str, ...]:
-    """Public alias of `_torrent_csv_row` for cross-command reuse."""
     return _torrent_csv_row(torrent, tracker_count_field=tracker_count_field)
 
 
@@ -804,7 +746,6 @@ def torrent_audit_row(
     tracker_count_field: str = "tracker_count",
     include_tracker_count: bool = True,
 ) -> list[str]:
-    """Public alias of `_torrent_audit_row` for cross-command reuse."""
     return _torrent_audit_row(
         torrent,
         tracker_count_field=tracker_count_field,
@@ -815,13 +756,8 @@ def torrent_audit_row(
 def selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
     """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict.
 
-    `download_rate`/`upload_rate` (bytes/second) are a pre-1.0 additive
-    field (see docs/DECISIONS.md): a new key in `json`/`jsonl` output,
-    never a removal or a change to an existing key's meaning. They are
-    deliberately not added to the `table`/`csv` renderers here -- those
-    were introduced for the TUI's per-row rate column (see
-    docs/TUI_ARCHITECTURE_REVIEW.md), and `torrents list`'s existing
-    table/CSV shape is left untouched.
+    `download_rate`/`upload_rate` (bytes/second) are deliberately not
+    added to the `table`/`csv` renderers -- only to `json`/`jsonl`.
     """
     return {
         "hash": torrent.hash,
@@ -844,10 +780,8 @@ def print_torrent_selection(
     """Print a torrent selection, one shared shape for every filter.
 
     JSON/JSONL always include a normalized `filters` representation
-    (`qbit_ops.features.torrents.torrent_filter_to_dict`) alongside the usual
-    `summary`/`torrents` -- a schema addition, not a removal, over the
-    previous filter-specific payloads (see docs/DECISIONS.md for the
-    unification this replaces).
+    (`qbit_ops.features.torrents.torrent_filter_to_dict`) alongside the
+    usual `summary`/`torrents`.
     """
     torrents = [
         selected_torrent_to_dict(torrent) for torrent in selection.matched
@@ -985,7 +919,6 @@ def render_tracker_status(
 
 
 def print_torrent_details(report: dict[str, Any]) -> None:
-    """Print detailed torrent inspection output."""
     print_summary(
         {
             "state": report["state"],
@@ -1023,9 +956,9 @@ def print_torrent_name_search(
     renders `torrents inspect --hash`'s single-torrent result elsewhere
     (nested tracker details, no stable tabular shape), and `torrents
     inspect` uses one format-support rule for both modes — see
-    `qbit_ops.cli.validation.FORMAT_SUPPORT["torrents_inspect"]` and
-    docs/DECISIONS.md. `validate_format_support` already rejected `csv`
-    before any API call was made.
+    `qbit_ops.cli.validation.FORMAT_SUPPORT["torrents_inspect"]`.
+    `validate_format_support` already rejected `csv` before any API
+    call was made.
     """
     if output_format == OutputFormat.json:
         print_json_output(report)
@@ -1062,7 +995,6 @@ def print_torrent_name_search(
 
 
 def print_backup_diff(report: dict[str, Any]) -> None:
-    """Print a human-readable backup diff report."""
     summary = report["summary"]
 
     if summary["identical"]:
@@ -1191,7 +1123,6 @@ def print_bulk_torrent_details(
     *,
     applied: bool,
 ) -> None:
-    """Print verbose bulk torrent action details, if any."""
     if not plan.changes and not plan.skipped:
         return
 
@@ -1207,7 +1138,6 @@ def addition_summary_rows(
     *,
     status: MutationStatus,
 ) -> dict[str, Any]:
-    """Build `print_summary` rows for a tracker addition plan."""
     return {
         "scanned": plan.scanned,
         "matched_source": plan.matched_source,
@@ -1218,7 +1148,6 @@ def addition_summary_rows(
 
 
 def print_addition_details(plan: TrackerAdditionPlan, *, applied: bool) -> None:
-    """Print verbose tracker addition details, if any."""
     if not plan.changes and not plan.already_had_target:
         return
 
@@ -1231,7 +1160,6 @@ def print_addition_details(plan: TrackerAdditionPlan, *, applied: bool) -> None:
 
 
 def addition_confirmation_message(plan: TrackerAdditionPlan) -> str:
-    """Build the confirmation prompt for `trackers add-if-present`."""
     return (
         f"Add tracker {redact_tracker_identity(plan.target_tracker)} to "
         f"{len(plan.changes)} torrent(s) already using "
@@ -1244,7 +1172,6 @@ def removal_summary_rows(
     *,
     status: MutationStatus,
 ) -> dict[str, Any]:
-    """Build `print_summary` rows for a tracker removal plan."""
     return {
         "scanned": plan.scanned,
         "matched_tracker": plan.matched_tracker,
@@ -1255,7 +1182,6 @@ def removal_summary_rows(
 
 
 def print_removal_details(plan: TrackerRemovalPlan, *, applied: bool) -> None:
-    """Print verbose tracker removal details, if any."""
     if not plan.changes:
         return
 
@@ -1271,7 +1197,6 @@ def print_removal_details(plan: TrackerRemovalPlan, *, applied: bool) -> None:
 
 
 def removal_confirmation_message(plan: TrackerRemovalPlan) -> str:
-    """Build the confirmation prompt for `trackers remove`."""
     return (
         f"Remove tracker {redact_tracker_identity(plan.tracker)} from "
         f"{plan.matched_tracker} torrent(s) "
@@ -1285,7 +1210,6 @@ def replacement_summary_rows(
     *,
     status: MutationStatus,
 ) -> dict[str, Any]:
-    """Build `print_summary` rows for a tracker replacement plan."""
     already_had_target = sum(
         1 for change in plan.changes if change.already_had_target
     )
@@ -1305,7 +1229,6 @@ def print_replacement_details(
     *,
     applied: bool,
 ) -> None:
-    """Print verbose tracker replacement details, if any."""
     if not plan.changes:
         return
 
@@ -1324,7 +1247,6 @@ def print_replacement_details(
 
 
 def replacement_confirmation_message(plan: TrackerReplacementPlan) -> str:
-    """Build the confirmation prompt for `trackers replace`."""
     return (
         f"Replace {redact_tracker_identity(plan.source_tracker)} with "
         f"{redact_tracker_identity(plan.target_tracker)} on "
