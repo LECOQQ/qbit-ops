@@ -1,19 +1,8 @@
-"""Adversarial regression tests from the TUI bulk-mutation safety audit.
-
-See docs/audits/2026-07-26-tui-bulk-mutation-audit.md for the original
-findings and
-docs/audits/2026-07-26-tui-bulk-mutation-remediation.md for their
-closure. Everything here is now an ordinary regression test, in one
-file so the audit's evidence stays together:
-
-* Properties the audit attacked and could not break -- the frozen plan
-  surviving a refresh, a reordered table, and a reconciled selection;
-  `Ctrl+A`/`Ctrl+D` inside a text `Input`; a late worker result after
-  shutdown; the import boundary.
-* Findings F-1 through F-5 and risks R-1 through R-3, each of which was
-  encoded as `xfail(strict=True)` while the defect stood. Every marker
-  has since been removed after the underlying behaviour was corrected
-  -- no audit defect remains encoded as an expected failure.
+"""Adversarial regression tests for TUI bulk-mutation safety: the frozen
+plan surviving a refresh, a reordered table, and a reconciled selection;
+`Ctrl+A`/`Ctrl+D` inside a text `Input`; a late worker result after
+shutdown; the import boundary; and the concurrency/staleness guards
+around applying a plan.
 
 Every concurrency proof uses real `threading.Event` barriers, never a
 sleep, matching `tests/test_tui_app.py`'s existing style.
@@ -97,14 +86,12 @@ async def _await_flag(
 ) -> None:
     """Wait for a *positive* fact, with a deadline that can fail.
 
-    Replaces the previous `_drain_workers` helper, which polled
-    `all(worker.is_finished for worker in app.workers)`. Textual empties
-    its worker registry on shutdown, so after `action_quit()` that
-    `all(...)` ran over an **empty** collection, was vacuously true, and
-    returned in ~0 ms -- before an unguarded mutation could possibly
-    land. The shutdown assertions therefore ran too early to observe
-    anything: measured 0 detections out of 8 with the authority guard
-    deliberately bypassed (final closure report, finding T-1).
+    Polling `all(worker.is_finished for worker in app.workers)` is not
+    safe here: Textual empties its worker registry on shutdown, so after
+    `action_quit()` that `all(...)` runs over an **empty** collection,
+    is vacuously true, and returns in ~0 ms -- before an unguarded
+    mutation could possibly land, letting a shutdown assertion run too
+    early to observe anything.
 
     Waiting on a real event that the worker itself sets, with a bounded
     deadline that raises on timeout, cannot pass vacuously: either the
@@ -165,7 +152,7 @@ class _AuthorityProbe:
             self.returned.set()
 
 
-# -- properties the audit attacked and could not break ---------------------
+# -- properties attacked and confirmed to hold -----------------------------
 
 
 async def test_apply_sends_frozen_plan_despite_refresh_and_reorder() -> None:
@@ -365,9 +352,9 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
 
 
 async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
-    """F-1 closed: `apply_refresh_success(reconcile=False)` while a
-    `FiltersScreen` holds an uncommitted draft, so a periodic tick can
-    no longer erase a selection mid-typing."""
+    """`apply_refresh_success(reconcile=False)` while a `FiltersScreen`
+    holds an uncommitted draft, so a periodic tick can no longer erase a
+    selection mid-typing."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -484,7 +471,7 @@ def _assert_serialized_after(log: list[str], blocker: str) -> None:
 
 
 async def test_apply_is_serialized_after_an_in_flight_refresh() -> None:
-    """F-2, proven non-vacuously.
+    """Proven non-vacuously.
 
     Asserts the full chain, not merely the absence of overlap: the read
     started, the mutation waited for it to finish, the mutation was
@@ -535,8 +522,8 @@ async def test_apply_is_serialized_after_an_in_flight_refresh() -> None:
 
 
 async def test_apply_is_serialized_after_an_in_flight_detail_fetch() -> None:
-    """F-2, detail-fetch half, proven non-vacuously -- same full chain
-    as the refresh test above."""
+    """Detail-fetch half, proven non-vacuously -- same full chain as the
+    refresh test above."""
     client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         trackers_by_hash={HASH_A: []},
@@ -582,7 +569,7 @@ async def test_apply_is_serialized_after_an_in_flight_detail_fetch() -> None:
 
 
 async def test_shutdown_while_queued_behind_a_refresh_sends_nothing() -> None:
-    """N-2 cancellation proof, behind a blocked refresh.
+    """Cancellation proof, behind a blocked refresh.
 
     **Cancellation test**: the expected endpoint call count is zero, and
     that zero is only meaningful because every preceding milestone is
@@ -661,7 +648,7 @@ async def test_shutdown_while_queued_behind_a_refresh_sends_nothing() -> None:
 
 
 async def test_shutdown_while_queued_behind_details_sends_nothing() -> None:
-    """N-2 cancellation proof, behind a blocked tracker-detail fetch.
+    """Cancellation proof, behind a blocked tracker-detail fetch.
 
     **Cancellation test**: same full lifecycle observation as the
     refresh variant, with `torrents_trackers()` owning the shared lock.
@@ -827,7 +814,7 @@ async def test_normal_queue_behind_details_dispatches_exactly_once() -> None:
 
 
 async def test_max_simultaneous_remote_client_operations_is_one() -> None:
-    """F-2 closed, measured directly and non-vacuously.
+    """Measured directly and non-vacuously.
 
     A detail fetch, a periodic refresh and a mutation all contend at
     once. Asserts not only that the controller's high-water mark of
@@ -873,8 +860,8 @@ async def test_max_simultaneous_remote_client_operations_is_one() -> None:
 async def test_vanished_torrents_are_not_reported_as_already_satisfied() -> (
     None
 ):
-    """F-3 closed: an all-`not_found` plan classifies as NO_MATCH and
-    says the torrents were not found, never 'already satisfied'."""
+    """An all-`not_found` plan classifies as NO_MATCH and says the
+    torrents were not found, never 'already satisfied'."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
@@ -910,13 +897,12 @@ async def test_vanished_torrents_are_not_reported_as_already_satisfied() -> (
 class _RaisingMutationClient(FakeQbitClient):
     """Raises a chosen error from the mutating call itself.
 
-    Replaces the audit's original trigger (break client *creation* via a
-    failed refresh). That path is no longer reachable: after R-2, a
-    failed refresh makes the open preview sticky-stale and Apply is
-    withdrawn before any client work happens -- a strictly stronger
-    safety property. Raising from the mutation keeps the connection
-    healthy so Apply genuinely dispatches, which is what these two
-    findings are actually about (how the failure is *classified*).
+    Breaking client *creation* via a failed refresh is not usable here:
+    a failed refresh makes the open preview sticky-stale and Apply is
+    withdrawn before any client work happens. Raising from the mutation
+    instead keeps the connection healthy so Apply genuinely dispatches,
+    which is what these tests are actually about: how the failure is
+    *classified*.
     """
 
     def __init__(self, *args: Any, error: BaseException, **kwargs: Any) -> None:
@@ -928,8 +914,8 @@ class _RaisingMutationClient(FakeQbitClient):
 
 
 async def test_config_error_during_apply_is_not_an_internal_defect() -> None:
-    """F-4 closed: `ConfigError` is classified CONFIGURATION, never as
-    a qbit-ops defect."""
+    """`ConfigError` is classified CONFIGURATION, never as a qbit-ops
+    defect."""
     text = await _apply_failure_result_text(
         ConfigError("QBIT_HOST is not set.")
     )
@@ -940,7 +926,7 @@ async def test_config_error_during_apply_is_not_an_internal_defect() -> None:
 
 
 async def test_connection_error_with_opaque_cause_stays_unavailable() -> None:
-    """F-5 closed: the *outer* error is classified before its cause, so a
+    """The *outer* error is classified before its cause, so a
     recoverable connection failure stays UNAVAILABLE even when it carries
     an opaque, unclassifiable cause."""
     connection_error = QbitConnectionError("Unable to connect to qBittorrent.")
@@ -989,7 +975,7 @@ async def _apply_failure_result_text(error: BaseException) -> str:
         return _result_text(app)
 
 
-# -- R-1: targeted modal lifecycle ----------------------------------------
+# -- targeted modal lifecycle ----------------------------------------------
 
 
 class _BlockingPauseClient(FakeQbitClient):
@@ -1008,13 +994,13 @@ class _BlockingPauseClient(FakeQbitClient):
 
 
 async def test_completion_never_pops_an_unrelated_modal() -> None:
-    """R-1 closed: a mutation completing while another modal sits above
-    its Preview must not pop that unrelated modal, and must not strand a
+    """A mutation completing while another modal sits above its Preview
+    must not pop that unrelated modal, and must not strand a
     `PreviewScreen` stuck in `applying=True`.
 
     The extra screen is pushed programmatically because no key reaches
-    it today -- the audit's point is precisely that the old guard relied
-    on that unreachability rather than on targeting.
+    it today: the guard must rely on targeting the right screen, not on
+    that unreachability.
     """
     client = _BlockingPauseClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
@@ -1042,7 +1028,7 @@ async def test_completion_never_pops_an_unrelated_modal() -> None:
         assert isinstance(app.screen, HelpScreen)
         # ...and the mutation still really happened...
         assert client.paused_hashes == [[HASH_A]]
-        # ...and its outcome was preserved rather than dropped (R-3).
+        # ...and its outcome was preserved rather than dropped.
         assert app._last_mutation_result is not None
         assert app._last_mutation_result.submitted_hashes == (HASH_A,)
 
@@ -1050,8 +1036,8 @@ async def test_completion_never_pops_an_unrelated_modal() -> None:
 async def test_old_operation_completion_cannot_replace_a_newer_preview() -> (
     None
 ):
-    """R-1 closed: a completion carrying a superseded `operation_id`
-    never touches a newer Preview."""
+    """A completion carrying a superseded `operation_id` never touches a
+    newer Preview."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1081,7 +1067,7 @@ async def test_old_operation_completion_cannot_replace_a_newer_preview() -> (
         assert app._last_mutation_result is None
 
 
-# -- R-2: stale preview cannot Apply --------------------------------------
+# -- stale preview cannot Apply ---------------------------------------------
 
 
 class _FailAfterFirstReadClient(FakeQbitClient):
@@ -1098,9 +1084,9 @@ class _FailAfterFirstReadClient(FakeQbitClient):
 
 
 async def test_stale_preview_refuses_apply_by_button_and_keyboard() -> None:
-    """R-2 closed: once the snapshot goes stale the Preview stays
-    readable but Apply is genuinely withdrawn -- by button *and* by
-    keyboard, since `action_apply_plan` checks `can_apply` itself."""
+    """Once the snapshot goes stale the Preview stays readable but Apply
+    is genuinely withdrawn -- by button *and* by keyboard, since
+    `action_apply_plan` checks `can_apply` itself."""
     client = _FailAfterFirstReadClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1138,7 +1124,7 @@ async def test_stale_preview_refuses_apply_by_button_and_keyboard() -> None:
 
 
 async def test_recovery_does_not_reactivate_a_stale_preview() -> None:
-    """R-2 closed: staleness is sticky. Recovery leaves the old preview
+    """Staleness is sticky: recovery leaves the old preview
     non-applicable; a rebuilt one is applicable again."""
     client = _FailAfterFirstReadClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
@@ -1179,12 +1165,12 @@ async def test_recovery_does_not_reactivate_a_stale_preview() -> None:
         assert client.paused_hashes == [[HASH_A]]
 
 
-# -- F-1 hardening: Cancel after refreshes --------------------------------
+# -- Cancel after refreshes -------------------------------------------------
 
 
 async def test_cancel_after_refreshes_preserves_filter_and_selection() -> None:
-    """F-1 closed, Cancel half: several ticks landing while a draft is
-    open leave both the committed filter and the selection untouched."""
+    """Several ticks landing while a draft is open leave both the
+    committed filter and the selection untouched."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -1312,11 +1298,11 @@ async def test_one_refresh_follows_a_successful_mutation() -> None:
         assert client.torrents_info_calls == reads_before + 1
 
 
-# -- N-1: hidden Preview must never stay stuck in `applying` ---------------
+# -- hidden Preview must never stay stuck in `applying` ---------------------
 
 
 async def test_hidden_preview_is_not_stranded_after_completion() -> None:
-    """N-1 closed.
+    """
 
     A mutation completing while an unrelated modal sits above its
     Preview must (a) leave that unrelated modal completely alone, and
@@ -1372,7 +1358,7 @@ async def test_hidden_preview_is_not_stranded_after_completion() -> None:
 
 
 async def test_hidden_preview_cancel_button_dismisses_after_reveal() -> None:
-    """N-1 closed: the visible Cancel control works too, not just Escape."""
+    """The visible Cancel control works too, not just Escape."""
     client = _BlockingPauseClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1402,9 +1388,8 @@ async def test_hidden_preview_cancel_button_dismisses_after_reveal() -> None:
 
 
 async def test_completion_with_no_surviving_preview_touches_no_screen() -> None:
-    """N-1 closed, missing-Preview case: the result is preserved
-    globally, no other screen is manipulated, the Preview is not
-    recreated."""
+    """Missing-Preview case: the result is preserved globally, no other
+    screen is manipulated, the Preview is not recreated."""
     client = _BlockingPauseClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1432,11 +1417,11 @@ async def test_completion_with_no_surviving_preview_touches_no_screen() -> None:
         assert app._last_mutation_result.submitted_hashes == (HASH_A,)
 
 
-# -- N-3: persistent last-action indicator --------------------------------
+# -- persistent last-action indicator ---------------------------------------
 
 
 async def test_persistent_result_outlives_the_transient_notification() -> None:
-    """N-3 closed: the durable record is a rendered line in the Torrents
+    """The durable record is a rendered line in the Torrents
     workspace, not a five-second toast.
 
     Textual toasts are dropped from the DOM on timeout; the last-action
@@ -1476,8 +1461,8 @@ async def test_persistent_result_outlives_the_transient_notification() -> None:
 
 
 async def test_persistent_result_reflects_only_the_latest_operation() -> None:
-    """N-3 closed: a stored result never alters a later operation, and
-    the indicator shows the latest contract only -- no history."""
+    """A stored result never alters a later operation, and the indicator
+    shows the latest contract only -- no history."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
@@ -1526,7 +1511,7 @@ async def test_persistent_result_reflects_only_the_latest_operation() -> None:
         assert "Pause" not in str(bar.content)
 
 
-# -- R-2 residual: unexpected refresh exception fails closed --------------
+# -- unexpected refresh exception fails closed -------------------------------
 
 
 class _UnclassifiableRefreshClient(FakeQbitClient):
@@ -1543,7 +1528,7 @@ class _UnclassifiableRefreshClient(FakeQbitClient):
 
 
 async def test_unexpected_refresh_exception_invalidates_open_preview() -> None:
-    """R-2 residual closed: an unclassifiable refresh exception used to
+    """An unclassifiable refresh exception used to
     `return` before freshness invalidation, leaving an open Preview
     applicable while the TUI had stopped refreshing. Every unsuccessful
     refresh now fails closed."""

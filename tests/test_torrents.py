@@ -86,7 +86,6 @@ def _torrent(**overrides: Any) -> dict[str, Any]:
 
 
 def test_select_torrents_with_empty_filter_matches_everything() -> None:
-    """Ensure an empty filter selects every torrent, unchanged order aside."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, name="B"),
@@ -104,7 +103,6 @@ def test_select_torrents_with_empty_filter_matches_everything() -> None:
 
 
 def test_select_torrents_repeated_categories_use_or() -> None:
-    """Ensure repeated --category values combine with OR."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category="movies"),
@@ -121,7 +119,6 @@ def test_select_torrents_repeated_categories_use_or() -> None:
 
 
 def test_select_torrents_different_filter_types_use_and() -> None:
-    """Ensure different filter fields combine with AND."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category="movies", state="stalledUP"),
@@ -139,8 +136,6 @@ def test_select_torrents_different_filter_types_use_and() -> None:
 
 
 def test_select_torrents_uncategorized_token_matches_bare_category() -> None:
-    """Ensure the bare 'uncategorized' token matches torrents with no
-    category."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category=""),
@@ -159,8 +154,6 @@ def test_select_torrents_uncategorized_token_matches_bare_category() -> None:
 def test_select_torrents_display_label_token_also_matches_uncategorized() -> (
     None
 ):
-    """Ensure the display label '(uncategorized)' is also an accepted
-    token."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category=""),
@@ -176,7 +169,6 @@ def test_select_torrents_display_label_token_also_matches_uncategorized() -> (
 
 
 def test_select_torrents_completed_and_incomplete() -> None:
-    """Ensure completed=True/False filters by progress."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, progress=1.0),
@@ -192,7 +184,6 @@ def test_select_torrents_completed_and_incomplete() -> None:
 
 
 def test_select_torrents_active_and_inactive() -> None:
-    """Ensure active=True/False filters by stopped state."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, state="uploading"),
@@ -209,7 +200,6 @@ def test_select_torrents_active_and_inactive() -> None:
 
 
 def test_select_torrents_stalled() -> None:
-    """Ensure stalled=True matches only stalled-state torrents."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, state="stalledDL"),
@@ -223,7 +213,6 @@ def test_select_torrents_stalled() -> None:
 
 
 def test_select_torrents_errored() -> None:
-    """Ensure errored=True matches only error-state torrents."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, state="error"),
@@ -237,7 +226,6 @@ def test_select_torrents_errored() -> None:
 
 
 def test_select_torrents_state_normalization() -> None:
-    """Ensure --state groups qBittorrent 4/5 state spellings identically."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, state="pausedUP"),
@@ -254,8 +242,6 @@ def test_select_torrents_state_normalization() -> None:
 def test_select_torrents_unknown_state_is_filterable_and_not_discarded() -> (
     None
 ):
-    """Ensure an unrecognized remote state is classified 'unknown', not
-    dropped, and can be found via --state unknown."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, state="totallyNewState"),
@@ -271,7 +257,6 @@ def test_select_torrents_unknown_state_is_filterable_and_not_discarded() -> (
 
 
 def test_select_torrents_tracker_matches_by_host() -> None:
-    """Ensure --tracker matches by host[:port], ignoring path and query."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40),
@@ -300,8 +285,6 @@ def test_select_torrents_tracker_matches_by_host() -> None:
 
 
 def test_select_torrents_tracker_filter_never_exposes_secrets() -> None:
-    """Ensure a passkey-bearing tracker URL never reaches the filter model
-    or the selection result."""
     filters = build_torrent_filter(
         tracker="https://tracker.example/announce/SUPER-SECRET-PASSKEY"
     )
@@ -328,7 +311,6 @@ def test_select_torrents_tracker_filter_never_exposes_secrets() -> None:
 
 
 def test_select_torrents_result_is_deterministically_ordered() -> None:
-    """Ensure matches are always sorted by name, case-insensitively."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, name="zebra"),
@@ -345,7 +327,6 @@ def test_select_torrents_result_is_deterministically_ordered() -> None:
 def test_select_torrents_no_tracker_filter_never_calls_torrents_trackers() -> (
     None
 ):
-    """Ensure cheap filters alone never trigger a tracker lookup."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category="movies"),
@@ -361,8 +342,6 @@ def test_select_torrents_no_tracker_filter_never_calls_torrents_trackers() -> (
 
 
 def test_select_torrents_narrows_before_tracker_lookups() -> None:
-    """Ensure cheap filters run before tracker lookups: only surviving
-    candidates ever get a torrents_trackers() call."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, category="movies"),
@@ -388,33 +367,27 @@ def test_select_torrents_narrows_before_tracker_lookups() -> None:
 
 
 def test_build_torrent_filter_rejects_completed_and_incomplete() -> None:
-    """Ensure --completed --incomplete is rejected before any API call."""
     with pytest.raises(ValueError, match="not both"):
         build_torrent_filter(completed=True, incomplete=True)
 
 
 def test_build_torrent_filter_rejects_active_and_inactive() -> None:
-    """Ensure --active --inactive is rejected before any API call."""
     with pytest.raises(ValueError, match="not both"):
         build_torrent_filter(active=True, inactive=True)
 
 
 def test_build_torrent_filter_rejects_unknown_state() -> None:
-    """Ensure an unrecognized --state value is rejected before any API call."""
     with pytest.raises(ValueError, match="Unknown --state value"):
         build_torrent_filter(states=["banana"])
 
 
 def test_build_torrent_filter_normalizes_tracker_host() -> None:
-    """Ensure build_torrent_filter normalizes --tracker eagerly."""
     filters = build_torrent_filter(tracker="HTTP://Tracker.Example:80/announce")
 
     assert filters.tracker == "tracker.example:80"
 
 
 def test_describe_torrent_filter_is_concise_and_secret_free() -> None:
-    """Ensure the human-readable filter description never renders a
-    tracker URL, only its normalized host."""
     filters = build_torrent_filter(
         categories=["movies", "series"],
         states=["stalled"],
@@ -430,7 +403,6 @@ def test_describe_torrent_filter_is_concise_and_secret_free() -> None:
 
 
 def test_describe_torrent_filter_empty() -> None:
-    """Ensure an empty filter describes itself plainly."""
     assert describe_torrent_filter(TorrentFilter()) == "none"
 
 
@@ -438,7 +410,6 @@ def test_describe_torrent_filter_empty() -> None:
 
 
 def test_validate_torrent_selector_rejects_hash_with_filters() -> None:
-    """Ensure --hash cannot combine with any other selector."""
     with pytest.raises(ValueError, match="Use --hash alone"):
         validate_torrent_selector(
             torrent_hash="abc123",
@@ -448,7 +419,6 @@ def test_validate_torrent_selector_rejects_hash_with_filters() -> None:
 
 
 def test_validate_torrent_selector_rejects_all_with_filters() -> None:
-    """Ensure --all cannot combine with any other filter."""
     with pytest.raises(ValueError, match="Use --all alone"):
         validate_torrent_selector(
             torrent_hash=None,
@@ -458,7 +428,6 @@ def test_validate_torrent_selector_rejects_all_with_filters() -> None:
 
 
 def test_validate_torrent_selector_rejects_no_selector_at_all() -> None:
-    """Ensure a mutation cannot silently target the whole seedbox."""
     with pytest.raises(ValueError, match="Provide --hash, --all"):
         validate_torrent_selector(
             torrent_hash=None, select_all=False, filters=TorrentFilter()
@@ -466,7 +435,6 @@ def test_validate_torrent_selector_rejects_no_selector_at_all() -> None:
 
 
 def test_validate_torrent_selector_accepts_a_single_filter() -> None:
-    """Ensure one filter alone is a valid bulk selector, without --all."""
     validate_torrent_selector(
         torrent_hash=None,
         select_all=False,
@@ -475,7 +443,6 @@ def test_validate_torrent_selector_accepts_a_single_filter() -> None:
 
 
 def test_validate_torrent_selector_accepts_combined_filters() -> None:
-    """Ensure multiple combined filters are a valid bulk selector."""
     validate_torrent_selector(
         torrent_hash=None,
         select_all=False,
@@ -484,7 +451,6 @@ def test_validate_torrent_selector_accepts_combined_filters() -> None:
 
 
 def test_plan_bulk_torrent_action_pauses_matching_category() -> None:
-    """Ensure bulk pause applies only to matching torrents."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, name="Torrent A", category="sonarr"),
@@ -506,7 +472,6 @@ def test_plan_bulk_torrent_action_pauses_matching_category() -> None:
 
 
 def test_plan_bulk_torrent_action_skips_already_paused_torrents() -> None:
-    """Ensure bulk pause is idempotent for paused torrents."""
     client = FakeQbitClient(
         torrents=[
             _torrent(
@@ -538,7 +503,6 @@ def test_plan_bulk_torrent_action_skips_already_paused_torrents() -> None:
 
 
 def test_plan_bulk_torrent_action_resumes_paused_torrents() -> None:
-    """Ensure bulk resume only targets paused torrents."""
     client = FakeQbitClient(
         torrents=[
             _torrent(
@@ -569,7 +533,6 @@ def test_plan_bulk_torrent_action_resumes_paused_torrents() -> None:
 
 
 def test_plan_bulk_torrent_action_resumes_stopped_up_torrents() -> None:
-    """Ensure bulk resume handles qBittorrent 5 stopped states."""
     client = FakeQbitClient(
         torrents=[
             _torrent(
@@ -625,8 +588,7 @@ def test_bulk_resume_calls_torrents_start_without_torrents_resume() -> None:
 
 
 def test_plan_bulk_torrent_action_starts_completed_torrents() -> None:
-    """Ensure start with --completed targets stopped completed torrents,
-    now available as a general filter rather than a start-only flag."""
+    """Now available as a general filter rather than a start-only flag."""
     client = FakeQbitClient(
         torrents=[
             _torrent(
@@ -663,7 +625,6 @@ def test_plan_bulk_torrent_action_starts_completed_torrents() -> None:
 
 
 def test_plan_bulk_torrent_action_reannounces_by_tracker() -> None:
-    """Ensure bulk reannounce can target torrents by tracker host."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, name="Torrent A"),
@@ -694,7 +655,6 @@ def test_plan_bulk_torrent_action_reannounces_by_tracker() -> None:
 
 
 def test_plan_bulk_torrent_action_combines_filters_with_and() -> None:
-    """Ensure a bulk action can combine category and state filters."""
     client = FakeQbitClient(
         torrents=[
             _torrent(
@@ -729,7 +689,6 @@ def test_plan_bulk_torrent_action_combines_filters_with_and() -> None:
 
 
 def test_plan_bulk_torrent_action_selects_all_torrents() -> None:
-    """Ensure bulk actions can target every torrent with select_all."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="a" * 40, name="Torrent A", category="sonarr"),
@@ -750,7 +709,6 @@ def test_plan_bulk_torrent_action_selects_all_torrents() -> None:
 
 
 def test_plan_bulk_torrent_action_pauses_by_hash_prefix() -> None:
-    """Ensure a unique hash prefix selects exactly one torrent."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="abc123def456" + "0" * 28, name="Torrent A"),
@@ -770,7 +728,6 @@ def test_plan_bulk_torrent_action_pauses_by_hash_prefix() -> None:
 
 
 def test_plan_bulk_torrent_action_with_ambiguous_hash_raises() -> None:
-    """Ensure an ambiguous prefix raises before any plan is built."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="abc123def456" + "0" * 28, name="Torrent A"),
@@ -787,7 +744,6 @@ def test_plan_bulk_torrent_action_with_ambiguous_hash_raises() -> None:
 
 
 def test_plan_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
-    """Ensure an unmatched hash resolves to zero matches, not an error."""
     client = FakeQbitClient(
         torrents=[
             _torrent(hash="abc123def456" + "0" * 28, name="Torrent A"),
@@ -815,11 +771,9 @@ def test_plan_bulk_torrent_action_with_unknown_hash_matches_nothing() -> None:
 def test_plan_bulk_torrent_action_matches_but_no_changes(
     action: TorrentBulkAction, state: str
 ) -> None:
-    """Ensure an already-satisfied action matches without producing a change.
-
-    `matched > 0` with `changes == ()` is the NO_CHANGES case: the
-    selector found the torrent, but the requested state was already
-    true, so there is nothing to apply.
+    """`matched > 0` with `changes == ()` is the NO_CHANGES case: the selector
+    found the torrent, but the requested state was already true, so there is
+    nothing to apply.
     """
     client = FakeQbitClient(
         torrents=[_torrent(hash="a" * 40, name="Torrent A", state=state)]
@@ -839,7 +793,6 @@ def test_plan_bulk_torrent_action_matches_but_no_changes(
 
 
 def test_apply_bulk_torrent_action_reuses_the_planned_target_set() -> None:
-    """Ensure applying a plan never rescans; it mutates exactly its changes."""
     client = FakeQbitClient(
         torrents=[_torrent(hash="abc123def456" + "0" * 28, name="Torrent A")]
     )
@@ -861,7 +814,6 @@ def test_apply_bulk_torrent_action_reuses_the_planned_target_set() -> None:
 
 
 def test_hash_selector_rejects_combined_filters() -> None:
-    """Ensure --hash cannot combine with other bulk selectors."""
     client = FakeQbitClient(
         torrents=[_torrent(hash="a" * 40, name="Torrent A", category="sonarr")]
     )
@@ -876,7 +828,6 @@ def test_hash_selector_rejects_combined_filters() -> None:
 
 
 def test_select_all_rejects_combined_filters() -> None:
-    """Ensure select_all cannot be combined with another filter."""
     client = FakeQbitClient(
         torrents=[_torrent(hash="a" * 40, name="Torrent A", category="sonarr")]
     )
@@ -891,7 +842,6 @@ def test_select_all_rejects_combined_filters() -> None:
 
 
 def test_no_selector_at_all_is_rejected_before_mutation_planning() -> None:
-    """Ensure a bulk mutation with no --hash, --all, or filter is refused."""
     client = FakeQbitClient(
         torrents=[_torrent(hash="a" * 40, name="Torrent A")]
     )
@@ -902,11 +852,10 @@ def test_no_selector_at_all_is_rejected_before_mutation_planning() -> None:
     assert client.paused_hashes == []
 
 
-# --- Unrelated read-only helpers, unchanged by this phase -------------------
+# --- Unrelated read-only helpers ---------------------------------------
 
 
 def test_inspect_torrent_returns_detailed_report() -> None:
-    """Ensure torrent inspection returns useful audit fields and trackers."""
     client = FakeQbitClient(
         torrents=[
             {
@@ -964,7 +913,6 @@ def test_inspect_torrent_returns_detailed_report() -> None:
 
 
 def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
-    """Ensure torrent inspection fails explicitly when no hash matches."""
     client = FakeQbitClient(
         torrents=[{"hash": "hash-a", "name": "Torrent A"}],
         trackers_by_hash={"hash-a": []},
@@ -974,7 +922,6 @@ def test_inspect_torrent_returns_none_when_hash_is_missing() -> None:
 
 
 def test_inspect_torrent_resolves_a_unique_hash_prefix() -> None:
-    """Ensure inspect accepts a unique prefix, not only a full hash."""
     client = FakeQbitClient(
         torrents=[{"hash": "abc123def456", "name": "Torrent A"}],
         trackers_by_hash={"abc123def456": []},
@@ -987,7 +934,6 @@ def test_inspect_torrent_resolves_a_unique_hash_prefix() -> None:
 
 
 def test_inspect_torrent_raises_for_an_ambiguous_prefix() -> None:
-    """Ensure an ambiguous prefix raises instead of picking a torrent."""
     client = FakeQbitClient(
         torrents=[
             {"hash": "abc123def456", "name": "Torrent A"},
@@ -1001,7 +947,6 @@ def test_inspect_torrent_raises_for_an_ambiguous_prefix() -> None:
 
 
 def test_search_torrents_by_name_ranks_best_matches_first() -> None:
-    """Ensure name search ranks exact and substring matches first."""
     client = FakeQbitClient(
         torrents=[
             {
@@ -1046,7 +991,6 @@ def test_search_torrents_by_name_ranks_best_matches_first() -> None:
 
 
 def test_search_torrents_by_name_supports_prefix_and_limit() -> None:
-    """Ensure broader name searches return multiple ranked matches."""
     client = FakeQbitClient(
         torrents=[
             {
@@ -1082,7 +1026,6 @@ def test_search_torrents_by_name_supports_prefix_and_limit() -> None:
 
 
 def test_search_torrents_by_name_returns_empty_when_nothing_matches() -> None:
-    """Ensure name search returns an empty result set explicitly."""
     client = FakeQbitClient(
         torrents=[{"hash": "hash-a", "name": "Torrent A"}],
         trackers_by_hash={"hash-a": []},
@@ -1095,7 +1038,6 @@ def test_search_torrents_by_name_returns_empty_when_nothing_matches() -> None:
 
 
 def test_list_category_usage_counts_torrents_per_category() -> None:
-    """Ensure category listing aggregates torrent counts."""
     client = FakeQbitClient(
         torrents=[
             {"hash": "hash-a", "name": "Torrent A", "category": "sonarr"},
@@ -1113,7 +1055,6 @@ def test_list_category_usage_counts_torrents_per_category() -> None:
 
 
 def test_list_torrents_with_trackers_returns_tracker_details() -> None:
-    """Ensure detailed torrent listing includes tracker metadata."""
     client = FakeQbitClient(
         torrents=[
             {

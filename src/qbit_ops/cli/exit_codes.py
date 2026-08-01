@@ -1,12 +1,4 @@
-"""Define every registered command's process exit-code scheme.
-
-Moved verbatim from `qbit_ops.main` during the CLI reorganization (see
-docs/ARCHITECTURE.md) -- no exit-code value or semantics changed. Kept
-in its own module (not `cli/app.py`) so both `cli/app.py` (the
-composition root) and every `cli/commands/*.py` module can import it
-without a circular dependency: `app.py` registers command modules, so
-command modules must not import `app.py` back.
-"""
+"""Define every registered command's process exit-code scheme."""
 
 from enum import IntEnum
 
@@ -14,16 +6,9 @@ from enum import IntEnum
 class ExitCode(IntEnum):
     """Define explicit process exit codes.
 
-    These remain the exit-code semantics for every command other than
-    `status`, which documents its own health-based exit codes below.
-
     `INTERNAL` (70) is shared by every command regardless of which exit
-    code enum it otherwise uses: an unexpected programming defect
-    (anything not explicitly classified as invalid input, not-found,
-    ambiguous, unavailable, authentication, configuration, or
-    cancellation) is never folded into a command's own scheme. See
-    `qbit_ops.cli.error_boundary._catch_internal_errors` and
-    docs/ERRORS_AND_EXIT_CODES.md.
+    code enum it otherwise uses: an unexpected programming defect is
+    never folded into a command's own scheme.
     """
 
     SUCCESS = 0
@@ -35,19 +20,13 @@ class ExitCode(IntEnum):
 class StatusExitCode(IntEnum):
     """Define exit codes specific to the `status` command.
 
-    Deliberately separate from `ExitCode`: `status` reports operational
-    health rather than success/failure, so its exit codes carry
-    different semantics (0-3 map to `qbit_ops.features.status.Health`;
-    4 is reserved for invalid local configuration or invalid CLI usage). Other
-    commands keep `ExitCode` until a later consolidation decision.
-
-    `status --watch` does **not** use this health mapping: a running
-    watch cannot continuously update the process exit code, and
-    warning/critical/unavailable snapshots must never stop the loop. Its
-    process exit code instead reports how the *process* ended: `0` for
-    a clean user interrupt (`Ctrl+C`), `INVALID_USAGE` (4) for a
-    pre-loop CLI/configuration failure, and `ExitCode.ERROR` (1) for an
-    unexpected fatal error. See `docs/COMMANDS.md`.
+    0-3 map to `qbit_ops.features.status.Health`; 4 is invalid local
+    configuration or CLI usage. `status --watch` does **not** use this
+    health mapping: a running watch cannot continuously update the exit
+    code, and warning/critical/unavailable snapshots must never stop the
+    loop. Its exit code instead reports how the process ended: `0` for a
+    clean `Ctrl+C`, `INVALID_USAGE` (4) for a pre-loop failure, and
+    `ExitCode.ERROR` (1) for an unexpected fatal error.
     """
 
     HEALTHY = 0
@@ -61,16 +40,7 @@ class DoctorExitCode(IntEnum):
     """Define exit codes specific to the `doctor` command.
 
     `0`/`1`/`2` mirror `qbit_ops.features.doctor.doctor_exit_code`'s
-    pass/warning/failure mapping exactly (kept here only for readability
-    at call sites and in tests). `3` is intentionally unused: doctor has
-    no condition that needs a fourth severity tier. `4` is reserved for
-    invalid CLI invocation preventing doctor from starting — today
-    `doctor` takes no options besides `--format`, and an invalid
-    `--format` value is rejected by Click before the command body runs
-    (Click's own usage-error exit code, not this one), so `4` is
-    currently unreachable in practice. It is kept, not removed, so a
-    future doctor-specific flag has a documented code to use instead of
-    silently reusing `2` (already meaning "failure").
+    pass/warning/failure mapping.
     """
 
     PASS = 0
@@ -82,16 +52,10 @@ class DoctorExitCode(IntEnum):
 class TrackerStatusExitCode(IntEnum):
     """Define exit codes specific to the `trackers status` command.
 
-    Mirrors `qbit_ops.features.tracker_status.tracker_status_exit_code`'s
-    healthy/warning/critical/unavailable mapping exactly (kept here only
-    for readability at call sites and in tests). Deliberately its own
-    scheme rather than `ExitCode`: `2` here means CRITICAL, not
-    `ExitCode.NO_MATCH` -- an empty selection (no torrents matched, or
-    `--tracker` matched no observed identity) is not an error condition
-    for this command and exits `0` via `HEALTHY`, not `2`, unlike
-    `trackers inspect`'s no-match convention. `4` is reserved for
-    invalid CLI invocation (e.g. contradictory filters), rejected before
-    any qBittorrent API call.
+    Deliberately its own scheme rather than `ExitCode`: `2` here means
+    CRITICAL, not `ExitCode.NO_MATCH` -- an empty selection is not an
+    error condition for this command and exits `0` via `HEALTHY`, unlike
+    `trackers inspect`'s no-match convention.
     """
 
     HEALTHY = 0
@@ -105,24 +69,10 @@ class ExplainExitCode(IntEnum):
     """Define exit codes specific to the `explain` command group.
 
     `0`/`1`/`2` mirror `qbit_ops.features.explain.explanation_exit_code`'s
-    info/warning-or-unknown/critical mapping exactly (kept here only for
-    readability at call sites and in tests). `3` (`TARGET_UNAVAILABLE`)
-    is used when there is nothing to explain at all -- an unresolved
-    torrent hash, or a tracker identity with zero observations -- and is
-    deliberately distinct from `ExplanationSeverity`-based `2`
-    (CRITICAL): reusing a plain "not found" `2` here would be
-    indistinguishable from a real critical finding, the same collision
-    `TrackerStatusExitCode` already avoids for an empty selection. This
-    also deliberately diverges from `ExitCode.NO_MATCH`/`trackers
-    inspect`'s no-match convention (both `2`) for the same reason. An
-    ambiguous hash prefix still reuses the shared `ExitCode.ERROR` (via
-    `_fail_ambiguous_hash`), consistent with every other hash-driven
-    command -- it is rejected before an explanation is ever computed, so
-    it never enters this scheme at all. `4` is reserved for invalid CLI
-    invocation; today `explain torrent`/`explain tracker` have no
-    combination of options that can be locally contradictory, so it is
-    currently unreachable in practice (see `DoctorExitCode` for the same
-    pattern).
+    info/warning-or-unknown/critical mapping. `3` (`TARGET_UNAVAILABLE`)
+    means there is nothing to explain at all (unresolved hash, or a
+    tracker with zero observations), deliberately distinct from
+    `CRITICAL` so it can never be mistaken for a real critical finding.
     """
 
     INFO = 0
@@ -132,13 +82,8 @@ class ExplainExitCode(IntEnum):
     INVALID_USAGE = 4
 
 
-# Documents which exit-code enum governs each registered command's *normal*
-# (non-internal) exit codes -- see docs/ERRORS_AND_EXIT_CODES.md for the
-# full per-command tables. Every command additionally shares
-# `ExitCode.INTERNAL` (70) for an unexpected programming defect via
-# `qbit_ops.cli.error_boundary._catch_internal_errors`, regardless of which
-# enum it is keyed to here. Read by `test_errors.py` to assert this table
-# stays in sync with the commands actually registered on `app`.
+# Read by test_errors.py to assert this table matches the commands
+# registered on `app`.
 EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "status": StatusExitCode,
     "doctor": DoctorExitCode,

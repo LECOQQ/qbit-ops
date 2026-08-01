@@ -1,11 +1,8 @@
 """Seed the synthetic torrent corpus into a running disposable container.
 
 This talks to the container directly via `qbittorrentapi`, bypassing
-qbit-ops entirely -- exactly like a test fixture writing rows into a
-database before the code under test runs. qbit-ops itself has no
-"add torrent" command (verified: no such command exists in
-`src/qbit_ops/main.py`), so seeding cannot go through qbit-ops's own
-CLI, and must not be mistaken for it in any report.
+qbit-ops entirely -- qbit-ops has no "add torrent" command, so seeding
+cannot go through its own CLI.
 """
 
 from __future__ import annotations

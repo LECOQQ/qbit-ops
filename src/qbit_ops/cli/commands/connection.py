@@ -1,7 +1,4 @@
-"""Register the `connection` command group (`connection check`).
-
-Moved from `qbit_ops.main`. No behavior change.
-"""
+"""Register the `connection` command group (`connection check`)."""
 
 from typing import Annotated
 

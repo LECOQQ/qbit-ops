@@ -1,4 +1,4 @@
-"""Characterize `qbit_ops.__version__` resolution (constat A-2).
+"""Characterize `qbit_ops.__version__` resolution.
 
 `qbit_ops/__init__.py` used to read the Poetry version from `pyproject.toml`
 via a path relative to this file's own location
@@ -9,9 +9,8 @@ back to `importlib.metadata` (returning `0.0.0` outside an installation)
 rather than failing loudly.
 
 The resolver now reads installed distribution metadata first, with an
-explicit, non-version-shaped development fallback -- see
-`docs/audits/2026-07-package-refactor-plan.md` (constat A-2, phase 2a).
-These tests call `qbit_ops._resolve_version()` directly (never reloading
+explicit, non-version-shaped development fallback. These tests call
+`qbit_ops._resolve_version()` directly (never reloading
 the `qbit_ops` module or mutating its already-resolved `__version__`), so a
 monkeypatched `importlib.metadata.version` cannot leak into any other
 test in the suite.

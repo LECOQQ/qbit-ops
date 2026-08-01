@@ -8,7 +8,7 @@ mounted widget tree (navigation, focus, layout, real key sequences) and
 what requires real OS threads (responsiveness, serialization,
 stale-result protection).
 
-Overview-first redesign (see docs/DECISIONS.md): the app now opens on
+The app opens on
 the Overview workspace, not the torrent table -- every test that needs
 the table, search, or filters must first switch to the Torrents
 workspace (`await _goto_torrents(app, pilot)`, or a raw `pilot.press
@@ -19,10 +19,10 @@ than `NARROW_WIDTH_THRESHOLD` (100) -- i.e. every test that does not
 pass an explicit wider `size=` is already exercising the narrow layout,
 matching real-world "ordinary terminal size" dogfooding.
 
-Worker-hardening tests (see docs/DECISIONS.md): every qBittorrent call
-now runs on a real Textual thread worker, so a completed action is no
-longer immediately reflected the instant `pilot.press()`/an action
-method returns -- `_settle()` below awaits every in-flight worker
+Every qBittorrent call runs on a real Textual thread worker, so a
+completed action is no longer immediately reflected the instant
+`pilot.press()`/an action method returns -- `_settle()` below awaits
+every in-flight worker
 (`app.workers.wait_for_complete()`) and then pumps one more message
 cycle. Blocking-client tests use real `threading.Event`s to control
 exactly when a fake network call resolves -- never an arbitrary sleep.
@@ -3300,7 +3300,7 @@ async def test_apply_runs_exactly_once_and_reports_applied() -> None:
         content = str(app.screen.query_one("#result-content", Static).content)
         # "Submitted", not "Applied": qBittorrent's bulk endpoints
         # confirm request acceptance, not a per-hash state transition
-        # (documented accepted limitation, audit remediation §5).
+        # (documented accepted limitation).
         assert "Submitted" in content
         assert "submitted for 1 torrent(s)" in content
 

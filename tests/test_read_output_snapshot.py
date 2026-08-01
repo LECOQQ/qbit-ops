@@ -2,9 +2,8 @@
 
 Complements `tests/test_output_format_cli.py` (which already proves
 every read command's `--format json`/`jsonl`/`csv` is valid and
-ANSI-free) with the deeper characterization
-`docs/audits/2026-07-package-refactor-plan.md` §5 (T2) asks for before
-any package move: top-level schema/keys, representative nested values,
+ANSI-free) with a deeper characterization: top-level schema/keys,
+representative nested values,
 stdout/stderr separation, and one non-success/structured-error path --
 all against `tests.support.FakeQbitClient`, never a real qBittorrent
 instance.
@@ -193,14 +192,11 @@ def test_torrents_list_json_has_representative_nested_values(
 def test_trackers_status_json_never_leaks_a_raw_passkey(
     configure_qbit_backend,
 ) -> None:
-    """Ensure a tracker URL's passkey never reaches ordinary JSON output.
-
-    `trackers status` reports tracker *identities*
+    """`trackers status` reports tracker *identities*
     (`describe_tracker_url`'s `host[:port]`), never the raw announce
-    URL -- see `docs/PHILOSOPHY.md` §15 and
-    `tests/test_tracker_security.py`. This test locks that guarantee
-    specifically for `--format json`, which T2 requires characterized
-    independently of the existing table-rendering tests.
+    URL -- see `tests/test_tracker_security.py`. This test locks that
+    guarantee specifically for `--format json`, independently of the
+    existing table-rendering tests.
     """
     configure_qbit_backend(
         client=FakeQbitClient(

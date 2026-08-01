@@ -1,19 +1,7 @@
-"""Characterize the package/entrypoint contract before any package move.
-
-Section 4 of the migration-prerequisite brief: prove, before a future
-`src/qbit_ops/` move, that:
-
-- the console command remains `qbit-ops`;
-- the configured entrypoint imports the intended callable;
-- importing the core package does not import Textual;
-- the TUI import stays deferred until the `tui` command is actually
-  requested (not merely until its `--help`, which Click resolves
-  without calling the command body at all);
-- invoking a non-TUI command never pulls in Textual.
-
-Updated for the CLI reorganization (see docs/ARCHITECTURE.md): the
-console entrypoint now resolves to `qbit_ops.cli.app:app`, the CLI
-composition root, instead of the former `qbit_ops.main:app`.
+"""Characterize the package/entrypoint contract: the console command
+resolves to `qbit_ops.cli.app:app`, importing the core package never
+imports Textual, and the TUI import stays deferred until the `tui`
+command is actually requested.
 
 Module-import assertions run in a fresh subprocess (mirroring
 `tests/test_errors.py`'s
@@ -139,8 +127,8 @@ def test_pyproject_console_script_matches_the_installed_entry_point() -> None:
 
     This is the only test in the suite allowed to read `pyproject.toml`
     directly -- it characterizes the *packaging configuration itself*,
-    not the runtime version-resolution path (constat A-2), which must
-    never read this file (see `tests/test_version_resolution.py`).
+    not the runtime version-resolution path, which must never read this
+    file (see `tests/test_version_resolution.py`).
     """
     import tomllib
 

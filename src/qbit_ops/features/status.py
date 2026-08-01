@@ -192,23 +192,14 @@ def watch_status(
     sleep: Callable[[float], None],
     now: Callable[[], float],
 ) -> None:
-    """Run collect → emit → wait, forever, reusing the existing snapshot model.
+    """Run collect -> emit -> wait, forever.
 
-    No Typer, no Rich, no qBittorrent client: `collect` and `emit` are
-    the only seams, plus `sleep`/`now` for deterministic tests (`now`
-    should be a monotonic clock; real callers pass `time.monotonic`).
-
-    Timing targets the *start* of each cycle, not a fixed post-collect
-    delay, so a slow `collect()` does not accumulate drift: if a cycle
-    takes longer than `interval`, the next collection starts immediately
-    (never a negative sleep, never two overlapping collections — this
-    loop is strictly sequential, no concurrency).
-
-    Never returns on its own. The only ways out are an exception raised
-    by `collect`, `emit`, or `sleep` (including `KeyboardInterrupt`,
-    which callers are expected to catch) — there is no other stop
-    condition, by design; this is a tight loop, not a scheduler
-    framework.
+    No Typer, no Rich, no qBittorrent client: `collect`/`emit` are the
+    only seams, plus `sleep`/`now` (a monotonic clock) for deterministic
+    tests. Timing targets the *start* of each cycle, so a slow
+    `collect()` never accumulates drift or overlaps the next cycle.
+    Never returns on its own -- the only way out is an exception raised
+    by `collect`, `emit`, or `sleep` (including `KeyboardInterrupt`).
     """
     while True:
         cycle_started_at = now()
@@ -305,8 +296,8 @@ def snapshot_to_csv_rows(
 def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
     """Build transfer rates from an already-fetched `transfer_info()` result.
 
-    Routes through `qbit_ops.qbit.fields.get_transfer_rates` (constat
-    P-2) instead of calling `.get()` on `transfer_info` directly: a
+    Routes through `qbit_ops.qbit.fields.get_transfer_rates` instead of
+    calling `.get()` on `transfer_info` directly: a
     malformed non-mapping payload now fails with an explicit `TypeError`
     there rather than an accidental `AttributeError` here.
     """

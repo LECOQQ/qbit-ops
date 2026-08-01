@@ -6,26 +6,19 @@ cannot avoid:
 
 1. qBittorrent's default-on DHT/PeX/LSD/GeoIP-update behavior would
    otherwise run, unsupervised, for the few seconds between container
-   start and the harness's first authenticated API call (verified
-   empirically: a fresh default container's log shows a "Successfully
-   updated IP geolocation database" line -- a real outbound HTTP
-   request -- before any preference can be set over the API).
-2. The per-boot random temporary WebUI password (also verified
-   empirically, logged as "A temporary password is provided for this
-   session: ...") would require scraping container logs and racing
-   qBittorrent's own startup timing, instead of a fixed, known
-   credential the harness controls end to end.
+   start and the harness's first authenticated API call (a fresh
+   default container's log shows a real outbound geolocation-database
+   update before any preference can be set over the API).
+2. The per-boot random temporary WebUI password would require
+   scraping container logs and racing qBittorrent's own startup
+   timing, instead of a fixed, known credential the harness controls
+   end to end.
 
-The WebUI password format below (`WebUI\\Password_PBKDF2=@ByteArray(<salt
-b64>:<hash b64>)`) was reverse-engineered empirically, not assumed: a
-disposable qBittorrent 5.1.4 container was made to set a password over
-the real WebUI API, then its resulting `qBittorrent.conf` was read back
-and the hash was verified in Python against every iteration count from
-1 to 100000 (`hashlib.pbkdf2_hmac`) until an exact match was found at
-100000 (PBKDF2-HMAC-SHA512, 100000 iterations, 64-byte digest). This is
-the same algorithm the same template was then confirmed to work with
-against real 4.6.7/5.0.0/5.1.4 containers (see the Docker matrix
-implementation note).
+The WebUI password format below
+(`WebUI\\Password_PBKDF2=@ByteArray(<salt b64>:<hash b64>)`) is
+PBKDF2-HMAC-SHA512, 100000 iterations, 64-byte digest -- reverse
+engineered from a real qBittorrent container and verified against
+4.6.7/5.0.0/5.1.4.
 """
 
 from __future__ import annotations
@@ -67,30 +60,26 @@ def build_hermetic_qbittorrent_conf(
     """Return `qBittorrent.conf` text disabling every public-network
     *feature qBittorrent itself owns*.
 
-    Disables, from the very first boot (empirically confirmed via
-    `qbittorrent.log`, not assumed): DHT, PeX, LSD, UPnP, and the
-    GeoIP-database auto-update (`Connection\\ResolvePeerCountries`).
-    Pre-accepts the legal notice so no interactive prompt blocks the
-    WebUI. Sets a fixed, known WebUI credential so the harness never
-    needs to scrape a per-boot temporary password from container logs.
+    Disables, from the very first boot: DHT, PeX, LSD, UPnP, and the
+    GeoIP-database auto-update. Pre-accepts the legal notice so no
+    interactive prompt blocks the WebUI. Sets a fixed, known WebUI
+    credential so the harness never needs to scrape a per-boot
+    temporary password from container logs.
 
     This is application-level outbound isolation, not a network-level
-    guarantee (independent-review finding F-1): the disposable Docker
-    network the container runs on permits public egress
-    (`Internal=false`, confirmed by `docker network inspect`), so a
-    future qBittorrent release changing one of these defaults, or a
-    malformed torrent, would not be caught by any test here. Do not
-    describe the network itself as "hermetic" or "egress-blocked" --
-    only this configuration is.
+    guarantee: the disposable Docker network the container runs on
+    permits public egress, so a future qBittorrent release changing
+    one of these defaults, or a malformed torrent, would not be caught
+    by any test here. Do not describe the network itself as "hermetic"
+    or "egress-blocked" -- only this configuration is.
 
-    `WebUI\\LocalHostAuth=false` is set explicitly (F-16): without it, a
-    future qBittorrent release could bypass authentication entirely for
-    connections that appear to originate from localhost, and
+    `WebUI\\LocalHostAuth=false` is set explicitly: without it, a
+    future qBittorrent release could bypass authentication entirely
+    for connections that appear to originate from localhost, and
     `auth_log_in()` would keep succeeding even if the sealed
-    `Password_PBKDF2` above were silently ignored -- the harness would
-    detect nothing. Explicitly disabling the bypass makes
-    `auth_log_in()` a real proof that the sealed password works, not an
-    artifact of a same-host convenience feature.
+    `Password_PBKDF2` above were silently ignored. Explicitly disabling
+    the bypass makes `auth_log_in()` a real proof that the sealed
+    password works.
     """
     password_hash = build_webui_password_hash(webui_password)
     return f"""[BitTorrent]

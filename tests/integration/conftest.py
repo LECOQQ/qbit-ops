@@ -1,12 +1,9 @@
 """pytest wiring for the hermetic Docker qBittorrent version matrix.
 
 Every test under `tests/integration/` is skipped unless
-`QBIT_OPS_DOCKER_MATRIX=1` is set in the environment -- these tests
-start real, disposable Docker containers and must never run as part
-of an ordinary `pytest`/`make check` invocation (no Docker requirement
-leaks into the default test suite). `make test-qbit-matrix` and
-`make test-qbit-version` are the supported entry points; see the
-Makefile.
+`QBIT_OPS_DOCKER_MATRIX=1` is set -- these tests start real,
+disposable Docker containers and must never run as part of an
+ordinary `pytest` invocation.
 """
 
 from __future__ import annotations
@@ -28,25 +25,12 @@ _THIS_DIRECTORY = Path(__file__).parent.resolve()
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Auto-mark every test collected under `tests/integration/`.
 
-    A small, documented collection hook (not filename substring
-    matching elsewhere): every item actually located under this
-    directory is marked `docker` -- it can only ever run with a real
-    Docker daemon and the opt-in above. `test_matrix_capture.py` is
-    additionally marked `capture` (F-7): it is the *only* file allowed
-    to write to `tests/compatibility/fixtures/captured-container/`, so
-    `make test-qbit-matrix`/`make test-qbit-version` explicitly
-    deselect it (`-m "docker and not capture"`) while
-    `make capture-qbit-fixtures` selects only it (`-m capture`).
-
-    `pytest_collection_modifyitems` is a *session-wide* hook: once
-    pytest discovers this conftest.py (which it does for the whole
-    tree, not just this directory), the hook receives every collected
-    item across the entire suite, not only this directory's -- an
-    unconditional `item.add_marker(...)` here would otherwise mark
-    every test in the repository as `docker` (caught empirically: a
-    whole-tree `-m docker` collection matched files with no relation
-    to this package at all). Every item must be filtered by its actual
-    file path first.
+    This hook is session-wide -- pytest applies it to every collected
+    item in the repo, not just this directory -- so each item is
+    filtered by its actual file path before marking it `docker`.
+    `test_matrix_capture.py` is additionally marked `capture`: it is
+    the only file allowed to write captured fixtures, so `-m` selects
+    it separately from the rest of the matrix suite.
     """
     for item in items:
         item_path = Path(item.fspath).resolve()

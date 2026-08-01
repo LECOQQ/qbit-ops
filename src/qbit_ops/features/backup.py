@@ -30,20 +30,13 @@ def export_instance_state(
 ) -> dict[str, Any]:
     """Export torrents, trackers and metadata for backup or audit.
 
-    This is qbit-ops's one deliberately sensitive export: unlike
-    `trackers list`/`inspect`/`status`/`export`, the backup artifact
-    legitimately needs raw tracker announce URLs (including any
-    passkey) to be useful for restoring trackers later -- see
-    docs/DECISIONS.md. Treat the resulting file as a credential: it must
-    never be echoed to a terminal summary (only counts are, see the CLI
-    layer) and should be stored with restrictive file permissions.
-
-    `metadata.qbit_host` is reduced to scheme + host[:port]
-    (`redact_tracker_identity`, reused here for the qBittorrent Web UI
-    host rather than a tracker URL -- the same "strip userinfo" need
-    applies): `QBIT_HOST` can itself embed the qBittorrent password as
-    userinfo, and the backup file does not need it to be useful, so it
-    is never written even into this sensitive artifact.
+    qbit-ops's one deliberately sensitive export: unlike `trackers
+    list`/`inspect`/`status`/`export`, this legitimately needs raw
+    tracker announce URLs (including any passkey) to restore trackers
+    later. Treat the resulting file as a credential: never echo it to a
+    terminal summary, and store it with restrictive permissions.
+    `metadata.qbit_host` is reduced to scheme + host[:port] since
+    `QBIT_HOST` can itself embed the qBittorrent password as userinfo.
     """
     torrents = _add_normalized_trackers(
         list_torrents_with_trackers(client),
@@ -200,18 +193,13 @@ def has_backup_diff(report: dict[str, Any]) -> bool:
 def redact_backup_diff(report: dict[str, Any]) -> dict[str, Any]:
     """Reduce a diff report's tracker fields to safe `host[:port]` identities.
 
-    `backup diff`'s default rendering: the underlying `report` (from
-    `diff_backup_exports`) is computed against the raw, exact tracker
-    URLs in the export files (so an actual passkey rotation is still
-    correctly detected as a real difference), but nothing derived from
-    it reaches a terminal or a machine-readable payload without passing
-    through here first, in every `--format`. `--reveal-sensitive`
-    bypasses this and renders `report` directly -- see
-    docs/COMMANDS.md ("Backup").
-
-    Never mutates `report`. `summary`/`added_torrents`/`removed_torrents`
-    carry no raw tracker data already (hash/name/counts only) and are
-    passed through unchanged.
+    `backup diff`'s default rendering: `report` (from
+    `diff_backup_exports`) is computed against raw, exact tracker URLs
+    (so a passkey rotation is still detected as a real difference), but
+    nothing derived from it reaches output without passing through here
+    first -- `--reveal-sensitive` bypasses this and renders `report`
+    directly. Never mutates `report`; fields with no raw tracker data
+    are passed through unchanged.
     """
     redacted_changed_torrents = [
         {

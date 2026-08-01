@@ -3,10 +3,9 @@
 Mirrors `tests/test_errors.py`'s AST-based approach: a compile-time
 guarantee, not just a runtime test, that TUI modules never import a
 raw-secret-producing helper, an out-of-scope mutation function, or the
-CLI module -- see docs/TUI_ARCHITECTURE_REVIEW.md §10/§12.
+CLI module -- see docs/ARCHITECTURE.md §4.
 
-TUI 2 (see docs/DECISIONS.md, "multi-selection + LOW-risk bulk
-actions") narrowed, not removed, this boundary: the TUI may now import
+TUI 2 narrowed, not removed, this boundary: the TUI may now import
 exactly `qbit_ops.features.torrents.apply_bulk_torrent_action`/
 `build_bulk_action_plan_from_snapshot` (Pause/Resume/Reannounce only,
 frozen-plan-in, frozen-plan-out, never a rescan, never `--all`).
@@ -52,8 +51,7 @@ def _tui_module_files() -> list[Path]:
 
     Uses `rglob`, not a one-directory `glob`, so a future split of
     `qbit_ops/tui/app.py` into `qbit_ops/tui/widgets/*.py` and
-    `qbit_ops/tui/screens/*.py` (see
-    `docs/audits/2026-07-package-refactor-plan.md`, Phase 9) cannot make
+    `qbit_ops/tui/screens/*.py` cannot make
     this security boundary silently vacuous by leaving new files
     unscanned.
     """
@@ -88,8 +86,8 @@ def test_tui_modules_never_import_the_cli_package() -> None:
     `qbit_ops.main` no longer exists -- the equivalent, and now broader,
     boundary is that no TUI module may import `qbit_ops.cli` or any of
     its submodules (`cli.app`, `cli.commands.*`, `cli.rendering`,
-    `cli.error_boundary`, `cli.validation`) -- see
-    `docs/TUI_ARCHITECTURE_REVIEW.md` §12.
+    `cli.error_boundary`, `cli.validation`) -- see docs/ARCHITECTURE.md
+    §4.
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
@@ -101,7 +99,7 @@ def test_tui_modules_never_import_the_cli_package() -> None:
         assert not leaked, (
             f"{path} must never import the CLI package ({leaked}) -- a TUI "
             "must not depend on the CLI layer "
-            "(docs/TUI_ARCHITECTURE_REVIEW.md §12)."
+            "(docs/ARCHITECTURE.md §4)."
         )
 
 
@@ -183,8 +181,8 @@ def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
     `_tui_module_files` uses.
 
     Builds a synthetic `tui/` tree with a `screens/` subdirectory --
-    exactly the shape Phase 9 (`docs/audits/2026-07-package-refactor-plan.md`)
-    plans to move `qbit_ops/tui/app.py`'s modal screens into. A one-directory
+    a plausible future shape for `qbit_ops/tui/app.py`'s modal screens.
+    A one-directory
     `glob("*.py")` would miss `screens/help.py` here and make every
     security assertion above silently vacuous once that split happens;
     `rglob` must not.

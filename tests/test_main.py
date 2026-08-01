@@ -13,7 +13,6 @@ runner = CliRunner()
 
 
 def test_main_prints_project_identity() -> None:
-    """Ensure the CLI prints the project name and version."""
     result = runner.invoke(app)
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -21,7 +20,6 @@ def test_main_prints_project_identity() -> None:
 
 
 def test_exit_if_no_targeted_matches_exits_with_no_match_code() -> None:
-    """Ensure targeted commands expose a no-match exit code."""
     with pytest.raises(typer.Exit) as error:
         exit_if_no_targeted_matches(0)
 
@@ -29,5 +27,4 @@ def test_exit_if_no_targeted_matches_exits_with_no_match_code() -> None:
 
 
 def test_exit_if_no_targeted_matches_allows_successful_matches() -> None:
-    """Ensure targeted commands keep success when matches exist."""
     exit_if_no_targeted_matches(1)

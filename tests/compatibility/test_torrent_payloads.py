@@ -44,7 +44,6 @@ def test_ordinary_seeding_torrent_classifies_as_seeding() -> None:
 
 
 def test_stopped_5x_vocabulary_classifies_as_stopped() -> None:
-    """qBittorrent 5.x's `stopped*` vocabulary must be recognized as stopped."""
     fixture = load_fixture("torrents", "stopped_state_5x")
     state = get_field_as_string(fixture.payload, "state")
 
@@ -52,8 +51,8 @@ def test_stopped_5x_vocabulary_classifies_as_stopped() -> None:
 
 
 def test_paused_4x_vocabulary_classifies_as_stopped() -> None:
-    """qBittorrent 4.x's `paused*` vocabulary must also be recognized as
-    stopped -- both vocabularies map to the same qbit-ops concept."""
+    """4.x's `paused*` and 5.x's `stopped*` vocabularies both map to
+    the same qbit-ops concept."""
     fixture = load_fixture("torrents", "paused_state_4x")
     state = get_field_as_string(fixture.payload, "state")
 
@@ -80,8 +79,6 @@ def test_completed_torrent_has_full_progress() -> None:
 
 
 def test_missing_optional_fields_use_documented_fallbacks() -> None:
-    """Every optional field absent entirely must degrade to its documented
-    default, not raise."""
     fixture = load_fixture("torrents", "missing_optional_fields")
     torrent = fixture.payload
 
@@ -99,8 +96,6 @@ def test_missing_optional_fields_use_documented_fallbacks() -> None:
 def test_explicit_none_fields_use_the_same_fallbacks_as_missing_fields() -> (
     None
 ):
-    """An explicit JSON `null` must degrade identically to a field's
-    total absence -- both are "no value", not two different behaviors."""
     fixture = load_fixture("torrents", "explicit_none_fields")
     torrent = fixture.payload
 
@@ -114,8 +109,7 @@ def test_explicit_none_fields_use_the_same_fallbacks_as_missing_fields() -> (
 
 def test_unknown_state_classifies_as_unknown_not_an_exception() -> None:
     """`forcedMetaDL` is a real qBittorrent state absent from every
-    classification set (architecture audit finding) -- it must degrade
-    to 'unknown', never raise."""
+    classification set."""
     fixture = load_fixture("torrents", "unknown_state")
     state = get_field_as_string(fixture.payload, "state")
 
@@ -134,7 +128,6 @@ def test_extra_future_field_is_silently_ignored() -> None:
 
 
 def test_v1_infohash_shape_is_read_as_an_opaque_string() -> None:
-    """A v1 infohash is 40 hex characters (160-bit SHA-1)."""
     fixture = load_fixture("torrents", "v1_hash")
     torrent_hash = get_field_as_string(fixture.payload, "hash")
 
@@ -144,9 +137,8 @@ def test_v1_infohash_shape_is_read_as_an_opaque_string() -> None:
 
 def test_v2_or_hybrid_infohash_shape_is_read_as_an_opaque_string() -> None:
     """qbit-ops treats 'hash' as an opaque string -- a 64-character
-    (256-bit SHA-256) v2/hybrid-shaped value must work identically to a
-    40-character v1 hash (constat: no length assumption found in a
-    repo-wide search)."""
+    v2/hybrid-shaped value must work identically to a 40-character
+    v1 hash."""
     fixture = load_fixture("torrents", "v2_hash")
     torrent_hash = get_field_as_string(fixture.payload, "hash")
 

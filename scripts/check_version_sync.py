@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that the declared release version is consistent across the repo.
-
-Compares the canonical version in ``pyproject.toml`` against the Release
-Please manifest (``.release-please-manifest.json``), and optionally against
-a supplied Git tag. Standard library only: no network access, no installed
-package metadata (``importlib.metadata`` reflects whatever was last
-installed, which can predate the current Release PR -- see
-``docs/RELEASE.md``).
-
-Usage:
-    python scripts/check_version_sync.py
-    python scripts/check_version_sync.py --tag v0.3.0
-"""
+"""Check repository release-version consistency."""
 
 from __future__ import annotations
 

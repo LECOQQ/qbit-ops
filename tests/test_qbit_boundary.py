@@ -1,12 +1,6 @@
-"""Prevent raw-field-helper duplication from creeping back outside the boundary.
-
-`qbit_ops.qbit.fields` is now the one place allowed to define a
-raw-field or tracker-status-shape helper (constat A-5). Before this
-extraction phase, `qbit_ops.features.trackers` and
-`qbit_ops.features.torrents` each carried an independent,
-byte-for-byte copy of the same functions. This
-test statically forbids a new copy from reappearing anywhere else under
-`src/qbit_ops/`, mirroring `tests/test_layering.py`'s AST approach.
+"""Statically forbid a raw-field or tracker-status-shape helper from being
+redefined outside `qbit_ops.qbit`, mirroring `tests/test_layering.py`'s
+AST approach.
 """
 
 from __future__ import annotations
@@ -20,10 +14,8 @@ PACKAGE_DIR = Path(qbit_ops.__file__).parent
 BOUNDARY_DIR = PACKAGE_DIR / "qbit"
 
 # Names owned exclusively by the qbit boundary (`qbit_ops/qbit/fields.py`
-# and `qbit_ops/qbit/client.py`). A function definition with one of
-# these names (with or without a leading underscore, to also catch a
-# private re-implementation) anywhere else under `src/qbit_ops/` is a
-# reintroduced duplicate.
+# and `qbit_ops/qbit/client.py`). Matched with or without a leading
+# underscore to also catch a private re-implementation.
 _BOUNDARY_OWNED_NAMES = frozenset(
     {
         "get_field",
@@ -94,5 +86,5 @@ def test_no_boundary_owned_helper_is_redefined_outside_qbit_package() -> None:
     assert not offenders, (
         f"boundary-owned helper(s) redefined outside qbit_ops/qbit/: "
         f"{offenders} -- reuse qbit_ops.qbit.fields/client instead of "
-        "reimplementing (constat A-5)"
+        "reimplementing"
     )

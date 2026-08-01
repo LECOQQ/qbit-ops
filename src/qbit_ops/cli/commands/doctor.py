@@ -1,8 +1,4 @@
-"""Register the root-level `doctor` command.
-
-Moved from `qbit_ops.main`. No behavior change -- still delegates every
-check's implementation to `qbit_ops.features.doctor.collect_doctor_report`.
-"""
+"""Register the root-level `doctor` command."""
 
 from typing import Annotated, Any
 
@@ -22,15 +18,6 @@ from qbit_ops.features.doctor import (
 
 
 def _collect_doctor_report() -> DoctorReport:
-    """Collect a doctor report, classifying failures instead of aborting.
-
-    Unlike every other command, `doctor` never calls `error_boundary.fail()`
-    on a configuration/connection/authentication error: the failure
-    itself is the payload the report exists to describe. Nothing is
-    written to stderr here (that contract is reserved for genuinely
-    invalid CLI invocation) — a `fail`/`warning` overall status and
-    non-zero exit code already carry the outcome, in every `--format`.
-    """
     config: QbitConfig | None = None
     config_error: Exception | None = None
     try:
@@ -63,8 +50,6 @@ def _collect_doctor_report() -> DoctorReport:
 
 
 def register(app: typer.Typer) -> None:
-    """Register the `doctor` command on the root Typer app."""
-
     @app.command()
     @error_boundary.catch_internal_errors
     def doctor(
@@ -78,12 +63,13 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Diagnose configuration, connectivity, and compatibility issues.
 
-        Read-only: performs at most one authenticated login plus up to four
-        bounded read calls (`app_version`, `app_web_api_version`,
-        `transfer_info`, `torrents_info`), the same budget `status` uses,
-        never a per-torrent call. Every check runs independently: a failed
-        prerequisite (e.g. invalid configuration) produces `skipped`
-        downstream checks instead of aborting the whole report.
+        Read-only: at most one authenticated login plus up to four
+        bounded read calls, never a per-torrent call. Every check runs
+        independently: a failed prerequisite produces `skipped`
+        downstream checks instead of aborting the report. Unlike other
+        commands, a configuration/connection/authentication failure here
+        is not fatal -- it becomes a `fail`/`warning` check, and the
+        exit code reflects `report.overall_status`.
         """
         validate_format_support("doctor", output_format)
         enabled = rendering.progress_enabled(

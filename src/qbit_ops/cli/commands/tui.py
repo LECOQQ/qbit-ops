@@ -1,10 +1,7 @@
 """Register the root-level `tui` command.
 
-Moved from `qbit_ops.main`. No behavior change: Textual is still
-imported lazily inside the command body, so no other command (and
-`import qbit_ops.cli.app`/`qbit_ops.cli.commands.tui` themselves) ever
-loads it -- see `tests/test_package_entrypoint.py` and
-`tests/test_tui_cli.py`.
+Textual is imported lazily inside the command body, so no other
+command ever loads it.
 """
 
 import math
@@ -19,8 +16,6 @@ from qbit_ops.errors import ErrorCategory
 
 
 def register(app: typer.Typer) -> None:
-    """Register the `tui` command on the root Typer app."""
-
     @app.command()
     @error_boundary.catch_internal_errors
     def tui(
@@ -39,12 +34,7 @@ def register(app: typer.Typer) -> None:
 
         Read-only: status header, torrent table, shared filters, read-only
         search, and safe focused-torrent details -- no mutation is
-        reachable. Requires the optional `tui` extra, installed from a
-        repository checkout (`qbit-ops` is not published on PyPI --
-        `pipx install "qbit-ops\\[tui]"` alone will always fail); Textual is
-        imported lazily here so no other command ever loads it. See
-        docs/COMMANDS.md ("TUI") for controls and
-        docs/TUI_ARCHITECTURE_REVIEW.md for the architecture.
+        reachable. Requires the optional `tui` extra.
         """
         if not (interval > 0) or math.isinf(interval):
             error_boundary.fail(
@@ -57,13 +47,11 @@ def register(app: typer.Typer) -> None:
         except ModuleNotFoundError:
             # Deliberately no literal URL here: `fail()` -> `print_error()`
             # runs every message through `sanitize_tracker_text()`
-            # unconditionally (see docs/PHILOSOPHY.md §15), which redacts
-            # any URL-shaped text on sight, tracker or not -- a real
+            # unconditionally, which redacts any URL-shaped text on
+            # sight, tracker or not -- a real
             # `https://github.com/...` clone URL here was silently replaced
-            # with "<redacted-url>" in practice (found via the packaging
-            # verification in docs/DECISIONS.md, worker-hardening phase),
-            # defeating the remediation. Point at the README instead, which
-            # is never sanitized.
+            # with "<redacted-url>" in practice, defeating the remediation.
+            # Point at the README instead, which is never sanitized.
             error_boundary.fail(
                 "The TUI requires the optional 'tui' extra, which is not "
                 "installed.\n\n"

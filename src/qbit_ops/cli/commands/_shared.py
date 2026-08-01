@@ -1,13 +1,4 @@
-"""Share mutation-flow orchestration across command groups.
-
-`run_mutation`/`exit_if_no_targeted_matches` are used by both
-`cli/commands/torrents.py` and `cli/commands/trackers.py` (and the
-no-match exit by `explain.py`/`backup.py` too); kept in one place so
-confirmation policy, dry-run behavior, and the no-match exit code are
-never duplicated between command modules (forbidden by
-docs/ARCHITECTURE.md's CLI boundary). Moved verbatim from
-`qbit_ops.main`.
-"""
+"""Mutation-flow orchestration shared across command groups."""
 
 from collections.abc import Callable
 from typing import Any
@@ -38,26 +29,12 @@ def run_mutation(
 ) -> bool:
     """Run the shared confirm/apply/refuse flow for an already-built plan.
 
-    Centralizes `qbit_ops.shared.execution.ExecutionPolicy` decisions for every
-    mutation command: low-risk commands apply real changes immediately
-    (no `confirmation_message` needed); medium/high-risk commands show
-    the plan, then confirm, then apply exactly that plan (no rescan).
-
-    `matched` and `has_changes` are deliberately separate: a plan can
-    match targets without having any actual change to apply (e.g. every
-    torrent already paused, or a passkey already up to date). This
-    distinguishes `NO_MATCH` (the selector matched nothing) from
-    `NO_CHANGES` (matched, but already satisfied the requested state) —
-    neither ever prompts or calls a mutation API, and neither is ever
-    reported as `APPLIED`.
-
-    `summary_rows(status)` must build the `rendering.print_summary` rows
-    dict with its `status` key set to the given `MutationStatus`, so the
-    same plan-derived counts can be shown under every terminal status.
-
-    Returns whether the plan was applied. Exits via `typer.Exit` on a
-    non-interactive refusal (`ExitCode.ERROR`) or a declined
-    confirmation (`ExitCode.SUCCESS`, per the cancellation contract).
+    `matched` and `has_changes` are separate: a plan can match targets
+    without any actual change to apply, distinguishing `NO_MATCH` (the
+    selector matched nothing) from `NO_CHANGES` (matched, but already
+    satisfied) -- neither ever prompts or calls a mutation API. Returns
+    whether the plan was applied; exits via `typer.Exit` on a
+    non-interactive refusal or a declined confirmation.
     """
     policy = ExecutionPolicy(
         dry_run=dry_run,
@@ -100,6 +77,5 @@ def run_mutation(
 
 
 def exit_if_no_targeted_matches(match_count: int) -> None:
-    """Exit explicitly when a targeted command does not match any torrent."""
     if match_count == 0:
         raise typer.Exit(code=ExitCode.NO_MATCH)

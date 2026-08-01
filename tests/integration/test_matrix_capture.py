@@ -1,9 +1,7 @@
 """Capture authentic `captured-container` payload fixtures for one matrix entry.
 
-Run via `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>` -- this test
-both performs the capture and asserts it produced a security-clean,
-non-empty fixture set, so a bad capture fails loudly instead of
-silently committing something.
+Run via `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`; asserts the
+capture is non-empty and security-clean so a bad capture fails loudly.
 """
 
 from __future__ import annotations

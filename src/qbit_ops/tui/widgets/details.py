@@ -1,8 +1,4 @@
-"""`DetailsPanel` -- the focused torrent's safe detail view.
-
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change.
-"""
+"""`DetailsPanel` -- the focused torrent's safe detail view."""
 
 from __future__ import annotations
 
@@ -29,8 +25,6 @@ class DetailsPanel(VerticalScroll):
     """
 
     def render_state(self, state: TuiState) -> None:
-        """Render the currently focused torrent's safe details, or an
-        explicit empty state when nothing is focused."""
         self.remove_children()
         torrent = state.focused_torrent()
 

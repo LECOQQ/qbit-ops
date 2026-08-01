@@ -1,10 +1,8 @@
-"""Unit tests for captured-fixture volatile-field normalization (F-7).
+"""Unit tests for captured-fixture volatile-field normalization.
 
-No Docker required: exercises `tests.integration._capture`'s pure
-normalization and serialization logic directly, against constructed
-data -- proving two "captures" of an otherwise-unchanged instance
-produce byte-identical committed fixture content once volatile fields
-(timestamps and durations) are normalized.
+Exercises `tests.integration._capture`'s pure normalization and
+serialization logic directly, against constructed data -- no Docker
+required.
 """
 
 from __future__ import annotations
@@ -51,9 +49,7 @@ def test_normalize_replaces_only_present_volatile_fields() -> None:
 
     for field_name in VOLATILE_TORRENT_FIELDS:
         assert normalized[field_name] == 0
-    # Shape preserved: every original key is still present.
     assert set(normalized) == set(payload)
-    # Non-volatile fields are untouched.
     assert normalized["hash"] == payload["hash"]
     assert normalized["progress"] == payload["progress"]
 
@@ -61,11 +57,11 @@ def test_normalize_replaces_only_present_volatile_fields() -> None:
 def test_normalize_does_not_mutate_the_input_payload() -> None:
     payload = {"added_on": 123, "hash": "b" * 40}
     normalize_volatile_torrent_fields(payload)
-    assert payload["added_on"] == 123  # unchanged
+    assert payload["added_on"] == 123
 
 
 def test_normalize_skips_fields_that_are_absent() -> None:
-    payload = {"hash": "c" * 40}  # no volatile fields present at all
+    payload = {"hash": "c" * 40}
     normalized = normalize_volatile_torrent_fields(payload)
     assert normalized == payload
 
@@ -73,11 +69,8 @@ def test_normalize_skips_fields_that_are_absent() -> None:
 def test_two_captures_differing_only_in_volatile_fields_are_byte_identical(
     tmp_path,
 ) -> None:
-    """F-7's exact regression: re-running the matrix against an
-    unchanged instance must not dirty the working tree. Simulates two
-    "captures" a few seconds apart -- different real timestamps/duration,
-    identical everything else -- and proves the *written* fixture text
-    is byte-for-byte identical once normalized."""
+    """Re-running the matrix against an unchanged instance must not dirty
+    the working tree."""
     container = _fake_container()
 
     capture_one = {
@@ -96,7 +89,7 @@ def test_two_captures_differing_only_in_volatile_fields_are_byte_identical(
         "last_activity": 1785181431,
         "seeding_time": 2,
     }
-    assert capture_one != capture_two  # sanity: the raw captures do differ
+    assert capture_one != capture_two
 
     directory_one = tmp_path / "run-one"
     directory_two = tmp_path / "run-two"

@@ -1,17 +1,10 @@
 """Collect and represent a qbit-ops diagnostic report.
 
-This is the `doctor` "service": it must remain callable without Typer and
-without Rich, mirroring `qbit_ops.features.status`'s collection/render
-split, so it can be reused by a future TUI without pulling in CLI or
-presentation concerns.
-
-Collection performs a bounded, documented number of remote calls: at most
-one authenticated login (`auth_log_in()`, performed by the caller before
-`collect_doctor_report()` is invoked) plus up to four read calls
-(`app_version`, `app_web_api_version`, `transfer_info`, `torrents_info`)
-made here — the same bounded budget
-`qbit_ops.features.status.collect_status_snapshot` uses, never a
-per-torrent call.
+Callable without Typer or Rich, mirroring `qbit_ops.features.status`'s
+collection/render split. Performs a bounded, documented number of
+remote calls: one login (by the caller) plus up to four read calls
+(`app_version`, `app_web_api_version`, `transfer_info`,
+`torrents_info`) -- never a per-torrent call.
 """
 
 from __future__ import annotations
@@ -70,10 +63,11 @@ class CheckStatus(StrEnum):
 class ConnectionOutcome(StrEnum):
     """Classify the result of one client-creation/login attempt.
 
-    Kept independent from `qbit_ops.main`'s `QbitConnectionError`/
-    `QbitAuthenticationError` so this module never imports `qbit_ops.main`
-    (which imports this module) — the caller classifies its own
-    exceptions into this enum before calling `collect_doctor_report()`.
+    Kept independent from `qbit_ops.errors.QbitConnectionError`/
+    `QbitAuthenticationError` so this module never imports
+    `qbit_ops.cli.commands.doctor` (which imports this module) — the
+    caller classifies its own exceptions into this enum before calling
+    `collect_doctor_report()`.
     """
 
     OK = "ok"
@@ -125,12 +119,10 @@ def collect_doctor_report(
 ) -> DoctorReport:
     """Build a full diagnostic report from already-attempted collection.
 
-    The caller is responsible for loading configuration and creating/
-    authenticating a qBittorrent client (both may fail); this function
-    never performs those steps itself, only the bounded read calls that
-    follow a successful login. Independent check failures never prevent
-    unrelated checks from running: a failed prerequisite produces
-    `SKIPPED` checks downstream instead of raising.
+    The caller loads configuration and creates/authenticates the client
+    (both may fail); this only runs the bounded read calls that follow a
+    successful login. A failed prerequisite produces `SKIPPED` checks
+    downstream rather than raising, so unrelated checks still run.
     """
     checks: list[DoctorCheck] = []
 
@@ -558,20 +550,14 @@ def _compatibility_evidence_check(
     web_api_version: str | None,
 ) -> DoctorCheck:
     """Classify the observed qBittorrent version against the packaged
-    compatibility evidence manifest (`qbit_ops.qbit.compatibility`).
+    compatibility evidence manifest.
 
-    Replaces the previous transitional, major-version-only check
-    (independent review constat F-5): rather than telling every 4.x/5.x
-    user their exact version is "supported" without matching evidence,
-    this compares the *exact* observed application version against the
-    manifest's exact container-integration-tested entries and reports
-    one of five truthful classifications -- see docs/COMPATIBILITY.md
-    §10 for the wording policy this implements. None of these
-    classifications ever says "supported"/"unsupported"/"incompatible":
-    the strongest claim made is the one the manifest actually backs
-    (exact application + exact Web API match), and every other case is
-    reported as an absence of evidence, never as an absence of
-    compatibility.
+    Compares the exact observed version against the manifest's exact
+    container-integration-tested entries and reports one of five
+    truthful classifications (see docs/COMPATIBILITY.md §10) -- never
+    "supported"/"unsupported"/"incompatible", only what the manifest
+    actually backs; every other case is reported as an absence of
+    evidence, never an absence of compatibility.
     """
     if parsed_version is None:
         return DoctorCheck(
@@ -729,13 +715,10 @@ def _capability_check(web_api_version: str | None) -> DoctorCheck:
     """Report whether the Web API version exposes the capabilities
     qbit-ops's mutation commands actually rely on.
 
-    Deliberately separate from `COMPAT002` (compatibility evidence):
-    this is a property of the Web API version alone, backed by
-    `qbittorrent-api`'s own declared floors, not by the Docker matrix
-    -- a version absent from the matrix is not itself a capability
-    problem, and a capability floor is not itself compatibility
-    evidence. Never invents a floor beyond the two documented in
-    docs/COMPATIBILITY.md §3.
+    Separate from `COMPAT002` (compatibility evidence): this is a
+    property of the Web API version alone, backed by `qbittorrent-api`'s
+    own declared floors, not the Docker matrix. Never invents a floor
+    beyond the two documented in docs/COMPATIBILITY.md §3.
     """
     if web_api_version is None:
         return DoctorCheck(
@@ -913,11 +896,10 @@ def _redact(error: Exception | None, config: QbitConfig | None) -> str | None:
     """Strip known secrets and embedded URL credentials from error text.
 
     The single funnel every check must use before putting exception text
-    into a `detail` field: `_create_qbit_client()`'s error messages may
-    embed the configured host (which can itself carry userinfo
-    credentials), and underlying `qbittorrentapi` exceptions can contain
-    arbitrary text. Never expose passwords, cookies, or authorization
-    headers.
+    into a `detail` field -- error messages may embed the configured
+    host (which can carry userinfo credentials) or arbitrary
+    `qbittorrentapi` exception text. Never expose passwords, cookies, or
+    authorization headers.
     """
     if error is None:
         return None

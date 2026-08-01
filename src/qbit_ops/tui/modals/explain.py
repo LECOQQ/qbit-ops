@@ -1,8 +1,7 @@
 """`ExplainScreen` -- the evidence-based explanation modal.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -25,21 +24,17 @@ if TYPE_CHECKING:
 class ExplainScreen(ModalScreen[None]):
     """An evidence-based explanation of the focused torrent's state.
 
-    `report` starts `None` while tracker data is still being fetched
-    (see `QbitOpsTuiApp.action_explain`) -- `refresh_content()` shows a
-    concise loading line in that case, and the App calls it again once
-    (and only if) a matching, still-current result arrives (see
-    `QbitOpsTuiApp._on_detail_worker_state_changed`'s explain-race
-    handling). Purely a renderer: it never fetches anything itself and
-    never calls back into `TuiController`.
+    `report` starts `None` while tracker data is still fetching --
+    `refresh_content()` shows a loading line, and the App calls it
+    again once a matching, still-current result arrives. Purely a
+    renderer: never fetches anything or calls back into `TuiController`.
     """
 
     BINDINGS: list[Binding] = []
     """Deliberately empty: `escape` is already a `priority=True` App
     binding (`action_dismiss_overlay`), which always wins over any
-    same-key Screen binding -- see `FiltersScreen`'s docstring for the
-    verified mechanism. A Screen-level `escape` binding here would
-    simply never fire."""
+    same-key Screen binding -- see `FiltersScreen`'s docstring. A
+    Screen-level `escape` binding here would simply never fire."""
 
     CSS = """
     ExplainScreen {

@@ -39,7 +39,6 @@ def _client_with_stalled_upload() -> FakeQbitClient:
 def test_explain_torrent_by_full_hash(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a full hash resolves and explains the torrent."""
     configure_qbit_backend(client=_client_with_stalled_upload())
 
     result = runner.invoke(
@@ -55,7 +54,6 @@ def test_explain_torrent_by_full_hash(
 def test_explain_torrent_by_unique_prefix(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a unique hash prefix resolves the same way as a full hash."""
     configure_qbit_backend(client=_client_with_stalled_upload())
 
     result = runner.invoke(
@@ -71,7 +69,6 @@ def test_explain_torrent_by_unique_prefix(
 def test_explain_torrent_unknown_hash_is_target_unavailable(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an unresolved hash exits TARGET_UNAVAILABLE, not CRITICAL."""
     configure_qbit_backend(
         client=FakeQbitClient(torrents=[make_torrent(hash=TORRENT_A, name="A")])
     )
@@ -88,7 +85,6 @@ def test_explain_torrent_unknown_hash_is_target_unavailable(
 def test_explain_torrent_ambiguous_hash_fails_clearly(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an ambiguous prefix reports candidates instead of guessing."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[
@@ -110,7 +106,6 @@ def test_explain_torrent_ambiguous_hash_fails_clearly(
 def test_explain_torrent_table_output(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure table output renders the severity and finding title."""
     configure_qbit_backend(client=_client_with_stalled_upload())
 
     result = runner.invoke(app, ["explain", "torrent", "--hash", TORRENT_A])
@@ -123,7 +118,6 @@ def test_explain_torrent_table_output(
 def test_explain_torrent_jsonl_matches_json(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure jsonl is exactly one line carrying the same payload as json."""
     configure_qbit_backend(client=_client_with_stalled_upload())
 
     json_result = runner.invoke(
@@ -145,7 +139,6 @@ def test_explain_torrent_jsonl_matches_json(
 def test_explain_torrent_csv_is_rejected_before_any_api_call(
     runner: CliRunner,
 ) -> None:
-    """Ensure --format csv fails fast, without a backend."""
     result = runner.invoke(
         app, ["explain", "torrent", "--hash", TORRENT_A, "--format", "csv"]
     )
@@ -158,7 +151,6 @@ def test_explain_torrent_csv_is_rejected_before_any_api_call(
 def test_explain_torrent_healthy_exits_zero(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a healthy torrent exits 0."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[
@@ -182,7 +174,6 @@ def test_explain_torrent_healthy_exits_zero(
 def test_explain_torrent_critical_exits_two(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an errored torrent exits 2 (CRITICAL)."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=TORRENT_A, name="A", state="error")],
@@ -200,7 +191,6 @@ def test_explain_torrent_critical_exits_two(
 def test_explain_torrent_help_documents_hash_and_format(
     runner: CliRunner,
 ) -> None:
-    """Ensure generated help documents --hash and --format."""
     result = runner.invoke(app, ["explain", "torrent", "--help"])
 
     assert result.exit_code == 0
@@ -231,7 +221,6 @@ def _client_with_mixed_tracker() -> FakeQbitClient:
 def test_explain_tracker_by_normalized_identity(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a bare host resolves and explains the tracker."""
     configure_qbit_backend(client=_client_with_mixed_tracker())
 
     result = runner.invoke(
@@ -255,7 +244,6 @@ def test_explain_tracker_by_normalized_identity(
 def test_explain_tracker_accepts_a_full_url(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a full announce URL is normalized to host[:port] first."""
     configure_qbit_backend(client=_client_with_mixed_tracker())
 
     result = runner.invoke(
@@ -279,7 +267,6 @@ def test_explain_tracker_accepts_a_full_url(
 def test_explain_tracker_no_observations_is_target_unavailable(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a tracker never observed exits TARGET_UNAVAILABLE."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=TORRENT_A, name="A")],
@@ -312,7 +299,6 @@ def test_explain_tracker_no_observations_is_target_unavailable(
 def test_explain_tracker_table_output(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure table output renders the tracker identity and severity."""
     configure_qbit_backend(client=_client_with_mixed_tracker())
 
     result = runner.invoke(
@@ -327,7 +313,6 @@ def test_explain_tracker_table_output(
 def test_explain_tracker_jsonl_matches_json(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure jsonl is exactly one line carrying the same payload as json."""
     configure_qbit_backend(client=_client_with_mixed_tracker())
 
     json_result = runner.invoke(
@@ -365,7 +350,6 @@ def test_explain_tracker_jsonl_matches_json(
 def test_explain_tracker_csv_is_rejected_before_any_api_call(
     runner: CliRunner,
 ) -> None:
-    """Ensure --format csv fails fast, without a backend."""
     result = runner.invoke(
         app,
         [
@@ -386,7 +370,6 @@ def test_explain_tracker_csv_is_rejected_before_any_api_call(
 def test_explain_tracker_help_documents_tracker_and_format(
     runner: CliRunner,
 ) -> None:
-    """Ensure generated help documents --tracker and --format."""
     result = runner.invoke(app, ["explain", "tracker", "--help"])
 
     assert result.exit_code == 0
@@ -400,7 +383,6 @@ def test_explain_tracker_help_documents_tracker_and_format(
 def test_explain_torrent_machine_readable_success_is_silent_on_stderr(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a successful machine-readable run prints nothing on stderr."""
     configure_qbit_backend(client=_client_with_stalled_upload())
 
     result = runner.invoke(
@@ -413,7 +395,6 @@ def test_explain_torrent_machine_readable_success_is_silent_on_stderr(
 def test_explain_tracker_machine_readable_success_is_silent_on_stderr(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a successful machine-readable run prints nothing on stderr."""
     configure_qbit_backend(client=_client_with_mixed_tracker())
 
     result = runner.invoke(
@@ -437,7 +418,6 @@ def test_explain_tracker_machine_readable_success_is_silent_on_stderr(
 def test_explain_torrent_never_leaks_a_secret(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure no format ever renders a raw tracker URL or passkey."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=TORRENT_A, name="A", state="error")],
@@ -465,7 +445,6 @@ def test_explain_torrent_never_leaks_a_secret(
 def test_explain_tracker_never_leaks_a_secret(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure no format ever renders a raw tracker URL or passkey."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=TORRENT_A, name="A")],
@@ -500,8 +479,6 @@ def test_explain_tracker_never_leaks_a_secret(
 def test_explain_tracker_no_observations_path_never_leaks_the_raw_url(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure the target-unavailable path echoes the normalized identity,
-    never the raw --tracker argument."""
     configure_qbit_backend(
         client=FakeQbitClient(
             torrents=[make_torrent(hash=TORRENT_A, name="A")],

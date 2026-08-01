@@ -45,7 +45,6 @@ class _FakeClock:
 
 
 def test_classify_torrent_state_groups_qbit4_and_qbit5_active_states() -> None:
-    """Ensure active DL/UP states classify without relying on paused/stopped."""
     assert classify_torrent_state("downloading") == "downloading"
     assert classify_torrent_state("metaDL") == "downloading"
     assert classify_torrent_state("forcedDL") == "downloading"
@@ -56,7 +55,6 @@ def test_classify_torrent_state_groups_qbit4_and_qbit5_active_states() -> None:
 
 
 def test_classify_torrent_state_groups_paused_and_stopped_equally() -> None:
-    """Ensure qBittorrent 4 `paused*` and 5 `stopped*` map identically."""
     assert classify_torrent_state("pausedDL") == "downloading"
     assert classify_torrent_state("stoppedDL") == "downloading"
     assert classify_torrent_state("pausedUP") == "seeding"
@@ -64,7 +62,6 @@ def test_classify_torrent_state_groups_paused_and_stopped_equally() -> None:
 
 
 def test_classify_torrent_state_groups_stalled_checking_and_errored() -> None:
-    """Ensure stalled, checking and error states map to their own groups."""
     assert classify_torrent_state("stalledDL") == "stalled"
     assert classify_torrent_state("stalledUP") == "stalled"
     assert classify_torrent_state("checkingDL") == "checking"
@@ -77,12 +74,10 @@ def test_classify_torrent_state_groups_stalled_checking_and_errored() -> None:
 
 
 def test_classify_torrent_state_keeps_unrecognized_states_as_unknown() -> None:
-    """Ensure a future/unrecognized state is tracked, not silently dropped."""
     assert classify_torrent_state("somethingNew") == "unknown"
 
 
 def test_collect_status_snapshot_reports_healthy_with_no_alerts() -> None:
-    """Ensure a clean instance reports healthy with an empty alert list."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a", state="uploading", progress=1.0),
@@ -110,7 +105,6 @@ def test_collect_status_snapshot_reports_healthy_with_no_alerts() -> None:
 
 
 def test_collect_status_snapshot_reports_warning_for_stalled_torrents() -> None:
-    """Ensure stalled torrents produce a warning, not a critical, health."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a", state="stalledDL"),
@@ -128,7 +122,6 @@ def test_collect_status_snapshot_reports_warning_for_stalled_torrents() -> None:
 
 
 def test_collect_status_snapshot_reports_critical_for_errored() -> None:
-    """Ensure errored torrents win over stalled torrents (most severe)."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a", state="error"),
@@ -144,7 +137,6 @@ def test_collect_status_snapshot_reports_critical_for_errored() -> None:
 
 
 def test_collect_status_snapshot_counts_unknown_states_as_warning() -> None:
-    """Ensure unrecognized states are counted and raise a warning alert."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a", state="futureState")],
     )
@@ -158,7 +150,6 @@ def test_collect_status_snapshot_counts_unknown_states_as_warning() -> None:
 
 
 def test_collect_status_snapshot_uses_a_bounded_number_of_api_calls() -> None:
-    """Ensure `status` never calls `torrents_trackers()` per torrent."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=str(index)) for index in range(50)],
     )
@@ -171,7 +162,6 @@ def test_collect_status_snapshot_uses_a_bounded_number_of_api_calls() -> None:
 
 
 def test_collect_status_snapshot_redacts_credentials_from_host() -> None:
-    """Ensure embedded userinfo never leaks into the snapshot."""
     client = FakeQbitClient(torrents=[])
 
     snapshot = collect_status_snapshot(
@@ -184,7 +174,6 @@ def test_collect_status_snapshot_redacts_credentials_from_host() -> None:
 
 
 def test_build_unavailable_snapshot_reports_unavailable_health() -> None:
-    """Ensure connection failures build an unavailable snapshot."""
     snapshot = build_unavailable_snapshot(
         code="qbittorrent_unavailable",
         message="Unable to connect to qBittorrent at http://localhost:8080.",
@@ -196,7 +185,6 @@ def test_build_unavailable_snapshot_reports_unavailable_health() -> None:
 
 
 def test_status_exit_code_maps_every_health_value() -> None:
-    """Ensure every health value has a documented exit code."""
     assert status_exit_code(Health.HEALTHY) == 0
     assert status_exit_code(Health.WARNING) == 1
     assert status_exit_code(Health.CRITICAL) == 2
@@ -204,7 +192,6 @@ def test_status_exit_code_maps_every_health_value() -> None:
 
 
 def test_snapshot_to_json_dict_has_the_documented_shape() -> None:
-    """Ensure the JSON representation matches the documented schema."""
     snapshot = StatusSnapshot(
         schema_version="1",
         generated_at=collect_status_snapshot(FakeQbitClient()).generated_at,
@@ -251,7 +238,6 @@ def test_snapshot_to_json_dict_has_the_documented_shape() -> None:
 
 
 def test_snapshot_to_csv_rows_is_a_stable_key_value_table() -> None:
-    """Ensure CSV rows expose numeric, unformatted rate and count values."""
     snapshot = build_unavailable_snapshot(
         code="qbittorrent_unavailable",
         message="Unable to connect.",
@@ -268,7 +254,6 @@ def test_snapshot_to_csv_rows_is_a_stable_key_value_table() -> None:
 
 
 def test_format_byte_rate_uses_binary_units() -> None:
-    """Ensure byte rates render with binary (1024-based) units."""
     assert format_byte_rate(0) == "0 B/s"
     assert format_byte_rate(512) == "512 B/s"
     assert format_byte_rate(1536) == "1.5 KiB/s"
@@ -299,7 +284,6 @@ def _healthy_snapshot(**overrides: object) -> StatusSnapshot:
 
 
 def test_watch_status_reuses_the_injected_collector_every_iteration() -> None:
-    """Ensure each loop iteration calls the same injected `collect`."""
     clock = _FakeClock()
     call_count = 0
 
@@ -323,7 +307,6 @@ def test_watch_status_reuses_the_injected_collector_every_iteration() -> None:
 
 
 def test_watch_status_emits_snapshots_in_order() -> None:
-    """Ensure snapshots reach `emit` in the same order they were collected."""
     clock = _FakeClock()
     emitted: list[Health] = []
     healths = [Health.HEALTHY, Health.WARNING, Health.CRITICAL]
@@ -346,7 +329,6 @@ def test_watch_status_emits_snapshots_in_order() -> None:
 
 
 def test_watch_status_uses_the_injected_sleep() -> None:
-    """Ensure the loop waits via the injected `sleep`, not a real delay."""
     clock = _FakeClock()
     count = 0
 
@@ -371,7 +353,6 @@ def test_watch_status_uses_the_injected_sleep() -> None:
 
 
 def test_watch_status_never_requests_a_negative_sleep() -> None:
-    """Ensure a slow collection never causes a negative sleep request."""
     clock = _FakeClock()
     count = 0
 
@@ -396,7 +377,6 @@ def test_watch_status_never_requests_a_negative_sleep() -> None:
 
 
 def test_watch_status_targets_cycle_start_to_avoid_drift() -> None:
-    """Ensure the sleep duration accounts for time already spent collecting."""
     clock = _FakeClock()
     count = 0
 
@@ -421,9 +401,7 @@ def test_watch_status_targets_cycle_start_to_avoid_drift() -> None:
 
 
 def test_watch_status_never_overlaps_collection() -> None:
-    """Ensure a new collection never starts before the previous one finished.
-
-    The loop is a plain synchronous `while True`, so overlap is
+    """The loop is a plain synchronous `while True`, so overlap is
     structurally impossible; this pins that invariant down with an
     explicit re-entrancy guard so a future change introducing real
     concurrency would be caught here.
@@ -454,7 +432,6 @@ def test_watch_status_never_overlaps_collection() -> None:
 
 
 def test_watch_status_continues_through_unavailable_snapshots() -> None:
-    """Ensure repeated `unavailable` snapshots never stop the loop."""
     clock = _FakeClock()
     emitted: list[Health] = []
     count = 0
@@ -481,7 +458,6 @@ def test_watch_status_continues_through_unavailable_snapshots() -> None:
 
 
 def test_watch_status_recovers_to_healthy_after_unavailable() -> None:
-    """Ensure a later successful collection produces a healthy snapshot."""
     clock = _FakeClock()
     emitted: list[Health] = []
     outcomes = [
@@ -509,12 +485,10 @@ def test_watch_status_recovers_to_healthy_after_unavailable() -> None:
 
 
 def test_malformed_non_mapping_transfer_info_fails_explicitly() -> None:
-    """`status` routes `transfer_info` through the shared qbit boundary.
-
-    Proves `build_status_snapshot_from_data` does not bypass
+    """`build_status_snapshot_from_data` does not bypass
     `qbit_ops.qbit.fields.get_transfer_rates` with a direct `.get()`
-    call (constat P-2): a non-mapping payload must fail with an
-    explicit `TypeError`, not an accidental `AttributeError`.
+    call: a non-mapping payload must fail with an explicit `TypeError`,
+    not an accidental `AttributeError`.
     """
 
     class _NotAMapping:

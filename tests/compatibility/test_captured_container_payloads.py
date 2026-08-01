@@ -1,10 +1,9 @@
 """Contract tests for authentic `captured-container` payload fixtures.
 
-Runs the exact production boundary functions the CLI and TUI use
-against payloads captured from real, disposable qBittorrent containers
-(see `tests/integration/_capture.py` and the Docker matrix
-implementation note) -- never a synthetic approximation. Reads only
-committed JSON fixtures; no Docker is required to run this file.
+Runs the production boundary functions the CLI and TUI use against
+payloads captured from real qBittorrent containers (see
+`tests/integration/_capture.py`). Reads only committed JSON fixtures;
+no Docker is required to run this file.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ _MATRIX_ENTRIES_BY_ID = {entry.id: entry for entry in load_matrix()}
 
 
 def test_at_least_one_matrix_entry_has_captured_fixtures() -> None:
-    """Guard the scan itself, exactly like the synthetic-fixture suite does."""
     assert discover_matrix_ids(), (
         "no captured-container fixtures found; run `make capture-qbit-fixtures "
         "QBIT_MATRIX_ID=<id>` at least once before this test can prove anything"
@@ -51,8 +49,8 @@ def test_declared_matrix_id_matches_the_directory_it_lives_in(
     matrix_id: str,
 ) -> None:
     """A fixture's own `_meta.matrix_id` claim must match the directory
-    it is actually stored in -- otherwise a fixture could claim e.g.
-    5.2.3 while its content silently came from a different capture."""
+    it is stored in -- otherwise a fixture could claim e.g. 5.2.3 while
+    its content silently came from a different capture."""
     for fixture in load_captured_fixtures(matrix_id):
         assert fixture.declared_matrix_id == fixture.matrix_id, (
             f"{fixture.path} declares matrix_id="
@@ -65,14 +63,11 @@ def test_declared_matrix_id_matches_the_directory_it_lives_in(
 def test_captured_versions_match_the_matrix_manifest_entry(
     matrix_id: str,
 ) -> None:
-    """F-2: `fixture.qbittorrent_version`/`web_api_version`/`architecture`
-    are the values *observed* from the real container
+    """`fixture.qbittorrent_version`/`web_api_version`/`architecture`
+    are values *observed* from the real container
     (`_capture.py::_write_fixture` reads `container.observed_*`, never
-    `matrix_entry.expected_*`) -- comparing them here to the manifest's
-    independently-loaded `expected_*` is therefore a real cross-check,
-    not the tautology the independent review found (a fixture that
-    copied the manifest's own expected value into its metadata, then
-    compared that copy back against the same manifest)."""
+    `matrix_entry.expected_*`), so comparing them to the manifest's
+    independently-loaded `expected_*` is a real cross-check."""
     entry = _MATRIX_ENTRIES_BY_ID[matrix_id]
     for fixture in load_captured_fixtures(matrix_id):
         if fixture.qbittorrent_version is not None:
@@ -107,11 +102,8 @@ def test_captured_torrent_payload_is_read_correctly() -> None:
             torrent = fixture.payload
             assert get_field_as_string(torrent, "hash")
             assert get_field_as_float(torrent, "progress") == 1.0
-            # Must not raise for a real captured state string -- no
-            # assertion on *which* classification comes back, since
-            # any classification (including "unknown") is a valid,
-            # non-raising outcome for this contract (F-10: this used
-            # to be a dead `assert ... or True`, which tested nothing).
+            # Any classification, including "unknown", is a valid
+            # non-raising outcome for a real captured state string.
             classify_torrent_state(get_field_as_string(torrent, "state"))
             # Extra real-world fields (e.g. `availability`, `popularity`) must
             # not break reading the fields qbit-ops actually consumes.
@@ -172,8 +164,6 @@ def test_captured_application_version_strings_are_read_correctly() -> None:
 
 
 def test_no_captured_fixture_leaks_a_real_secret() -> None:
-    """Re-run the same security scan the synthetic fixtures pass --
-    captured fixtures must clear the identical bar, not a looser one."""
     from tests.compatibility._security_scan import scan_text
 
     for fixture in load_all_captured_fixtures():

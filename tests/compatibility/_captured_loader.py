@@ -3,10 +3,7 @@
 Distinct from `_fixture_loader.py`'s `category/name.json` layout:
 captured fixtures live one level deeper, under
 `fixtures/captured-container/<matrix-id>/<name>.json`, one directory
-per matrix entry (see the phase spec and
-`tests/integration/_capture.py`). Kept as a separate, small loader
-rather than folding into `_fixture_loader.load_all_fixtures()`, so nothing
-about the existing synthetic/official-example fixture contract changes.
+per matrix entry (see `tests/integration/_capture.py`).
 """
 
 from __future__ import annotations
@@ -27,10 +24,8 @@ class CapturedFixture:
 
     `matrix_id` is derived from the *directory* the file lives in --
     the ground truth. `declared_matrix_id` is whatever the file's own
-    `_meta.matrix_id` claims, which a test must cross-check against
-    `matrix_id` (see
-    `test_declared_matrix_id_matches_the_directory_it_lives_in`) --
-    otherwise a fixture could claim one version while its content
+    `_meta.matrix_id` claims; a test must cross-check the two, since a
+    fixture could otherwise claim one version while its content
     silently came from another.
     """
 

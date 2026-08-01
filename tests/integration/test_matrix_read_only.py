@@ -1,8 +1,7 @@
 """Read-only compatibility scenarios against real, disposable qBittorrent.
 
-Every command here is invoked exactly as an end user would, through
-`qbit_ops.main.app` via `CliRunner`, with the hermetic environment from
-`conftest.hermetic_env` -- never by calling internal functions directly.
+Every command is invoked through the CLI like an end user, never by
+calling internal functions directly.
 """
 
 from __future__ import annotations
@@ -121,12 +120,10 @@ def test_explain_torrent_for_the_completed_torrent(hermetic_env, seeded_corpus):
         ],
     )
 
-    # F-12: the deterministic corpus's "complete" torrent is
-    # `stoppedUP`/progress 1.0 with no unhealthy trackers attached --
-    # `build_torrent_explanation` classifies this as `TORRENT_STOPPED`
-    # at INFO severity (exit 0), verified against a real container.
-    # Any other code would mean the corpus or the explanation rules
-    # changed underneath this test.
+    # The corpus's "complete" torrent is stoppedUP/progress 1.0 with no
+    # unhealthy trackers, which `build_torrent_explanation` classifies
+    # as TORRENT_STOPPED at INFO severity -- verified against a real
+    # container, not a fake.
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["overall_severity"] == "info"
@@ -148,12 +145,11 @@ def test_explain_tracker_for_the_tracked_torrents_tracker(
         ],
     )
 
-    # F-12: the disposable in-network tracker (real, but only a minimal
-    # bencode responder -- see _tracker_service.py) mixes with the
-    # always-present DHT/PeX/LSD pseudo-trackers, which
-    # `trackers_status` reports as disabled -- `explain tracker`
-    # classifies this exact mix as `TRACKER_MIXED_ENDPOINT_HEALTH` at
-    # WARNING severity (exit 1), verified against a real container.
+    # The disposable in-network tracker (a minimal bencode responder,
+    # see _tracker_service.py) mixes with the always-present DHT/PeX/LSD
+    # pseudo-trackers, which `trackers_status` reports as disabled --
+    # `explain tracker` classifies this mix as
+    # TRACKER_MIXED_ENDPOINT_HEALTH at WARNING severity.
     assert result.exit_code == 1, result.output
     payload = json.loads(result.stdout)
     assert payload["overall_severity"] == "warning"
@@ -168,15 +164,11 @@ def test_backup_export_json_against_the_isolated_instance_only(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"]["torrents"] >= 3
-    # F-11: each secret class is checked independently -- an `or`
-    # between them would pass as long as just one class were absent,
-    # proving nothing about the other. `backup export`'s whole purpose
-    # is to preserve real tracker URLs (so a backup is restorable), so
-    # the disposable tracker's hostname legitimately appears here --
-    # that is not a leak. What must never appear is the WebUI
-    # password, or a passkey-shaped credential embedded in a tracker
-    # URL (this corpus's tracker URL carries no passkey, so none
-    # should appear either).
+    # Each secret class is checked independently -- an `or` between
+    # them would pass as long as just one were absent. The disposable
+    # tracker's hostname legitimately appears (backup export preserves
+    # real tracker URLs so a backup is restorable); the WebUI password
+    # and any passkey-shaped credential must not.
     rendered = json.dumps(payload)
     assert "password" not in rendered.lower()
     assert hermetic_env["QBIT_PASSWORD"] not in rendered
@@ -186,13 +178,8 @@ def test_backup_export_json_against_the_isolated_instance_only(
 def test_no_unexpected_endpoint_failure_across_the_read_only_suite(
     hermetic_env, seeded_corpus
 ):
-    """A representative sweep: every read-only command exits cleanly.
-
-    Any endpoint absent/changed for this qBittorrent version must show
-    up as a non-zero, classified exit code (never a raw traceback) --
-    `_catch_internal_errors` already guarantees this in production; this
-    test proves it holds against a real instance, not just fakes.
-    """
+    """Any endpoint absent/changed for this qBittorrent version must
+    surface as a classified exit code, never a raw traceback."""
     commands = [
         (["status"], (0,)),
         (["doctor"], (0,)),
@@ -218,11 +205,9 @@ def test_no_unexpected_endpoint_failure_across_the_read_only_suite(
 def test_correct_password_succeeds_and_wrong_password_is_rejected(
     qbit_container,
 ):
-    """F-16: prove the sealed `Password_PBKDF2` is what actually gates
-    access, not a same-host/localhost authentication bypass --
-    `WebUI\\LocalHostAuth=false` is set explicitly in the pre-sealed
-    conf precisely so this stays true even though the harness always
-    connects via 127.0.0.1."""
+    """`WebUI\\LocalHostAuth=false` is set explicitly in the pre-sealed
+    conf so the sealed password gates access even though the harness
+    always connects via 127.0.0.1."""
     import qbittorrentapi
 
     good_client = qbittorrentapi.Client(

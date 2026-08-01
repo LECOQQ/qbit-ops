@@ -1,7 +1,4 @@
-"""Register the `backup` command group (`export`, `diff`).
-
-Moved from `qbit_ops.main`. No behavior change.
-"""
+"""Register the `backup` command group (`export`, `diff`)."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -27,7 +24,6 @@ backup_app = typer.Typer(help="Export qBittorrent state.")
 
 
 def _get_optional_client_value(client: Any, method_name: str) -> str:
-    """Read an optional value from a qBittorrent API method."""
     method = getattr(client, method_name, None)
     if method is None:
         return "unknown"
@@ -41,7 +37,6 @@ def _get_optional_client_value(client: Any, method_name: str) -> str:
 
 
 def _exit_if_backup_diff(report: dict[str, Any]) -> None:
-    """Exit explicitly when two exports differ."""
     if has_backup_diff(report):
         raise typer.Exit(code=ExitCode.NO_MATCH)
 

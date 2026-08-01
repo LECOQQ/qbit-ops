@@ -3,10 +3,9 @@
 These run in the ordinary test suite (no Docker required, no
 `QBIT_OPS_DOCKER_MATRIX` needed) -- they exercise the harness's pure
 guard logic and deterministic corpus generation directly, including
-controlled sabotage of the guard functions themselves (item 16 of the
-Docker matrix phase spec). Container lifecycle tests that require a
-real Docker daemon live under `tests/integration/` instead, gated by
-`QBIT_OPS_DOCKER_MATRIX=1`.
+controlled sabotage of the guard functions themselves. Container
+lifecycle tests that require a real Docker daemon live under
+`tests/integration/` instead, gated by `QBIT_OPS_DOCKER_MATRIX=1`.
 """
 
 from __future__ import annotations
@@ -40,9 +39,9 @@ def hermetic_env_for_test():
 
     `make_hermetic_env()` creates a real `/tmp/qbit-ops-it-home-*`
     directory via `tempfile.mkdtemp` -- calling it directly in a test,
-    without cleanup, leaks that directory on every run
-    (independent-review finding F-9). This fixture is the single,
-    tracked cleanup point every test in this file must go through.
+    without cleanup, leaks that directory on every run. This fixture is
+    the single, tracked cleanup point every test in this file must go
+    through.
     """
     created: list[HermeticEnv] = []
 
@@ -68,7 +67,7 @@ def test_hermetic_env_passes_its_own_guard(hermetic_env_for_test) -> None:
 def test_sabotage_missing_qbit_ops_env_file_fails_closed(
     hermetic_env_for_test,
 ) -> None:
-    """Item 16: the harness must fail if it could discover the repo `.env`."""
+    """The harness must fail if it could discover the repo `.env`."""
     env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     del env["QBIT_OPS_ENV_FILE"]
 
@@ -79,7 +78,7 @@ def test_sabotage_missing_qbit_ops_env_file_fails_closed(
 def test_sabotage_env_file_pointing_at_a_real_file_fails_closed(
     hermetic_env_for_test,
 ) -> None:
-    """Item 16: a `QBIT_OPS_ENV_FILE` that resolves to a real, existing file
+    """A `QBIT_OPS_ENV_FILE` that resolves to a real, existing file
     (standing in for the repository `.env`) must be rejected."""
     env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     env["QBIT_OPS_ENV_FILE"] = str(Path(__file__))  # any real, existing file
@@ -91,7 +90,7 @@ def test_sabotage_env_file_pointing_at_a_real_file_fails_closed(
 def test_sabotage_real_home_directory_fails_closed(
     hermetic_env_for_test,
 ) -> None:
-    """Item 16: the harness must fail if HOME could resolve to the user's
+    """The harness must fail if HOME could resolve to the user's
     real HOME config."""
     env = hermetic_env_for_test(host="http://127.0.0.1:18112").as_environ()
     env["HOME"] = os.path.expanduser("~")
@@ -101,7 +100,7 @@ def test_sabotage_real_home_directory_fails_closed(
 
 
 def test_sabotage_non_loopback_host_fails_closed() -> None:
-    """Item 16: a resolved host outside loopback must never be targeted."""
+    """A resolved host outside loopback must never be targeted."""
     with pytest.raises(HarnessError, match="disposable"):
         assert_target_is_disposable("http://192.168.1.50:8080")
 
@@ -111,7 +110,7 @@ def test_disposable_loopback_host_passes() -> None:
 
 
 def test_sabotage_lookalike_loopback_hostname_fails_closed() -> None:
-    """F-17: a substring check (`"127.0.0.1" in host`) would wrongly accept
+    """A substring check (`"127.0.0.1" in host`) would wrongly accept
     a hostname that merely *contains* the loopback address -- the guard
     must parse the URL and compare the exact hostname instead."""
     with pytest.raises(HarnessError, match="disposable"):
@@ -127,10 +126,9 @@ def test_sabotage_loopback_as_userinfo_fails_closed() -> None:
 
 def test_webui_password_hash_matches_the_reverse_engineered_format() -> None:
     """Regression: this exact salt/password/hash triple was verified against
-    a real qBittorrent 5.1.4 container's own generated `qBittorrent.conf`
-    (see the Docker matrix implementation note) -- if this ever stops
-    matching, the harness can no longer log in without falling back to
-    scraping a per-boot temporary password."""
+    a real qBittorrent 5.1.4 container's own generated `qBittorrent.conf` --
+    if this ever stops matching, the harness can no longer log in without
+    falling back to scraping a per-boot temporary password."""
     import base64
 
     salt = base64.b64decode("uST3wxhBEBMjC2hmKBlb2g==")
@@ -189,8 +187,8 @@ def test_matrix_manifest_loads_and_has_no_duplicate_ids() -> None:
 
 
 def test_matrix_manifest_only_contains_verified_release_lines() -> None:
-    """4.6.x, 5.0.x, and 5.1.x must each be represented -- the phase spec's
-    three required release lines, not an arbitrary set."""
+    """4.6.x, 5.0.x, and 5.1.x must each be represented, not an arbitrary
+    set."""
     release_lines = {entry.release_line for entry in load_matrix()}
     assert {"4.6.x", "5.0.x", "5.1.x"} <= release_lines
 
@@ -201,9 +199,9 @@ def test_unknown_matrix_id_raises_instead_of_running_something_else() -> None:
 
 
 def test_sabotage_empty_matrix_manifest_fails_closed(tmp_path) -> None:
-    """F-8: a manifest with zero entries must never silently produce
-    "success" -- a CI job with nothing to run, or a local/freshness
-    command reporting green having tested nothing."""
+    """A manifest with zero entries must never silently produce "success" --
+    a CI job with nothing to run, or a local/freshness command reporting
+    green having tested nothing."""
     empty_manifest = tmp_path / "empty-matrix.toml"
     empty_manifest.write_text("", encoding="utf-8")
 

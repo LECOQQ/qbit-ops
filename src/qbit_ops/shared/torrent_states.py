@@ -1,12 +1,7 @@
 """Classify raw qBittorrent torrent states into a stable public vocabulary.
 
-Extracted from `qbit_ops.features.torrents`/`qbit_ops.features.status`
-(mirroring the Phase 2 extraction of `qbit_ops.qbit_fields`) so both
-modules can depend on the same state classification without an import
-cycle: `qbit_ops.features.status` and the torrent-filter pipeline in
-`qbit_ops.features.torrents` both need it, and `qbit_ops.features.torrents`
-must not import `qbit_ops.features.status` (which itself needs
-low-level torrent field access). No Typer, no Rich.
+Shared by `qbit_ops.features.status` and `qbit_ops.features.torrents`
+to avoid an import cycle between the two.
 """
 
 from __future__ import annotations

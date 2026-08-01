@@ -1,17 +1,10 @@
 """Capture authentic `captured-container` payload fixtures.
 
-Talks only to the disposable container the harness itself started
-(`RunningQbitContainer`), never ordinary qbit-ops configuration
-discovery. Every captured payload is sanitized and scanned with the
-exact same rules `tests/compatibility/test_payload_security.py`
-enforces (`_security_scan.scan_text`) *before* it is accepted -- a
-violation raises, it never gets written.
-
-Only `make capture-qbit-fixtures` writes to
-`tests/compatibility/fixtures/captured-container/` -- ordinary matrix
-verification (`make test-qbit-matrix` / `make test-qbit-version`) never
-calls this module (see the `capture` pytest marker on
-`test_matrix_capture.py`, independent-review finding F-7).
+Talks only to the disposable container the harness itself started,
+never ordinary qbit-ops configuration discovery. Every payload is
+scanned for secrets with the same rules
+`tests/compatibility/test_payload_security.py` enforces before it is
+written; a violation raises instead.
 """
 
 from __future__ import annotations
@@ -43,14 +36,10 @@ CAPTURED_FIXTURES_ROOT = (
 # before writing, and record the substitution in `sanitization`.
 _TRACKER_HOSTNAME_SUBSTITUTION = ("qbit-ops-tracker", "tracker.example")
 
-# Fields whose *value* is a real wall-clock timestamp or an
-# elapsed-time duration measured on the capturing machine -- neither is
-# reproducible between two otherwise-identical captures (independent
-# review finding F-7: "only timestamps drift" was found to be false,
-# `seeding_time` is a duration, not a timestamp, and also drifted).
-# Normalized to a fixed sentinel so two captures of an unchanged
-# instance are byte-identical; the *shape* (the field's presence and
-# type) is preserved, only the volatile value is replaced.
+# Timestamp/duration fields that are not reproducible between two
+# otherwise-identical captures. Normalized to a fixed sentinel so two
+# captures of an unchanged instance are byte-identical; the field's
+# presence and type are preserved, only the value is replaced.
 VOLATILE_TORRENT_FIELDS = (
     "added_on",
     "completion_on",
@@ -89,10 +78,8 @@ def normalize_volatile_torrent_fields(
 ) -> dict[str, Any]:
     """Replace known volatile torrent fields with a fixed sentinel value.
 
-    Only replaces a field that is actually present, so the payload
-    *shape* (which fields a real `torrents_info()` entry has) is never
-    hidden -- only the non-reproducible value is. Returns a new dict;
-    never mutates `payload` in place.
+    Only replaces fields that are present, preserving payload shape.
+    Returns a new dict; never mutates `payload` in place.
     """
     normalized = dict(payload)
     for field_name in VOLATILE_TORRENT_FIELDS:
@@ -118,10 +105,8 @@ def _write_fixture(
     meta = {
         "trust": "captured-container",
         "description": description,
-        # Observed values -- read from the actual running container,
-        # never copied from the manifest's expected_* fields
-        # (independent-review finding F-2: the manifest values alone
-        # would make this metadata self-consistent but unverified).
+        # Observed values -- read from the running container, never
+        # copied from the manifest's expected_* fields.
         "qbittorrent_version": container.observed_version,
         "web_api_version": container.observed_web_api_version,
         "architecture": container.observed_architecture,

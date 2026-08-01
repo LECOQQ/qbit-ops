@@ -24,7 +24,6 @@ TrackersByHash = dict[str, list[dict[str, Any]]]
 
 
 def test_normalize_tracker_url_strips_spaces() -> None:
-    """Ensure surrounding spaces are removed from tracker URLs."""
     assert (
         normalize_tracker_url("  https://tracker.example/announce  ")
         == "https://tracker.example/announce"
@@ -32,7 +31,6 @@ def test_normalize_tracker_url_strips_spaces() -> None:
 
 
 def test_normalize_tracker_url_removes_trailing_slash() -> None:
-    """Ensure trailing slashes do not affect tracker comparisons."""
     assert (
         normalize_tracker_url("https://tracker.example/announce/")
         == "https://tracker.example/announce"
@@ -40,14 +38,12 @@ def test_normalize_tracker_url_removes_trailing_slash() -> None:
 
 
 def test_normalize_tracker_url_keeps_query_in_exact_mode() -> None:
-    """Ensure exact mode keeps query parameters for comparisons."""
     tracker_url = "https://tracker.example/announce?sig=a&announce_ts=1"
 
     assert normalize_tracker_url(tracker_url) == tracker_url
 
 
 def test_normalize_tracker_url_removes_query_in_without_query_mode() -> None:
-    """Ensure without-query mode ignores dynamic query parameters."""
     assert (
         normalize_tracker_url(
             "https://tracker.example/announce/?sig=a&announce_ts=1",
@@ -58,21 +54,18 @@ def test_normalize_tracker_url_removes_query_in_without_query_mode() -> None:
 
 
 def test_has_tracker_matches_existing_tracker_with_trailing_slash() -> None:
-    """Ensure tracker lookup normalizes existing tracker URLs."""
     trackers = ["https://tracker.example/announce/"]
 
     assert has_tracker(trackers, "https://tracker.example/announce")
 
 
 def test_has_tracker_returns_false_when_absent() -> None:
-    """Ensure tracker lookup fails when no normalized URL matches."""
     trackers = ["https://tracker-a.example/announce"]
 
     assert not has_tracker(trackers, "https://tracker-b.example/announce")
 
 
 def test_has_tracker_matches_query_variants_without_query() -> None:
-    """Ensure dynamic tracker URLs require explicit without-query matching."""
     trackers = ["https://tracker.example/announce?sig=a&announce_ts=1"]
 
     assert not has_tracker(trackers, "https://tracker.example/announce")
@@ -84,7 +77,6 @@ def test_has_tracker_matches_query_variants_without_query() -> None:
 
 
 def test_list_tracker_usage_counts_unique_trackers_per_torrent() -> None:
-    """Ensure tracker listing is normalized and counted per torrent."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -105,7 +97,6 @@ def test_list_tracker_usage_counts_unique_trackers_per_torrent() -> None:
 
 
 def test_list_tracker_usage_groups_query_variants_with_without_query() -> None:
-    """Ensure tracker listing can group dynamic query variants."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -124,7 +115,6 @@ def test_list_tracker_usage_groups_query_variants_with_without_query() -> None:
 
 
 def test_list_tracker_usage_ignores_disabled_trackers() -> None:
-    """Ensure disabled qBittorrent trackers are not listed."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -141,11 +131,9 @@ def test_list_tracker_usage_ignores_disabled_trackers() -> None:
 
 
 def test_inspect_tracker_lists_matching_torrents() -> None:
-    """Ensure tracker inspection reports matching torrents by host identity.
-
-    Two different query-string variants on the same host both match --
-    inspection is host[:port]-based, not exact-URL-based -- and the
-    output never carries a raw URL, only structural fields.
+    """Two different query-string variants on the same host both match --
+    inspection is host[:port]-based, not exact-URL-based -- and the output never
+    carries a raw URL, only structural fields.
     """
     client = FakeQbitClient(
         trackers_by_hash={
@@ -217,7 +205,6 @@ def test_inspect_tracker_lists_matching_torrents() -> None:
 
 
 def test_inspect_tracker_reports_a_disabled_matching_endpoint() -> None:
-    """Ensure a disabled endpoint for the matched host is still reported."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -237,10 +224,7 @@ def test_inspect_tracker_reports_a_disabled_matching_endpoint() -> None:
 
 
 def test_export_tracker_state_exports_normalized_identities_only() -> None:
-    """Ensure tracker export is safe by default: identities only, no raw URLs.
-
-    The DHT pseudo-tracker is excluded entirely (no host to normalize).
-    """
+    """The DHT pseudo-tracker is excluded entirely (no host to normalize)."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -268,7 +252,6 @@ def test_export_tracker_state_exports_normalized_identities_only() -> None:
 
 
 def test_plan_tracker_addition_reports_matching_torrents() -> None:
-    """Ensure the addition plan reports impacted torrents unconditionally."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce"}],
@@ -291,7 +274,6 @@ def test_plan_tracker_addition_reports_matching_torrents() -> None:
 
 
 def test_apply_tracker_addition_adds_target_tracker() -> None:
-    """Ensure applying an addition plan calls the add-trackers API."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce"}],
@@ -311,7 +293,6 @@ def test_apply_tracker_addition_adds_target_tracker() -> None:
 
 
 def test_plan_tracker_addition_reports_already_had_target() -> None:
-    """Ensure torrents that already have the target tracker are reported."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -334,7 +315,6 @@ def test_plan_tracker_addition_reports_already_had_target() -> None:
 
 
 def test_plan_tracker_removal_reports_matching_torrents() -> None:
-    """Ensure the removal plan reports matching torrents without mutating."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker.example/announce/"}],
@@ -354,7 +334,6 @@ def test_plan_tracker_removal_reports_matching_torrents() -> None:
 
 
 def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
-    """Ensure without-query removal matches raw dynamic tracker URLs."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -386,7 +365,6 @@ def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
 
 
 def test_plan_tracker_removal_reports_matching_urls_per_torrent() -> None:
-    """Ensure the removal plan carries the raw matching URLs per torrent."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker.example/announce/"}],
@@ -405,7 +383,6 @@ def test_plan_tracker_removal_reports_matching_urls_per_torrent() -> None:
 
 
 def test_apply_tracker_removal_removes_matching_raw_urls() -> None:
-    """Ensure real removal uses raw qBittorrent tracker URLs."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -437,7 +414,6 @@ def test_apply_tracker_removal_removes_matching_raw_urls() -> None:
 
 
 def test_plan_tracker_replacement_reports_matching_torrents() -> None:
-    """Ensure the replacement plan reports matching torrents by default."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce"}],
@@ -460,7 +436,6 @@ def test_plan_tracker_replacement_reports_matching_torrents() -> None:
 
 
 def test_apply_tracker_replacement_replaces_source_url() -> None:
-    """Ensure applying a replacement plan edits the matching raw source URL."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-a.example/announce/"}],
@@ -487,7 +462,6 @@ def test_apply_tracker_replacement_replaces_source_url() -> None:
 
 
 def test_plan_tracker_replacement_removes_source_when_target_exists() -> None:
-    """Ensure replacement avoids duplicating an existing target tracker."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -517,7 +491,6 @@ def test_plan_tracker_replacement_removes_source_when_target_exists() -> None:
 
 
 def test_apply_tracker_replacement_removes_extra_variants() -> None:
-    """Ensure dynamic source variants do not become duplicate targets."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -551,7 +524,6 @@ def test_apply_tracker_replacement_removes_extra_variants() -> None:
 
 
 def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
-    """Ensure a template missing the placeholder is rejected."""
     client = FakeQbitClient(trackers_by_hash={})
 
     with pytest.raises(RuntimeError, match="placeholder"):
@@ -563,7 +535,6 @@ def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
 
 
 def test_plan_passkey_replacement_updates_query_placeholder() -> None:
-    """Ensure a query-string passkey placeholder is planned in place."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -596,7 +567,6 @@ def test_plan_passkey_replacement_updates_query_placeholder() -> None:
 
 
 def test_plan_passkey_replacement_preserves_other_query_params() -> None:
-    """Ensure unrelated query parameters survive the passkey swap."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -624,7 +594,6 @@ def test_plan_passkey_replacement_preserves_other_query_params() -> None:
 
 
 def test_plan_passkey_replacement_updates_path_before_announce() -> None:
-    """Ensure a passkey path segment placed before 'announce' is planned."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -652,7 +621,6 @@ def test_plan_passkey_replacement_updates_path_before_announce() -> None:
 
 
 def test_plan_passkey_replacement_updates_path_segment_after_announce() -> None:
-    """Ensure a passkey path segment placed after 'announce' is planned."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tk.tr4ker.net/announce/old-passkey"}],
@@ -677,7 +645,6 @@ def test_plan_passkey_replacement_updates_path_segment_after_announce() -> None:
 
 
 def test_plan_passkey_replacement_preserves_dynamic_query_params() -> None:
-    """Ensure per-torrent query params survive a path-based passkey swap."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -709,9 +676,7 @@ def test_plan_passkey_replacement_preserves_dynamic_query_params() -> None:
 
 
 def test_plan_passkey_replacement_never_leaks_secret_in_repr() -> None:
-    """Ensure the plan's repr never exposes the old or new passkey.
-
-    `PasskeyReplacementChange.stale_urls` uses `field(repr=False)`
+    """`PasskeyReplacementChange.stale_urls` uses `field(repr=False)`
     specifically so an accidental `print(change)` or `logger.debug(plan)`
     cannot leak a passkey; this asserts that guarantee directly with an
     unmistakable secret fixture.
@@ -734,7 +699,6 @@ def test_plan_passkey_replacement_never_leaks_secret_in_repr() -> None:
 
 
 def test_plan_passkey_replacement_is_pure_and_does_not_mutate() -> None:
-    """Ensure planning a passkey replacement never calls the edit API."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tk.tr4ker.net/announce/old"}],
@@ -755,7 +719,6 @@ def test_plan_passkey_replacement_is_pure_and_does_not_mutate() -> None:
 
 
 def test_plan_passkey_replacement_skips_torrents_already_up_to_date() -> None:
-    """Ensure torrents already using the new passkey are left untouched."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -779,7 +742,6 @@ def test_plan_passkey_replacement_skips_torrents_already_up_to_date() -> None:
 
 
 def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
-    """Ensure torrents without the target tracker host/path are skipped."""
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [{"url": "https://tracker-b.example/announce/old"}],
@@ -810,7 +772,6 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
 
 
 def test_plan_tracker_addition_matches_nothing() -> None:
-    """Ensure an addition plan with no matching torrents reports zero."""
     client = FakeQbitClient(
         trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}
     )
@@ -827,11 +788,9 @@ def test_plan_tracker_addition_matches_nothing() -> None:
 
 
 def test_plan_tracker_removal_matches_nothing() -> None:
-    """Ensure a removal plan with no matching torrents reports zero.
-
-    `matched_tracker` always equals `len(changes)` for removal (a match
-    always implies a removal) so this plan type never reaches
-    NO_CHANGES — only NO_MATCH or a real change.
+    """`matched_tracker` always equals `len(changes)` for removal (a match
+    always implies a removal) so this plan type never reaches NO_CHANGES --
+    only NO_MATCH or a real change.
     """
     client = FakeQbitClient(
         trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}
@@ -846,11 +805,9 @@ def test_plan_tracker_removal_matches_nothing() -> None:
 
 
 def test_plan_tracker_replacement_matches_nothing() -> None:
-    """Ensure a replacement plan with no matching torrents reports zero.
-
-    `matched_source` always equals `len(changes)` for replacement (a
-    match always implies at least a removal), so this plan type never
-    reaches NO_CHANGES either — only NO_MATCH or a real change.
+    """`matched_source` always equals `len(changes)` for replacement (a match
+    always implies at least a removal), so this plan type never reaches
+    NO_CHANGES either -- only NO_MATCH or a real change.
     """
     client = FakeQbitClient(
         trackers_by_hash={"hash-a": [{"url": "https://other.example/announce"}]}

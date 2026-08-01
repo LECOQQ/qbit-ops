@@ -1,8 +1,7 @@
 """`ResultScreen` -- a truthful report of what an Apply actually did.
 
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change; see `qbit_ops.tui.modals`'s module
-docstring for the `self.app` typing note.
+See `qbit_ops.tui.modals`'s module docstring for the `self.app`
+typing note.
 """
 
 from __future__ import annotations
@@ -25,22 +24,13 @@ if TYPE_CHECKING:
 class ResultScreen(ModalScreen[None]):
     """A truthful, dismissible report of what an Apply actually did.
 
-    Never inferred from "Apply was pressed" -- the whole `outcome` is
-    computed by the App from the mutation worker's real result (see
-    `QbitOpsTuiApp._classify_mutation_outcome`) before this screen is
-    even constructed. Dismissing (`Esc`, or the Close button) never
-    re-applies anything; it only triggers
-    `QbitOpsTuiApp._on_result_dismissed`'s documented selection policy.
-
-    Deliberately no Screen-level `escape` binding: `escape` is already
-    a `priority=True` App binding
-    (`QbitOpsTuiApp.action_dismiss_overlay`), which always wins over a
-    same-key `Screen` binding regardless -- a `Binding("escape",
-    "dismiss", ...)` here would simply never fire (verified
-    empirically; see docs/MEMORY.md, the same mechanism documented for
-    `FiltersScreen`/`ExplainScreen`). `action_dismiss_overlay` special-
-    cases `ResultScreen` instead. The Close button below reuses that
-    same central path rather than duplicating the dismissal policy.
+    `outcome` is computed by the App from the mutation worker's real
+    result before this screen is constructed -- never inferred from
+    "Apply was pressed". Dismissing (`Esc`, or Close) never re-applies
+    anything; both route through `QbitOpsTuiApp.action_dismiss_overlay`,
+    which special-cases `ResultScreen` to trigger
+    `_on_result_dismissed`'s selection policy (no Screen-level `escape`
+    binding here -- it would never fire behind the App's priority one).
     """
 
     BINDINGS: list[Binding] = []

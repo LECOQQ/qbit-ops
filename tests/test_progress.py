@@ -26,49 +26,42 @@ from qbit_ops.cli.rendering import (
 
 
 def test_table_and_interactive_enables_progress() -> None:
-    """Ensure table output on a real TTY enables progress."""
     assert progress_enabled(
         output_format=OutputFormat.table, quiet=False, interactive=True
     )
 
 
 def test_table_and_non_interactive_disables_progress() -> None:
-    """Ensure table output on a non-TTY stream disables progress."""
     assert not progress_enabled(
         output_format=OutputFormat.table, quiet=False, interactive=False
     )
 
 
 def test_json_disables_progress_even_when_interactive() -> None:
-    """Ensure --format json disables progress regardless of the terminal."""
     assert not progress_enabled(
         output_format=OutputFormat.json, quiet=False, interactive=True
     )
 
 
 def test_jsonl_disables_progress_even_when_interactive() -> None:
-    """Ensure --format jsonl disables progress regardless of the terminal."""
     assert not progress_enabled(
         output_format=OutputFormat.jsonl, quiet=False, interactive=True
     )
 
 
 def test_csv_disables_progress_even_when_interactive() -> None:
-    """Ensure --format csv disables progress regardless of the terminal."""
     assert not progress_enabled(
         output_format=OutputFormat.csv, quiet=False, interactive=True
     )
 
 
 def test_quiet_disables_progress_even_when_interactive_table() -> None:
-    """Ensure --quiet disables progress even for table output on a TTY."""
     assert not progress_enabled(
         output_format=OutputFormat.table, quiet=True, interactive=True
     )
 
 
 def test_output_format_none_is_treated_like_table() -> None:
-    """Ensure mutation commands (no --format) behave like table output."""
     assert progress_enabled(output_format=None, quiet=False, interactive=True)
     assert not progress_enabled(
         output_format=None, quiet=False, interactive=False
@@ -78,7 +71,6 @@ def test_output_format_none_is_treated_like_table() -> None:
 def test_progress_enabled_defaults_interactive_from_err_console(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `interactive=None` falls back to the real stderr TTY check."""
     monkeypatch.setattr(
         ui, "err_console", Console(file=io.StringIO(), force_terminal=True)
     )
@@ -94,20 +86,17 @@ def test_progress_enabled_defaults_interactive_from_err_console(
 
 
 def test_disabled_transient_spinner_is_a_safe_noop() -> None:
-    """Ensure a disabled spinner never touches the console."""
     with transient_spinner("Loading...", enabled=False):
         pass
 
 
 def test_disabled_transient_progress_yields_a_working_noop_callback() -> None:
-    """Ensure a disabled progress bar yields a harmless callback."""
     with transient_progress("Scanning...", enabled=False) as advance:
         advance(1, 10)
         advance(10, 10)
 
 
 def test_disabled_helpers_still_propagate_exceptions() -> None:
-    """Ensure disabling progress does not swallow errors."""
     with pytest.raises(RuntimeError, match="boom"):
         with transient_spinner("Loading...", enabled=False):
             raise RuntimeError("boom")
@@ -136,7 +125,6 @@ def _forced_terminal_console() -> tuple[Console, io.StringIO]:
 def test_transient_spinner_never_writes_to_stdout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the spinner only ever renders on stderr, never stdout."""
     fake_err_console, _ = _forced_terminal_console()
     fake_stdout_console, stdout_buffer = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)
@@ -151,7 +139,6 @@ def test_transient_spinner_never_writes_to_stdout(
 def test_transient_progress_advances_and_exits_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the progress bar accepts advances and exits without error."""
     fake_err_console, _ = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)
 
@@ -163,11 +150,9 @@ def test_transient_progress_advances_and_exits_cleanly(
 def test_transient_spinner_cleans_up_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure an exception inside the spinner block still stops it cleanly.
-
-    Rich's `Console.status()` always stops its live region in `__exit__`,
-    regardless of how the block exits. Proven here by successfully using
-    the same console again immediately afterward.
+    """Rich's `Console.status()` always stops its live region in `__exit__`,
+    regardless of how the block exits. Proven here by successfully using the
+    same console again immediately afterward.
     """
     fake_err_console, buffer = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)
@@ -184,7 +169,6 @@ def test_transient_spinner_cleans_up_on_exception(
 def test_transient_progress_cleans_up_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure an exception inside the progress block still stops it cleanly."""
     fake_err_console, buffer = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)
 
@@ -200,7 +184,6 @@ def test_transient_progress_cleans_up_on_exception(
 def test_transient_progress_cleans_up_on_keyboard_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure Ctrl+C during progress still restores the console cleanly."""
     fake_err_console, buffer = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)
 
@@ -216,13 +199,11 @@ def test_transient_progress_cleans_up_on_keyboard_interrupt(
 def test_two_sequential_progress_blocks_do_not_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure a progress block fully releases the console's live display.
-
-    Rich raises `LiveError` if two `Live` displays (which both `Status`
-    and `Progress` are built on) are active on the same console at once.
-    This proves the first block is fully torn down before the second
-    starts — the same guarantee that lets a confirmation prompt safely
-    follow a scan's progress bar.
+    """Rich raises `LiveError` if two `Live` displays (which both `Status` and
+    `Progress` are built on) are active on the same console at once. This proves
+    the first block is fully torn down before the second starts -- the same
+    guarantee that lets a confirmation prompt safely follow a scan's progress
+    bar.
     """
     fake_err_console, _ = _forced_terminal_console()
     monkeypatch.setattr(ui, "err_console", fake_err_console)

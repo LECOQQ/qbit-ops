@@ -1,11 +1,7 @@
 """Record the real HTTP endpoints `qbittorrentapi` sends to a real container.
 
-Distinguishes explicitly between the two layers item 11 of the phase
-spec calls out: `qbit-ops -> qbittorrent-api` method calls (visible as
-Python call sites) versus `qbittorrent-api -> Web API` HTTP requests
-(only visible here, by recording the real request path while it is
-still forwarded to the real disposable container -- never faked, only
-observed).
+Records the real request path while it is still forwarded to the
+disposable container -- never faked, only observed.
 """
 
 from __future__ import annotations

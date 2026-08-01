@@ -1,19 +1,12 @@
 """Manage qBittorrent trackers.
 
-Every tracker-facing surface in this project must route through the
-sanitization primitives defined here before rendering anything derived
-from a tracker announce URL or a tracker-provided message:
-`redact_tracker_identity` (scheme + host[:port], for mutation
-confirmation text), `normalize_tracker_host` (bare host[:port], the
-shared public identity used everywhere else), `describe_tracker_url` (a
-fuller structural breakdown for read-only inspection), and
-`sanitize_tracker_text` (strips URLs/userinfo out of free-form text such
-as upstream exception messages or qBittorrent-reported tracker
-messages). None of these ever rely on matching a specific configured
-password or a known passkey value -- sanitization here is always
-structural (strip anything shaped like a credential-bearing URL), never
-secret-value-specific, so it holds for credentials this project has
-never seen.
+Every tracker-facing surface must route through the sanitization
+primitives defined here (`redact_tracker_identity`,
+`normalize_tracker_host`, `describe_tracker_url`,
+`sanitize_tracker_text`) before rendering anything derived from a
+tracker announce URL or tracker-provided message. Sanitization is
+always structural (strip anything shaped like a credential-bearing
+URL), never specific to a known password or passkey value.
 """
 
 import re
@@ -33,23 +26,17 @@ from qbit_ops.qbit.fields import (
 
 TrackerMatchMode = Literal["exact", "without-query"]
 
-# Matches a scheme-prefixed URL (`https://...`, `udp://...`) up to the
-# next whitespace -- the primary shape a raw announce URL takes inside
-# an otherwise-safe message (e.g. an upstream connection-error string
-# that echoes the request URL it failed to reach).
+# Matches a scheme-prefixed URL (`https://...`, `udp://...`), the primary
+# shape a raw announce URL takes inside an otherwise-safe message.
 _URL_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://\S+")
 
-# Matches the same shape but percent-encoded (as it would appear inside
-# a qBittorrent Web API request URL that itself embeds a tracker
-# announce URL as a query value, e.g.
-# `.../addTrackers?urls=https%3A%2F%2Ftracker.example%2FSECRET`) --
-# an HTTP client's own exception text can echo this verbatim.
+# Matches the same shape percent-encoded, as an HTTP client's exception
+# text can echo a request URL that itself embeds a tracker announce URL.
 _PERCENT_ENCODED_URL_PATTERN = re.compile(r"[a-zA-Z0-9]*%3[Aa]%2[Ff]%2[Ff]\S+")
 
-# Matches a bare `userinfo@host[:port]` fragment with no scheme prefix
-# (e.g. a URL rendered without its scheme, or manually assembled error
-# text) -- deliberately narrower than a generic `\S+:\S+@\S+` so it
-# does not fire on ordinary prose containing a colon and an "@".
+# Matches a bare `userinfo@host[:port]` fragment with no scheme prefix,
+# narrower than a generic `\S+:\S+@\S+` so it doesn't fire on ordinary
+# prose containing a colon and an "@".
 _BARE_USERINFO_PATTERN = re.compile(
     r"\b[\w.%+-]+:[\w.%+-]+@[\w.-]+(?::\d+)?\S*"
 )
@@ -58,14 +45,8 @@ _BARE_USERINFO_PATTERN = re.compile(
 def sanitize_tracker_text(text: str) -> str:
     """Strip URLs, percent-encoded URLs, and bare userinfo from free text.
 
-    The single funnel for any free-form text that might embed a tracker
-    announce URL or credentials before it reaches a user: upstream
-    `qbittorrentapi`/HTTP-client exception messages, qBittorrent's own
-    tracker-reported `msg` field, and configuration error text (a
-    misconfigured `QBIT_HOST` can itself carry userinfo). Purely
-    structural -- it recognizes URL/userinfo *shape*, never a specific
-    password or passkey value, so it also redacts secrets this project
-    has never seen.
+    Purely structural -- recognizes URL/userinfo shape, never a
+    specific password or passkey value.
     """
     sanitized = _URL_PATTERN.sub("<redacted-url>", text)
     sanitized = _PERCENT_ENCODED_URL_PATTERN.sub("<redacted-url>", sanitized)
@@ -77,16 +58,10 @@ def sanitize_tracker_text(text: str) -> str:
 class SafeTrackerIdentity:
     """A tracker announce URL reduced to secret-free structural fields.
 
-    `identity` is always the shared public identity (`host` or
-    `host:port`, `normalize_tracker_host`'s output) or, for a DHT/PeX/LSD
-    pseudo-tracker, its bracketed label (`DHT`/`PeX`/`LSD`) with
-    `scheme`/`host`/`port` left `None`. `path_shape` never reveals path
-    content: every non-empty segment becomes a uniform `<secret>`
-    placeholder -- a segment is never allowlisted as safe merely because
-    it looks like a conventional literal (`announce`, `scrape`), since
-    qbit-ops cannot reliably distinguish a fixed path element from a
-    secret one. `query_keys` carries parameter *names* only, never
-    values.
+    `path_shape` never reveals path content: every non-empty segment
+    becomes a uniform `<secret>` placeholder, since qbit-ops cannot
+    reliably distinguish a fixed path element from a secret one.
+    `query_keys` carries parameter names only, never values.
     """
 
     identity: str
@@ -104,12 +79,9 @@ def describe_tracker_url(url: str) -> SafeTrackerIdentity:
     """Reduce a tracker announce URL to a `SafeTrackerIdentity`.
 
     Handles qBittorrent's DHT/PeX/LSD pseudo-tracker markers (e.g.
-    `"** [DHT] **"`) specially -- they are not URLs and
-    `normalize_tracker_host` cannot parse them. A malformed or otherwise
-    unparsable value degrades to `identity="unknown"` with every other
-    field `None`/empty rather than raising: this function exists to make
-    safe rendering possible even for data qbit-ops cannot fully make
-    sense of.
+    `"** [DHT] **"`) specially. A malformed or unparsable value degrades
+    to `identity="unknown"` with every other field `None`/empty, rather
+    than raising.
     """
     stripped = url.strip()
 
@@ -175,13 +147,7 @@ def describe_tracker_url(url: str) -> SafeTrackerIdentity:
 
 
 class TrackerHealth(StrEnum):
-    """Classify the health of one tracker endpoint or aggregate.
-
-    Shared between `inspect_tracker` (per-endpoint) and
-    `qbit_ops.features.tracker_status` (per-endpoint and aggregated) so the two
-    read-only tracker views can never disagree about what a raw status
-    code means.
-    """
+    """Classify the health of one tracker endpoint or aggregate."""
 
     HEALTHY = "healthy"
     WARNING = "warning"
@@ -191,15 +157,10 @@ class TrackerHealth(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-# Maps qBittorrent's real `TrackerStatus` int codes (see
-# `qbittorrentapi.definitions.TrackerStatus`) to a `TrackerHealth`.
-# UPDATING is treated as HEALTHY, not WARNING: it means an announce is
-# actively in flight, the most transient state qBittorrent reports, and a
-# normal working instance can be caught mid-announce at any moment --
-# scoring it WARNING would make a healthy instance flap between exit
-# codes 0 and 1 for no operational reason. NOT_CONTACTED is WARNING
-# rather than UNKNOWN: it is a recognized, well-understood state (no
-# announce attempted yet), just not yet a confirmed-good one.
+# Maps qBittorrent's `TrackerStatus` int codes to a `TrackerHealth`.
+# UPDATING -> HEALTHY (not WARNING): an announce in flight is transient
+# and a healthy instance can be caught mid-announce at any moment.
+# NOT_CONTACTED -> WARNING (not UNKNOWN): a recognized, expected state.
 _RAW_STATUS_HEALTH: dict[int, TrackerHealth] = {
     0: TrackerHealth.DISABLED,  # DISABLED
     1: TrackerHealth.WARNING,  # NOT_CONTACTED
@@ -216,12 +177,9 @@ def classify_raw_tracker_status(
 ) -> tuple[TrackerHealth, bool | None]:
     """Map one raw qBittorrent tracker status to `(health, enabled)`.
 
-    `enabled` is `False` only when the endpoint is confirmed disabled,
-    `True` when it is confirmed active (any of the six non-disabled
-    codes), and `None` when the raw value could not be classified at
-    all -- never guessed. Unrecognized or unparsable values map to
-    `TrackerHealth.UNKNOWN` rather than inventing a severity: qbit-ops
-    only claims certainty it actually has.
+    `enabled` is `None` when the raw value could not be classified at
+    all -- never guessed. Unrecognized values map to
+    `TrackerHealth.UNKNOWN` rather than inventing a severity.
     """
     if isinstance(raw_status, str) and raw_status.strip().lower() == "disabled":
         return TrackerHealth.DISABLED, False
@@ -248,26 +206,11 @@ def compute_tracker_aggregate_health(
 ) -> TrackerHealth:
     """Compute one tracker identity's aggregate health from endpoint counts.
 
-    Shared by `qbit_ops.features.tracker_status.collect_tracker_status`
-    (aggregating across torrents for one tracker identity) and
-    `qbit_ops.features.explain`
-    (aggregating one torrent's own tracker endpoints) so both agree on
-    what a mix of endpoint healths means.
-
-    Precedence, evaluated in order (disabled endpoints are excluded from
-    every comparison below -- an intentionally-disabled tracker must
-    never push a working tracker's health toward WARNING/CRITICAL):
-
-    1. No enabled (non-disabled) endpoints at all -> DISABLED: every
-       observation for this identity was an intentional disable.
-    2. Every enabled endpoint is CRITICAL -> CRITICAL: a mixed
-       critical/healthy identity is WARNING, not CRITICAL -- one failing
-       endpoint must never drown out others that are working.
-    3. Every enabled endpoint is HEALTHY -> HEALTHY.
-    4. Every enabled endpoint is UNKNOWN -> UNKNOWN: nothing classifiable
-       was observed, so no stronger claim is made.
-    5. Otherwise -> WARNING: a genuine mix (e.g. some healthy, some
-       failing, or some unknown) is a degraded-but-not-fatal condition.
+    Disabled endpoints are excluded from every comparison, so an
+    intentionally-disabled tracker never pushes a working tracker's
+    health toward WARNING/CRITICAL. All-CRITICAL -> CRITICAL; a mixed
+    critical/healthy set is WARNING, not CRITICAL, so one failing
+    endpoint never drowns out others that are working.
     """
     enabled_total = healthy + warning + critical + unknown
     if enabled_total == 0:
@@ -291,12 +234,7 @@ class TrackerAdditionChange:
 
 @dataclass(frozen=True)
 class TrackerAdditionPlan:
-    """Plan for `add_tracker_if_source_present`.
-
-    `changes` and `already_had_target` are collected unconditionally so
-    the CLI can render a full confirmation preview regardless of
-    `--verbose`.
-    """
+    """Plan for `add_tracker_if_source_present`."""
 
     source_tracker: str
     target_tracker: str
@@ -371,11 +309,9 @@ class TrackerReplacementPlan:
 class PasskeyReplacementChange:
     """One torrent's passkey update.
 
-    `stale_urls` (old URL -> new URL, with the new passkey embedded) is
-    required by `apply_tracker_passkey_replacement` but must never be
-    rendered: `repr=False` keeps it out of default dataclass repr/logging,
-    and callers must only use `stale_url_count` for any user-facing
-    preview or summary.
+    `stale_urls` embeds the new passkey and must never be rendered:
+    `repr=False` keeps it out of default dataclass repr/logging.
+    Callers must use `stale_url_count` for any user-facing preview.
     """
 
     hash: str
@@ -389,8 +325,7 @@ class PasskeyReplacementPlan:
     """Plan for `replace_tracker_passkey`.
 
     Never carries the raw new passkey or new URLs outside of each
-    change's `stale_urls` (see `PasskeyReplacementChange`); the tracker
-    template itself does not contain the passkey value.
+    change's `stale_urls` (see `PasskeyReplacementChange`).
     """
 
     tracker_template: str
@@ -408,18 +343,11 @@ class PasskeyReplacementPlan:
 def redact_tracker_identity(url: str) -> str:
     """Return a tracker URL reduced to scheme and host[:port] for safe display.
 
-    Private trackers commonly embed a passkey or other per-user secret
-    in the path (e.g. `/announce/<passkey>`) or the query string (e.g.
-    `?passkey=<value>`). Guessing which path segment is secret is
-    unreliable, so any tracker identity shown in a confirmation prompt
-    or preview is reduced to scheme + host[:port] only; the raw URL is
-    still used for the actual API calls.
-
-    Deliberately rebuilds `host[:port]` from `urlsplit().hostname`/`.port`
-    rather than using `.netloc` directly: `.netloc` includes any
-    userinfo (`user:pass@host`), which a tracker URL can carry, and
-    which must never reach a confirmation prompt regardless of whether
-    it happens to match the configured qBittorrent password.
+    Private trackers commonly embed a passkey in the path or query
+    string, and guessing which segment is secret is unreliable, so any
+    identity shown in a prompt or preview is reduced to scheme +
+    host[:port]. Rebuilds from `.hostname`/`.port` rather than
+    `.netloc`, which would include userinfo (`user:pass@host`).
     """
     parsed = urlsplit(url.strip())
     host = (parsed.hostname or "").lower()
@@ -432,31 +360,12 @@ def redact_tracker_identity(url: str) -> str:
 def normalize_tracker_host(value: str) -> str:
     """Normalize a tracker filter value to a bare `host` or `host:port`.
 
-    Used by the torrent-filter pipeline's `--tracker` option, which is
-    deliberately hostname-oriented rather than full-URL: a private
-    tracker's announce URL commonly embeds a passkey in its path or
-    query string, and a public filter must never require or display one
-    (see `redact_tracker_identity` above for the same reasoning applied
-    to mutation previews). Accepts either a bare host (`tracker.example`,
-    `tracker.example:6969`) or a full announce URL
-    (`https://tracker.example:6969/announce/PASSKEY`) and extracts only
-    the host and port from either form — the scheme, path, and query
-    string (where a passkey would live) are always discarded and never
-    reach a match, a log, or rendered output.
-
-    Also the tracker-identity function for
-    `qbit_ops.features.tracker_status`, so
-    `trackers status`'s aggregate identities and `--tracker` on any
-    command always agree on what "the same tracker" means. Deliberately
-    does not collapse a scheme's default port (`https://host:443` stays
-    `host:443`, distinct from `host`): the port is taken verbatim from
-    whatever the caller or qBittorrent supplied, matching this
-    function's existing, tested behavior (see `test_torrents.py`) rather
-    than inventing a second, scheme-aware notion of "the same host" that
-    could disagree with it. Does not accept qBittorrent's DHT/PeX/LSD
-    pseudo-tracker markers (e.g. `"** [DHT] **"`) — callers must filter
-    those out first, since they have no netloc to parse and this
-    function raises on them.
+    Accepts either a bare host or a full announce URL and extracts only
+    the host and port; scheme, path, and query string (where a passkey
+    would live) are always discarded. Does not collapse a scheme's
+    default port (`https://host:443` stays `host:443`, distinct from
+    `host`). Does not accept qBittorrent's DHT/PeX/LSD pseudo-tracker
+    markers (e.g. `"** [DHT] **"`) -- callers must filter those out first.
     """
     stripped = value.strip()
     parseable = stripped if "://" in stripped else f"//{stripped}"
@@ -519,10 +428,7 @@ def has_tracker(
 def has_tracker_host(tracker_urls: list[str], normalized_host: str) -> bool:
     """Return whether any tracker URL's host[:port] matches a normalized host.
 
-    `normalized_host` must already be the output of
-    `normalize_tracker_host` (the torrent-filter pipeline normalizes the
-    `--tracker` filter value once, up front); each candidate URL is
-    normalized the same way before comparison.
+    `normalized_host` must already be `normalize_tracker_host`'s output.
     """
     return any(
         normalize_tracker_host(url) == normalized_host for url in tracker_urls
@@ -536,19 +442,10 @@ def list_tracker_usage(
 ) -> dict[str, int]:
     """List normalized-but-raw trackers and count torrents using each one.
 
-    Deliberately **not** safe for display: `match_mode="exact"` (the
-    default) preserves the full announce URL's query string, so a
-    result key can still carry a passkey. This exists only to back
-    `backup export`'s `tracker_usage` field -- the project's dedicated
-    restorable-backup artifact, which legitimately needs raw tracker
-    data (see docs/DECISIONS.md). No CLI command renders this
-    function's output directly; `trackers list` uses
-    `qbit_ops.features.tracker_status.collect_tracker_status` instead,
-    which is safe by construction.
-
-    Calls `client.torrents_trackers()` once per torrent, so
-    `on_progress(completed, total)` reports real, known progress through
-    that per-torrent work.
+    Deliberately not safe for display: with `match_mode="exact"` a
+    result key can still carry a passkey. Exists only to back `backup
+    export`'s `tracker_usage` field; no CLI command renders this
+    directly.
     """
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
@@ -589,22 +486,10 @@ def inspect_tracker(
 ) -> dict[str, Any]:
     """List torrents using a tracker, matched by normalized host[:port].
 
-    Read-only, so unlike the mutating tracker commands this never needs
-    qBittorrent's literal stored URL to act on -- matching is always by
-    `normalize_tracker_host` identity, the same one `trackers status`
-    and `torrents list --tracker` use, and there is no `--match` mode to
-    choose. Every endpoint reported is reduced to secret-free structural
-    fields (`SafeTrackerIdentity`, `TrackerHealth`) -- a full announce
-    URL is never present in the returned data, so it can never reach a
-    table, JSON, JSONL, or CSV render. Considers every tracker entry,
-    including disabled ones (so a disabled matching endpoint is still
-    reported, with `enabled: false`), unlike `active_tracker_count`
-    (context only, unrelated to the match) which still counts active
-    endpoints alone.
-
-    Calls `client.torrents_trackers()` once per scanned torrent, so
-    `on_progress(completed, total)` reports real, known progress through
-    that per-torrent work.
+    Every endpoint reported is reduced to secret-free structural fields
+    (`SafeTrackerIdentity`, `TrackerHealth`) -- a full announce URL
+    never reaches the returned data. Considers every tracker entry,
+    including disabled ones.
     """
     normalized_identity = describe_tracker_url(tracker).identity
     all_torrents = list(client.torrents_info())
@@ -677,17 +562,9 @@ def export_tracker_state(
 ) -> dict[str, Any]:
     """Export normalized tracker identities for every torrent.
 
-    Safe by default: every torrent's trackers are reduced to
-    `host[:port]` identities (`describe_tracker_url`), never a full
-    announce URL or passkey. DHT/PeX/LSD pseudo-trackers and otherwise
-    unparsable entries are excluded (`describe_tracker_url(...).host is
-    None` for both). This is distinct from `backup export`, which is
-    this project's dedicated restorable-backup artifact and
-    legitimately carries raw announce URLs -- see docs/DECISIONS.md.
-
-    Calls `client.torrents_trackers()` once per torrent, so
-    `on_progress(completed, total)` reports real, known progress through
-    that per-torrent work.
+    Safe by default: trackers are reduced to `host[:port]` identities,
+    never a full announce URL or passkey. Distinct from `backup export`,
+    which legitimately carries raw announce URLs.
     """
     all_torrents = list(client.torrents_info())
     total = len(all_torrents)
@@ -1102,16 +979,10 @@ def plan_tracker_passkey_replacement(
     """Plan replacing a tracker's passkey on every torrent using it.
 
     The tracker template locates the passkey with a literal
-    '{passkey}' placeholder, either as a query parameter value
-    (e.g. '?passkey={passkey}') or as a full path segment
-    (e.g. '/announce/{passkey}'). Torrents are matched on the
-    tracker's fixed host/path shape, so the caller does not need to
-    know each torrent's current passkey value.
-
-    Neither `tracker_template` nor the returned plan's summary fields
-    ever carry `new_passkey`; it only ever appears inside each change's
-    `stale_urls`, which callers must never render (see
-    `PasskeyReplacementChange`).
+    '{passkey}' placeholder, either as a query parameter value or a
+    full path segment. Neither `tracker_template` nor the plan's
+    summary fields carry `new_passkey`; it only appears inside each
+    change's `stale_urls` (see `PasskeyReplacementChange`).
     """
     scheme, netloc, mode, position = _parse_passkey_template(tracker_template)
     template_path_segments = (

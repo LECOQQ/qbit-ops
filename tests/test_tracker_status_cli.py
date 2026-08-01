@@ -47,7 +47,6 @@ def _client_with_mixed_health() -> FakeQbitClient:
 def test_status_unfiltered_reports_every_tracker(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an unfiltered run reports every tracker identity."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(app, ["trackers", "status", "--format", "json"])
@@ -60,7 +59,6 @@ def test_status_unfiltered_reports_every_tracker(
 def test_status_category_filter_narrows_the_scan(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure `--category` restricts which torrents get scanned."""
     client = _client_with_mixed_health()
     configure_qbit_backend(client=client)
 
@@ -74,7 +72,6 @@ def test_status_category_filter_narrows_the_scan(
 
 
 def test_status_state_filter(runner: CliRunner, configure_qbit_backend) -> None:
-    """Ensure `--state` restricts the selection."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(
@@ -88,7 +85,6 @@ def test_status_state_filter(runner: CliRunner, configure_qbit_backend) -> None:
 def test_status_combined_filters_use_and(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure combining --category and --state applies both (AND)."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(
@@ -113,7 +109,6 @@ def test_status_combined_filters_use_and(
 def test_status_tracker_filter_normalizes_a_full_url(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure `--tracker` accepts a full URL and normalizes it to host."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(
@@ -135,7 +130,6 @@ def test_status_tracker_filter_normalizes_a_full_url(
 def test_status_rejects_completed_and_incomplete_together(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a locally-provable contradiction fails before any API call."""
     client = _client_with_mixed_health()
     configure_qbit_backend(client=client)
 
@@ -151,14 +145,12 @@ def test_status_rejects_completed_and_incomplete_together(
 
 
 def test_status_table_output(runner: CliRunner, configure_qbit_backend) -> None:
-    """Ensure table output renders the documented columns and both trackers.
-
-    Nine columns wrap the `Tracker` identity across lines at CliRunner's
-    narrow default width, interleaving other cells' text between the
-    wrapped fragments -- a plain substring check on the raw table would
-    be unreliable, so this checks for the (unambiguous, non-wrapping)
-    per-tracker health words instead; `test_status_json_...` already
-    pins down the exact identity strings.
+    """Nine columns wrap the `Tracker` identity across lines at CliRunner's
+    narrow default width, interleaving other cells' text between the wrapped
+    fragments -- a plain substring check on the raw table would be
+    unreliable, so this checks for the (unambiguous, non-wrapping) per-
+    tracker health words instead; `test_status_json_...` already pins down
+    the exact identity strings.
     """
     configure_qbit_backend(client=_client_with_mixed_health())
 
@@ -172,7 +164,6 @@ def test_status_table_output(runner: CliRunner, configure_qbit_backend) -> None:
 def test_status_json_is_valid_and_matches_documented_schema(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure --format json is valid and has every documented field."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(app, ["trackers", "status", "--format", "json"])
@@ -206,7 +197,6 @@ def test_status_json_is_valid_and_matches_documented_schema(
 def test_status_jsonl_is_one_line_with_the_same_schema_as_json(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure jsonl is exactly one line, identical schema to json."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     json_result = runner.invoke(app, ["trackers", "status", "--format", "json"])
@@ -229,7 +219,6 @@ def test_status_jsonl_is_one_line_with_the_same_schema_as_json(
 def test_status_csv_has_the_documented_columns(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure --format csv has the exact documented column set, no message."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(app, ["trackers", "status", "--format", "csv"])
@@ -252,7 +241,6 @@ def test_status_csv_has_the_documented_columns(
 def test_status_machine_readable_success_is_silent_on_stderr(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a successful json/jsonl/csv run prints nothing on stderr."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     for fmt in ("json", "jsonl", "csv"):
@@ -266,7 +254,6 @@ def test_status_machine_readable_success_is_silent_on_stderr(
 def test_status_exit_code_healthy(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an all-healthy report exits 0."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A, name="A")],
         trackers_by_hash={
@@ -285,7 +272,6 @@ def test_status_exit_code_healthy(
 def test_status_exit_code_warning(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a mixed healthy/failing report exits 1."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=TORRENT_A, name="A"),
@@ -310,7 +296,6 @@ def test_status_exit_code_warning(
 def test_status_exit_code_critical(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure an all-failing tracker exits 2."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A, name="A")],
         trackers_by_hash={
@@ -329,7 +314,6 @@ def test_status_exit_code_critical(
 def test_status_exit_code_unavailable(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure total tracker-collection failure exits 3."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A, name="A")],
         tracker_error_hashes={TORRENT_A},
@@ -344,7 +328,6 @@ def test_status_exit_code_unavailable(
 def test_status_empty_selection_exits_healthy_not_no_match(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure a filter matching nothing exits 0 (healthy), not 2."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(
@@ -360,7 +343,6 @@ def test_status_empty_selection_exits_healthy_not_no_match(
 def test_trackers_health_no_longer_exists(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure `trackers health` was removed, not kept alongside `status`."""
     configure_qbit_backend(client=_client_with_mixed_health())
 
     result = runner.invoke(app, ["trackers", "health"])
@@ -370,7 +352,6 @@ def test_trackers_health_no_longer_exists(
 
 
 def test_trackers_status_appears_in_generated_help(runner: CliRunner) -> None:
-    """Ensure generated --help lists `status` as a subcommand, not `health`."""
     result = runner.invoke(app, ["trackers", "--help"])
 
     command_names = {
@@ -388,7 +369,6 @@ def test_trackers_status_appears_in_generated_help(runner: CliRunner) -> None:
 def test_status_never_renders_a_full_tracker_url_or_passkey(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Ensure no output format ever renders a full announce URL or passkey."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_A, name="A")],
         trackers_by_hash={

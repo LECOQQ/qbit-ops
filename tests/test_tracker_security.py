@@ -595,7 +595,8 @@ def test_trackers_export_has_no_sensitive_opt_in_flag(
 ) -> None:
     """Item 28 (negative): there is no `--include-sensitive` escape hatch on
     `trackers export` -- the raw-export use case is served by `backup
-    export` instead (see docs/DECISIONS.md), so no such flag was added."""
+    export` instead, so no such flag was added.
+    """
     result = runner.invoke(app, ["trackers", "export", "--help"])
 
     assert "--include-sensitive" not in result.output

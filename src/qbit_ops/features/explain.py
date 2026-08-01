@@ -1,21 +1,11 @@
 """Build deterministic, evidence-based explanations for one torrent or tracker.
 
-This is the `explain` "service": read-only, and free of Typer and Rich
-(mirroring `qbit_ops.features.status`/`qbit_ops.features.doctor`/
-`qbit_ops.features.tracker_status`'s collection/render split). Every
-finding comes from a small, explicit rule catalogue evaluated over
-already-classified data (`qbit_ops.shared.torrent_states` groups,
-`qbit_ops.features.trackers.TrackerHealth`) -- there is no generic rule
-engine and no confidence scoring. A finding never claims a cause the
-collected evidence does not support; when qbit-ops cannot classify
-something, it says so via `ExplanationSeverity.UNKNOWN` or an explicit
-limitation rather than guessing.
-
-Tracker-derived evidence (identities, messages) is always the same
-secret-free structural data
-`qbit_ops.features.trackers`/`qbit_ops.features.tracker_status` already
-produce -- a raw announce URL or credential is never collected here,
-let alone rendered.
+Every finding comes from a small, explicit rule catalogue evaluated
+over already-classified data -- no generic rule engine, no confidence
+scoring. When qbit-ops cannot classify something, it says so via
+`ExplanationSeverity.UNKNOWN` or an explicit limitation rather than
+guessing. Tracker-derived evidence is always the same secret-free
+structural data `qbit_ops.features.trackers` produces.
 """
 
 from __future__ import annotations
@@ -162,19 +152,12 @@ def explain_torrent(
     """Explain one torrent's current state using deterministic evidence.
 
     Bounded to `torrents_info()` once, then at most one
-    `torrents_trackers()` call for the resolved torrent -- the same
-    budget `torrents inspect --hash` uses; no other torrent's trackers
-    are ever scanned. Returns `None` when nothing matches (mirrors
-    `qbit_ops.features.torrents.inspect_torrent`); propagates
-    `AmbiguousTorrentHashError`/`InvalidTorrentSelectorError` so the
-    caller can present candidates instead of guessing.
-
-    Fetches, then delegates every actual rule-evaluation decision to
-    `build_torrent_explanation` -- the pure builder is the single
-    catalogue; this function's only job is the ambiguity-aware hash
-    resolution a bare hash string requires (a TUI caller that already
-    has one exact, already-focused torrent skips straight to the
-    builder -- see `qbit_ops.tui.state`).
+    `torrents_trackers()` call for the resolved torrent. Returns `None`
+    when nothing matches; propagates `AmbiguousTorrentHashError`/
+    `InvalidTorrentSelectorError` so the caller can present candidates
+    instead of guessing. Resolves the hash, then delegates every
+    rule-evaluation decision to `build_torrent_explanation` -- the pure
+    builder is the single catalogue.
     """
     all_torrents = list(client.torrents_info())
 
@@ -210,15 +193,11 @@ def build_torrent_explanation(
 
     The single rule catalogue behind `explain_torrent`: takes an
     already-fetched raw `torrents_info()` item and already-computed safe
-    tracker details
-    (`qbit_ops.features.torrents.get_safe_tracker_details`'s output, or
-    `None` when a `torrents_trackers()` attempt failed or was never
-    made) and evaluates exactly the same findings `explain_torrent`
-    would for the same torrent -- there is no second, TUI-only
-    explanation catalogue. `None` and `[]` are deliberately distinct:
-    `None` means tracker data could not be obtained at all (an explicit
-    limitation is attached); `[]` means it was obtained and the torrent
-    simply has no tracker endpoints.
+    tracker details, evaluating the same findings for any caller
+    (there is no second, TUI-only catalogue). `None` and `[]` are
+    deliberately distinct: `None` means tracker data could not be
+    obtained (an explicit limitation is attached); `[]` means it was
+    obtained and the torrent has no tracker endpoints.
     """
     resolved = ResolvedTorrent(
         hash=get_field_as_string(torrent_item, "hash"),
@@ -370,11 +349,8 @@ def _build_torrent_finding(
         {
             endpoint["tracker"]
             for endpoint in endpoints
-            # `scheme is None` marks a DHT/PeX/LSD pseudo-tracker or an
-            # otherwise-unparsable identity (`describe_tracker_url`) --
-            # `trackers status --tracker <identity>` cannot look either
-            # up (it excludes pseudo-trackers from its report entirely),
-            # so a suggested command must never name one.
+            # `scheme is None` marks a pseudo-tracker or unparsable
+            # identity, which `trackers status --tracker` can't look up.
             if endpoint["scheme"] is not None
             and endpoint["health"]
             in (TrackerHealth.CRITICAL.value, TrackerHealth.UNKNOWN.value)
@@ -619,16 +595,11 @@ def explain_tracker(
 ) -> ExplanationReport | None:
     """Explain one tracker's aggregate health using deterministic evidence.
 
-    Reuses `qbit_ops.features.tracker_status.collect_tracker_status`
-    unscoped by any cheap filter, restricted afterward to the requested
-    identity -- the same bounded pattern (`torrents_info()` once, at most one
-    `torrents_trackers()` call per surviving torrent) `trackers status`
-    already uses; this never performs a second collection pass. Returns
-    `None` when qBittorrent reported no observation at all for the
-    requested identity (nothing to explain) -- deliberately distinct
-    from `trackers status --tracker`'s empty-selection-is-healthy
-    convention, since this command exists specifically to explain one
-    named tracker (see docs/DECISIONS.md).
+    Reuses `qbit_ops.features.tracker_status.collect_tracker_status`,
+    restricted afterward to the requested identity -- never a second
+    collection pass. Returns `None` when qBittorrent reported no
+    observation for the requested identity, deliberately distinct from
+    `trackers status --tracker`'s empty-selection-is-healthy convention.
     """
     filters = build_torrent_filter(tracker=tracker)
     report = collect_tracker_status(client, filters, on_progress=on_progress)

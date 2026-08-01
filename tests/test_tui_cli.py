@@ -61,16 +61,14 @@ def test_tui_missing_extra_fails_before_creating_a_client(
     assert "Traceback" not in result.stderr
     # The remediation must not suggest a bare "pipx install qbit-ops[tui]"
     # as something to actually run -- qbit-ops is not on PyPI, and that
-    # exact command was reported to fail in practice (see
-    # docs/DECISIONS.md, 2026-07-25 "pipx install qbit-ops[tui] échoue").
+    # exact command was reported to fail in practice.
     assert "not published on PyPI" in result.stderr
     assert 'pipx install ".[tui]"' in result.stderr
     # Deliberately no literal URL in the message: `print_error()` runs
     # every message through `sanitize_tracker_text()` unconditionally,
     # which redacts any URL-shaped text on sight -- a real clone URL
     # here would silently become "<redacted-url>", defeating the
-    # remediation (found via packaging verification, see
-    # docs/DECISIONS.md, worker-hardening phase).
+    # remediation (found via packaging verification).
     assert "redacted" not in result.stderr.lower()
     assert "README.md" in result.stderr
 

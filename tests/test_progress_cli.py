@@ -1,11 +1,11 @@
 """Test transient progress feedback at the CLI level.
 
-Covers the read-only and mutation command wiring introduced alongside
-`qbit_ops.cli.rendering.progress_enabled`/`transient_spinner`/`transient_progress`:
-interactive table mode shows progress, machine-readable/non-interactive
-modes stay silent, progress uses a real known total where the domain
-does one API call per item, and progress never changes mutation
-outcomes, exit codes, or the plan/apply invariant.
+Covers the read-only and mutation command wiring introduced alongside `qbit_ops.
+cli.rendering.progress_enabled`/`transient_spinner`/`transient_progress`:
+interactive table mode shows progress, machine-readable/non-interactive modes
+stay silent, progress uses a real known total where the domain does one API call
+per item, and progress never changes mutation outcomes, exit codes, or the
+plan/apply invariant.
 """
 
 from collections.abc import Generator
@@ -83,13 +83,10 @@ def test_torrents_list_unfiltered_uses_a_spinner_not_a_progress_bar(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure unfiltered `torrents list` never drives a progress bar.
-
-    Since this phase, a filter-less (or non-tracker-filtered) listing
-    never calls `torrents_trackers()`, so there is nothing with a real
-    per-item total to report -- it uses a spinner instead (see
-    `test_progress.py` and docs/COMMANDS.md, "Progress & Spinner
-    Behavior").
+    """A filter-less (or non-tracker-filtered) listing never calls
+    `torrents_trackers()`, so there is nothing with a real per-item total to
+    report -- it uses a spinner instead (see `test_progress.py` and
+    docs/COMMANDS.md, "Progress & Spinner Behavior").
     """
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
@@ -106,7 +103,6 @@ def test_torrents_list_with_tracker_filter_enables_configured_progress(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `torrents list --tracker ...` still drives a real progress bar."""
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     configure_qbit_backend(client=_client_with_torrents(5))
@@ -125,7 +121,6 @@ def test_torrents_list_json_emits_no_stderr(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the same command in --format json stays silent on stderr."""
     _make_interactive(monkeypatch)
     configure_qbit_backend(client=_client_with_torrents(5))
 
@@ -140,7 +135,6 @@ def test_trackers_status_progress_uses_the_real_torrent_total(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure tracker-status progress reports the real scanned total."""
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     configure_qbit_backend(client=_client_with_torrents(7))
@@ -156,7 +150,6 @@ def test_unsupported_format_fails_before_any_progress(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure an unsupported --format fails before progress or an API call."""
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     client = _client_with_torrents(3)
@@ -184,7 +177,6 @@ def test_read_only_command_non_interactive_emits_no_stderr(
     configure_qbit_backend,
     argv: list[str],
 ) -> None:
-    """Ensure non-interactive (CliRunner's default) execution stays silent."""
     configure_qbit_backend(client=_client_with_torrents(3))
 
     result = runner.invoke(app, argv)
@@ -200,7 +192,6 @@ def test_mutation_planning_enables_transient_progress(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure mutation planning drives progress on a real TTY."""
     _make_interactive(monkeypatch)
     calls = _spy_on_progress_calls(monkeypatch)
     client = FakeQbitClient(
@@ -227,7 +218,6 @@ def test_progress_never_causes_an_additional_scan(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure enabling progress does not add an extra torrents_info() call."""
     _make_interactive(monkeypatch)
     _spy_on_progress_calls(monkeypatch)
     client = FakeQbitClient(
@@ -260,7 +250,6 @@ def test_no_match_still_reports_no_match_regardless_of_progress(
     monkeypatch: pytest.MonkeyPatch,
     interactive: bool,
 ) -> None:
-    """Ensure progress never changes the NO_MATCH mutation outcome."""
     monkeypatch.setattr(m, "is_interactive_terminal", lambda: interactive)
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, name="T1")],
@@ -293,7 +282,6 @@ def test_no_changes_still_reports_no_changes(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure progress never changes the NO_CHANGES mutation outcome."""
     _make_interactive(monkeypatch)
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, state="uploading")],
@@ -313,7 +301,6 @@ def test_dry_run_still_reports_preview(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure progress never changes the PREVIEW mutation outcome."""
     _make_interactive(monkeypatch)
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, name="T1")],
@@ -340,7 +327,6 @@ def test_accepted_execution_still_reports_applied(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure progress never changes the APPLIED mutation outcome."""
     _make_interactive(monkeypatch)
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, name="T1")],
@@ -376,7 +362,6 @@ def test_declined_confirmation_still_reports_cancelled(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure progress is stopped before the prompt, and CANCELLED holds."""
     _make_interactive(monkeypatch)
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, name="T1")],
@@ -410,10 +395,8 @@ def test_mutation_plan_is_built_once_and_reused_for_apply(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the same plan drives both the preview and the real apply.
-
-    A regression here would show up as a second `torrents_info()` call
-    (a rescan) between the confirmation prompt and the actual mutation.
+    """A regression here would show up as a second `torrents_info()` call (a
+    rescan) between the confirmation prompt and the actual mutation.
     """
     _make_interactive(monkeypatch)
     client = FakeQbitClient(

@@ -20,7 +20,6 @@ TORRENTS = [
 
 
 def test_resolve_torrent_hash_matches_full_lowercase_hash() -> None:
-    """Ensure a complete lowercase hash resolves directly."""
     resolved = resolve_torrent_hash(TORRENTS, "zz00112233ff")
 
     assert resolved == ResolvedTorrent(
@@ -30,7 +29,6 @@ def test_resolve_torrent_hash_matches_full_lowercase_hash() -> None:
 
 
 def test_resolve_torrent_hash_matches_full_hash_case_insensitively() -> None:
-    """Ensure an uppercase selector resolves the same lowercase hash."""
     resolved = resolve_torrent_hash(TORRENTS, "ZZ00112233FF")
 
     assert resolved.hash == "zz00112233ff"
@@ -38,26 +36,22 @@ def test_resolve_torrent_hash_matches_full_hash_case_insensitively() -> None:
 
 
 def test_resolve_torrent_hash_matches_unique_prefix() -> None:
-    """Ensure an unambiguous prefix resolves to its single match."""
     resolved = resolve_torrent_hash(TORRENTS, "zz0011")
 
     assert resolved.hash == "zz00112233ff"
 
 
 def test_resolve_torrent_hash_rejects_empty_selector() -> None:
-    """Ensure an empty selector fails validation before any matching."""
     with pytest.raises(InvalidTorrentSelectorError):
         resolve_torrent_hash(TORRENTS, "   ")
 
 
 def test_resolve_torrent_hash_rejects_empty_selector_as_value_error() -> None:
-    """Ensure the empty-selector error is also catchable as ValueError."""
     with pytest.raises(ValueError):
         resolve_torrent_hash(TORRENTS, "")
 
 
 def test_resolve_torrent_hash_raises_not_found_for_no_match() -> None:
-    """Ensure a selector matching nothing raises TorrentNotFoundError."""
     with pytest.raises(TorrentNotFoundError) as excinfo:
         resolve_torrent_hash(TORRENTS, "doesnotexist")
 
@@ -65,7 +59,6 @@ def test_resolve_torrent_hash_raises_not_found_for_no_match() -> None:
 
 
 def test_resolve_torrent_hash_raises_ambiguous_for_shared_prefix() -> None:
-    """Ensure a shared prefix raises with every matching candidate."""
     with pytest.raises(AmbiguousTorrentHashError) as excinfo:
         resolve_torrent_hash(TORRENTS, "abc")
 
@@ -79,7 +72,6 @@ def test_resolve_torrent_hash_raises_ambiguous_for_shared_prefix() -> None:
 
 
 def test_resolve_torrent_hash_ambiguous_candidates_are_deterministic() -> None:
-    """Ensure ambiguous candidates are sorted the same way every time."""
     reversed_torrents = list(reversed(TORRENTS))
 
     with pytest.raises(AmbiguousTorrentHashError) as first:
@@ -103,7 +95,6 @@ class _AttributeTorrent:
 
 
 def test_resolve_torrent_hash_supports_attribute_based_objects() -> None:
-    """Ensure the resolver reuses the shared safe field-access helpers."""
     attribute_torrents = [
         _AttributeTorrent(hash="feedface0001", name="Attribute torrent"),
     ]

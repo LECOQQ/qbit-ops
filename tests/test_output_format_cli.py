@@ -1,10 +1,9 @@
 """Test the shared `--format` option across every read-only command.
 
-Phase 2.1 consistency pass: `--output` was removed everywhere in favor of
-one `--format table|json|jsonl|csv` option. `FORMAT_SUPPORT` in
-`qbit_ops/main.py` is the single source of truth for which formats each
-command actually supports; these tests parametrize over that same table
-so the implementation, its validation, and its tests cannot drift apart.
+`FORMAT_SUPPORT` in `qbit_ops/main.py` is the single source of truth for
+which formats each command actually supports; these tests parametrize
+over that same table so the implementation, its validation, and its
+tests cannot drift apart.
 """
 
 import csv
@@ -120,7 +119,6 @@ def test_command_help_exposes_format_not_output(
     runner: CliRunner,
     command_id: str,
 ) -> None:
-    """Ensure every read-only command's help shows --format, not --output."""
     result = runner.invoke(app, [*COMMAND_PATH[command_id], "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -133,7 +131,6 @@ def test_command_rejects_removed_output_option(
     runner: CliRunner,
     command_id: str,
 ) -> None:
-    """Ensure --output fails clearly instead of being silently accepted."""
     result = runner.invoke(
         app,
         [*COMMAND_ARGV[command_id], "--output", "json"],
@@ -150,7 +147,6 @@ def test_command_json_is_valid_and_ansi_free(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure --format json is valid JSON with no ANSI escape sequences."""
     configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
     )
@@ -171,7 +167,6 @@ def test_command_jsonl_is_one_valid_json_document(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure --format jsonl emits exactly one parseable line."""
     configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
     )
@@ -194,7 +189,6 @@ def test_command_csv_is_valid_where_supported(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure --format csv produces parseable, ANSI-free CSV data."""
     configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
     )
@@ -215,7 +209,6 @@ def test_command_csv_is_rejected_before_any_api_call(
     runner: CliRunner,
     command_id: str,
 ) -> None:
-    """Ensure an unsupported --format fails fast, without a backend."""
     result = runner.invoke(
         app,
         [*COMMAND_ARGV[command_id], "--format", "csv"],
@@ -234,7 +227,6 @@ def test_machine_readable_success_has_no_connection_message(
     command_id: str,
     output_format: str,
 ) -> None:
-    """Ensure a successful machine-readable run prints no connection banner."""
     configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
     )
@@ -255,7 +247,6 @@ def test_table_success_also_has_no_connection_message(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure the connection banner was removed from table output too."""
     configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
     )
@@ -273,11 +264,9 @@ def test_command_creates_client_exactly_once(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure every read-only command creates exactly one qBittorrent client.
-
-    `_create_qbit_client()` never shows a connection spinner or banner
-    (see `docs/DECISIONS.md`), so there is no `quiet` flag left to
-    assert on; this instead pins down the call count itself.
+    """`_create_qbit_client()` never shows a connection spinner or banner,
+    so there is no `quiet` flag left to assert on; this instead pins
+    down the call count itself.
     """
     calls = configure_qbit_backend(
         client=_make_client(), config=_config_for(command_id)
@@ -295,12 +284,9 @@ def test_command_error_remains_visible_on_stderr(
     configure_qbit_backend,
     command_id: str,
 ) -> None:
-    """Ensure genuine errors are never silenced by the machine-readable
-    or table silence contract.
-
-    `doctor` is deliberately excluded: unlike every other command, a
+    """`doctor` is deliberately excluded: unlike every other command, a
     configuration/connection/authentication failure is not an error
-    doctor reports on stderr and aborts on — it is the diagnostic
+    doctor reports on stderr and aborts on -- it is the diagnostic
     payload itself (a `fail` check in the report), so stderr stays
     empty and the non-zero exit code plus the report body carry the
     outcome instead. See `tests/test_doctor_cli.py`.
@@ -317,7 +303,6 @@ def test_command_error_remains_visible_on_stderr(
 
 
 def test_backup_diff_help_exposes_format(runner: CliRunner) -> None:
-    """Ensure `backup diff --help` exposes --format, not --output."""
     result = runner.invoke(app, ["backup", "diff", "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -329,7 +314,6 @@ def test_backup_diff_json_is_valid_and_silent(
     runner: CliRunner,
     tmp_path,
 ) -> None:
-    """Ensure `backup diff --format json` is valid and connection-silent."""
     export = {
         "torrents": [
             {
@@ -356,7 +340,6 @@ def test_backup_diff_json_is_valid_and_silent(
 
 
 def test_docs_commands_reference_has_no_leftover_output_examples() -> None:
-    """Ensure no documented command example still uses the removed --output."""
     lines = COMMANDS_DOC.read_text(encoding="utf-8").splitlines()
 
     offending_lines = [

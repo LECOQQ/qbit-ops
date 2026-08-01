@@ -1,35 +1,11 @@
 """Collect and represent a filter-aware tracker status report.
 
-Mirrors `qbit_ops.features.doctor`/`qbit_ops.features.status`'s
-collection/render split: this module stays free of Typer and Rich so
-it can be reused by any future interface.
-It reuses `qbit_ops.features.torrents.select_torrents` for the shared,
-cheap torrent filters (category/state/completed/active/stalled/errored)
-but performs
-its own per-torrent `torrents_trackers()` collection rather than going
-through `select_torrents`'s `tracker` filter -- that filter narrows the
-*torrent* selection to one host and propagates lookup exceptions, while
-`trackers status` needs per-torrent error tolerance (see
-`collect_tracker_status`) and reports per-tracker aggregates, not a
-torrent list.
-
 Tracker identities are always `host` or `host:port`
 (`qbit_ops.features.trackers.normalize_tracker_host`), never a full
-announce URL: a private tracker's announce URL commonly embeds a
-passkey in its path or query string, and nothing in this module's
-output (table, JSON, JSONL,
-CSV, or exception/log text) may render one. DHT/PeX/LSD pseudo-tracker
-entries (qBittorrent represents these as sentinel strings like
-`"** [DHT] **"`, not URLs) are excluded from aggregation entirely --
-`normalize_tracker_host` cannot parse them as a host, and they are not
-operationally meaningful trackers to report on.
-
-Port numbers are preserved verbatim, never collapsed to a scheme's
-default (e.g. `https://host:443` and `https://host` normalize to two
-distinct identities, `host:443` and `host`): `normalize_tracker_host`
-is reused unchanged rather than given a second, scheme-aware notion of
-"the same host" that could disagree with every other command using it
-(`torrents list --tracker`, bulk mutations).
+announce URL, so a passkey embedded in a tracker's path or query
+string never reaches this module's output. DHT/PeX/LSD pseudo-tracker
+entries are excluded from aggregation entirely, since they have no
+parseable host.
 """
 
 from __future__ import annotations
@@ -143,15 +119,8 @@ def _is_pseudo_tracker_url(url: str) -> bool:
     return stripped.startswith("**") and stripped.endswith("**")
 
 
-# Fallback order for `representative_message` when the aggregate's own
-# `health` has no message of its own (e.g. a WARNING aggregate, which by
-# `_compute_tracker_health`'s rules never has a WARNING-classified
-# endpoint unless a raw NOT_CONTACTED is actually present -- it is
-# reached by *mixing* other severities). Most severe first, so a mixed
-# healthy/critical identity always surfaces the critical endpoint's
-# message, never the healthy one's -- insertion (scan) order would
-# otherwise let whichever endpoint happened to be read first win,
-# independent of severity.
+# Most severe first, so a mixed healthy/critical identity always
+# surfaces the critical endpoint's message, never the healthy one's.
 _MESSAGE_FALLBACK_ORDER = (
     TrackerHealth.CRITICAL,
     TrackerHealth.WARNING,
@@ -267,21 +236,14 @@ def collect_tracker_status(
 ) -> TrackerStatusReport:
     """Collect a filter-aware tracker status report.
 
-    Applies every cheap (torrent-info-only) filter first via
-    `select_torrents` (with `tracker` cleared, so that call never
-    performs its own per-torrent lookup), then calls
-    `client.torrents_trackers()` at most once per surviving torrent.
-    A single torrent's lookup failure is caught and counted rather than
-    aborting collection: `collection_errors` is always visible, and
-    `overall_health` can never read fully healthy while errors > 0 (see
-    `_compute_overall_health`).
-
-    When `filters.tracker` is set, every surviving torrent is still
-    scanned (the identity a torrent's trackers will normalize to is not
-    known until they are read) and the resulting aggregates are filtered
-    down to that one identity afterward -- `--tracker` here restricts
-    the *report*, not the API-call volume, unlike `torrents list
-    --tracker`.
+    Applies every cheap filter first, then calls
+    `client.torrents_trackers()` at most once per surviving torrent. A
+    lookup failure is caught and counted rather than aborting:
+    `collection_errors` is always visible, and `overall_health` can
+    never read fully healthy while errors > 0. When `filters.tracker` is
+    set, every surviving torrent is still scanned and the aggregates are
+    filtered afterward -- `--tracker` restricts the report, not the
+    API-call volume.
     """
     cheap_filters = replace(filters, tracker=None)
     selection = select_torrents(client, cheap_filters)

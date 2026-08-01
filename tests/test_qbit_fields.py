@@ -4,8 +4,7 @@ Uses both plain dicts (what `tests.support.FakeQbitClient` returns) and
 the real qbittorrent-api response types (`TorrentDictionary`, `Tracker`,
 `TransferInfoDictionary`) so this boundary is proven against the actual
 object shapes the installed library returns, not only against test
-doubles -- see `docs/audits/2026-07-qbittorrent-api-inventory.md`
-constat P-1.
+doubles.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ def test_field_helpers_accept_dict_and_real_torrent_payloads(
 
 
 def test_field_helpers_accept_attribute_based_object() -> None:
-    """The non-Mapping branch (P-1) still works for an attribute object."""
+    """The non-Mapping branch still works for an attribute object."""
 
     class _AttrItem:
         hash = "attr-hash"
@@ -89,7 +88,7 @@ def test_unknown_extra_fields_are_harmless() -> None:
     assert get_field_as_string(item, "hash") == "abc"
 
 
-# --- transfer-info boundary (constat P-2) ------------------------------------
+# --- transfer-info boundary ---------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -109,7 +108,7 @@ def test_get_transfer_rates_rejects_non_mapping_with_explicit_type_error() -> (
     None
 ):
     """A malformed non-mapping payload fails explicitly, not with a bare
-    `AttributeError` from an unguarded `.get()` call (constat P-2)."""
+    `AttributeError` from an unguarded `.get()` call."""
 
     class _NotAMapping:
         pass
@@ -122,7 +121,7 @@ def test_get_transfer_rates_missing_keys_default_to_zero() -> None:
     assert get_transfer_rates({}) == (0, 0)
 
 
-# --- tracker-status normalization (constat P-3) ------------------------------
+# --- tracker-status normalization -----------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -148,7 +147,7 @@ def test_is_disabled_tracker_status_classifies_ints_and_strings(
 def test_is_disabled_tracker_status_handles_enum_like_int_subclass() -> None:
     """An `IntEnum`-like value (e.g. `qbittorrentapi.definitions.TrackerStatus`)
     must classify correctly even though its `str()` does not read as a
-    plain digit -- the exact defect constat P-3 identified."""
+    plain digit."""
 
     import enum
 
@@ -160,7 +159,7 @@ def test_is_disabled_tracker_status_handles_enum_like_int_subclass() -> None:
         DISABLED = 0
         WORKING = 2
 
-    assert str(_TrackerStatusLike.DISABLED) != "0"  # the trap P-3 describes
+    assert str(_TrackerStatusLike.DISABLED) != "0"  # the trap this test targets
     assert is_disabled_tracker_status(_TrackerStatusLike.DISABLED) is True
     assert is_disabled_tracker_status(_TrackerStatusLike.WORKING) is False
 
@@ -205,8 +204,7 @@ def test_get_raw_tracker_status_preserves_original_type() -> None:
 
 def test_get_active_tracker_urls_excludes_disabled_trackers() -> None:
     """A disabled pseudo-tracker (int 0) never reaches a mutation plan's
-    active-URL list -- the exact mutation-safety guarantee constat P-3
-    is about."""
+    active-URL list."""
     trackers = [
         {"url": "** [DHT] **", "status": 0},
         {"url": "https://disabled.example/announce", "status": "disabled"},

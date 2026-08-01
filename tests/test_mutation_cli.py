@@ -74,14 +74,11 @@ def test_mutation_defaults_to_dry_run_and_performs_no_mutation(
     configure_qbit_backend,
     argv: list[str],
 ) -> None:
-    """Ensure every mutation command previews only by default.
-
-    The fixture torrent is active, so idempotent actions (`resume`,
-    `start`) report `NO_CHANGES` rather than `PREVIEW`, and
-    `replace-passkey`'s path-shaped template does not match the fixture
-    tracker's URL shape, reporting `NO_MATCH` — any of the three is
-    correct here; what matters is that a dry-run never reports `APPLIED`
-    and never calls a mutation API.
+    """The fixture torrent is active, so idempotent actions (`resume`, `start`)
+    report `NO_CHANGES` rather than `PREVIEW`, and `replace-passkey`'s path-
+    shaped template does not match the fixture tracker's URL shape, reporting
+    `NO_MATCH` -- any of the three is correct here; what matters is that a dry-
+    run never reports `APPLIED` and never calls a mutation API.
     """
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
@@ -111,7 +108,6 @@ def test_low_risk_torrent_commands_do_not_expose_yes(
     runner: CliRunner,
     command: str,
 ) -> None:
-    """Ensure low-risk torrent commands never expose --yes."""
     result = runner.invoke(app, ["torrents", command, "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -122,7 +118,6 @@ def test_low_risk_mutation_applies_without_confirmation_non_interactively(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a low-risk mutation applies immediately, non-interactively too."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, state="uploading")],
         trackers_by_hash={TORRENT_HASH: []},
@@ -187,7 +182,6 @@ def test_yes_applies_without_prompting(
     argv: list[str],
     attribute: str,
 ) -> None:
-    """Ensure --yes applies real changes without any confirmation prompt."""
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -202,7 +196,6 @@ def test_yes_never_implies_no_dry_run(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure --yes alone, without --no-dry-run, keeps the command dry-run."""
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -260,7 +253,6 @@ def test_medium_high_risk_refuses_non_interactive_without_yes(
     configure_qbit_backend,
     argv: list[str],
 ) -> None:
-    """Ensure medium/high risk fails clearly instead of hanging or mutating."""
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -281,7 +273,6 @@ def test_declining_confirmation_cancels_cleanly(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure declining confirmation performs no mutation and exits 0."""
     _make_interactive(monkeypatch)
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
@@ -308,7 +299,6 @@ def test_confirming_applies_the_previously_built_plan(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure confirming applies exactly the previewed change."""
     _make_interactive(monkeypatch)
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
@@ -339,9 +329,7 @@ def test_no_match_plan_does_not_prompt_or_refuse(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure an empty plan skips confirmation entirely and exits NO_MATCH.
-
-    Regression test: an unmatched `--no-dry-run` selector used to report
+    """Regression test: an unmatched `--no-dry-run` selector used to report
     `status APPLIED` even though nothing was ever sent to qBittorrent.
     """
     client = _client_with_tracker("https://tracker.example/announce")
@@ -428,7 +416,6 @@ def test_unmatched_tracker_selector_reports_no_match_not_applied(
     argv: list[str],
     attribute: str,
 ) -> None:
-    """Ensure every tracker mutation reports NO_MATCH, never APPLIED."""
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -455,7 +442,6 @@ def test_already_satisfied_torrent_action_reports_no_changes(
     command: str,
     state: str,
 ) -> None:
-    """Ensure a matched-but-already-satisfied torrent reports NO_CHANGES."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, state=state)],
         trackers_by_hash={TORRENT_HASH: []},
@@ -476,7 +462,6 @@ def test_add_if_present_already_had_target_reports_no_changes(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure add-if-present reports NO_CHANGES when the target is present."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=TORRENT_HASH, name="Fake Torrent")],
         trackers_by_hash={
@@ -512,7 +497,6 @@ def test_replace_passkey_already_current_reports_no_changes(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure replace-passkey reports NO_CHANGES when already up to date."""
     client = _client_with_tracker(
         f"https://tracker.example/announce/{NEW_PASSKEY_MARKER}"
     )
@@ -547,7 +531,6 @@ def test_replace_passkey_confirmation_never_shows_the_passkey(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure the confirmation prompt for replace-passkey omits any passkey."""
     _make_interactive(monkeypatch)
     client = _client_with_tracker(
         f"https://tracker.example/announce/{SECRET_PASSKEY_MARKER}"
@@ -585,7 +568,6 @@ def test_replace_passkey_dry_run_never_shows_the_passkey(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure even a dry-run preview never renders the new passkey."""
     client = _client_with_tracker(
         f"https://tracker.example/announce/{SECRET_PASSKEY_MARKER}"
     )
@@ -615,7 +597,6 @@ def test_remove_confirmation_redacts_tracker_query_string(
     configure_qbit_backend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure a tracker's secret query string never reaches the prompt."""
     _make_interactive(monkeypatch)
     secret_tracker = (
         f"https://tracker.example/announce?passkey={SECRET_PASSKEY_MARKER}"
@@ -646,7 +627,6 @@ def test_mutation_command_never_shows_connection_banner(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure mutation commands never print the removed connection banner."""
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
@@ -663,7 +643,6 @@ def test_mutation_command_creates_client_exactly_once(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """Ensure a mutation command creates exactly one qBittorrent client."""
     client = _client_with_tracker("https://tracker.example/announce")
     calls = configure_qbit_backend(client=client)
 

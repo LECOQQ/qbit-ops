@@ -3,7 +3,7 @@ name: qBittorrent Docker version matrix
 # Manual and low-frequency only -- never on every push/PR. Each entry
 # starts a real, disposable qBittorrent container; running the full
 # historical matrix on every small PR would not be a reasonable use of
-# CI minutes for this project's size. Cadence (docs/TESTING.md):
+# CI minutes for this project's size. Cadence (docs/DEVELOPMENT.md):
 # weekly = current-stable entry only (the only image likely to drift);
 # monthly = the complete historical matrix (immutable digests, so a
 # weekly re-run of unchanged historical images would prove nothing new).

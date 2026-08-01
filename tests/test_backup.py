@@ -17,7 +17,6 @@ from qbit_ops.features.backup import (
 
 
 def test_export_instance_state_includes_metadata_and_trackers() -> None:
-    """Ensure backup export combines torrents, trackers and metadata."""
     client = FakeQbitClient(
         torrents=[
             {
@@ -128,7 +127,6 @@ def _sample_export(
 
 
 def test_diff_backup_exports_reports_identical_payloads() -> None:
-    """Ensure identical exports produce an empty diff report."""
     export_payload = _sample_export()
 
     report = diff_backup_exports(export_payload, export_payload)
@@ -141,7 +139,6 @@ def test_diff_backup_exports_reports_identical_payloads() -> None:
 
 
 def test_diff_backup_exports_reports_added_and_removed_torrents() -> None:
-    """Ensure torrent additions and removals are reported."""
     baseline = _sample_export(
         torrent_hash="hash-a",
         name="Torrent A",
@@ -167,7 +164,6 @@ def test_diff_backup_exports_reports_added_and_removed_torrents() -> None:
 
 
 def test_diff_backup_exports_reports_tracker_changes() -> None:
-    """Ensure per-torrent tracker changes are reported."""
     baseline = _sample_export(
         normalized_trackers=["https://tracker-a.example/announce"],
     )
@@ -194,7 +190,6 @@ def test_diff_backup_exports_reports_tracker_changes() -> None:
 
 
 def test_diff_backup_exports_reports_tracker_usage_changes() -> None:
-    """Ensure tracker usage differences are reported."""
     baseline = _sample_export(
         tracker_usage={"https://tracker-a.example/announce": 2},
     )
@@ -214,7 +209,6 @@ def test_diff_backup_exports_reports_tracker_usage_changes() -> None:
 
 
 def test_load_export_file_reads_valid_payload(tmp_path: Path) -> None:
-    """Ensure valid export files can be loaded."""
     export_file = tmp_path / "export.json"
     export_file.write_text(
         json.dumps(_sample_export()),
@@ -225,7 +219,6 @@ def test_load_export_file_reads_valid_payload(tmp_path: Path) -> None:
 
 
 def test_load_export_file_fails_on_invalid_payload(tmp_path: Path) -> None:
-    """Ensure invalid export files fail explicitly."""
     export_file = tmp_path / "invalid.json"
     export_file.write_text('{"summary": {}}', encoding="utf-8")
 

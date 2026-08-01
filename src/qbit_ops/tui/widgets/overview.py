@@ -1,8 +1,4 @@
-"""The Overview workspace: `WorkspaceTabs` + `OverviewPanel`.
-
-Moved out of `qbit_ops.tui.app` (see docs/DECISIONS.md, TUI reorg
-phase). No behavior change.
-"""
+"""The Overview workspace: `WorkspaceTabs` + `OverviewPanel`."""
 
 from __future__ import annotations
 
@@ -56,19 +52,12 @@ def _tab_label(name: str, keys: str, active: bool) -> str:
 class OverviewPanel(VerticalScroll):
     """The Overview workspace's content, grouped into distinct conceptual
     cards -- built entirely from the same `TuiState` the periodic
-    refresh already populates. No qBittorrent call of its own, no
-    tracker-wide scan, no invented recommendations or confidence
-    scores.
+    refresh already populates. No qBittorrent call of its own.
 
-    Grouping deliberately keeps three dimensions separate rather than
-    presenting them as one partition of "total": Activity (downloading/
-    seeding/stopped/checking -- a torrent's current transfer state),
-    Completion (completed/incomplete -- a torrent's progress, which a
-    seeding *and* completed *and* stopped torrent all satisfy at once),
-    and Attention (stalled/errored/unknown -- conditions worth an
-    operator's attention, again independent of the other two). Every
-    count reuses `qbit_ops.features.status`/`qbit_ops.shared.torrent_states`'s
-    existing classifiers -- see the module docstring.
+    Deliberately three independent dimensions rather than one partition
+    of "total": Activity (transfer state), Completion (progress), and
+    Attention (conditions worth notice) -- a torrent can count toward
+    more than one at once (e.g. seeding *and* completed *and* stopped).
     """
 
     def render_state(self, state: TuiState) -> None:

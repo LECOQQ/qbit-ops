@@ -52,9 +52,7 @@ def _all_imported_modules(source: str) -> set[str]:
 def test_qbittorrentapi_import_is_confined_to_the_qbit_boundary() -> None:
     """`qbittorrentapi` must never be imported (module-level or deferred)
     outside `qbit_ops/qbit/**` -- client construction and third-party
-    exception knowledge live entirely in the boundary (see
-    `docs/audits/2026-07-package-refactor-plan.md` Phase 3
-    continuation)."""
+    exception knowledge live entirely in the boundary."""
     files = [
         path
         for path in _production_python_files(PACKAGE_DIR)

@@ -1,10 +1,4 @@
-"""Register the `torrents` command group.
-
-Moved from `qbit_ops.main`: `list`, `categories`, `inspect`, `pause`,
-`resume`, `start`, `reannounce`. No behavior change -- filter options,
-selection, and mutation planning are unchanged calls into
-`qbit_ops.features.torrents`/`qbit_ops.shared.execution`.
-"""
+"""Register the `torrents` command group."""
 
 from typing import Annotated
 
@@ -38,8 +32,7 @@ from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 
 # Shared help text for the torrent-filter options common to `torrents list`
-# and every bulk mutation command, so wording cannot silently drift between
-# them (see docs/COMMANDS.md, "Torrent Filters").
+# and every bulk mutation command, so wording cannot drift between them.
 CATEGORY_FILTER_HELP = (
     "Restrict to a category (repeatable; combines with OR). Use "
     "'uncategorized' for torrents without a category."
@@ -72,7 +65,6 @@ def _run_bulk_torrent_action(
     dry_run: bool,
     verbose: bool,
 ) -> None:
-    """Execute a bulk torrent action with shared validation and output."""
     torrent_hash = validate_hash_option(torrent_hash)
     try:
         filters = build_torrent_filter(
