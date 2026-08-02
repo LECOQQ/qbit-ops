@@ -52,10 +52,10 @@ jobs:
       matrix_ids: ${{ steps.read.outputs.matrix_ids }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -109,10 +109,10 @@ jobs:
         matrix_id: ${{ fromJson(needs.generate-matrix.outputs.matrix_ids) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload pytest node-id cache (diagnostic only, no secrets or fixtures)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qbit-matrix-${{ matrix.matrix_id }}-report
           # `.pytest_cache/**` is pytest's own node-id/last-failed cache,
@@ -164,10 +164,10 @@ jobs:
     # matrix and needs no repository secret (public GitHub API).
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
