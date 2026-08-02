@@ -10,6 +10,8 @@ seedbox by accident.**
 
 Inspect torrents and trackers, diagnose problems, and preview bulk changes before they reach qBittorrent.
 
+![qbit-ops TUI demo](docs/assets/qbit-ops-demo.gif)
+
 ## 🚀 Get started
 
 Requires Python 3.12+ and a qBittorrent instance with the Web UI enabled.
@@ -87,9 +89,13 @@ The optional Textual interface provides a branded overview, torrent browsing, fi
 qbit-ops tui
 ```
 
-<!-- Add a real screenshot here:
-![qbit-ops TUI](docs/images/tui-overview.png)
--->
+| Overview | Torrents |
+|---|---|
+| ![Overview workspace](docs/assets/overview.png) | ![Torrent table](docs/assets/torrents.png) |
+
+| Search | Preview before Apply |
+|---|---|
+| ![Search results](docs/assets/torrent-details.png) | ![Frozen bulk-action preview](docs/assets/action-preview.png) |
 
 Press `?` inside the TUI to see the available controls.
 
