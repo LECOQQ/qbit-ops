@@ -18,10 +18,12 @@ Show
 
 # Branded Overview
 Sleep 2000ms
+Screenshot demo/output/overview.png
 
 # Torrents workspace
 Type "t"
 Sleep 2000ms
+Screenshot demo/output/torrents.png
 
 # Inline search
 Type "/"
@@ -36,6 +38,7 @@ Enter
 Sleep 3000ms
 Escape
 Sleep 600ms
+Screenshot demo/output/torrent-details.png
 
 # Select two visible torrents
 Space
@@ -50,3 +53,4 @@ Type "a"
 Sleep 2000ms
 Enter
 Sleep 3000ms
+Screenshot demo/output/action-preview.png
