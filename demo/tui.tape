@@ -7,7 +7,7 @@ Set FontSize 16
 Set Width 1400
 Set Height 800
 Set Padding 20
-Set TypingSpeed 60ms
+Set TypingSpeed 120ms
 Set PlaybackSpeed 1.0
 
 Hide
@@ -21,32 +21,32 @@ Sleep 2000ms
 
 # Torrents workspace
 Type "t"
-Sleep 800ms
+Sleep 2000ms
 
 # Inline search
 Type "/"
-Sleep 300ms
+Sleep 500ms
 Type "Documentary"
-Sleep 800ms
+Sleep 2000ms
 
 # Focus a result, open Details briefly
 Enter
-Sleep 400ms
+Sleep 800ms
 Enter
-Sleep 1200ms
+Sleep 3000ms
 Escape
-Sleep 300ms
+Sleep 600ms
 
 # Select two visible torrents
 Space
-Sleep 200ms
+Sleep 600ms
 Down
-Sleep 200ms
+Sleep 600ms
 Space
-Sleep 500ms
+Sleep 1000ms
 
 # Actions -> Pause -> frozen Preview
 Type "a"
-Sleep 600ms
+Sleep 2000ms
 Enter
-Sleep 2500ms
+Sleep 3000ms
