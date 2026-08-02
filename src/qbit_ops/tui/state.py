@@ -49,9 +49,120 @@ from qbit_ops.features.torrents import (
 from qbit_ops.features.trackers import sanitize_tracker_text
 from qbit_ops.qbit.fields import get_field_as_string
 from qbit_ops.shared.execution import MutationStatus
-from qbit_ops.shared.torrent_states import is_stopped_state
+from qbit_ops.shared.torrent_states import (
+    classify_torrent_state,
+    is_stopped_state,
+)
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
+
+# Downloading/seeding are the two "active" groups a torrent spends most
+# of its life in; everything else (including a still-unclassified raw
+# state) stays neutral or, for a genuine error, red -- see
+# `qbit_ops.tui.formatting._STATE_STYLES` for the colour side of this,
+# kept separate since colour is presentation-only.
+_STATE_LABELS: dict[str, str] = {
+    "downloading": "Downloading",
+    "seeding": "Seeding",
+    "stalled": "Stalled",
+    "checking": "Checking",
+    "errored": "Error",
+    "unknown": "Unknown",
+}
+
+
+def _state_label(raw_state: str) -> str:
+    """Classify a raw qBittorrent state into one human-readable label.
+
+    Reuses `qbit_ops.shared.torrent_states` entirely -- `is_stopped_state`
+    for the qBittorrent 4/5 pause-vs-stop split (checked first, since
+    `classify_torrent_state` folds a stopped torrent into its seeding/
+    downloading *direction* rather than reporting it as stopped), then
+    `classify_torrent_state` for every other group. Never a second,
+    parallel classifier. Lives here (not `tui.formatting`) so local
+    sorting -- which must stay in this Textual-independent module --
+    can order by the same human label the table displays.
+    """
+    if is_stopped_state(raw_state):
+        return "Stopped"
+    return _STATE_LABELS[classify_torrent_state(raw_state)]
+
+
+class SortField(StrEnum):
+    """Torrent-table columns local sorting can order by."""
+
+    NAME = "name"
+    STATE = "state"
+    PROGRESS = "progress"
+    DOWN = "down"
+    UP = "up"
+    RATIO = "ratio"
+    CATEGORY = "category"
+
+
+class SortDirection(StrEnum):
+    ASCENDING = "asc"
+    DESCENDING = "desc"
+
+
+_SORT_FIELD_LABELS: dict[SortField, str] = {
+    SortField.NAME: "Name",
+    SortField.STATE: "State",
+    SortField.PROGRESS: "Progress",
+    SortField.DOWN: "Down speed",
+    SortField.UP: "Up speed",
+    SortField.RATIO: "Ratio",
+    SortField.CATEGORY: "Category",
+}
+
+
+@dataclass(frozen=True)
+class SortOrder:
+    """The Torrents table's current local sort -- purely presentational,
+    computed from the already-collected snapshot, never a qBittorrent
+    call. Defaults to Name ascending."""
+
+    field: SortField = SortField.NAME
+    direction: SortDirection = SortDirection.ASCENDING
+
+    @property
+    def label(self) -> str:
+        arrow = "↑" if self.direction is SortDirection.ASCENDING else "↓"
+        return f"{_SORT_FIELD_LABELS[self.field]} {arrow}"
+
+
+_SORT_KEY_FUNCS: dict[SortField, Callable[[SelectedTorrent], Any]] = {
+    SortField.NAME: lambda t: t.name.casefold(),
+    SortField.STATE: lambda t: _state_label(t.state),
+    SortField.PROGRESS: lambda t: t.progress,
+    SortField.DOWN: lambda t: t.download_rate,
+    SortField.UP: lambda t: t.upload_rate,
+    SortField.RATIO: lambda t: t.ratio,
+    SortField.CATEGORY: lambda t: t.category.casefold(),
+}
+
+
+def _sort_torrents(
+    matched: tuple[SelectedTorrent, ...], order: SortOrder
+) -> tuple[SelectedTorrent, ...]:
+    """Sort `matched` by `order`, purely in-memory -- zero API calls.
+
+    Deterministic tie-break: canonical (casefolded) name, then full
+    hash, applied via a two-pass stable sort so ties always resolve the
+    same way regardless of `order.direction` -- Python's `sorted` is
+    stable, so sorting by the tie-break first and the primary key
+    second leaves equal-primary-key groups in tie-break order no matter
+    which direction the primary key itself is sorted in.
+    """
+    tie_broken = sorted(matched, key=lambda t: (t.name.casefold(), t.hash))
+    primary = _SORT_KEY_FUNCS[order.field]
+    return tuple(
+        sorted(
+            tie_broken,
+            key=primary,
+            reverse=order.direction is SortDirection.DESCENDING,
+        )
+    )
 
 
 class ConnectionState(StrEnum):
@@ -103,11 +214,16 @@ class TuiState:
     focused_hash: str | None = None
     focused_tracker_details: list[dict[str, Any]] | None = None
     focused_details_fetched_at: datetime | None = None
+    focused_tracker_fetch_failed: bool = False
     refreshing: bool = False
     stale: bool = False
     last_successful_refresh: datetime | None = None
     last_error: AppError | None = None
     workspace: Workspace = Workspace.OVERVIEW
+    sort: SortOrder = field(default_factory=SortOrder)
+    """The Torrents table's active local sort. Presentation-only:
+    persists across refresh, filter/search changes, workspace
+    switches, and resizing -- reset only by process restart."""
     selected_hashes: set[str] = field(default_factory=set)
     """Explicit multi-selection for bulk actions -- full canonical
     hashes only. Deliberately distinct from `focused_hash` (never
@@ -334,6 +450,16 @@ class TuiController:
 
     # -- workspace navigation (always local, no I/O) ------------------------
 
+    def set_sort(self, order: SortOrder) -> None:
+        """Apply a new local sort order. Zero qBittorrent API calls.
+
+        Purely a reordering of `visible.matched` -- membership,
+        `focused_hash`, and `selected_hashes` are all untouched, so
+        focus and selection survive a sort change unchanged.
+        """
+        self.state.sort = order
+        self._recompute_visible()
+
     def set_workspace(self, workspace: Workspace) -> None:
         """Switch the active workspace. Zero qBittorrent API calls.
 
@@ -507,6 +633,7 @@ class TuiController:
         self.state.focused_hash = torrent_hash
         self.state.focused_tracker_details = None
         self.state.focused_details_fetched_at = None
+        self.state.focused_tracker_fetch_failed = False
         self._detail_request_id += 1
         if torrent_hash is None:
             return None
@@ -522,6 +649,7 @@ class TuiController:
         """
         if self.state.focused_hash is None:
             return None
+        self.state.focused_tracker_fetch_failed = False
         self._detail_request_id += 1
         return self._detail_request_id
 
@@ -536,6 +664,7 @@ class TuiController:
         self.state.focused_hash = None
         self.state.focused_tracker_details = None
         self.state.focused_details_fetched_at = None
+        self.state.focused_tracker_fetch_failed = False
         self._detail_request_id += 1
 
     @property
@@ -618,6 +747,7 @@ class TuiController:
             raw_trackers
         )
         self.state.focused_details_fetched_at = datetime.now(UTC)
+        self.state.focused_tracker_fetch_failed = False
 
     def apply_tracker_details_failure(
         self,
@@ -644,6 +774,10 @@ class TuiController:
             code=failure.code,
             message=failure.message,
         )
+        # Never leave the Details modal reading "Loading..." forever: a
+        # failed fetch is a terminal outcome for this request, distinct
+        # from "still in flight", and must render as such.
+        self.state.focused_tracker_fetch_failed = True
 
     def set_focus(self, torrent_hash: str | None) -> None:
         """Focus a torrent by its complete hash, or clear focus with `None`.
@@ -714,6 +848,7 @@ class TuiController:
         else:
             matched = filtered.matched
 
+        matched = _sort_torrents(matched, self.state.sort)
         self.state.visible = replace(filtered, matched=matched)
 
     def _reconcile_focus(self) -> None:

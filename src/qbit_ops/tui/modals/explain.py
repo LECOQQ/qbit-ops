@@ -44,7 +44,7 @@ class ExplainScreen(ModalScreen[None]):
         width: 80%;
         max-width: 96;
         height: 85%;
-        border: solid $accent;
+        border: round #ff9933;
         background: $surface;
         padding: 1 2;
     }
@@ -63,6 +63,7 @@ class ExplainScreen(ModalScreen[None]):
             yield Static("[dim]Esc to close[/dim]")
 
     def on_mount(self) -> None:
+        self.query_one("#explain-dialog").border_title = "Explain"
         self.refresh_content()
 
     def refresh_content(self) -> None:

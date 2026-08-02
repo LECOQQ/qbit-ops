@@ -52,7 +52,7 @@ class FiltersPanel(Vertical):
                     classes="f-activity",
                 )
         yield Static("", classes="f-error")
-        with Horizontal(classes="f-actions"):
+        with Vertical(classes="f-actions"):
             yield Button("Apply", id="filters-apply", variant="primary")
             yield Button("Clear", id="filters-clear")
             yield Button("Cancel", id="filters-cancel")

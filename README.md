@@ -81,7 +81,7 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 
 ## 🖥️ TUI
 
-The optional Textual interface provides an overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
+The optional Textual interface provides a branded overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
 
 ```bash
 qbit-ops tui

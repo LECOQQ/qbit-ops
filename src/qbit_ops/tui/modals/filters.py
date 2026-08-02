@@ -56,8 +56,13 @@ class FiltersScreen(ModalScreen[None]):
     #filters-dialog {
         width: 64;
         max-height: 90%;
-        border: solid $accent;
-        background: $surface;
+        border: round #ff9933;
+        /* `$surface` (a visibly lighter grey) read as a distinct box
+           clashing with the round orange border floating on the app's
+           now-uniform dark background -- `$background` matches that
+           uniform tone, so only the border (not a grey panel) reads as
+           "floating". */
+        background: $background;
         padding: 1 2;
     }
     .f-columns {
@@ -72,24 +77,102 @@ class FiltersScreen(ModalScreen[None]):
         height: auto;
         margin-top: 1;
     }
+    /* Full-width, stacked one per row -- matches `ActionsScreen`'s
+       button layout, the same component used the same way in both
+       modals rather than a narrow horizontal row here alone. */
     .f-actions Button {
-        margin-right: 1;
+        width: 100%;
+        margin-bottom: 0;
     }
     /* Selected (on) vs focused vs both must be distinguishable without
        relying on color alone: RadioButton's own "( )"/"(x)" glyph
-       already encodes selection non-color; `:focus` additionally gets
-       an explicit border and bold text so keyboard focus position is
-       visible even on a color-blind or monochrome terminal. */
+       already encodes selection non-color; `:focus-within` on the
+       RadioSet gives an explicit border so keyboard focus position is
+       visible even on a color-blind or monochrome terminal.
+       `background: transparent` here (and on `Input`/`Button`/
+       `Checkbox` below): each of these widgets' own `DEFAULT_CSS`
+       fills with `$surface`, a visibly lighter grey than this dialog's
+       `$background` -- left alone, every field/button reads as its own
+       grey box nested inside the (now-uniform) dialog, the same clash
+       the round border fix targeted, just moved one level in. */
     RadioSet {
-        border: round $panel;
+        border: round $panel-lighten-2;
+        background: transparent;
         height: auto;
     }
     RadioSet:focus-within {
-        border: round $accent;
+        border: round #ff9933;
     }
-    RadioButton:focus {
-        text-style: bold underline;
-        border: tall $accent;
+    /* Input/Checkbox/Button default focus/`-primary` styling all draw
+       from Textual's own `$primary`/`$border`/`$block-cursor-*` (a
+       saturated blue) -- replaced here with the same brand orange used
+       everywhere else in this dialog. A `RadioButton` is never focused
+       directly (confirmed empirically): the containing `RadioSet` is,
+       and it highlights its own `.-selected` child's `.toggle--label`
+       -- so that's the selector that actually needs overriding, not
+       `RadioButton:focus`. */
+    Input {
+        background: transparent;
+    }
+    Input:focus {
+        border: tall #ff9933;
+    }
+    Checkbox {
+        background: transparent;
+    }
+    Checkbox:focus {
+        border: tall #ff9933;
+    }
+    /* `color: $background` (not `$text`, near-white) for text sitting
+       directly on the `#ff9933` fill below -- white-on-orange is
+       roughly 2:1 contrast, well under a readable threshold; the
+       app's own dark background colour against orange is ~9:1. */
+    Checkbox:focus > .toggle--label,
+    RadioSet:focus > RadioButton.-selected > .toggle--label {
+        background: #ff9933;
+        color: $background;
+        text-style: bold;
+    }
+    /* Same blurred-selection and on-mark fixes as `SortScreen` -- see
+       its CSS comments: both otherwise default to Textual's blue
+       `$block-cursor-blurred-background` and green `$text-success`. */
+    RadioSet:blur > RadioButton.-selected > .toggle--label {
+        background: #ff9933 30%;
+    }
+    RadioSet > RadioButton.-on > .toggle--button {
+        color: #ff9933;
+    }
+    /* Flat, single-row buttons -- same fix as `ActionsScreen` (see its
+       CSS comment): Textual's default 3-row "3D" `Button` and blue
+       `-primary` variant both clash with this dialog's restrained
+       style, and made a stack of three buttons look oversized. */
+    Button {
+        height: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: $text;
+        text-style: none;
+    }
+    Button:hover {
+        background: $panel-lighten-2;
+    }
+    Button:focus {
+        background: #ff9933 20%;
+        color: #ff9933;
+        text-style: bold;
+    }
+    Button.-primary {
+        background: transparent;
+        color: #ff9933;
+        text-style: bold;
+    }
+    Button.-primary:hover {
+        background: #ff9933 20%;
+    }
+    Button.-primary:focus {
+        background: #ff9933;
+        color: $background;
     }
     """
 
@@ -102,11 +185,11 @@ class FiltersScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="filters-dialog"):
-            yield Static("[bold]Filters[/bold]")
             yield FiltersPanel()
             yield Static("[dim]Enter/Apply · Esc/Cancel · Ctrl+R/Clear[/dim]")
 
     def on_mount(self) -> None:
+        self.query_one("#filters-dialog").border_title = "Filters"
         self.query_one(FiltersPanel).sync_from(self.original_filters)
         # Textual's default `AUTO_FOCUS = "*"` auto-focuses the *first*
         # focusable widget on the screen in DOM order -- which is

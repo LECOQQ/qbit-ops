@@ -19,6 +19,7 @@ q          Quit
 j/k, ↑/↓   Navigate (moves focus)
 /          Search (name or hash)
 f          Filters
+s          Sort
 enter      Details (focused torrent)
 c          Copy hash (focused torrent)
 e          Explain (focused torrent)
@@ -55,8 +56,8 @@ class HelpScreen(ModalScreen[None]):
     #help-dialog {
         width: 64;
         max-height: 90%;
-        border: solid $accent;
-        background: $surface;
+        border: round #ff9933;
+        background: $background;
         padding: 1 2;
     }
     """
@@ -64,6 +65,9 @@ class HelpScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-dialog"):
             yield Static(_HELP_TEXT)
+
+    def on_mount(self) -> None:
+        self.query_one("#help-dialog").border_title = "Help"
 
     def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
         self.dismiss()
