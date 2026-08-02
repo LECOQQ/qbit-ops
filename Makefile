@@ -13,7 +13,10 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor clean
+.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+
+DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
+DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
 
 .sync-stamp: pyproject.toml poetry.lock
 	@poetry install --sync --extras tui --no-interaction
@@ -112,6 +115,47 @@ docker-matrix-doctor: ## Check Docker is available for the qBittorrent version m
 		printf '[MISSING] docker daemon not reachable\n' >&2; exit 1; \
 	fi; \
 	printf '[OK] docker\n'
+
+demo-doctor: ## Check required local tools for the demo (docker, compose, poetry)
+	@missing=0; \
+	for command in docker poetry; do \
+		if command -v "$$command" >/dev/null 2>&1; then \
+			printf '[OK] %s\n' "$$command"; \
+		else \
+			printf '[MISSING] %s\n' "$$command" >&2; missing=1; \
+		fi; \
+	done; \
+	if ! docker compose version >/dev/null 2>&1; then \
+		printf '[MISSING] docker compose plugin\n' >&2; missing=1; \
+	else \
+		printf '[OK] docker compose\n'; \
+	fi; \
+	exit "$$missing"
+
+demo-up: demo-doctor sync ## Generate demo fixtures, start the disposable qBittorrent, and seed it
+	@$(PY) python demo/generate_fixtures.py
+	@DEMO_UID=$$(id -u) DEMO_GID=$$(id -g) $(DEMO_COMPOSE) up -d
+	@$(PY) python demo/seed_instance.py
+	@printf '\nNext: make demo-tui | make demo-record | make demo-down\n'
+
+demo-tui: sync ## Launch the qbit-ops TUI against the demo instance only
+	@QBIT_OPS_ENV_FILE="$(DEMO_ENV_FILE)" $(PY) qbit-ops tui
+
+demo-reset: demo-down ## Destroy and recreate the demo instance from scratch
+	@rm -rf demo/generated
+	@$(MAKE) demo-up
+
+demo-record: sync ## Record demo/tui.tape with VHS (requires VHS installed separately)
+	@if ! command -v vhs >/dev/null 2>&1; then \
+		printf '[MISSING] vhs not found -- install from https://github.com/charmbracelet/vhs\n' >&2; \
+		exit 1; \
+	fi
+	@mkdir -p demo/output
+	@vhs demo/tui.tape
+
+demo-down: ## Stop and remove the demo containers, network, and all qBittorrent state
+	@$(DEMO_COMPOSE) down -v --remove-orphans
+	@rm -rf demo/generated/config demo/generated/downloads
 
 test-qbit-matrix: docker-matrix-doctor ## Run the full Docker qBittorrent version matrix (requires Docker, not part of `make check`; never writes captured fixtures -- see `capture-qbit-fixtures`)
 	@printf 'Running the full qBittorrent Docker matrix against disposable containers on a dedicated Docker network.\n'

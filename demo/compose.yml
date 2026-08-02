@@ -1,0 +1,20 @@
+# Disposable qBittorrent instance for the qbit-ops TUI demo.
+# Isolation: WebUI bound to 127.0.0.1 only, non-standard port, demo-only
+# credentials pre-seeded into generated/config/qBittorrent.conf, DHT/PeX/
+# LSD/UPnP/NAT-PMP disabled at the application level. The Docker network
+# itself still permits egress -- it is not blocked, only peer discovery is.
+services:
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.2.3
+    container_name: qbit-ops-demo
+    environment:
+      - PUID=${DEMO_UID:-1000}
+      - PGID=${DEMO_GID:-1000}
+      - TZ=Etc/UTC
+      - WEBUI_PORT=18080
+    ports:
+      - 127.0.0.1:18080:18080
+    volumes:
+      - ./generated/config:/config/qBittorrent
+      - ./generated/downloads:/downloads
+    restart: "no"

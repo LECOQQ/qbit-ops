@@ -1,0 +1,118 @@
+# Deterministic demo torrent inventory -- single source of truth for
+# `generate_fixtures.py` and `seed_instance.py`. Order here is the
+# order torrents are generated, added, and printed.
+#
+# desired_state is one of: seeding, completed-paused, stalled-download,
+# incomplete-paused. payload_size is in bytes.
+
+[[fixture]]
+name = "Ubuntu 24.04 Desktop ISO"
+category = "linux"
+extension = "iso"
+payload_size = 3_000_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Debian 12 Netinst ISO"
+category = "linux"
+extension = "iso"
+payload_size = 2_400_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Fedora Workstation 42"
+category = "linux"
+extension = "iso"
+payload_size = 2_800_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Arch Linux Monthly Snapshot"
+category = "linux"
+extension = "iso"
+payload_size = 1_200_000
+desired_state = "completed-paused"
+
+[[fixture]]
+name = "Documentary S01E01 — The First Signal"
+category = "sonarr"
+extension = "mkv"
+payload_size = 900_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Documentary S01E02 — Into the Unknown"
+category = "sonarr"
+extension = "mkv"
+payload_size = 900_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Documentary S01E03 — The Long Return"
+category = "sonarr"
+extension = "mkv"
+payload_size = 900_000
+desired_state = "completed-paused"
+
+[[fixture]]
+name = "Example Movie (2025) MULTi 2160p HDR"
+category = "radarr"
+extension = "mkv"
+payload_size = 2_000_000
+desired_state = "stalled-download"
+
+[[fixture]]
+name = "Example Movie (2023) Director's Cut 1080p"
+category = "radarr"
+extension = "mkv"
+payload_size = 1_500_000
+desired_state = "incomplete-paused"
+
+[[fixture]]
+name = "Open Climate Dataset 2020–2025"
+category = "data"
+extension = "zip"
+payload_size = 1_000_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Public Domain Space Archive"
+category = "data"
+extension = "zip"
+payload_size = 700_000
+desired_state = "completed-paused"
+
+[[fixture]]
+name = "Family Photos Archive — Synthetic Demo"
+category = "archive"
+extension = "zip"
+payload_size = 1_100_000
+desired_state = "stalled-download"
+
+[[fixture]]
+name = "Project Assets v2"
+category = "projects"
+extension = "zip"
+payload_size = 500_000
+desired_state = "seeding"
+
+[[fixture]]
+name = "Old Backup 2019"
+category = "archive"
+extension = "zip"
+payload_size = 600_000
+desired_state = "completed-paused"
+
+[[fixture]]
+name = "Linux Kernel Source Mirror"
+category = "linux"
+extension = "tar"
+payload_size = 1_800_000
+desired_state = "stalled-download"
+
+[[fixture]]
+name = "Creative Commons Audio Collection"
+category = "audio"
+extension = "flac"
+payload_size = 1_300_000
+desired_state = "incomplete-paused"
