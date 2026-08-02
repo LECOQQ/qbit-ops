@@ -399,6 +399,15 @@ class QbitOpsTuiApp(App[None]):
         self.refresh_interval = refresh_interval
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
+        # Incremental-update bookkeeping for `_render_table` -- see its
+        # docstring. `_last_table_signature` also folds in the active
+        # sort, since a sort-only change still needs a fresh header
+        # arrow even when the column set/widths themselves haven't
+        # changed (`_column_header` renders it into the header text).
+        self._last_table_signature: tuple[Any, ...] | None = None
+        self._last_row_order: list[str] = []
+        self._last_row_values: dict[str, dict[str, Any]] = {}
+        self._last_row_sources: dict[str, tuple[Any, ...]] = {}
         self._refresh_worker: Worker[Any] | None = None
         self._last_detail_worker: Worker[Any] | None = None
         self._pending_explain_request_id: int | None = None
@@ -629,6 +638,36 @@ class QbitOpsTuiApp(App[None]):
         bar.add_class("visible")
 
     def _render_table(self) -> None:
+        """Apply `state.visible` to the `#torrents` `DataTable`.
+
+        Three costs are kept independent so a periodic refresh, a
+        search keystroke, or a resize each pay only for what actually
+        changed (see `docs/PLAN.md`'s TUI performance phase):
+
+        - formatting (`_torrent_row_values`): only for a hash whose
+          `_last_row_sources` entry (the small tuple of raw fields that
+          actually feed formatting -- name/state/progress/rates/ratio/
+          category, focused, selected, and the shared bar/name-width/
+          search context) differs from last render. Benchmarked as
+          roughly half the cost of a full periodic-refresh render at
+          1,100 torrents, so an unwatched torrent must never be
+          reformatted just because a handful of others changed.
+        - column rebuild (`clear(columns=True)` + `add_column` x N):
+          only when `_last_table_signature` (columns, Name/Progress
+          widths, active sort) differs from last render -- covers
+          resize *within* the same responsive class doing nothing.
+        - row rebuild (`clear()` + `add_row` x N, columns preserved):
+          only when the ordered list of visible hashes differs from
+          last render -- covers filter/search/sort/snapshot membership
+          changes, never a mere refresh with the same visible set.
+        - cell diff (`update_cell` for changed cells only): the common
+          periodic-refresh case, same visible set in the same order --
+          only the (already known-changed) hashes' cells are compared
+          against `_last_row_values` and written if they actually
+          differ. Touching every cell unconditionally (measured in
+          `scripts/profile_tui_table.py`) costs *more* than a full row
+          rebuild, so an unchanged cell must never be re-written.
+        """
         table = self.query_one("#torrents", DataTable)
         state = self.controller.state
         visible = state.visible
@@ -647,52 +686,140 @@ class QbitOpsTuiApp(App[None]):
             tuple(c for c in columns if c != "Name"),
             bar=bar_progress,
         )
-
         previously_focused = state.focused_hash
-        self._rebuilding_table = True
-        try:
-            table.clear(columns=True)
-            self._hash_by_row = {}
-            for name in columns:
-                width = (
-                    name_width
-                    if name == "Name"
-                    else (
-                        _progress_column_width(bar=bar_progress)
-                        if name == "Progress"
-                        else _COLUMN_WIDTHS.get(name)
-                    )
-                )
-                table.add_column(
-                    _column_header(name, state.sort, width=width),
-                    width=width,
-                    key=name,
-                )
 
-            if visible is None or not visible.matched:
-                return
+        table_signature = (columns, name_width, bar_progress, state.sort)
+        columns_rebuilt = table_signature != self._last_table_signature
+        # Shared across every row this render -- folded into each row's
+        # own source tuple below, so a bar/width/search change alone
+        # (without the row's own data changing) still forces a
+        # reformat of that row's `Name`/`Progress` cell.
+        shared_context = (bar_progress, name_width, state.search)
 
-            for index, torrent in enumerate(visible.matched):
-                values = _torrent_row_values(
+        new_order = [] if visible is None else [t.hash for t in visible.matched]
+        new_values: dict[str, dict[str, Any]] = {}
+        new_sources: dict[str, tuple[Any, ...]] = {}
+        changed_hashes: set[str] = set()
+        if visible is not None:
+            for torrent in visible.matched:
+                focused = torrent.hash == previously_focused
+                selected = torrent.hash in state.selected_hashes
+                source = (
+                    torrent.name,
+                    torrent.state,
+                    torrent.progress,
+                    torrent.download_rate,
+                    torrent.upload_rate,
+                    torrent.ratio,
+                    torrent.category,
+                    focused,
+                    selected,
+                    shared_context,
+                )
+                new_sources[torrent.hash] = source
+                if source == self._last_row_sources.get(torrent.hash):
+                    new_values[torrent.hash] = self._last_row_values[
+                        torrent.hash
+                    ]
+                    continue
+                new_values[torrent.hash] = _torrent_row_values(
                     torrent,
-                    focused=torrent.hash == previously_focused,
-                    selected=torrent.hash in state.selected_hashes,
+                    focused=focused,
+                    selected=selected,
                     bar=bar_progress,
                     name_width=name_width,
                     search=state.search,
                 )
-                table.add_row(
-                    *(values[name] for name in columns), key=torrent.hash
-                )
-                self._hash_by_row[index] = torrent.hash
+                changed_hashes.add(torrent.hash)
 
-            if previously_focused is not None:
-                for row_index, torrent_hash in self._hash_by_row.items():
+        rows_reusable = (
+            not columns_rebuilt and new_order == self._last_row_order
+        )
+
+        self._rebuilding_table = True
+        try:
+            if columns_rebuilt:
+                table.clear(columns=True)
+                for name in columns:
+                    width = (
+                        name_width
+                        if name == "Name"
+                        else (
+                            _progress_column_width(bar=bar_progress)
+                            if name == "Progress"
+                            else _COLUMN_WIDTHS.get(name)
+                        )
+                    )
+                    table.add_column(
+                        _column_header(name, state.sort, width=width),
+                        width=width,
+                        key=name,
+                    )
+                self._last_table_signature = table_signature
+                self._add_all_rows(table, columns, new_order, new_values)
+            elif rows_reusable:
+                self._diff_rows(table, columns, changed_hashes, new_values)
+            else:
+                table.clear()
+                self._add_all_rows(table, columns, new_order, new_values)
+
+            if not rows_reusable and previously_focused is not None:
+                for row_index, torrent_hash in enumerate(new_order):
                     if torrent_hash == previously_focused:
                         table.move_cursor(row=row_index)
                         break
         finally:
             self._rebuilding_table = False
+
+        self._hash_by_row = dict(enumerate(new_order))
+        self._last_row_order = new_order
+        self._last_row_values = new_values
+        self._last_row_sources = new_sources
+
+    def _add_all_rows(
+        self,
+        table: DataTable[Any],
+        columns: tuple[str, ...],
+        order: list[str],
+        values_by_hash: dict[str, dict[str, Any]],
+    ) -> None:
+        for torrent_hash in order:
+            values = values_by_hash[torrent_hash]
+            table.add_row(*(values[name] for name in columns), key=torrent_hash)
+
+    def _diff_rows(
+        self,
+        table: DataTable[Any],
+        columns: tuple[str, ...],
+        changed_hashes: set[str],
+        new_values: dict[str, dict[str, Any]],
+    ) -> None:
+        """Update only the cells of rows whose source data actually
+        changed, and only the cells whose formatted value differs.
+
+        `changed_hashes` already excludes every row whose
+        `_last_row_sources` entry matched -- a periodic refresh where
+        nothing changed calls this with an empty set, doing no work at
+        all. `_last_row_values` may be missing or stale for a hash
+        touched only by `_refresh_indicator_cell` (a bare focus/
+        selection move writes the cell directly, without updating this
+        cache) -- that self-heals here: the comparison below still
+        detects the (already-applied) difference and re-issues the
+        same value, a harmless no-op write, never a correctness issue.
+        """
+        for torrent_hash in changed_hashes:
+            values = new_values[torrent_hash]
+            old_values = self._last_row_values.get(torrent_hash)
+            for name in columns:
+                value = values[name]
+                if old_values is not None and old_values.get(name) == value:
+                    continue
+                try:
+                    table.update_cell(
+                        torrent_hash, name, value, update_width=False
+                    )
+                except (CellDoesNotExist, ColumnDoesNotExist, RowDoesNotExist):
+                    pass
 
     def _refresh_indicator_cell(self, torrent_hash: str | None) -> None:
         """Update one row's focus/selection glyphs in place.
