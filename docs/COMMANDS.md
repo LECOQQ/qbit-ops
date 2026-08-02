@@ -60,10 +60,29 @@ Read commands support `table`, `json`, `jsonl`, and sometimes `csv`. Unsupported
 
 Machine-readable output contains only serialized data on stdout and no ANSI decoration.
 
+## Format Support Matrix
+
+| Command | table | json | jsonl | csv |
+|---|---|---|---|---|
+| `status` | ✅ | ✅ | ✅ | ✅ |
+| `connection check` | ✅ | ✅ | ✅ | ✅ |
+| `doctor` | ✅ | ✅ | ✅ | ✅ |
+| `torrents list` | ✅ | ✅ | ✅ | ✅ |
+| `torrents categories` | ✅ | ✅ | ✅ | ✅ |
+| `torrents inspect` | ✅ | ✅ | ✅ | — |
+| `trackers list` | ✅ | ✅ | ✅ | ✅ |
+| `trackers status` | ✅ | ✅ | ✅ | ✅ |
+| `trackers inspect` | ✅ | ✅ | ✅ | ✅ |
+| `trackers export` | ✅ | ✅ | ✅ | — |
+| `backup export` | ✅ | ✅ | ✅ | — |
+| `backup diff` | ✅ | ✅ | ✅ | — |
+| `explain torrent` | ✅ | ✅ | ✅ | — |
+| `explain tracker` | ✅ | ✅ | ✅ | — |
+
 ## ⚠️ Mutation rules
 
 - 🧪 Mutations default to dry-run.
 - ▶️ `--no-dry-run` requests real execution.
-- ❓ Medium/high-risk tracker mutations prompt in an interactive terminal.
+- ❓ Low-risk mutations apply without a prompt; medium/high-risk tracker mutations prompt in an interactive terminal.
 - ⏭️ `--yes` skips that prompt but never enables real execution by itself.
 - 🚫 Empty selections never mean “all”.
