@@ -1,13 +1,13 @@
-"""Prove `docs/COMPATIBILITY.md`'s structured evidence table cannot
-silently drift from the executable matrix manifest.
+"""Prove `docs/COMPATIBILITY.md`'s version/Web API table cannot silently
+drift from the executable matrix manifest.
 
-Deliberately narrow: parses only the one compact "| `qbit-X` | ... |"
-table row per entry (id, image:tag, digest prefix, version, Web API
-version) -- never the surrounding prose, which would make this a
-fragile whole-document text match instead of a structured-fact check.
-A passing run here says nothing about whether the documented range is
-"broad" or "narrow"; see `test_docs_never_claim_a_broad_version_range`
-for that, kept as a separate, explicit assertion.
+Deliberately narrow: parses only the compact "| qBittorrent | Web API |
+..." table row per entry -- never the surrounding prose, which would
+make this a fragile whole-document text match instead of a structured-
+fact check. A passing run here says nothing about whether the
+documented range is "broad" or "narrow"; see
+`test_docs_never_claim_a_broad_version_range` for that, kept as a
+separate, explicit assertion.
 """
 
 from __future__ import annotations
@@ -20,23 +20,17 @@ from qbit_ops.qbit.compatibility import load_compatibility_evidence
 COMPATIBILITY_DOC = Path(__file__).parent.parent / "docs" / "COMPATIBILITY.md"
 
 _TABLE_ROW_PATTERN = re.compile(
-    r"^\| `(?P<id>qbit-[\d.]+)` \| `[^:]+:[^`]+` "
-    r"\(`(?P<digest_prefix>sha256:[0-9a-f]+)\.\.\.`\) "
-    r"\| `v(?P<version>[\d.]+)` \| `(?P<web_api>[\d.]+)` \|",
+    r"^\| (?P<version>[\d.]+) \| (?P<web_api>[\d.]+) \|",
     re.MULTILINE,
 )
 
 
-def _parsed_doc_rows() -> dict[str, dict[str, str]]:
+def _parsed_doc_rows() -> dict[str, str]:
     text = COMPATIBILITY_DOC.read_text(encoding="utf-8")
-    rows = {}
-    for match in _TABLE_ROW_PATTERN.finditer(text):
-        rows[match.group("id")] = {
-            "digest_prefix": match.group("digest_prefix"),
-            "version": match.group("version"),
-            "web_api": match.group("web_api"),
-        }
-    return rows
+    return {
+        match.group("version"): match.group("web_api")
+        for match in _TABLE_ROW_PATTERN.finditer(text)
+    }
 
 
 def test_evidence_table_discovery_is_non_empty() -> None:
@@ -46,40 +40,44 @@ def test_evidence_table_discovery_is_non_empty() -> None:
 
 
 def test_every_matrix_entry_appears_in_the_evidence_table() -> None:
-    doc_rows = _parsed_doc_rows()
-    manifest_ids = {entry.id for entry in load_compatibility_evidence().entries}
-    assert manifest_ids <= set(doc_rows), (
-        f"matrix entries missing from docs/COMPATIBILITY.md's evidence "
-        f"table: {manifest_ids - set(doc_rows)}"
+    doc_versions = _parsed_doc_rows()
+    manifest_versions = {
+        entry.expected_version.removeprefix("v")
+        for entry in load_compatibility_evidence().entries
+    }
+    assert manifest_versions <= set(doc_versions), (
+        f"matrix versions missing from docs/COMPATIBILITY.md's evidence "
+        f"table: {manifest_versions - set(doc_versions)}"
     )
 
 
-def test_evidence_table_never_lists_an_id_absent_from_the_manifest() -> None:
-    doc_rows = _parsed_doc_rows()
-    manifest_ids = {entry.id for entry in load_compatibility_evidence().entries}
-    assert set(doc_rows) <= manifest_ids, (
-        f"docs/COMPATIBILITY.md documents an id the manifest no longer "
-        f"has: {set(doc_rows) - manifest_ids}"
+def test_evidence_table_never_lists_a_version_absent_from_the_manifest() -> (
+    None
+):
+    doc_versions = _parsed_doc_rows()
+    manifest_versions = {
+        entry.expected_version.removeprefix("v")
+        for entry in load_compatibility_evidence().entries
+    }
+    assert set(doc_versions) <= manifest_versions, (
+        f"docs/COMPATIBILITY.md documents a version the manifest no "
+        f"longer has: {set(doc_versions) - manifest_versions}"
     )
 
 
-def test_documented_version_and_web_api_match_the_manifest() -> None:
-    doc_rows = _parsed_doc_rows()
+def test_documented_web_api_matches_the_manifest() -> None:
+    doc_versions = _parsed_doc_rows()
     for entry in load_compatibility_evidence().entries:
-        row = doc_rows[entry.id]
-        assert row["version"] == entry.expected_version.removeprefix(
-            "v"
-        ), entry.id
-        assert row["web_api"] == entry.expected_web_api_version, entry.id
-        assert entry.image_digest.startswith(row["digest_prefix"]), entry.id
+        version = entry.expected_version.removeprefix("v")
+        assert doc_versions[version] == entry.expected_web_api_version, entry.id
 
 
-def test_the_normative_compatibility_claims_policy_is_tracked() -> None:
-    """The eight-rule compatibility-claims policy must live in this
-    tracked file (§10), not only in the gitignored `AGENTS.md`."""
+def test_the_compatibility_claims_policy_is_tracked() -> None:
+    """The exact-versions-only claims policy must live in this tracked
+    file, not only in the gitignored `AGENTS.md`."""
     text = COMPATIBILITY_DOC.read_text(encoding="utf-8")
-    assert "Politique normative de revendication de compatibilité" in text
-    assert "container integration tested" in text.lower()
+    assert "must always cite exact tested versions" in text
+    assert "container-integration tested" in text.lower()
 
 
 _FORBIDDEN_CONTEXT_MARKERS = ("jamais", "never", "interdit", "forbidden")
