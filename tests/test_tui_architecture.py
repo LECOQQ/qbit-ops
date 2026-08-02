@@ -28,9 +28,14 @@ import qbit_ops.tui
 import qbit_ops.tui.app
 from qbit_ops.tui.modals.actions import ActionsScreen
 from qbit_ops.tui.modals.help import HelpScreen
+from qbit_ops.tui.modals.sort import SortScreen
 from qbit_ops.tui.widgets.details import DetailsPanel
 from qbit_ops.tui.widgets.filters import FiltersPanel
-from qbit_ops.tui.widgets.overview import OverviewPanel, WorkspaceTabs
+from qbit_ops.tui.widgets.overview import (
+    BrandHeader,
+    OverviewPanel,
+    WorkspaceTabs,
+)
 from qbit_ops.tui.widgets.status_bar import (
     ConnectionBanner,
     FilterSummary,
@@ -52,6 +57,7 @@ _CANONICAL_HOME: dict[str, str] = {
     "MainScreen": "app.py",
     "WorkspaceTabs": "widgets/overview.py",
     "OverviewPanel": "widgets/overview.py",
+    "BrandHeader": "widgets/overview.py",
     "FiltersPanel": "widgets/filters.py",
     "DetailsPanel": "widgets/details.py",
     "ConnectionBanner": "widgets/status_bar.py",
@@ -64,6 +70,7 @@ _CANONICAL_HOME: dict[str, str] = {
     "ActionsScreen": "modals/actions.py",
     "PreviewScreen": "modals/preview.py",
     "ResultScreen": "modals/result.py",
+    "SortScreen": "modals/sort.py",
     "MutationUiResult": "state.py",
 }
 
@@ -202,6 +209,7 @@ def test_app_level_bindings_are_all_still_registered() -> None:
         ("modals/help.py", {"dismiss"}),
         ("modals/filters.py", {"clear"}),
         ("modals/actions.py", {"dismiss"}),
+        ("modals/sort.py", {"dismiss"}),
         ("modals/preview.py", set()),
         ("modals/result.py", set()),
     ],
@@ -258,7 +266,7 @@ class _Harness(App[None]):
 
 @pytest.mark.parametrize(
     "widget_factory",
-    [WorkspaceTabs, OverviewPanel, FiltersPanel, DetailsPanel],
+    [WorkspaceTabs, OverviewPanel, FiltersPanel, DetailsPanel, BrandHeader],
 )
 async def test_extracted_content_widgets_mount_in_isolation(
     widget_factory: type,
@@ -317,3 +325,12 @@ async def test_actions_modal_composes_successfully_in_isolation() -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         assert isinstance(app.screen, ActionsScreen)
+
+
+async def test_sort_modal_composes_successfully_in_isolation() -> None:
+    from qbit_ops.tui.state import SortOrder
+
+    app = _ModalHarness(SortScreen(SortOrder()))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, SortScreen)
