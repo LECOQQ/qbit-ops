@@ -283,6 +283,54 @@ def test_focused_torrent_disappearing_clears_focus_and_details() -> None:
     assert controller.state.focused_details_fetched_at is None
 
 
+def test_failed_tracker_fetch_does_not_stay_stuck_loading_forever() -> None:
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={torrent_hash: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+    request_id = controller.begin_focus_change(torrent_hash)
+    assert request_id is not None
+    assert controller.state.focused_tracker_details is None
+    assert controller.state.focused_tracker_fetch_failed is False
+
+    controller.apply_tracker_details_failure(
+        request_id, QbitConnectionError("connection lost")
+    )
+
+    assert controller.state.focused_tracker_details is None
+    assert controller.state.focused_tracker_fetch_failed is True
+
+    # A later successful fetch clears the failure flag again.
+    controller.apply_tracker_details_success(request_id, torrent_hash, [])
+    assert controller.state.focused_tracker_fetch_failed is False
+
+
+def test_new_focus_change_clears_a_prior_fetch_failure() -> None:
+    hash_a, hash_b = "a" * 40, "b" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=hash_a, name="Alpha"),
+            make_torrent(hash=hash_b, name="Beta"),
+        ],
+        trackers_by_hash={hash_a: [], hash_b: []},
+    )
+    controller = _controller(client)
+    controller.refresh()
+    request_id = controller.begin_focus_change(hash_a)
+    assert request_id is not None
+    controller.apply_tracker_details_failure(
+        request_id, QbitConnectionError("connection lost")
+    )
+    assert controller.state.focused_tracker_fetch_failed is True
+
+    controller.begin_focus_change(hash_b)
+
+    assert controller.state.focused_tracker_fetch_failed is False
+
+
 def test_focus_hidden_by_filter_change_is_cleared() -> None:
     torrent_hash = "a" * 40
     client = FakeQbitClient(
