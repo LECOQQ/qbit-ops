@@ -1,5 +1,16 @@
 """Shared pytest fixtures for CLI-level tests."""
 
+import os
+
+# Typer force-enables Rich's colored/styled `--help` rendering whenever
+# `GITHUB_ACTIONS` is set (so it reads nicely in the Actions log
+# viewer). That styling splits option flags like `--format` across
+# multiple ANSI spans, breaking plain-text substring assertions on
+# `result.output` in CI only. Must run before `typer.rich_utils` is
+# first imported (lazily, on the first `--help` render) -- setting it
+# here, before any other import, guarantees that.
+os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
+
 from collections.abc import Callable
 from typing import Any
 
