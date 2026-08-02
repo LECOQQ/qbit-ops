@@ -12,13 +12,19 @@ jobs:
   check:
     name: Check CI
     runs-on: ubuntu-latest
-
+    # Skip only the release-please squash-merge commit landing on main --
+    # that exact diff already ran here as a pull_request check before
+    # merge. Every other push (direct commits, feature branches, the
+    # release-please PR itself) still runs in full.
+    if: >-
+      github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, 'chore(main): release ')
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
