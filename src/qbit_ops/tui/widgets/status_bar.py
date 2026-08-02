@@ -2,12 +2,23 @@
 
 Each is a marker `Static` subclass whose content is set from
 `QbitOpsTuiApp` via `query_one(...).update(...)`, never mutating shared
-state or dispatching anything itself.
+state or dispatching anything itself -- except `CommandBar`, which is
+self-sufficient the same way Textual's own `Footer` is.
 """
 
 from __future__ import annotations
 
-from textual.widgets import Static
+from typing import Any
+
+from textual.widgets import Input, Static
+
+from qbit_ops.features.status import StatusSnapshot
+from qbit_ops.tui.formatting import (
+    _format_command_bar,
+    _format_command_entry,
+    _format_command_value_entry,
+    _format_global_rate,
+)
 
 
 class ConnectionBanner(Static):
@@ -36,3 +47,119 @@ class FilterSummary(Static):
     Purely presentational: derived from `TuiState`, never fetched. Only
     shown in the Torrents workspace.
     """
+
+
+class CommandBar(Static):
+    """A compact, contextual replacement for Textual's default `Footer`.
+
+    Renders `[key→Description]` tokens straight from
+    `Screen.active_bindings` -- the same source `Footer` itself reads
+    -- so the bar can never drift from real key availability. Refreshes
+    itself on `Screen.bindings_updated_signal`, exactly like `Footer`.
+
+    While a live search is active (`set_search_state`), the `[/→Search]`
+    token is replaced in place by a `|search: xxx|` token -- pipe-
+    delimited, not bracketed, to distinguish this live/focused-input
+    token from the static `[key→Description]` key hints beside it (see
+    `FooterTotal` for the right-aligned `|Total: y|` sibling this bar
+    no longer renders itself).
+
+    "Active" is judged from real focus (`#search-input` currently
+    having it), re-checked on every render, not from a sticky flag:
+    `Screen.bindings_updated_signal` already fires on every focus
+    change, so this self-heals the moment focus leaves the search
+    input -- whether that happens via Escape (which also removes the
+    widget), Enter (`QbitOpsTuiApp.action_activate` merely moves focus
+    to the table, leaving the input mounted but idle), or Tab. It would
+    otherwise be possible to strand the footer showing `search: xxx`
+    with every other binding hidden, even though those bindings work
+    again the instant focus leaves the input. While the input *is*
+    focused, `Screen.active_bindings` itself already drops every other
+    single-key binding it would consume as typed text (Textual's own
+    `check_consume_key` filtering) -- so `entries` naturally shrinks to
+    just Search while typing, which is correct: those other keys
+    genuinely type into the search box right now instead of firing
+    their actions.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._search_text: str | None = None
+
+    def on_mount(self) -> None:
+        self.screen.bindings_updated_signal.subscribe(
+            self, self._bindings_changed
+        )
+        self._bindings_changed(self.screen)
+
+    def set_search_state(self, text: str | None) -> None:
+        """Push the live search text (or `None` once search closes) and
+        re-render immediately -- called by `QbitOpsTuiApp` after every
+        keystroke, on open, and on close."""
+        self._search_text = text
+        self._bindings_changed(self.screen)
+
+    def _search_input_focused(self) -> bool:
+        focused = self.app.focused
+        return isinstance(focused, Input) and focused.id == "search-input"
+
+    def _bindings_changed(self, screen: Any) -> None:
+        entries = [
+            (
+                self.app.get_key_display(active.binding),
+                active.binding.description,
+            )
+            for active in self.screen.active_bindings.values()
+            if active.binding.show and active.enabled
+        ]
+        if self._search_text is None or not self._search_input_focused():
+            self.update(_format_command_bar(entries))
+            return
+
+        tokens = [
+            (
+                _format_command_value_entry("search", self._search_text)
+                if description == "Search"
+                else _format_command_entry(key, description)
+            )
+            for key, description in entries
+        ]
+        self.update(" ".join(tokens))
+
+
+class FooterTotal(Static):
+    """The footer row's right-aligned `|Total: y|` token.
+
+    A sibling of `CommandBar` in `#footer-row` (`width: auto`, pinned
+    to the row's right edge by `CommandBar`'s own `width: 1fr`) rather
+    than a token appended into `CommandBar`'s own string -- computing a
+    right-aligned position inside a markup-bearing string is exactly
+    the kind of raw-width arithmetic this codebase avoids. Empty (and
+    so invisible) whenever search isn't active.
+    """
+
+    def set_total(self, total: int | None) -> None:
+        if total is None:
+            self.update("")
+            return
+        self.update(_format_command_value_entry("Total", f"{total:,}"))
+
+
+class GlobalRateDisplay(Static):
+    """The top-right global qBittorrent transfer-rate indicator.
+
+    Reuses `TuiState.status.rates` -- the same data the Overview rail
+    already renders -- never a second qBittorrent call. Blank before
+    the first successful refresh, since there is no rate to show yet.
+    """
+
+    def render_state(self, status: StatusSnapshot | None) -> None:
+        if status is None:
+            self.update("")
+            return
+        rates = status.rates
+        self.update(
+            _format_global_rate(
+                rates.download_bytes_per_second, rates.upload_bytes_per_second
+            )
+        )

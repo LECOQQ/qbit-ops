@@ -42,7 +42,7 @@ class ResultScreen(ModalScreen[None]):
     #result-dialog {
         width: 64;
         max-height: 90%;
-        border: solid $accent;
+        border: round #ff9933;
         background: $surface;
         padding: 1 2;
     }
@@ -61,6 +61,7 @@ class ResultScreen(ModalScreen[None]):
             yield Button("Close", id="result-close")
 
     def on_mount(self) -> None:
+        self.query_one("#result-dialog").border_title = "Result"
         self.query_one("#result-content", Static).update(
             _format_result_text(self.outcome)
         )

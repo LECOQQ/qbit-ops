@@ -51,7 +51,7 @@ class PreviewScreen(ModalScreen[None]):
         width: 76%;
         max-width: 90;
         max-height: 90%;
-        border: solid $accent;
+        border: round #ff9933;
         background: $surface;
         padding: 1 2;
     }
@@ -100,6 +100,9 @@ class PreviewScreen(ModalScreen[None]):
         self.query_one("#preview-apply", Button).focus()
 
     def _render_content(self) -> None:
+        self.query_one("#preview-dialog").border_title = (
+            f"{self.plan.action.title()} · Preview"
+        )
         self.query_one("#preview-content", Static).update(
             _format_preview_text(self.plan, self.snapshot_at, stale=self.stale)
         )

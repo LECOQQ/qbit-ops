@@ -1,74 +1,60 @@
-"""`DetailsPanel` -- the focused torrent's safe detail view."""
+"""`DetailsPanel` -- the Details modal's full content."""
 
 from __future__ import annotations
 
+from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from qbit_ops.tui.formatting import (
-    _format_byte_rate,
-    _format_endpoint,
-    _format_local_time,
-    _shorten_hash,
+    _details_dialog_content_width,
+    _format_details_identity,
+    _format_details_metrics,
+    _format_details_modal_footer,
+    _format_details_trackers,
 )
 from qbit_ops.tui.state import TuiState
 
 
 class DetailsPanel(VerticalScroll):
-    """Safe details for the focused torrent, grouped into Identity,
-    Transfer, and Trackers sections.
+    """Safe details for the focused torrent: a centered identity/
+    progress header, a centered metric grid, a Trackers section, and a
+    contextual-actions footer.
 
     Only ever renders `SelectedTorrent` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker
-    fields -- never a raw announce URL, path, query value, userinfo, or
+    data -- never a raw announce URL, path, query value, or
     unsanitized message.
     """
 
-    def render_state(self, state: TuiState) -> None:
-        self.remove_children()
+    def compose(self) -> ComposeResult:
+        yield Static(id="details-identity")
+        yield Static(id="details-metrics")
+        yield Static("Trackers", id="details-trackers-heading")
+        yield Static(id="details-trackers")
+        yield Static(_format_details_modal_footer(), id="details-footer")
+
+    def render_state(self, state: TuiState, *, app_width: int) -> None:
         torrent = state.focused_torrent()
+        identity = self.query_one("#details-identity", Static)
+        metrics = self.query_one("#details-metrics", Static)
+        trackers = self.query_one("#details-trackers", Static)
 
         if torrent is None:
-            self.mount(Static("No torrent focused."))
+            identity.update("No torrent focused.")
+            metrics.update("")
+            trackers.update("")
             return
 
-        identity_lines = [
-            f"[bold]{torrent.name}[/bold]",
-            f"Hash: {_shorten_hash(torrent.hash)}  [dim](c to copy)[/dim]",
-            f"Category: {torrent.category}",
-        ]
-        self.mount(Static("\n".join(identity_lines), classes="d-section"))
-
-        transfer_lines = [
-            "[bold]Transfer[/bold]",
-            f"State: {torrent.state}",
-            f"Progress: {torrent.progress * 100:.1f}%   "
-            f"Ratio: {torrent.ratio:.2f}",
-            f"Down: {_format_byte_rate(torrent.download_rate)}   "
-            f"Up: {_format_byte_rate(torrent.upload_rate)}",
-        ]
-        self.mount(Static("\n".join(transfer_lines), classes="d-section"))
-
-        tracker_details = state.focused_tracker_details
-        if tracker_details is None:
-            self.mount(
-                Static(
-                    "[bold]Trackers[/bold]\n  loading...", classes="d-section"
-                )
+        name_width = _details_dialog_content_width(app_width)
+        identity.update(
+            _format_details_identity(torrent, name_width=name_width)
+        )
+        metrics.update(_format_details_metrics(torrent))
+        trackers.update(
+            _format_details_trackers(
+                state.focused_tracker_details,
+                state.focused_details_fetched_at,
+                fetch_failed=state.focused_tracker_fetch_failed,
             )
-        else:
-            fetched_at = state.focused_details_fetched_at
-            freshness = (
-                f"fetched {_format_local_time(fetched_at)}"
-                if fetched_at is not None
-                else ""
-            )
-            lines = [f"[bold]Trackers[/bold] ({freshness})"]
-            if not tracker_details:
-                lines.append("  (none)")
-            else:
-                lines.extend(
-                    f"  {_format_endpoint(endpoint)}"
-                    for endpoint in tracker_details
-                )
-            self.mount(Static("\n".join(lines), classes="d-section"))
+        )

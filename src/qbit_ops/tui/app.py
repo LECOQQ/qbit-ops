@@ -25,12 +25,17 @@ from textual.widgets import (
     Button,
     Checkbox,
     DataTable,
-    Footer,
     Input,
     RadioSet,
 )
+from textual.widgets.data_table import (
+    CellDoesNotExist,
+    ColumnDoesNotExist,
+    RowDoesNotExist,
+)
 from textual.worker import Worker, WorkerState
 
+from qbit_ops import __version__
 from qbit_ops.app_services import (
     TuiRefreshResult,
     create_qbit_client,
@@ -45,9 +50,14 @@ from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.formatting import (
     _COLUMN_WIDTHS,
     NARROW_WIDTH_THRESHOLD,
+    _column_header,
     _columns_for_width,
     _format_last_action_line,
     _format_result_notification,
+    _format_torrents_title,
+    _indicator_cell,
+    _name_column_width,
+    _progress_column_width,
     _shorten_hash,
     _torrent_row_values,
 )
@@ -58,20 +68,29 @@ from qbit_ops.tui.modals.filters import FiltersScreen
 from qbit_ops.tui.modals.help import HelpScreen
 from qbit_ops.tui.modals.preview import PreviewScreen
 from qbit_ops.tui.modals.result import ResultScreen
+from qbit_ops.tui.modals.sort import SortScreen
 from qbit_ops.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
     ConnectionState,
     MutationUiResult,
+    SortOrder,
     TuiController,
     Workspace,
     _classify_mutation_error,
 )
 from qbit_ops.tui.widgets.details import DetailsPanel
 from qbit_ops.tui.widgets.filters import FiltersPanel
-from qbit_ops.tui.widgets.overview import OverviewPanel, WorkspaceTabs
+from qbit_ops.tui.widgets.overview import (
+    OVERVIEW_GRID_MIN_WIDTH,
+    OverviewPanel,
+    WorkspaceTabs,
+)
 from qbit_ops.tui.widgets.status_bar import (
+    CommandBar,
     ConnectionBanner,
     FilterSummary,
+    FooterTotal,
+    GlobalRateDisplay,
     LastActionBar,
 )
 
@@ -95,23 +114,13 @@ class MainScreen(Screen[None]):
     def _apply_width(self, width: int) -> None:
         is_narrow = width < NARROW_WIDTH_THRESHOLD
         self.set_class(is_narrow, "narrow")
-        overview = self.query_one("#overview-workspace")
-        overview.set_class(not is_narrow, "grid")
+        # Its own breakpoint, not tied to `is_narrow`: Health/Torrents
+        # fit the two-column grid well before the general narrow cutoff.
+        overview_cards = self.query_one("#overview-cards")
+        overview_cards.set_class(width >= OVERVIEW_GRID_MIN_WIDTH, "grid")
 
         assert isinstance(self.app, QbitOpsTuiApp)
         self.app._render_table()
-
-        # Never leave a now-hidden inline Details widget focused. Skip
-        # while a modal is open: its DetailsPanel is a separate widget.
-        app = self.app
-        if not is_narrow or app.focused is None or len(app.screen_stack) > 1:
-            return
-
-        try:
-            app.focused.query_ancestor("DetailsPanel")
-        except NoMatches:
-            return
-        self.query_one("#torrents", DataTable).focus()
 
 
 class QbitOpsTuiApp(App[None]):
@@ -120,14 +129,56 @@ class QbitOpsTuiApp(App[None]):
     # No qbit-ops commands live in the command palette yet.
     ENABLE_COMMAND_PALETTE = False
 
+    # One shared chrome grammar, reused by every titled region below:
+    # a neutral `$panel-lighten-2` border while inactive, warm brand
+    # orange (`#ff9933` -- must stay in sync with
+    # `qbit_ops.tui.formatting._BRAND_ACCENT`; a literal here, not an
+    # f-string interpolation, since CSS's own `{ }` blocks would
+    # otherwise need escaping throughout this entire string) on
+    # `:focus-within`, expressed purely in CSS -- no extra reactive
+    # state tracks "is this region focused" in Python.
     CSS = """
     Screen {
         layout: vertical;
     }
-    #workspace-tabs {
+    /* Thinner (1 column, Textual's default is 2), brand-orange
+       vertical scrollbar. Scrollbar properties do *not* cascade down
+       the DOM the way most Textual styles do (confirmed empirically:
+       a `Screen`-level declaration alone left every descendant at
+       Textual's own default) -- so this is declared once per type,
+       against `DataTable`/`VerticalScroll` directly, and reaches the
+       torrent table, the Overview scroll area, and every modal's own
+       `VerticalScroll` dialog (App-level `CSS` applies across every
+       `Screen`, not just the default one). */
+    DataTable, VerticalScroll {
+        scrollbar-size-vertical: 1;
+        scrollbar-color: #ff9933 40%;
+        scrollbar-color-hover: #ff9933 70%;
+        scrollbar-color-active: #ff9933;
+        scrollbar-background: $surface;
+        scrollbar-corner-color: $surface;
+    }
+    MainScreen {
+        border: round $panel-lighten-2;
+    }
+    /* Narrow terminals drop the decorative outer frame entirely --
+       every column is worth more than a floating title there. */
+    MainScreen.narrow {
+        border: none;
+    }
+    /* No fill here (see point 1 of the visual-polish brief): this
+       strip used to carry a `$panel` background + bottom border that
+       read as an empty grey seam. The active/inactive tab colours
+       (see `WorkspaceTabs`) now carry all of this row's meaning. */
+    #top-bar {
         height: 1;
         padding: 0 1;
-        background: $panel;
+    }
+    #workspace-tabs {
+        width: 1fr;
+    }
+    #global-rate {
+        width: auto;
     }
     #banner {
         height: auto;
@@ -142,28 +193,57 @@ class QbitOpsTuiApp(App[None]):
         height: 1fr;
         padding: 0 1;
     }
-    #overview-workspace.grid {
+    #brand-header {
+        height: auto;
+        margin-bottom: 1;
+    }
+    .ov-rail {
+        height: auto;
+        padding: 0 0 1 0;
+        border-bottom: solid $panel-lighten-2;
+        margin-bottom: 1;
+    }
+    #overview-cards {
+        height: auto;
+    }
+    #overview-cards.grid {
         layout: grid;
         grid-size: 2;
-        grid-gutter: 1 1;
+        grid-columns: 3fr 2fr;
+        grid-gutter: 0 2;
         grid-rows: auto;
     }
-    .ov-card {
-        border: round $accent;
-        padding: 0 1;
+    .ov-torrents {
         height: auto;
-        min-height: 5;
+        padding: 0 1 0 0;
     }
-    .ov-card.ov-attention {
-        border: round $warning;
+    .ov-health {
+        height: auto;
+        padding: 0 0 0 1;
+        border-left: solid $panel-lighten-2;
+        margin-top: 1;
+    }
+    #overview-cards.grid .ov-health {
+        margin-top: 0;
+    }
+    .ov-health-healthy {
+        border-left: solid $success;
+    }
+    .ov-health-warning {
+        border-left: solid $warning;
+    }
+    .ov-health-critical, .ov-health-unavailable {
+        border-left: solid $error;
     }
     .ov-nav {
         color: $text-muted;
-        padding: 0 1;
-        height: 1;
+        padding: 1 0 0 0;
+        border-top: solid $panel-lighten-2;
+        margin-top: 1;
+        height: auto;
     }
     #filter-summary {
-        height: 1;
+        height: auto;
         padding: 0 1;
         color: $text-muted;
     }
@@ -176,45 +256,124 @@ class QbitOpsTuiApp(App[None]):
     #last-action.visible {
         display: block;
     }
-    #main {
-        height: 1fr;
-    }
-    DataTable {
+    /* Restrained header: a subtle dark surface + muted text, not the
+       default bright/bold bar -- and a cursor row that reads as a
+       slim warm accent, never Textual's default full-width blue
+       block (DataTable's own cursor variable defaults to the theme's
+       blue primary colour). The `›`/`✔` glyphs (see `formatting.py`)
+       carry the actual focus/selection signal; this background is
+       deliberately subtle so it never outcompetes them or the brand. */
+    #torrents {
         width: 1fr;
+        height: 1fr;
+        border: round $panel-lighten-2;
+        background: transparent;
     }
-    #main > DetailsPanel {
-        width: 40;
-        border: solid $accent;
+    /* DataTable's own DEFAULT_CSS tints its background by 5% on focus
+       (`&:focus { background-tint: ... }`), which -- even with the
+       `background: transparent` above -- still composited a visibly
+       lighter panel than the rest of the app's uniform background
+       while the table (the Torrents workspace's default focus target)
+       was focused. Zeroed out here to keep the table's background
+       genuinely uniform with its surroundings in every focus state. */
+    #torrents:focus {
+        background-tint: transparent;
+    }
+    #torrents:focus-within {
+        border: round #ff9933;
+    }
+    #torrents > .datatable--header {
+        background: $surface;
+        color: $text-muted;
+        text-style: bold;
+    }
+    #torrents > .datatable--cursor {
+        background: $panel-lighten-2 60%;
+        color: $text;
+        text-style: none;
+    }
+    #torrents:focus > .datatable--cursor {
+        background: $panel-lighten-3 70%;
+        color: $text;
+        text-style: bold;
+    }
+    /* The footer row: `CommandBar` renders every `[key→Description]`
+       token plus the live `|search: xxx|` token (see
+       `CommandBar.set_search_state`); `FooterTotal` is a `width: auto`
+       sibling that `CommandBar`'s own `width: 1fr` pins to the row's
+       right edge, showing `|Total: y|` only while search is active.
+       `#search-input` is a zero-width, invisible keystroke sink
+       mounted alongside them only while search is active (see
+       `mount_search_input`). Zero width still keeps a Textual `Input`
+       genuinely focusable and able to receive key presses -- confirmed
+       empirically, not merely assumed. */
+    #footer-row {
+        height: auto;
+    }
+    #command-bar {
+        width: 1fr;
+        height: auto;
         padding: 0 1;
+        border-top: solid $panel-lighten-2;
     }
-    Screen.narrow #main > DetailsPanel {
-        display: none;
+    #footer-total {
+        width: auto;
+        height: auto;
+        padding: 0 1;
+        border-top: solid $panel-lighten-2;
     }
-    .d-section {
-        margin-bottom: 1;
+    #search-input {
+        width: 0;
+        height: 1;
+        border: none;
+        padding: 0;
+        background: transparent;
+    }
+    #search-input:focus {
+        border: none;
+    }
+    /* Restyle Textual's built-in toast notifications (`self.notify`)
+       to the same dark-uniform surface + brand accent as every modal
+       -- `-warning`/`-error` keep Textual's own semantic colours
+       (see `Toast`'s own `DEFAULT_CSS`), only the default
+       `-information` state switches from `$success` green to the
+       brand orange, since that's this app's "primary/success" accent. */
+    Toast {
+        background: $surface;
+    }
+    Toast.-information {
+        border-left: outer #ff9933;
+    }
+    Toast.-information .toast--title {
+        color: #ff9933;
     }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        # check_action hides whichever direction doesn't apply to the
-        # current workspace, so only one of these ever shows at once.
+        # Never shown in the footer: the top workspace-tabs strip is
+        # the sole visible way to advertise switching pages now (see
+        # `WorkspaceTabs`) -- these keys still work.
         Binding("1", "show_overview", "Overview", show=False),
-        Binding("g", "show_overview", "Overview", show=True),
+        Binding("g", "show_overview", "Overview", show=False),
         Binding("2", "show_torrents", "Torrents", show=False),
-        Binding("t", "show_torrents", "Torrents", show=True),
+        Binding("t", "show_torrents", "Torrents", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
         Binding("up", "cursor_up", "Up", show=False),
         Binding("slash", "focus_search", "Search"),
         Binding("f", "open_filters", "Filters"),
+        Binding("s", "open_sort", "Sort"),
         # priority=True: DataTable's own `enter` binding (select_cursor)
         # would otherwise win while the table has focus.
         Binding("enter", "activate", "Open", show=False, priority=True),
-        Binding("c", "copy_hash", "Copy"),
-        Binding("e", "explain", "Explain"),
-        Binding("r", "refresh_details", "Refresh"),
+        # Focused-torrent actions: reachable by key and via Help/the
+        # Details modal, but not in the global footer (kept to primary
+        # workspace actions -- see `check_action`/Footer rendering).
+        Binding("c", "copy_hash", "Copy", show=False),
+        Binding("e", "explain", "Explain", show=False),
+        Binding("r", "refresh_details", "Refresh", show=False),
         # Explicit multi-selection, distinct from focus: only an
         # explicit Space press toggles it, never mere highlighting.
         Binding("space", "toggle_selection", "Select"),
@@ -254,18 +413,21 @@ class QbitOpsTuiApp(App[None]):
         return MainScreen(id="_default")
 
     def compose(self) -> ComposeResult:
-        yield WorkspaceTabs(id="workspace-tabs")
+        with Horizontal(id="top-bar"):
+            yield WorkspaceTabs(id="workspace-tabs")
+            yield GlobalRateDisplay(id="global-rate")
         yield ConnectionBanner(id="banner")
         yield OverviewPanel(id="overview-workspace")
         with Vertical(id="torrents-workspace"):
             yield FilterSummary(id="filter-summary")
+            yield DataTable(id="torrents", cursor_type="row")
             yield LastActionBar(id="last-action")
-            with Horizontal(id="main"):
-                yield DataTable(id="torrents", cursor_type="row")
-                yield DetailsPanel()
-        yield Footer()
+        with Horizontal(id="footer-row"):
+            yield CommandBar(id="command-bar")
+            yield FooterTotal(id="footer-total")
 
     def on_mount(self) -> None:
+        self.screen.border_title = f"qbit-ops v{__version__}"
         # Render the initial empty state so the screen isn't blank
         # while the first refresh worker is still in flight.
         self._render_workspace_visibility()
@@ -376,6 +538,7 @@ class QbitOpsTuiApp(App[None]):
 
     def _render_all(self) -> None:
         self._render_workspace_tabs()
+        self._render_global_rate()
         self._render_banner()
         self._render_overview()
         self._render_filter_summary()
@@ -386,6 +549,11 @@ class QbitOpsTuiApp(App[None]):
     def _render_workspace_tabs(self) -> None:
         self.query_one("#workspace-tabs", WorkspaceTabs).render_state(
             self.controller.state.workspace
+        )
+
+    def _render_global_rate(self) -> None:
+        self.query_one("#global-rate", GlobalRateDisplay).render_state(
+            self.controller.state.status
         )
 
     def _render_overview(self) -> None:
@@ -420,22 +588,36 @@ class QbitOpsTuiApp(App[None]):
         banner.add_class("visible")
 
     def _render_filter_summary(self) -> None:
+        """Two compact lines: shown/total (+ selected), then active
+        criteria (or "No filters") plus the active local sort -- the
+        latter always present now that sorting exists."""
         summary = self.query_one("#filter-summary", FilterSummary)
         state = self.controller.state
         visible = state.visible
         total = state.torrent_snapshot.scanned if state.torrent_snapshot else 0
         shown = len(visible.matched) if visible is not None else 0
 
-        parts = [f"{shown:,} shown / {total:,}"]
+        counts_line = f"{shown:,} shown / {total:,}"
         if state.selected_hashes:
-            parts.append(f"{len(state.selected_hashes):,} selected")
+            counts_line += f" · {len(state.selected_hashes):,} selected"
+
+        criteria = []
         description = describe_torrent_filter(state.filters)
         if description != "none":
-            parts.append(description)
+            criteria.append(description)
         if state.search:
-            parts.append(f"search: {state.search}")
+            criteria.append(f"search: {state.search}")
 
-        summary.update(" · ".join(parts))
+        criteria_text = " · ".join(criteria) if criteria else "No filters"
+        second_line = f"{criteria_text} · Sorted by {state.sort.label}"
+        summary.update(f"{counts_line}\n{second_line}")
+
+        self.query_one("#torrents", DataTable).border_title = (
+            _format_torrents_title(
+                shown, len(state.selected_hashes), state.sort.label
+            )
+        )
+        self._refresh_search_command_bar_if_active()
 
     def _render_last_action(self) -> None:
         bar = self.query_one("#last-action", LastActionBar)
@@ -451,6 +633,20 @@ class QbitOpsTuiApp(App[None]):
         state = self.controller.state
         visible = state.visible
         columns = _columns_for_width(self.size.width)
+        # Progress renders a bar+percentage once there's room for it,
+        # a bare percentage below the narrow threshold -- same
+        # threshold `_columns_for_width` already uses to decide
+        # whether Rate fits.
+        bar_progress = self.size.width >= NARROW_WIDTH_THRESHOLD
+        # `Name` gets whatever width remains once every other visible
+        # column's own rendered width (declared width + DataTable's
+        # padding) is accounted for -- never auto-sized to its content,
+        # or a long release name would force horizontal scrolling.
+        name_width = _name_column_width(
+            self.size.width,
+            tuple(c for c in columns if c != "Name"),
+            bar=bar_progress,
+        )
 
         previously_focused = state.focused_hash
         self._rebuilding_table = True
@@ -458,14 +654,32 @@ class QbitOpsTuiApp(App[None]):
             table.clear(columns=True)
             self._hash_by_row = {}
             for name in columns:
-                table.add_column(name, width=_COLUMN_WIDTHS.get(name), key=name)
+                width = (
+                    name_width
+                    if name == "Name"
+                    else (
+                        _progress_column_width(bar=bar_progress)
+                        if name == "Progress"
+                        else _COLUMN_WIDTHS.get(name)
+                    )
+                )
+                table.add_column(
+                    _column_header(name, state.sort, width=width),
+                    width=width,
+                    key=name,
+                )
 
             if visible is None or not visible.matched:
                 return
 
             for index, torrent in enumerate(visible.matched):
                 values = _torrent_row_values(
-                    torrent, torrent.hash in state.selected_hashes
+                    torrent,
+                    focused=torrent.hash == previously_focused,
+                    selected=torrent.hash in state.selected_hashes,
+                    bar=bar_progress,
+                    name_width=name_width,
+                    search=state.search,
                 )
                 table.add_row(
                     *(values[name] for name in columns), key=torrent.hash
@@ -480,10 +694,37 @@ class QbitOpsTuiApp(App[None]):
         finally:
             self._rebuilding_table = False
 
-    def _render_details_panels(self) -> None:
+    def _refresh_indicator_cell(self, torrent_hash: str | None) -> None:
+        """Update one row's focus/selection glyphs in place.
+
+        Used instead of a full `_render_table()` rebuild for a mere
+        cursor move or single-row selection toggle -- rebuilding every
+        cell for one changed row would not stay comfortable at ~1,100
+        torrents. A no-op if the row isn't currently in the table (e.g.
+        focus cleared, or the row was already filtered out).
+        """
+        if torrent_hash is None:
+            return
+        table = self.query_one("#torrents", DataTable)
         state = self.controller.state
-        for panel in self.query(DetailsPanel):
-            panel.render_state(state)
+        cell = _indicator_cell(
+            focused=state.focused_hash == torrent_hash,
+            selected=torrent_hash in state.selected_hashes,
+        )
+        try:
+            table.update_cell(torrent_hash, "Sel", cell, update_width=False)
+        except (CellDoesNotExist, ColumnDoesNotExist, RowDoesNotExist):
+            pass
+
+    def _render_details_panels(self) -> None:
+        # `self.query()` only ever searches `App.default_screen` -- the
+        # Details modal's own `DetailsPanel` lives on whichever screen
+        # is currently on top of `screen_stack`, so this must query
+        # `self.screen` instead (a harmless no-op when nothing is open,
+        # since `DetailsPanel` no longer lives outside the modal).
+        state = self.controller.state
+        for panel in self.screen.query(DetailsPanel):
+            panel.render_state(state, app_width=self.size.width)
 
     # -- context-aware footer ---------------------------------------------
 
@@ -515,7 +756,7 @@ class QbitOpsTuiApp(App[None]):
             return state.workspace is Workspace.TORRENTS
         if action == "show_torrents":
             return state.workspace is Workspace.OVERVIEW
-        if action in ("focus_search", "open_filters"):
+        if action in ("focus_search", "open_filters", "open_sort"):
             return state.workspace is Workspace.TORRENTS
         if action in ("copy_hash", "explain", "refresh_details"):
             return (
@@ -561,6 +802,15 @@ class QbitOpsTuiApp(App[None]):
         if workspace is Workspace.TORRENTS:
             self.query_one("#torrents", DataTable).focus()
         else:
+            # `#search-input` now lives in the always-mounted
+            # `#footer-row`, not inside `#torrents-workspace` -- it no
+            # longer disappears on its own when that workspace is
+            # hidden, and would otherwise keep eating keystrokes meant
+            # for Overview navigation.
+            search_inputs = self.query("#search-input")
+            if search_inputs:
+                search_inputs.first().remove()
+                self._push_search_state(None)
             self.screen.set_focus(None)
         self.refresh_bindings()
 
@@ -600,22 +850,28 @@ class QbitOpsTuiApp(App[None]):
         self._focus_torrent(str(torrent_hash))
 
     def _clear_focus_and_render(self) -> None:
+        previous_hash = self.controller.state.focused_hash
         self.controller.clear_focus()
         self._render_details_panels()
+        self._refresh_indicator_cell(previous_hash)
         self.refresh_bindings()
 
-    def _focus_torrent(self, torrent_hash: str) -> Worker[Any] | None:
-        """Focus a torrent and dispatch a background tracker-details fetch.
+    def _focus_torrent(self, torrent_hash: str) -> None:
+        """Focus a torrent -- zero qBittorrent calls.
 
-        Returns the dispatched `Worker`, or `None` if no fetch was
-        needed -- used only by tests awaiting one specific fetch.
+        Tracker details are no longer fetched here: `begin_focus_change`
+        still bumps the detail-request generation (invalidating any
+        in-flight fetch for the previously focused torrent) and clears
+        the cached tracker details, but the fetch itself is only
+        dispatched when the Details modal opens or is explicitly
+        refreshed -- see `DetailsScreen.on_mount`/`action_refresh_details`.
         """
-        request_id = self.controller.begin_focus_change(torrent_hash)
+        previous_hash = self.controller.state.focused_hash
+        self.controller.begin_focus_change(torrent_hash)
         self._render_details_panels()
+        self._refresh_indicator_cell(previous_hash)
+        self._refresh_indicator_cell(torrent_hash)
         self.refresh_bindings()
-        if request_id is None:
-            return None
-        return self._start_detail_fetch(torrent_hash, request_id)
 
     def _start_detail_fetch(
         self, torrent_hash: str, request_id: int
@@ -761,23 +1017,51 @@ class QbitOpsTuiApp(App[None]):
         if removed:
             self.notify(f"{removed} hidden selection(s) cleared.")
 
-    def action_focus_search(self) -> None:
+    async def action_focus_search(self) -> None:
         if not self._in_torrents_workspace():
             return
-        self.mount_search_input()
+        await self.mount_search_input()
 
-    def mount_search_input(self) -> None:
+    async def mount_search_input(self) -> None:
         existing = self.query("#search-input")
         if existing:
             existing.first().focus()
             return
-        search = Input(
-            placeholder="Search name or hash... (Enter/Esc to close)",
-            value=self.controller.state.search,
-            id="search-input",
-        )
-        self.query_one("#torrents-workspace", Vertical).mount(search, before=0)
+        search = Input(value=self.controller.state.search, id="search-input")
+        # Mounted into `#footer-row`, alongside `CommandBar` -- not a
+        # separate row above the footer. Zero-width/borderless (see the
+        # module CSS): it renders nothing itself, it only captures
+        # keystrokes, while `CommandBar.set_search_state` renders the
+        # visible `search: xxx`/`Total: y` tokens in its place. Awaited
+        # (unlike a bare unwrapped `Input` mount, which used to work
+        # focused synchronously): focusing a widget immediately after
+        # an unawaited `mount()` can silently lose the focus request
+        # under real key-dispatch timing -- reproduced empirically, not
+        # merely suspected.
+        await self.query_one("#footer-row", Horizontal).mount(search)
+        self._push_search_state(self.controller.state.search)
         search.focus()
+
+    def _push_search_state(self, text: str | None) -> None:
+        """Push the live search text (or `None` to restore the normal
+        `[/→Search]` token) into `CommandBar`, and the right-aligned
+        `|Total: y|` token (or clear it) into `FooterTotal`."""
+        command_bar = self.query_one("#command-bar", CommandBar)
+        footer_total = self.query_one("#footer-total", FooterTotal)
+        if text is None:
+            command_bar.set_search_state(None)
+            footer_total.set_total(None)
+            return
+        command_bar.set_search_state(text)
+        state = self.controller.state
+        total = state.torrent_snapshot.scanned if state.torrent_snapshot else 0
+        footer_total.set_total(total)
+
+    def _refresh_search_command_bar_if_active(self) -> None:
+        """Keep the footer's `|Total: y|` token current across a
+        refresh, without touching it while search isn't open."""
+        if self.query("#search-input"):
+            self._push_search_state(self.controller.state.search)
 
     # Input.Submitted never fires for #search-input: the App's priority
     # `enter` binding (action_activate) intercepts it first and handles
@@ -788,6 +1072,24 @@ class QbitOpsTuiApp(App[None]):
             return
         self.push_screen(FiltersScreen(self.controller.state.filters))
         self.refresh_bindings()
+
+    def action_open_sort(self) -> None:
+        if not self._in_torrents_workspace():
+            return
+        self.push_screen(SortScreen(self.controller.state.sort))
+        self.refresh_bindings()
+
+    def apply_sort(self, order: SortOrder) -> None:
+        """Apply a new local sort order picked from `SortScreen`.
+
+        Purely local reordering (zero API calls) -- focus and
+        selection are untouched by `TuiController.set_sort`, and
+        `_render_table` already restores the cursor to the previously
+        focused hash after any rebuild.
+        """
+        self.controller.set_sort(order)
+        self._render_table()
+        self._render_filter_summary()
 
     def action_cursor_down(self) -> None:
         if not self._in_torrents_workspace():
@@ -827,11 +1129,8 @@ class QbitOpsTuiApp(App[None]):
             self.query_one("#torrents", DataTable).focus()
             return
 
-        if self._is_narrow():
-            self.push_screen(DetailsScreen())
-            self.refresh_bindings()
-        else:
-            self.query_one("#main > DetailsPanel", DetailsPanel).focus()
+        self.push_screen(DetailsScreen())
+        self.refresh_bindings()
 
     def action_refresh_details(self) -> Worker[Any] | None:
         """Manually refresh the focused torrent's tracker details.
@@ -921,7 +1220,7 @@ class QbitOpsTuiApp(App[None]):
             self.notify("No torrent focused.", severity="warning")
             return
         self.controller.toggle_selection(torrent_hash)
-        self._render_table()
+        self._refresh_indicator_cell(torrent_hash)
         self._render_filter_summary()
         self.refresh_bindings()
 
@@ -1264,9 +1563,10 @@ class QbitOpsTuiApp(App[None]):
 
         was_editing_text = isinstance(self.focused, Input)
 
-        search_input = self.query("#search-input")
-        if search_input:
-            search_input.first().remove()
+        search_inputs = self.query("#search-input")
+        if search_inputs:
+            search_inputs.first().remove()
+            self._push_search_state(None)
             was_editing_text = True
 
         if was_editing_text:
@@ -1280,9 +1580,6 @@ class QbitOpsTuiApp(App[None]):
             self._render_filter_summary()
             self.refresh_bindings()
             self.notify(f"Cleared {count} selection(s).")
-
-    def _is_narrow(self) -> bool:
-        return self.size.width < NARROW_WIDTH_THRESHOLD
 
 
 def run_tui(

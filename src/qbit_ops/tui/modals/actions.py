@@ -45,17 +45,41 @@ class ActionsScreen(ModalScreen[None]):
     #actions-dialog {
         width: 48;
         max-height: 90%;
-        border: solid $accent;
-        background: $surface;
+        border: round #ff9933;
+        /* Same `$background`-not-`$surface` fix as `FiltersScreen`
+           (see its CSS comment). */
+        background: $background;
         padding: 1 2;
     }
     #actions-dialog Button {
         width: 100%;
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
     .actions-names {
         color: $text-muted;
         margin-bottom: 1;
+    }
+    /* Flat, single-row buttons -- Textual's default `Button` is 3
+       rows tall (a raised, "3D" shadow look) and pulls in `$surface`/
+       `$primary`, both out of place in this dialog's restrained,
+       terminal-native style. `border: none` removes the extra two
+       rows along with the shadow; focus/selection are conveyed by
+       colour alone (background tint + bold orange text), not a frame. */
+    Button {
+        height: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: $text;
+        text-style: none;
+    }
+    Button:hover {
+        background: $panel-lighten-2;
+    }
+    Button:focus {
+        background: #ff9933 20%;
+        color: #ff9933;
+        text-style: bold;
     }
     """
 
@@ -74,9 +98,7 @@ class ActionsScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="actions-dialog"):
-            yield Static(
-                f"[bold]Actions[/bold] · {len(self.selected_hashes)} selected"
-            )
+            yield Static(f"{len(self.selected_hashes)} selected")
             preview = ", ".join(_truncate(name, 24) for name in self._names[:3])
             extra = len(self._names) - 3
             if extra > 0:
@@ -88,6 +110,7 @@ class ActionsScreen(ModalScreen[None]):
             yield Button("Cancel", id="actions-cancel")
 
     def on_mount(self) -> None:
+        self.query_one("#actions-dialog").border_title = "Actions"
         self.query_one("#actions-pause", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
