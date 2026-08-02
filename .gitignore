@@ -26,3 +26,7 @@ dist/
 build/
 *.egg-info/
 .sync-stamp
+
+# Demo: generated fixtures/state and recordings are disposable
+demo/generated/
+demo/output/
