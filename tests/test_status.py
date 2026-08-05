@@ -10,9 +10,11 @@ from qbit_core.features.status import (
     StatusSnapshot,
     TransferCounts,
     TransferRates,
+    build_instance_stats_from_server_state,
     build_status_snapshot_from_data,
     build_unavailable_snapshot,
     classify_torrent_state,
+    collect_instance_stats,
     collect_status_snapshot,
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
@@ -159,6 +161,7 @@ def test_collect_status_snapshot_uses_a_bounded_number_of_api_calls() -> None:
     assert client.torrents_info_calls == 1
     assert client.transfer_info_calls == 1
     assert client.torrents_trackers_calls == 0
+    assert client.sync_maindata_calls == 0
 
 
 def test_collect_status_snapshot_redacts_credentials_from_host() -> None:
@@ -171,6 +174,75 @@ def test_collect_status_snapshot_redacts_credentials_from_host() -> None:
 
     assert snapshot.host == "http://localhost:8080"
     assert "super-secret" not in (snapshot.host or "")
+
+
+# --- InstanceStats: lifetime instance-wide totals ---------------------------
+
+
+def test_build_instance_stats_from_server_state() -> None:
+    stats = build_instance_stats_from_server_state(
+        {
+            "alltime_dl": 123_456,
+            "alltime_ul": 654_321,
+            "global_ratio": "1.75",
+            "total_peer_connections": 42,
+        }
+    )
+
+    assert stats.all_time_downloaded_bytes == 123_456
+    assert stats.all_time_uploaded_bytes == 654_321
+    assert stats.all_time_ratio == pytest.approx(1.75)
+    assert stats.connected_peers == 42
+    assert stats.instance_id is None
+
+
+def test_build_instance_stats_normalizes_no_ratio_sentinel_to_none() -> None:
+    """qBittorrent reports `-1` for "no ratio computed yet" -- never
+    surfaced as a real (misleadingly negative) ratio value."""
+    stats = build_instance_stats_from_server_state(
+        {
+            "alltime_dl": 0,
+            "alltime_ul": 0,
+            "global_ratio": "-1",
+            "total_peer_connections": 0,
+        }
+    )
+
+    assert stats.all_time_ratio is None
+
+
+def test_build_instance_stats_normalizes_unparsable_ratio_to_none() -> None:
+    stats = build_instance_stats_from_server_state({"global_ratio": "n/a"})
+
+    assert stats.all_time_ratio is None
+    assert stats.all_time_downloaded_bytes == 0
+    assert stats.connected_peers == 0
+
+
+def test_build_instance_stats_carries_the_given_instance_id() -> None:
+    stats = build_instance_stats_from_server_state(
+        {}, instance_id="http://localhost:8080"
+    )
+
+    assert stats.instance_id == "http://localhost:8080"
+
+
+def test_collect_instance_stats_uses_exactly_one_api_call() -> None:
+    client = FakeQbitClient(
+        all_time_downloaded=10,
+        all_time_uploaded=20,
+        global_ratio="2.00",
+        connected_peers=7,
+    )
+
+    stats = collect_instance_stats(client, instance_id="http://x")
+
+    assert client.sync_maindata_calls == 1
+    assert stats.all_time_downloaded_bytes == 10
+    assert stats.all_time_uploaded_bytes == 20
+    assert stats.all_time_ratio == pytest.approx(2.00)
+    assert stats.connected_peers == 7
+    assert stats.instance_id == "http://x"
 
 
 def test_build_unavailable_snapshot_reports_unavailable_health() -> None:

@@ -28,10 +28,19 @@ class QbitTorrentReader(Protocol):
 
 @runtime_checkable
 class QbitTransferReader(Protocol):
-    """Read-only global transfer-rate introspection."""
+    """Read-only global transfer/instance-statistics introspection."""
 
     def transfer_info(self) -> Mapping[str, Any]:
         """Return current global download/upload speeds."""
+        ...
+
+    def sync_maindata(self) -> Mapping[str, Any]:
+        """Return the instance's full sync snapshot.
+
+        Only its `server_state` entry is used (lifetime transfer
+        totals, global ratio, connected peers) -- see
+        `qbit_core.features.status.collect_instance_stats`.
+        """
         ...
 
 

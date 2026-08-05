@@ -27,7 +27,7 @@ from qbit_core.features.explain import (
     ExplanationReport,
     build_torrent_explanation,
 )
-from qbit_core.features.status import StatusSnapshot
+from qbit_core.features.status import InstanceStats, StatusSnapshot
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
@@ -199,13 +199,14 @@ class TuiState:
     """The TUI's complete state, split into three kinds of field.
 
     Authoritative, replaced wholesale by a successful refresh:
-    `status`, `torrent_snapshot`, `stopped_count`. Derived, recomputed
-    locally, never fetched: `visible`. Everything else is ephemeral UI
-    state, never persisted.
+    `status`, `instance_stats`, `torrent_snapshot`, `stopped_count`.
+    Derived, recomputed locally, never fetched: `visible`. Everything
+    else is ephemeral UI state, never persisted.
     """
 
     connection: ConnectionState = ConnectionState.CONNECTING
     status: StatusSnapshot | None = None
+    instance_stats: InstanceStats | None = None
     torrent_snapshot: TorrentSelection | None = None
     stopped_count: int = 0
     filters: TorrentFilter = field(default_factory=TorrentFilter)
@@ -359,6 +360,7 @@ class TuiController:
         """
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
+        self.state.instance_stats = result.instance_stats
         self.state.torrent_snapshot = result.torrents
         self.state.stopped_count = _count_stopped_torrents(result.raw_torrents)
         self.state.connection = ConnectionState.CONNECTED
