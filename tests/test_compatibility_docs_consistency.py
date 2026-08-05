@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from qbit_ops.qbit.compatibility import load_compatibility_evidence
+from qbit_core.qbit.compatibility import load_compatibility_evidence
 
 COMPATIBILITY_DOC = Path(__file__).parent.parent / "docs" / "COMPATIBILITY.md"
 

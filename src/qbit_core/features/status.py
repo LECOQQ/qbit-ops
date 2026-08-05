@@ -14,8 +14,8 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from qbit_ops.qbit.fields import get_field_as_string, get_transfer_rates
-from qbit_ops.shared.torrent_states import (
+from qbit_core.qbit.fields import get_field_as_string, get_transfer_rates
+from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_completed_torrent,
@@ -296,7 +296,7 @@ def snapshot_to_csv_rows(
 def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
     """Build transfer rates from an already-fetched `transfer_info()` result.
 
-    Routes through `qbit_ops.qbit.fields.get_transfer_rates` instead of
+    Routes through `qbit_core.qbit.fields.get_transfer_rates` instead of
     calling `.get()` on `transfer_info` directly: a
     malformed non-mapping payload now fails with an explicit `TypeError`
     there rather than an accidental `AttributeError` here.

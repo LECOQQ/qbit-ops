@@ -4,17 +4,17 @@ from typing import Annotated, Any
 
 import typer
 
-from qbit_ops.cli import error_boundary, rendering
-from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.config import ConfigError, QbitConfig
-from qbit_ops.errors import QbitAuthenticationError
-from qbit_ops.features.doctor import (
+from qbit_core.errors import QbitAuthenticationError
+from qbit_core.features.doctor import (
     ConnectionOutcome,
     DoctorReport,
     collect_doctor_report,
     doctor_exit_code,
 )
+from qbit_ops.cli import error_boundary, rendering
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.validation import validate_format_support
+from qbit_ops.config import ConfigError, QbitConfig
 
 
 def _collect_doctor_report() -> DoctorReport:

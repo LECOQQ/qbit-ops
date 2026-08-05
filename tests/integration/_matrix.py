@@ -2,7 +2,7 @@
 
 Re-exports `QbitMatrixEntry` as `MatrixEntry` and adds loader
 convenience wrappers used by the Docker harness and CI, translating
-`qbit_ops.qbit.compatibility` errors into the exception types this
+`qbit_core.qbit.compatibility` errors into the exception types this
 test suite expects.
 """
 
@@ -11,12 +11,12 @@ from __future__ import annotations
 import importlib.resources
 from pathlib import Path
 
-from qbit_ops.qbit.compatibility import (
+from qbit_core.qbit.compatibility import (
     CompatibilityManifestError,
     load_compatibility_evidence,
     parse_manifest_text,
 )
-from qbit_ops.qbit.compatibility import (
+from qbit_core.qbit.compatibility import (
     QbitMatrixEntry as MatrixEntry,
 )
 
@@ -34,7 +34,7 @@ __all__ = [
 # production code.
 MATRIX_MANIFEST_PATH = Path(
     str(
-        importlib.resources.files("qbit_ops.data").joinpath(
+        importlib.resources.files("qbit_core.data").joinpath(
             "qbittorrent-matrix.toml"
         )
     )

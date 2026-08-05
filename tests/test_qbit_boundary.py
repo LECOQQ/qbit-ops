@@ -1,5 +1,5 @@
 """Statically forbid a raw-field or tracker-status-shape helper from being
-redefined outside `qbit_ops.qbit`, mirroring `tests/test_layering.py`'s
+redefined outside `qbit_core.qbit`, mirroring `tests/test_layering.py`'s
 AST approach.
 """
 
@@ -8,13 +8,23 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import qbit_core
 import qbit_ops
 
 PACKAGE_DIR = Path(qbit_ops.__file__).parent
-BOUNDARY_DIR = PACKAGE_DIR / "qbit"
+CORE_DIR = Path(qbit_core.__file__).parent
+BOUNDARY_DIR = CORE_DIR / "qbit"
 
-# Names owned exclusively by the qbit boundary (`qbit_ops/qbit/fields.py`
-# and `qbit_ops/qbit/client.py`). Matched with or without a leading
+# `qbit_ops.app_services.create_qbit_client` is a deliberate, documented
+# second definition: the zero-argument CLI/TUI wrapper that loads
+# `.env`/environment configuration before delegating to the boundary's
+# `create_qbit_client(config)` -- see
+# `tests/test_qbit_architecture.py`'s
+# `test_client_construction_exists_in_exactly_two_documented_locations`.
+_ALLOWED_SECOND_DEFINITION = PACKAGE_DIR / "app_services.py"
+
+# Names owned exclusively by the qbit boundary (`qbit_core/qbit/fields.py`
+# and `qbit_core/qbit/client.py`). Matched with or without a leading
 # underscore to also catch a private re-implementation.
 _BOUNDARY_OWNED_NAMES = frozenset(
     {
@@ -60,15 +70,19 @@ def test_no_boundary_owned_helper_is_redefined_outside_qbit_package() -> None:
     """A new copy of a boundary-owned helper must fail here."""
     files = [
         path
-        for path in _production_python_files(PACKAGE_DIR)
+        for path in (
+            _production_python_files(PACKAGE_DIR)
+            + _production_python_files(CORE_DIR)
+        )
         if BOUNDARY_DIR not in path.parents
+        and path != _ALLOWED_SECOND_DEFINITION
     ]
     assert (
         files
-    ), "expected at least one production module outside qbit_ops/qbit/"
+    ), "expected at least one production module outside qbit_core/qbit/"
     assert any(path.name == "trackers.py" for path in files), (
-        "expected qbit_ops/trackers.py to be part of the scanned set -- an "
-        "empty or wrong scan would make this test vacuously pass"
+        "expected qbit_core/features/trackers.py to be part of the scanned "
+        "set -- an empty or wrong scan would make this test vacuously pass"
     )
 
     offenders: dict[str, set[str]] = {}
@@ -84,7 +98,7 @@ def test_no_boundary_owned_helper_is_redefined_outside_qbit_package() -> None:
             offenders[str(path)] = leaked
 
     assert not offenders, (
-        f"boundary-owned helper(s) redefined outside qbit_ops/qbit/: "
-        f"{offenders} -- reuse qbit_ops.qbit.fields/client instead of "
+        f"boundary-owned helper(s) redefined outside qbit_core/qbit/: "
+        f"{offenders} -- reuse qbit_core.qbit.fields/client instead of "
         "reimplementing"
     )

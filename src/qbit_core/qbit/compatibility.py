@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from packaging.version import InvalidVersion, Version
 
-_MANIFEST_PACKAGE = "qbit_ops.data"
+_MANIFEST_PACKAGE = "qbit_core.data"
 _MANIFEST_FILENAME = "qbittorrent-matrix.toml"
 
 

@@ -39,15 +39,23 @@ class AppError:
     target: str | None = None
 
 
-class InvalidInputError(ValueError):
-    """Report a locally-invalid CLI invocation, raised before any API call."""
+class QbitCoreError(Exception):
+    """Base class for every domain exception `qbit_core` raises.
+
+    Lets a consumer (e.g. Waitarr) catch every `qbit_core` failure with
+    one `except QbitCoreError`, or narrow to a specific subclass.
+    """
 
 
-class QbitConnectionError(RuntimeError):
+class InvalidInputError(QbitCoreError, ValueError):
+    """Report a locally-invalid request, raised before any API call."""
+
+
+class QbitConnectionError(QbitCoreError, RuntimeError):
     """Report that qBittorrent could not be reached."""
 
 
-class QbitAuthenticationError(RuntimeError):
+class QbitAuthenticationError(QbitCoreError, RuntimeError):
     """Report that qBittorrent rejected the configured credentials."""
 
 

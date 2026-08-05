@@ -4,13 +4,13 @@ Rejects an unsupported `--format` or a blank `--hash`/`--tracker`/etc.
 before any qBittorrent API call. Deliberately narrow -- this is not a
 second domain validation layer;
 domain rules (torrent filter combinations, tracker template shape,
-mutation planning) stay in their own modules (`qbit_ops.features.torrents`,
-`qbit_ops.features.trackers`, ...).
+mutation planning) stay in their own modules (`qbit_core.features.torrents`,
+`qbit_core.features.trackers`, ...).
 """
 
+from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
 from qbit_ops.cli.error_boundary import fail
 from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
 
 # Every read-only command uses the same `qbit_ops.cli.rendering.OutputFormat`
 # enum and the same `--format` option, but not every command can

@@ -5,13 +5,7 @@ from typing import Annotated, Any
 
 import typer
 
-from qbit_ops import __version__
-from qbit_ops.cli import error_boundary, rendering
-from qbit_ops.cli.commands.trackers import TrackerMatchModeOption
-from qbit_ops.cli.exit_codes import ExitCode
-from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.features.backup import (
+from qbit_core.features.backup import (
     BackupExportError,
     diff_backup_exports,
     export_instance_state,
@@ -19,6 +13,12 @@ from qbit_ops.features.backup import (
     load_export_file,
     redact_backup_diff,
 )
+from qbit_ops import __version__
+from qbit_ops.cli import error_boundary, rendering
+from qbit_ops.cli.commands.trackers import TrackerMatchModeOption
+from qbit_ops.cli.exit_codes import ExitCode
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.validation import validate_format_support
 
 backup_app = typer.Typer(help="Export qBittorrent state.")
 

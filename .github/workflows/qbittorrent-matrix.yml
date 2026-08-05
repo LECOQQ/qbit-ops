@@ -73,7 +73,7 @@ jobs:
         run: |
           ids=$(poetry run python3 -c "
           import json
-          from qbit_ops.qbit.compatibility import load_compatibility_evidence
+          from qbit_core.qbit.compatibility import load_compatibility_evidence
 
           scope = '${{ needs.resolve-scope.outputs.scope }}'
           evidence = load_compatibility_evidence()  # fails closed if the manifest is empty

@@ -1,4 +1,4 @@
-"""Characterize the qBittorrent client protocols (`qbit_ops.qbit.protocols`).
+"""Characterize the qBittorrent client protocols (`qbit_core.qbit.protocols`).
 
 Proves the minimal protocols actually match what production calls
 (`Signature.parameters` covers keyword-argument names, not just method
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 
-from qbit_ops.qbit.protocols import (
+from qbit_core.qbit.protocols import (
     QbitAppInfoReader,
     QbitClient,
     QbitTorrentMutator,

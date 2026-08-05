@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+import qbit_ops.app_services
 import qbit_ops.cli.error_boundary
-import qbit_ops.qbit.client
 from qbit_ops.config import QbitConfig
 from tests.support import make_config
 
@@ -58,7 +58,7 @@ def configure_qbit_backend(
 
             # Commands that call `error_boundary.create_qbit_client()`
             # directly (skipping their own `load_qbit_config()` call)
-            # reach `qbit_ops.qbit.client`'s own imported reference, not
+            # reach `qbit_ops.app_services`'s own imported reference, not
             # this module's -- patch both seams so every command sees
             # the injected error, not the real on-disk config.
             monkeypatch.setattr(
@@ -66,7 +66,7 @@ def configure_qbit_backend(
                 _raise_config_error,
             )
             monkeypatch.setattr(
-                "qbit_ops.qbit.client.load_qbit_config",
+                "qbit_ops.app_services.load_qbit_config",
                 _raise_config_error,
             )
             return calls
@@ -76,7 +76,7 @@ def configure_qbit_backend(
             lambda: config or make_config(),
         )
         monkeypatch.setattr(
-            "qbit_ops.qbit.client.load_qbit_config",
+            "qbit_ops.app_services.load_qbit_config",
             lambda: config or make_config(),
         )
 
@@ -136,7 +136,7 @@ def configure_qbit_backend_by_reference(
                 _raise_config_error,
             )
             monkeypatch.setattr(
-                qbit_ops.qbit.client,
+                qbit_ops.app_services,
                 "load_qbit_config",
                 _raise_config_error,
             )
@@ -148,7 +148,7 @@ def configure_qbit_backend_by_reference(
             lambda: config or make_config(),
         )
         monkeypatch.setattr(
-            qbit_ops.qbit.client,
+            qbit_ops.app_services,
             "load_qbit_config",
             lambda: config or make_config(),
         )

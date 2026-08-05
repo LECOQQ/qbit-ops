@@ -1,4 +1,4 @@
-"""Characterize the qBittorrent field-access boundary (`qbit_ops.qbit.fields`).
+"""Characterize the qBittorrent field-access boundary (`qbit_core.qbit.fields`).
 
 Uses both plain dicts (what `tests.support.FakeQbitClient` returns) and
 the real qbittorrent-api response types (`TorrentDictionary`, `Tracker`,
@@ -15,7 +15,7 @@ import pytest
 import qbittorrentapi.torrents as qbt_torrents
 import qbittorrentapi.transfer as qbt_transfer
 
-from qbit_ops.qbit.fields import (
+from qbit_core.qbit.fields import (
     get_active_tracker_urls,
     get_field,
     get_field_as_float,

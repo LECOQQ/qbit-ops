@@ -1,10 +1,10 @@
-"""Static guarantees for the `features/`/`shared/` package split.
+"""Static guarantees for the `features/`/`shared/`/`qbit/` package split.
 
 Mirrors `tests/test_layering.py`'s and `tests/test_cli_architecture.py`'s
 AST approach: compile-time guarantees, not just runtime tests, for the
-claims the package-cleanup phase makes about dependency direction. See
-docs/ARCHITECTURE.md for the strict meaning of `features/` and
-`shared/`.
+claims the qbit_core extraction makes about dependency direction. See
+docs/ARCHITECTURE.md for the strict meaning of `features/`, `shared/`,
+and `qbit/` -- all three now live under `qbit_core`, not `qbit_ops`.
 """
 
 from __future__ import annotations
@@ -12,12 +12,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import qbit_core
 import qbit_ops
 
 PACKAGE_DIR = Path(qbit_ops.__file__).parent
-FEATURES_DIR = PACKAGE_DIR / "features"
-SHARED_DIR = PACKAGE_DIR / "shared"
-QBIT_DIR = PACKAGE_DIR / "qbit"
+CORE_DIR = Path(qbit_core.__file__).parent
+FEATURES_DIR = CORE_DIR / "features"
+SHARED_DIR = CORE_DIR / "shared"
+QBIT_DIR = CORE_DIR / "qbit"
 CLI_DIR = PACKAGE_DIR / "cli"
 TUI_DIR = PACKAGE_DIR / "tui"
 
@@ -64,18 +66,29 @@ def test_features_and_shared_directories_are_both_non_empty() -> None:
 
 
 def test_each_moved_module_exists_in_exactly_one_canonical_location() -> None:
-    """No module was left duplicated at the old root path after the move."""
+    """No module was left duplicated at an old path after the move to
+    `qbit_core` -- neither the historical `qbit_ops/` package root, nor
+    a flat `qbit_ops/features|shared/` (the layout before this
+    extraction)."""
     for name in _FEATURE_MODULES:
         assert (FEATURES_DIR / f"{name}.py").is_file(), name
         assert not (PACKAGE_DIR / f"{name}.py").exists(), (
-            f"{name}.py still exists at the package root -- "
-            "it should only exist under features/"
+            f"{name}.py still exists at the qbit_ops package root -- "
+            "it should only exist under qbit_core/features/"
+        )
+        assert not (PACKAGE_DIR / "features" / f"{name}.py").exists(), (
+            f"{name}.py still exists under qbit_ops/features/ -- "
+            "it should only exist under qbit_core/features/"
         )
     for name in _SHARED_MODULES:
         assert (SHARED_DIR / f"{name}.py").is_file(), name
         assert not (PACKAGE_DIR / f"{name}.py").exists(), (
-            f"{name}.py still exists at the package root -- "
-            "it should only exist under shared/"
+            f"{name}.py still exists at the qbit_ops package root -- "
+            "it should only exist under qbit_core/shared/"
+        )
+        assert not (PACKAGE_DIR / "shared" / f"{name}.py").exists(), (
+            f"{name}.py still exists under qbit_ops/shared/ -- "
+            "it should only exist under qbit_core/shared/"
         )
 
 
@@ -98,7 +111,7 @@ def test_cli_and_tui_may_import_features() -> None:
     found_cli_feature_import = False
     for path in cli_files:
         modules = _all_imported_modules(path.read_text(encoding="utf-8"))
-        if any(m.startswith("qbit_ops.features.") for m in modules):
+        if any(m.startswith("qbit_core.features.") for m in modules):
             found_cli_feature_import = True
             break
     assert (
@@ -109,7 +122,7 @@ def test_cli_and_tui_may_import_features() -> None:
     found_tui_feature_import = False
     for path in tui_files:
         modules = _all_imported_modules(path.read_text(encoding="utf-8"))
-        if any(m.startswith("qbit_ops.features.") for m in modules):
+        if any(m.startswith("qbit_core.features.") for m in modules):
             found_tui_feature_import = True
             break
     assert (
@@ -145,8 +158,8 @@ def test_shared_modules_never_import_features_cli_or_tui() -> None:
         leaked = {
             m
             for m in modules
-            if m == "qbit_ops.features"
-            or m.startswith("qbit_ops.features.")
+            if m == "qbit_core.features"
+            or m.startswith("qbit_core.features.")
             or m == "qbit_ops.cli"
             or m.startswith("qbit_ops.cli.")
             or m == "qbit_ops.tui"
@@ -166,8 +179,8 @@ def test_qbit_boundary_modules_never_import_features_cli_or_tui() -> None:
         leaked = {
             m
             for m in modules
-            if m == "qbit_ops.features"
-            or m.startswith("qbit_ops.features.")
+            if m == "qbit_core.features"
+            or m.startswith("qbit_core.features.")
             or m == "qbit_ops.cli"
             or m.startswith("qbit_ops.cli.")
             or m == "qbit_ops.tui"
@@ -181,7 +194,7 @@ def test_qbit_boundary_modules_never_import_features_cli_or_tui() -> None:
 def test_no_executable_import_references_the_old_root_feature_paths() -> None:
     """No production or test module imports a moved feature module from
     its old root path (`qbit_ops.torrents`, not
-    `qbit_ops.features.torrents`) -- this scan is over executable
+    `qbit_core.features.torrents`) -- this scan is over executable
     imports only, via AST, never grep over prose."""
     files = _production_python_files(PACKAGE_DIR) + _production_python_files(
         Path(qbit_ops.__file__).parent.parent.parent / "tests"

@@ -1,6 +1,6 @@
 """Check whether a newer stable qBittorrent release exists than the newest
 entry in the packaged compatibility manifest
-(`qbit_ops.qbit.compatibility`, `qbit_ops/data/qbittorrent-matrix.toml`).
+(`qbit_core.qbit.compatibility`, `qbit_core/data/qbittorrent-matrix.toml`).
 
 This is a **detector, not an updater**: it never edits the matrix, never
 marks a new release as supported, and never runs as part of ordinary
@@ -31,7 +31,7 @@ import urllib.request
 
 from packaging.version import InvalidVersion, Version
 
-from qbit_ops.qbit.compatibility import (
+from qbit_core.qbit.compatibility import (
     CompatibilityManifestError,
     load_compatibility_evidence,
 )
@@ -124,7 +124,7 @@ def main() -> int:
             "this does not mean qbit-ops is incompatible with "
             f"{latest_stable}, only that it has not yet been "
             "container-integration tested against it. The packaged "
-            "compatibility manifest (qbit_ops/data/qbittorrent-matrix.toml) "
+            "compatibility manifest (qbit_core/data/qbittorrent-matrix.toml) "
             "was not modified by this check."
         )
         return 1

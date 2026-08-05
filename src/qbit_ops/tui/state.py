@@ -22,20 +22,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from qbit_ops.app_services import (
-    TuiRefreshResult,
-    classify_recoverable_qbit_failure,
-    collect_tui_refresh,
-    create_qbit_client,
-)
-from qbit_ops.config import ConfigError
-from qbit_ops.errors import AppError, ErrorCategory
-from qbit_ops.features.explain import (
+from qbit_core.errors import AppError, ErrorCategory
+from qbit_core.features.explain import (
     ExplanationReport,
     build_torrent_explanation,
 )
-from qbit_ops.features.status import StatusSnapshot
-from qbit_ops.features.torrents import (
+from qbit_core.features.status import StatusSnapshot
+from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentBulkAction,
@@ -46,13 +39,20 @@ from qbit_ops.features.torrents import (
     get_safe_tracker_details,
     select_torrents_from_items,
 )
-from qbit_ops.features.trackers import sanitize_tracker_text
-from qbit_ops.qbit.fields import get_field_as_string
-from qbit_ops.shared.execution import MutationStatus
-from qbit_ops.shared.torrent_states import (
+from qbit_core.features.trackers import sanitize_tracker_text
+from qbit_core.qbit.fields import get_field_as_string
+from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.torrent_states import (
     classify_torrent_state,
     is_stopped_state,
 )
+from qbit_ops.app_services import (
+    TuiRefreshResult,
+    classify_recoverable_qbit_failure,
+    collect_tui_refresh,
+    create_qbit_client,
+)
+from qbit_ops.config import ConfigError
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
@@ -74,7 +74,7 @@ _STATE_LABELS: dict[str, str] = {
 def _state_label(raw_state: str) -> str:
     """Classify a raw qBittorrent state into one human-readable label.
 
-    Reuses `qbit_ops.shared.torrent_states` entirely -- `is_stopped_state`
+    Reuses `qbit_core.shared.torrent_states` entirely -- `is_stopped_state`
     for the qBittorrent 4/5 pause-vs-stop split (checked first, since
     `classify_torrent_state` folds a stopped torrent into its seeding/
     downloading *direction* rather than reporting it as stopped), then
@@ -168,7 +168,7 @@ def _sort_torrents(
 class ConnectionState(StrEnum):
     """The TUI's high-level connection/session state.
 
-    Distinct from `qbit_ops.features.status.Health`: this tracks
+    Distinct from `qbit_core.features.status.Health`: this tracks
     whether the TUI *can talk to qBittorrent at all*, not the
     instance's own operational health (which is carried inside
     `TuiState.status` once connected).
@@ -742,7 +742,7 @@ class TuiController:
         if request_id != self._detail_request_id:
             return
         # Safe, structural fields only -- never a raw announce URL, path,
-        # query value, or unsanitized message (see qbit_ops.features.torrents).
+        # query value, or unsanitized message (see qbit_core.features.torrents).
         self.state.focused_tracker_details = get_safe_tracker_details(
             raw_trackers
         )

@@ -1,6 +1,6 @@
 """Shared mutation risk classification and execution policy.
 
-Every mutating command in `qbit_ops/main.py` is classified into exactly one
+Every mutating command in `qbit_ops`'s CLI is classified into exactly one
 `MutationRisk` tier and goes through the same `ExecutionPolicy.decide()`
 logic to determine whether it previews, applies silently, prompts for
 confirmation, or refuses. This keeps the safety model in one place

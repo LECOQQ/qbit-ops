@@ -1,4 +1,4 @@
-"""Unit tests for `qbit_ops.qbit.compatibility`, the package-owned loader.
+"""Unit tests for `qbit_core.qbit.compatibility`, the package-owned loader.
 
 Covers the packaged manifest's happy path plus every fail-closed case
 required by the phase spec: missing package data, empty manifest,
@@ -15,8 +15,8 @@ import inspect
 
 import pytest
 
-from qbit_ops.qbit import compatibility as compat_module
-from qbit_ops.qbit.compatibility import (
+from qbit_core.qbit import compatibility as compat_module
+from qbit_core.qbit.compatibility import (
     CompatibilityManifestError,
     load_compatibility_evidence,
     parse_manifest_text,
@@ -112,7 +112,7 @@ def test_entry_for_application_version_does_not_match_a_patch_sibling() -> None:
 
 
 def test_importing_the_module_does_not_parse_the_manifest() -> None:
-    """Importing `qbit_ops.qbit.compatibility` must never read/parse the
+    """Importing `qbit_core.qbit.compatibility` must never read/parse the
     manifest -- only calling `load_compatibility_evidence()` does.
 
     Verified statically (not by reloading the module, which would mint a

@@ -4,7 +4,7 @@ This directory contains **payload fixtures** — JSON snapshots of the
 shapes qBittorrent's Web API returns (torrents, trackers, transfer
 info, application/version strings) — plus contract tests that exercise
 qbit-ops's real production boundary functions
-(`qbit_ops.qbit.fields`, `qbit_ops.torrent_states`,
+(`qbit_core.qbit.fields`, `qbit_ops.torrent_states`,
 `qbit_ops.trackers`, `qbit_ops.doctor`) against them.
 
 The goal is **contract testing against payload shapes**. Most fixtures
@@ -42,7 +42,7 @@ Every fixture's `_meta.trust` field is one of:
   mechanism described below (`tests/integration/_capture.py`,
   `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`). Now used by
   `fixtures/captured-container/<matrix-id>/*.json` for each of the
-  four matrix entries in `qbit_ops/data/qbittorrent-matrix.toml`.
+  four matrix entries in `qbit_core/data/qbittorrent-matrix.toml`.
 - **`captured-instance`** — captured from a real qBittorrent instance
   outside of the disposable-container harness. **qbit-ops never
   captures fixtures from a user's homelab instance; this trust level is
@@ -144,8 +144,8 @@ Any new fixture must pass all of these scans.
 
 Per-version fixture directories now exist, but only where a real image
 was pulled, started, version-verified, and captured (2026-07-27) — see
-`qbit_ops/data/qbittorrent-matrix.toml` (loaded via
-`qbit_ops.qbit.compatibility.load_compatibility_evidence()`) for the
+`qbit_core/data/qbittorrent-matrix.toml` (loaded via
+`qbit_core.qbit.compatibility.load_compatibility_evidence()`) for the
 exact pinned image references and digests:
 
 | Directory | Release line | Observed | Web API |

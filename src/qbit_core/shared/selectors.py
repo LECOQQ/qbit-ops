@@ -11,7 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from qbit_ops.qbit.fields import get_field_as_string
+from qbit_core.errors import QbitCoreError
+from qbit_core.qbit.fields import get_field_as_string
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,7 @@ class ResolvedTorrent:
     name: str
 
 
-class TorrentSelectorError(Exception):
+class TorrentSelectorError(QbitCoreError):
     """Base class for torrent hash selector errors."""
 
 

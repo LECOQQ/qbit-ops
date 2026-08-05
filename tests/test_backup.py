@@ -6,14 +6,14 @@ from typing import Any
 
 import pytest
 
-from qbit_ops.config import QbitConfig
-from qbit_ops.features.backup import (
+from qbit_core.features.backup import (
     BackupExportError,
     diff_backup_exports,
     export_instance_state,
     has_backup_diff,
     load_export_file,
 )
+from qbit_ops.config import QbitConfig
 
 
 def test_export_instance_state_includes_metadata_and_trackers() -> None:

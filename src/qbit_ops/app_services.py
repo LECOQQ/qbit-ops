@@ -12,17 +12,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
-from qbit_ops.features.status import (
+from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_core.features.status import (
     StatusSnapshot,
     build_status_snapshot_from_data,
 )
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
     TorrentFilter,
     TorrentSelection,
     select_torrents_from_items,
 )
-from qbit_ops.qbit.client import create_qbit_client
+from qbit_core.qbit.client import create_qbit_client as _create_qbit_client
+from qbit_ops.config import load_qbit_config
 
 __all__ = [
     "create_qbit_client",
@@ -31,6 +32,17 @@ __all__ = [
     "TuiRefreshResult",
     "collect_tui_refresh",
 ]
+
+
+def create_qbit_client() -> Any:
+    """Load `.env`/environment configuration, then build a qBittorrent client.
+
+    The CLI/TUI-facing zero-argument entry point: loading configuration
+    from the environment is a `qbit_ops` concern (see `qbit_ops.config`),
+    never `qbit_core`'s -- `qbit_core.qbit.client.create_qbit_client`
+    takes an explicit `QbitConfig` instead.
+    """
+    return _create_qbit_client(load_qbit_config())
 
 
 @dataclass(frozen=True)
@@ -73,7 +85,7 @@ class TuiRefreshResult:
     Re-filtering must use `raw_torrents`, not `torrents.matched`:
     `SelectedTorrent.category` is display-formatted (e.g.
     `(uncategorized)`) and would silently break the `uncategorized`
-    filter token -- see `qbit_ops.features.torrents._category_matches`.
+    filter token -- see `qbit_core.features.torrents._category_matches`.
     """
 
     status: StatusSnapshot

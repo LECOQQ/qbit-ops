@@ -22,9 +22,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import qbit_core
 import qbit_ops
 
 APP_PACKAGE_DIR = Path(qbit_ops.__file__).parent
+CORE_PACKAGE_DIR = Path(qbit_core.__file__).parent
 TUI_PACKAGE_DIR = APP_PACKAGE_DIR / "tui"
 
 
@@ -39,10 +41,16 @@ def test_canonical_production_root_is_src_qbit_ops() -> None:
     assert APP_PACKAGE_DIR.parent.name == "src"
 
 
-# R1: exactly the modules that must stay pure (no I/O, no client).
-# Not derived by scanning, because "pure" is a design claim about
-# these specific modules, not a structural property `rglob` could
-# detect on its own.
+def test_canonical_core_root_is_src_qbit_core() -> None:
+    """Same guard as above, for the `qbit_core` package."""
+    assert CORE_PACKAGE_DIR.name == "qbit_core"
+    assert CORE_PACKAGE_DIR.parent.name == "src"
+
+
+# R1: exactly the modules that must stay pure (no I/O, no client). All
+# live under `qbit_core` now (moved out of `qbit_ops`). Not derived by
+# scanning, because "pure" is a design claim about these specific
+# modules, not a structural property `rglob` could detect on its own.
 _PURE_DOMAIN_MODULE_NAMES = (
     "shared/torrent_states.py",
     "shared/selectors.py",
@@ -104,7 +112,7 @@ def test_pure_modules_never_import_typer_rich_textual_or_qbittorrentapi() -> (
     qbittorrentapi."""
     checked = 0
     for name in _PURE_DOMAIN_MODULE_NAMES:
-        path = APP_PACKAGE_DIR / name
+        path = CORE_PACKAGE_DIR / name
         assert path.is_file(), f"expected pure module {name} at {path}"
         roots = _module_level_imported_roots(path.read_text(encoding="utf-8"))
         leaked = roots & _R1_FORBIDDEN_ROOTS
@@ -168,6 +176,42 @@ def test_deferred_tui_import_in_main_is_not_flagged_as_module_level() -> None:
         module == "qbit_ops.tui" or module.startswith("qbit_ops.tui.")
         for module in modules
     )
+
+
+def _all_imported_modules(source: str) -> set[str]:
+    """Every imported module at any nesting (module-level or deferred)."""
+    tree = ast.parse(source)
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
+
+
+def test_qbit_core_never_imports_qbit_ops_typer_rich_or_textual() -> None:
+    """`qbit_core` is the reusable core: it must stay importable without
+    the CLI package, Typer, Rich, or Textual, at any nesting -- a future
+    consumer (e.g. Waitarr) installs `qbit_core` on its own."""
+    files = _production_python_files(CORE_PACKAGE_DIR)
+    assert files, "expected at least one production .py file under qbit_core"
+
+    forbidden_roots = {"typer", "rich", "textual"}
+    offenders: dict[str, set[str]] = {}
+    for path in files:
+        modules = _all_imported_modules(path.read_text(encoding="utf-8"))
+        leaked = {
+            module
+            for module in modules
+            if module == "qbit_ops"
+            or module.startswith("qbit_ops.")
+            or module.split(".")[0] in forbidden_roots
+        }
+        if leaked:
+            offenders[str(path)] = leaked
+
+    assert not offenders, f"qbit_core depends on the CLI layer: {offenders}"
 
 
 def test_production_file_discovery_is_non_empty_and_recursive() -> None:

@@ -1,6 +1,6 @@
 """Test the shared error-category, validation, and exit-code contract.
 
-Covers the cross-cutting guarantees introduced alongside `qbit_ops.errors`:
+Covers the cross-cutting guarantees introduced alongside `qbit_core.errors`:
 local validation before any qBittorrent API call, the distinction
 between invalid input / not found / ambiguous / unavailable /
 authentication / internal failures, and that an unexpected programming
@@ -20,9 +20,9 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from qbit_core.errors import AppError, ErrorCategory
 from qbit_ops.cli.app import app
 from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE, ExitCode
-from qbit_ops.errors import AppError, ErrorCategory
 from tests.support import FakeQbitClient, make_torrent
 
 pytestmark = pytest.mark.usefixtures("configure_qbit_backend")
@@ -141,7 +141,7 @@ def test_not_found_distinct_from_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    from qbit_ops.errors import QbitConnectionError
+    from qbit_core.errors import QbitConnectionError
 
     not_found_client = FakeQbitClient(torrents=[])
     configure_qbit_backend(client=not_found_client)
@@ -163,7 +163,7 @@ def test_authentication_distinct_from_unavailable(
     configure_qbit_backend,
 ) -> None:
     import qbit_ops.cli.error_boundary as error_boundary
-    from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
+    from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitAuthenticationError("Authentication failed.")
@@ -259,7 +259,7 @@ def test_internal_error_does_not_leak_credentials(
 
 def test_ambiguous_hash_error_has_remediation() -> None:
     import qbit_ops.cli.error_boundary as error_boundary
-    from qbit_ops.shared.selectors import (
+    from qbit_core.shared.selectors import (
         AmbiguousTorrentHashError,
         ResolvedTorrent,
     )
@@ -286,7 +286,7 @@ def test_fatal_error_produces_no_stdout_json(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    from qbit_ops.errors import QbitConnectionError
+    from qbit_core.errors import QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect.")
@@ -361,7 +361,7 @@ def test_exit_code_table_matches_registered_commands() -> None:
     assert registered == set(EXIT_CODE_TABLE)
 
 
-# --- TUI readiness: qbit_ops.errors importable without Typer/Rich/main ----
+# --- TUI readiness: qbit_core.errors importable without Typer/Rich/main ----
 
 
 def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
@@ -369,9 +369,9 @@ def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
     already imported into `sys.modules` in this process (see the subprocess-
     based test below for the dynamic guarantee).
     """
-    import qbit_ops.errors
+    import qbit_core.errors
 
-    source = Path(qbit_ops.errors.__file__).read_text(encoding="utf-8")
+    source = Path(qbit_core.errors.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported_modules: set[str] = set()
     for node in ast.walk(tree):
@@ -395,16 +395,17 @@ def test_app_errors_module_source_has_no_typer_or_rich_import() -> None:
 def test_app_errors_importable_without_typer_or_rich_in_a_fresh_process() -> (
     None
 ):
-    """Proves the dependency direction a future TUI relies on: `qbit_ops.errors`
-    (domain/application error model) must never pull in the CLI layer
-    (`qbit_ops.cli`, Typer command registration) or a rendering library, so a
-    TUI can depend on it directly instead of on `qbit_ops.cli`. Runs in a fresh
-    subprocess so already- imported modules from the rest of this test session
-    cannot mask a real dependency.
+    """Proves the dependency direction a future TUI relies on:
+    `qbit_core.errors` (domain/application error model) must never pull
+    in the CLI layer (`qbit_ops.cli`, Typer command registration) or a
+    rendering library, so a TUI can depend on it directly instead of on
+    `qbit_ops.cli`. Runs in a fresh subprocess so already- imported
+    modules from the rest of this test session cannot mask a real
+    dependency.
     """
     script = (
         "import sys\n"
-        "from qbit_ops.errors import AppError, ErrorCategory\n"
+        "from qbit_core.errors import AppError, ErrorCategory\n"
         "assert not any(\n"
         "    name == 'typer' or name.startswith('typer.')\n"
         "    or name == 'rich' or name.startswith('rich.')\n"

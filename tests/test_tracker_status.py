@@ -1,7 +1,7 @@
 """Test the `trackers status` domain model: collection and aggregation."""
 
-from qbit_ops.features.torrents import build_torrent_filter
-from qbit_ops.features.tracker_status import (
+from qbit_core.features.torrents import build_torrent_filter
+from qbit_core.features.tracker_status import (
     TrackerHealth,
     classify_raw_tracker_status,
     collect_tracker_status,
@@ -9,7 +9,7 @@ from qbit_ops.features.tracker_status import (
     tracker_status_report_to_csv_rows,
     tracker_status_report_to_dict,
 )
-from qbit_ops.features.trackers import normalize_tracker_host
+from qbit_core.features.trackers import normalize_tracker_host
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40

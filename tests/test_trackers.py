@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from qbit_ops.features.trackers import (
+from qbit_core.features.trackers import (
     apply_tracker_addition,
     apply_tracker_passkey_replacement,
     apply_tracker_removal,

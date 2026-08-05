@@ -1,7 +1,7 @@
 """Compatibility contract tests: tracker payload fixtures.
 
-Exercises `qbit_ops.qbit.fields` (raw status/URL access) and
-`qbit_ops.features.trackers` (health classification, sanitization) -- the exact
+Exercises `qbit_core.qbit.fields` (raw status/URL access) and
+`qbit_core.features.trackers` (health classification, sanitization) -- the exact
 production boundary the CLI and TUI use.
 """
 
@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import enum
 
-from qbit_ops.features.trackers import (
+from qbit_core.features.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
     sanitize_tracker_text,
 )
-from qbit_ops.qbit.fields import (
+from qbit_core.qbit.fields import (
     get_field_as_string,
     get_raw_tracker_status,
     is_disabled_tracker,

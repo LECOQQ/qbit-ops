@@ -16,16 +16,16 @@ from typing import Any
 from rich.cells import cell_len
 from rich.text import Text
 
-from qbit_ops.errors import ErrorCategory
-from qbit_ops.features.explain import (
+from qbit_core.errors import ErrorCategory
+from qbit_core.features.explain import (
     Evidence,
     ExplanationFinding,
     ExplanationReport,
 )
-from qbit_ops.features.explain import ExplanationSeverity as Severity
-from qbit_ops.features.torrents import BulkTorrentActionPlan, SelectedTorrent
-from qbit_ops.features.trackers import TrackerHealth
-from qbit_ops.shared.execution import MutationStatus
+from qbit_core.features.explain import ExplanationSeverity as Severity
+from qbit_core.features.torrents import BulkTorrentActionPlan, SelectedTorrent
+from qbit_core.features.trackers import TrackerHealth
+from qbit_core.shared.execution import MutationStatus
 from qbit_ops.tui.state import (
     MutationUiResult,
     SortDirection,
@@ -787,7 +787,7 @@ def _format_explain_text(
     header.append(f"[{style}]{report.overall_severity.value.title()}[/{style}]")
 
     # A single-finding report's summary is, by construction
-    # (`qbit_ops.features.explain.build_torrent_explanation`), always
+    # (`qbit_core.features.explain.build_torrent_explanation`), always
     # the finding's own `explanation` -- printing both would show the
     # same sentence twice. Only show the summary here when it says something the
     # first finding block does not already say.
@@ -1057,7 +1057,7 @@ def _format_finding(finding: ExplanationFinding) -> str:
 
 
 # Evidence codes that carry a raw byte-per-second rate, per
-# `qbit_ops.features.explain._build_torrent_finding`'s `common_evidence` tuple.
+# `qbit_core.features.explain._build_torrent_finding`'s `common_evidence` tuple.
 _RATE_EVIDENCE_CODES = frozenset({"download_rate", "upload_rate"})
 
 

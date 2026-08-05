@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import pytest
 
-from qbit_ops.features.trackers import classify_raw_tracker_status
-from qbit_ops.qbit.fields import (
+from qbit_core.features.trackers import classify_raw_tracker_status
+from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_string,
     get_raw_tracker_status,
     get_transfer_rates,
     is_disabled_tracker,
 )
-from qbit_ops.shared.torrent_states import classify_torrent_state
+from qbit_core.shared.torrent_states import classify_torrent_state
 from tests.compatibility._captured_loader import (
     discover_matrix_ids,
     load_all_captured_fixtures,
@@ -148,7 +148,7 @@ def test_captured_transfer_payload_is_read_correctly() -> None:
 
 
 def test_captured_application_version_strings_are_read_correctly() -> None:
-    from qbit_ops.features.doctor import CheckStatus, _version_parsable_check
+    from qbit_core.features.doctor import CheckStatus, _version_parsable_check
 
     found_any = False
     for matrix_id in discover_matrix_ids():

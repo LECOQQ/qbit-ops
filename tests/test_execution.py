@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from qbit_ops.cli.app import app
-from qbit_ops.shared.execution import (
+from qbit_core.shared.execution import (
     MUTATION_RISK,
     ExecutionDecision,
     ExecutionPolicy,
     MutationOperation,
     MutationRisk,
 )
+from qbit_ops.cli.app import app
 
 COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"
 

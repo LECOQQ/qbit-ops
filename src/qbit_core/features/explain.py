@@ -5,7 +5,7 @@ over already-classified data -- no generic rule engine, no confidence
 scoring. When qbit-ops cannot classify something, it says so via
 `ExplanationSeverity.UNKNOWN` or an explicit limitation rather than
 guessing. Tracker-derived evidence is always the same secret-free
-structural data `qbit_ops.features.trackers` produces.
+structural data `qbit_core.features.trackers` produces.
 """
 
 from __future__ import annotations
@@ -16,30 +16,30 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
     build_torrent_filter,
     get_safe_tracker_details,
 )
-from qbit_ops.features.tracker_status import (
+from qbit_core.features.tracker_status import (
     TrackerAggregate,
     TrackerStatusReport,
     collect_tracker_status,
 )
-from qbit_ops.features.trackers import (
+from qbit_core.features.trackers import (
     TrackerHealth,
     compute_tracker_aggregate_health,
 )
-from qbit_ops.qbit.fields import (
+from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
 )
-from qbit_ops.shared.selectors import (
+from qbit_core.shared.selectors import (
     ResolvedTorrent,
     TorrentNotFoundError,
     resolve_torrent_hash,
 )
-from qbit_ops.shared.torrent_states import (
+from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_stopped_state,
@@ -280,7 +280,7 @@ def _pick_representative_message(
 ) -> str | None:
     """Pick one already-sanitized tracker message, most severe first.
 
-    Mirrors `qbit_ops.features.tracker_status`'s aggregate message-selection
+    Mirrors `qbit_core.features.tracker_status`'s aggregate message-selection
     precedence (critical > warning > unknown > disabled > healthy) so an
     operator never sees a healthy endpoint's message while a failing one
     is available.
@@ -595,7 +595,7 @@ def explain_tracker(
 ) -> ExplanationReport | None:
     """Explain one tracker's aggregate health using deterministic evidence.
 
-    Reuses `qbit_ops.features.tracker_status.collect_tracker_status`,
+    Reuses `qbit_core.features.tracker_status.collect_tracker_status`,
     restricted afterward to the requested identity -- never a second
     collection pass. Returns `None` when qBittorrent reported no
     observation for the requested identity, deliberately distinct from

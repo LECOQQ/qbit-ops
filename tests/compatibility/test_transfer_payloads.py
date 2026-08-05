@@ -1,14 +1,14 @@
 """Compatibility contract tests: transfer_info() payload fixtures.
 
-Exercises `qbit_ops.qbit.fields.get_transfer_rates`, the function
-`qbit_ops.features.status` routes through.
+Exercises `qbit_core.qbit.fields.get_transfer_rates`, the function
+`qbit_core.features.status` routes through.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from qbit_ops.qbit.fields import get_transfer_rates
+from qbit_core.qbit.fields import get_transfer_rates
 from tests.compatibility._fixture_loader import load_fixture
 
 

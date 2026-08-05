@@ -115,10 +115,10 @@ def test_status_json_reports_unavailable_health_on_connection_failure(
     `status` never raises on a connection failure -- it degrades to a
     valid, schema-conformant snapshot with `health: "unavailable"` and a
     dedicated exit code (see
-    `qbit_ops.features.status.EXIT_CODE_BY_HEALTH`), which is qbit-ops'
+    `qbit_core.features.status.EXIT_CODE_BY_HEALTH`), which is qbit-ops'
     contract for "unavailable" rather than a fatal CLI error.
     """
-    from qbit_ops.errors import QbitConnectionError
+    from qbit_core.errors import QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect to qBittorrent.")
@@ -143,7 +143,7 @@ def test_fatal_cli_error_json_path_emits_no_stdout(
     non-zero exit, no partial/malformed JSON on stdout. Both shapes are
     legitimate, existing contracts; this locks the second one.
     """
-    from qbit_ops.errors import QbitConnectionError
+    from qbit_core.errors import QbitConnectionError
 
     configure_qbit_backend(
         client_error=QbitConnectionError("Unable to connect.")
