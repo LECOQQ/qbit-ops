@@ -14,10 +14,8 @@ def create_qbit_client(config: QbitConfig) -> Any:
     """Create and authenticate a qBittorrent API client from `config`.
 
     Never prints or exits: raises `QbitAuthenticationError`/
-    `QbitConnectionError` for the caller to render or classify. Callers
-    that load configuration from the environment (the CLI) resolve a
-    `QbitConfig` first -- this function has no knowledge of `.env` or
-    environment variables.
+    `QbitConnectionError` for the caller. No `.env`/environment
+    knowledge -- callers resolve a `QbitConfig` first.
     """
     client = qbittorrentapi.Client(
         host=config.host,

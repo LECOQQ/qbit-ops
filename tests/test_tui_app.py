@@ -621,8 +621,6 @@ async def test_overview_sections_remain_mounted_at_every_brand_variant() -> (
 
 
 async def test_overview_instance_card_shows_lifetime_totals_and_peers() -> None:
-    """The Instance card renders `TuiState.instance_stats`, never
-    torrent-derived data -- see `qbit_core.features.status.InstanceStats`."""
     client = FakeQbitClient(
         torrents=[make_torrent()],
         all_time_downloaded=1024**3,  # 1 GiB

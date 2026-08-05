@@ -235,9 +235,8 @@ class QbitOpsTuiApp(App[None]):
     .ov-health-critical, .ov-health-unavailable {
         border-left: solid $error;
     }
-    /* Always full-width, unlike Torrents/Health: a summary strip below
-       the primary/secondary pair, not a third grid column -- avoids
-       leaving an empty cell in row 2 of the 2-column grid. */
+    /* column-span, not a 3rd grid column: avoids an empty cell in
+       row 2 of the 2-column grid. */
     .ov-instance {
         height: auto;
         padding: 1 0 0 0;

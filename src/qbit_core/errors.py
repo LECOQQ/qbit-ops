@@ -40,11 +40,7 @@ class AppError:
 
 
 class QbitCoreError(Exception):
-    """Base class for every domain exception `qbit_core` raises.
-
-    Lets a consumer (e.g. Waitarr) catch every `qbit_core` failure with
-    one `except QbitCoreError`, or narrow to a specific subclass.
-    """
+    """Base class for every domain exception `qbit_core` raises."""
 
 
 class InvalidInputError(QbitCoreError, ValueError):

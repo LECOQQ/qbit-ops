@@ -15,12 +15,8 @@ PACKAGE_DIR = Path(qbit_ops.__file__).parent
 CORE_DIR = Path(qbit_core.__file__).parent
 BOUNDARY_DIR = CORE_DIR / "qbit"
 
-# `qbit_ops.app_services.create_qbit_client` is a deliberate, documented
-# second definition: the zero-argument CLI/TUI wrapper that loads
-# `.env`/environment configuration before delegating to the boundary's
-# `create_qbit_client(config)` -- see
-# `tests/test_qbit_architecture.py`'s
-# `test_client_construction_exists_in_exactly_two_documented_locations`.
+# Deliberate second `create_qbit_client` definition (the .env-loading
+# CLI/TUI wrapper) -- see test_qbit_architecture.py's "...exactly_two_...".
 _ALLOWED_SECOND_DEFINITION = PACKAGE_DIR / "app_services.py"
 
 # Names owned exclusively by the qbit boundary (`qbit_core/qbit/fields.py`

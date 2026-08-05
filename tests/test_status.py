@@ -197,8 +197,7 @@ def test_build_instance_stats_from_server_state() -> None:
 
 
 def test_build_instance_stats_normalizes_no_ratio_sentinel_to_none() -> None:
-    """qBittorrent reports `-1` for "no ratio computed yet" -- never
-    surfaced as a real (misleadingly negative) ratio value."""
+    """qBittorrent's `-1` means "no ratio computed yet"."""
     stats = build_instance_stats_from_server_state(
         {
             "alltime_dl": 0,

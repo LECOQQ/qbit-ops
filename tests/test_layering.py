@@ -191,9 +191,6 @@ def _all_imported_modules(source: str) -> set[str]:
 
 
 def test_qbit_core_never_imports_qbit_ops_typer_rich_or_textual() -> None:
-    """`qbit_core` is the reusable core: it must stay importable without
-    the CLI package, Typer, Rich, or Textual, at any nesting -- a future
-    consumer (e.g. Waitarr) installs `qbit_core` on its own."""
     files = _production_python_files(CORE_PACKAGE_DIR)
     assert files, "expected at least one production .py file under qbit_core"
 

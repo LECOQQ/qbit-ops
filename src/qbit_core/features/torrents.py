@@ -32,7 +32,9 @@ from qbit_core.shared.selectors import (
     resolve_torrent_hash,
 )
 from qbit_core.shared.torrent_states import (
+    TorrentSnapshot,
     TorrentStateGroup,
+    build_torrent_snapshot,
     classify_torrent_state,
     is_completed_torrent,
     is_stopped_state,
@@ -278,6 +280,14 @@ def select_torrents_from_items(
         matched=tuple(selected),
         filters=filters,
         tracker_data_collected=False,
+    )
+
+
+def list_torrent_snapshots(client: Any) -> tuple[TorrentSnapshot, ...]:
+    """List every torrent as a `TorrentSnapshot`, unfiltered, one
+    `torrents_info()` call -- the non-CLI counterpart to `select_torrents`."""
+    return tuple(
+        build_torrent_snapshot(torrent) for torrent in client.torrents_info()
     )
 
 
@@ -803,20 +813,13 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
 
 
 class HashActionStatus(StrEnum):
-    """Unambiguous per-torrent outcome of a hash-targeted bulk action.
+    """Per-torrent outcome of a hash-targeted bulk action.
 
-    `CHANGED` means the torrent existed, its initial state required the
-    action, and the qBittorrent API call reporting that action
-    succeeded -- qBittorrent's bulk endpoints
-    (`torrents_pause`/`torrents_start`) return no per-torrent
-    confirmation, so `CHANGED` never re-reads the torrent to confirm its
-    resulting state; a second `torrents_info()` call would be required
-    for that; `previous_state` is the only state this result carries.
-    `UNCHANGED` means the torrent already satisfied the requested state
-    (no API call was made for it). `NOT_FOUND` means the hash was
-    absent from the snapshot the action was planned against.
-    Never conflate `CHANGED` with "successful": `UNCHANGED` is also a
-    successful outcome, just not one a caller should treat as its own.
+    `CHANGED`: needed the action, and the (unconfirmed -- no
+    per-torrent API feedback) call succeeded. `UNCHANGED`: already in
+    the requested state, no call made. `NOT_FOUND`: hash absent from
+    the snapshot. Never treat `UNCHANGED` as `CHANGED` -- both are
+    "successful" but only `CHANGED` means state actually moved.
     """
 
     CHANGED = "changed"
@@ -838,15 +841,9 @@ class HashActionOutcome:
 
 @dataclass(frozen=True)
 class BulkHashActionResult:
-    """Result of a hash-targeted bulk action (`pause_torrents_by_hash`/
-    `resume_torrents_by_hash`), one `HashActionOutcome` per requested hash.
-
-    For Waitarr's "resume only what I actually paused" invariant, the
-    only property that matters is `changed_hashes` -- `successful_hashes`
-    (which also includes `UNCHANGED`) is not a substitute for it: a
-    torrent already paused before Waitarr touched it must never be
-    resumed by Waitarr later just because pausing it "succeeded".
-    """
+    """One `HashActionOutcome` per requested hash. To later reverse only
+    what this call changed, use `changed_hashes` -- never
+    `successful_hashes`, which also includes `UNCHANGED`."""
 
     action: TorrentBulkAction
     outcomes: tuple[HashActionOutcome, ...]
@@ -889,11 +886,8 @@ class BulkHashActionResult:
 
     @property
     def successful_hashes(self) -> tuple[str, ...]:
-        """Hashes with no error: `CHANGED` union `UNCHANGED`.
-
-        Not what a caller should persist to know what to reverse later
-        -- use `changed_hashes` for that (see the class docstring).
-        """
+        """`CHANGED` union `UNCHANGED` -- not for deciding what to
+        reverse later; use `changed_hashes`."""
         return tuple(
             outcome.torrent_hash
             for outcome in self.outcomes
@@ -907,19 +901,10 @@ def _apply_bulk_action_to_hashes(
     action: TorrentBulkAction,
     hashes: Collection[str],
 ) -> BulkHashActionResult:
-    """Classify and apply `action` against exactly `hashes`, one API call.
-
-    Internal engine behind `pause_torrents_by_hash`/
-    `resume_torrents_by_hash`, which restrict `action` to a fixed,
-    statically valid value instead of accepting an arbitrary string.
-
-    Fetches `torrents_info()` once, classifies every requested hash
-    locally (never a second network round trip per torrent), then
-    issues at most one bulk mutating call for the hashes that actually
-    need it. On failure every hash that needed the action is reported
-    `FAILED` with the same `error` -- qBittorrent's bulk endpoints
-    accept multiple hashes but return no per-torrent status.
-    """
+    """Classify `hashes` from one `torrents_info()` call, then issue at
+    most one bulk mutating call for those that need it. On failure every
+    attempted hash is reported `FAILED` with the same `error` --
+    qBittorrent's bulk endpoints give no per-torrent status."""
     raw_torrents = list(client.torrents_info())
     by_hash: dict[str, Any] = {
         get_field_as_string(item, "hash").lower(): item for item in raw_torrents
@@ -979,9 +964,7 @@ def pause_torrents_by_hash(
     client: Any,
     hashes: Collection[str],
 ) -> BulkHashActionResult:
-    """Pause exactly `hashes`. See `BulkHashActionResult.changed_hashes`
-    for the set a caller should track in order to later reverse only
-    what it actually caused to change."""
+    """Pause exactly `hashes`. Track `.changed_hashes` to reverse later."""
     return _apply_bulk_action_to_hashes(client, "pause", hashes)
 
 
@@ -989,9 +972,8 @@ def resume_torrents_by_hash(
     client: Any,
     hashes: Collection[str],
 ) -> BulkHashActionResult:
-    """Resume exactly `hashes`. Callers implementing "resume only what I
-    paused" (e.g. Waitarr) must pass a prior pause's `changed_hashes`,
-    never its `successful_hashes`."""
+    """Resume exactly `hashes`. Pass a prior pause's `changed_hashes`,
+    never `successful_hashes`."""
     return _apply_bulk_action_to_hashes(client, "resume", hashes)
 
 

@@ -35,12 +35,8 @@ class QbitTransferReader(Protocol):
         ...
 
     def sync_maindata(self) -> Mapping[str, Any]:
-        """Return the instance's full sync snapshot.
-
-        Only its `server_state` entry is used (lifetime transfer
-        totals, global ratio, connected peers) -- see
-        `qbit_core.features.status.collect_instance_stats`.
-        """
+        """Full sync snapshot; only `server_state` is used (see
+        `qbit_core.features.status.collect_instance_stats`)."""
         ...
 
 

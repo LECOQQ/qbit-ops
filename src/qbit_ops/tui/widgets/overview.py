@@ -237,18 +237,18 @@ class OverviewPanel(VerticalScroll):
 
     Four visual levels, in mount order: `BrandHeader` (branding);
     `#overview-rail` (compact connection + transfer status); the
-    `#overview-cards` section (Torrents/Health as a primary/secondary
-    pair, then a full-width Instance card below them); and the
-    Browse-torrents nav hint. The header and nav hint are mounted once
-    and never torn down; `render_state()` only updates the rail's text
-    and replaces the three cards.
+    `#overview-cards` section (Torrents/Health primary/secondary pair,
+    then a full-width Instance card); and the Browse-torrents nav hint.
+    The header and nav hint are mounted once and never torn down;
+    `render_state()` only updates the rail's text and replaces the
+    three cards.
 
     Torrents and Health each fold two formerly-separate cards
     (Activity+Completion, Attention+Health) into one section without
     implying their sub-counts partition the total -- a torrent can
     count toward more than one at once (e.g. seeding *and* completed
-    *and* stalled). Instance is lifetime instance-wide totals
-    (`TuiState.instance_stats`), never derived from the torrent list.
+    *and* stalled). Instance is lifetime totals (`TuiState.instance_stats`),
+    never derived from the torrent list.
     """
 
     def compose(self) -> ComposeResult:
@@ -381,19 +381,15 @@ def _overview_health_text(state: TuiState) -> str:
 
 
 def _format_ratio(ratio: float | None) -> str:
-    """Format an all-time share ratio, or '–' when qBittorrent has not
-    computed one yet (`InstanceStats.all_time_ratio is None`)."""
+    """`None` means qBittorrent has no ratio computed yet."""
     if ratio is None:
         return "–"
     return f"{ratio:.2f}"
 
 
 def _overview_instance_stats_text(state: TuiState) -> str:
-    """Lifetime instance-wide totals: qBittorrent's own "Statistics"
-    dialog figures, never derived from the current torrent list.
-
-    Single-instance today (`InstanceStats.instance_id` is carried on
-    the model for a future multi-instance TUI, not rendered here)."""
+    """Lifetime totals (qBittorrent's "Statistics" dialog), never
+    derived from the current torrent list."""
     stats = state.instance_stats
     assert stats is not None
     return (

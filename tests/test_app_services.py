@@ -19,9 +19,6 @@ from tests.support import make_config
 def test_create_qbit_client_loads_config_then_builds_the_core_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The zero-argument CLI/TUI entry point loads `.env`/environment
-    configuration, then delegates to `qbit_core.qbit.client.create_qbit_client`
-    -- the only place that knows how to build a `qbittorrentapi.Client`."""
     config = make_config()
     calls: list[Any] = []
 

@@ -14,6 +14,7 @@ from qbit_core.qbit.fields import (
     get_field_as_string,
 )
 from qbit_core.shared.torrent_states import (
+    build_torrent_snapshot,
     classify_torrent_state,
     is_stopped_state,
 )
@@ -147,3 +148,87 @@ def test_v2_or_hybrid_infohash_shape_is_read_as_an_opaque_string() -> None:
     assert len(torrent_hash) != len(
         get_field_as_string(load_fixture("torrents", "v1_hash").payload, "hash")
     )
+
+
+# --- TorrentSnapshot: the same fixtures, through the qbit_core model -------
+
+
+def test_snapshot_of_a_4x_paused_download_is_paused_not_downloading() -> None:
+    fixture = load_fixture("torrents", "paused_state_4x")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.is_paused is True
+    assert snapshot.is_downloading is False
+    assert snapshot.is_active is False
+
+
+def test_snapshot_of_a_5x_stopped_torrent_is_paused() -> None:
+    fixture = load_fixture("torrents", "stopped_state_5x")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.is_paused is True
+    assert snapshot.is_active is False
+
+
+def test_snapshot_of_an_ordinary_downloading_torrent() -> None:
+    fixture = load_fixture("torrents", "ordinary_downloading")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.is_downloading is True
+    assert snapshot.is_paused is False
+    assert snapshot.has_error is False
+
+
+def test_snapshot_of_an_ordinary_seeding_torrent() -> None:
+    fixture = load_fixture("torrents", "ordinary_seeding")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.is_uploading is True
+    assert snapshot.is_paused is False
+
+
+def test_snapshot_of_a_stalled_torrent_is_active_not_transferring() -> None:
+    fixture = load_fixture("torrents", "stalled")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.is_active is True
+    assert snapshot.is_downloading is False
+    assert snapshot.is_uploading is False
+
+
+def test_snapshot_of_an_errored_torrent() -> None:
+    fixture = load_fixture("torrents", "errored")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.has_error is True
+
+
+def test_snapshot_of_an_unknown_state_torrent_has_every_boolean_false() -> None:
+    """`forcedMetaDL`: absent from every classification set, must not raise."""
+    fixture = load_fixture("torrents", "unknown_state")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.state_group == "unknown"
+    assert snapshot.is_paused is False
+    assert snapshot.is_downloading is False
+    assert snapshot.is_uploading is False
+    assert snapshot.is_checking is False
+    assert snapshot.has_error is False
+
+
+def test_snapshot_tolerates_missing_optional_fields() -> None:
+    fixture = load_fixture("torrents", "missing_optional_fields")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.category == ""
+    assert snapshot.ratio == 0.0
+    assert snapshot.download_rate == 0
+    assert snapshot.upload_rate == 0
+
+
+def test_snapshot_ignores_an_extra_future_field() -> None:
+    fixture = load_fixture("torrents", "extra_future_field")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.hash != ""
+    assert snapshot.is_downloading is True
