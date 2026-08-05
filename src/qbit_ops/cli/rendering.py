@@ -50,6 +50,10 @@ from qbit_core.features.status import (
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
 )
+from qbit_core.features.torrent_import import (
+    TorrentImportPlan,
+    TorrentImportResult,
+)
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
@@ -1312,3 +1316,81 @@ def passkey_confirmation_message(plan: PasskeyReplacementPlan) -> str:
         "passkey will break every affected torrent's announce until "
         "corrected."
     )
+
+
+def import_summary_rows(
+    plan: TorrentImportPlan,
+    *,
+    status: MutationStatus,
+    save_path: str | None,
+    category: str | None,
+    tags: list[str],
+    paused: bool,
+) -> dict[str, Any]:
+    """Build `print_summary` rows for a torrent import plan.
+
+    Never includes `display_name` or any torrent-derived text -- only
+    counts and the caller-supplied placement options.
+    """
+    return {
+        "discovered": plan.discovered,
+        "valid": len(plan.candidates),
+        "existing": len(plan.existing_hashes),
+        "duplicates": len(plan.duplicate_hashes),
+        "invalid": len(plan.invalid_entries),
+        "ready": len(plan.ready),
+        "state": "paused" if paused else "started",
+        "save_path": save_path or "(qBittorrent default)",
+        "category": category or "(none)",
+        "tags": ", ".join(tags) if tags else "(none)",
+        "status": status,
+    }
+
+
+def import_confirmation_message(plan: TorrentImportPlan) -> str:
+    return f"Import {len(plan.ready)} torrent(s)?"
+
+
+def print_existing_notice(count: int) -> None:
+    err_console.print(
+        f"[yellow]{count} torrent(s) already present, skipped.[/yellow]"
+    )
+
+
+def import_result_to_dict(
+    plan: TorrentImportPlan,
+    result: TorrentImportResult | None,
+    *,
+    dry_run: bool,
+    source: str,
+) -> dict[str, Any]:
+    """Build the `torrents import --format json` payload.
+
+    `results` stays empty in dry-run (nothing was attempted); on a real
+    import it lists one entry per attempted torrent.
+    """
+    results: list[dict[str, Any]] = []
+    if result is not None:
+        results = [
+            {"hash": info_hash, "status": "imported"}
+            for info_hash in result.imported_hashes
+        ] + [
+            {
+                "hash": failure.info_hash,
+                "status": "failed",
+                "message": failure.message,
+            }
+            for failure in result.failed
+        ]
+
+    return {
+        "dry_run": dry_run,
+        "source": source,
+        "discovered": plan.discovered,
+        "valid": len(plan.candidates),
+        "ready": len(plan.ready),
+        "existing": len(plan.existing_hashes),
+        "duplicates": len(plan.duplicate_hashes),
+        "invalid": len(plan.invalid_entries),
+        "results": results,
+    }

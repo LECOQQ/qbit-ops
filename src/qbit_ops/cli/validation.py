@@ -28,6 +28,7 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "torrents_inspect": frozenset(
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
     ),
+    "torrents_import": frozenset({OutputFormat.table, OutputFormat.json}),
     "trackers_list": frozenset(OutputFormat),
     "trackers_status": frozenset(OutputFormat),
     "trackers_inspect": frozenset(OutputFormat),

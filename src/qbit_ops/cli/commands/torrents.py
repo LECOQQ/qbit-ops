@@ -1,9 +1,16 @@
 """Register the `torrents` command group."""
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from qbit_core.features.torrent_import import (
+    TorrentImportError,
+    TorrentImportResult,
+    apply_torrent_import,
+    plan_torrent_import,
+)
 from qbit_core.features.torrents import (
     STATE_FILTER_VALUES,
     TorrentBulkAction,
@@ -23,6 +30,7 @@ from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
     run_mutation,
 )
+from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import (
     validate_format_support,
@@ -764,3 +772,130 @@ def reannounce(
         dry_run=dry_run,
         verbose=verbose,
     )
+
+
+@torrents_app.command(name="import")
+@error_boundary.catch_internal_errors
+def import_torrents(
+    source: Annotated[
+        Path,
+        typer.Argument(help="A .torrent file, a directory, or a .zip archive."),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Apply changes instead of previewing them.",
+        ),
+    ] = True,
+    assume_yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip confirmation for real execution."),
+    ] = False,
+    save_path: Annotated[
+        str | None,
+        typer.Option("--save-path", help="Save path for imported torrents."),
+    ] = None,
+    category: Annotated[
+        str | None,
+        typer.Option(
+            "--category", help="Category to assign to imported torrents."
+        ),
+    ] = None,
+    tags: Annotated[
+        list[str],
+        typer.Option("--tag", help="Tag to assign (repeatable)."),
+    ] = [],  # noqa: B006
+    start: Annotated[
+        bool,
+        typer.Option(
+            "--start",
+            help="Start torrents immediately instead of adding them paused.",
+        ),
+    ] = False,
+    recursive: Annotated[
+        bool,
+        typer.Option(
+            "--recursive",
+            help="Recurse into subdirectories when SOURCE is a directory.",
+        ),
+    ] = False,
+    skip_existing: Annotated[
+        bool,
+        typer.Option(
+            "--skip-existing",
+            help="Silence the already-present notice.",
+        ),
+    ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+) -> None:
+    """Import .torrent files from a file, directory, or .zip archive.
+
+    Torrents already present in qBittorrent are never re-sent, whether
+    or not `--skip-existing` is given -- the flag only silences the
+    notice about them. Added paused unless `--start` is given.
+    """
+    validate_format_support("torrents_import", output_format)
+    enabled = rendering.progress_enabled(
+        output_format=output_format,
+        interactive=rendering.is_interactive_terminal(),
+    )
+    with error_boundary.qbit_error_boundary():
+        client = error_boundary.create_qbit_client()
+        try:
+            with rendering.transient_spinner(
+                "Scanning source and qBittorrent...", enabled=enabled
+            ):
+                plan = plan_torrent_import(client, source, recursive=recursive)
+        except TorrentImportError as error:
+            error_boundary.fail(str(error))
+
+    result: TorrentImportResult | None = None
+
+    def _apply() -> None:
+        nonlocal result
+        result = apply_torrent_import(
+            client,
+            plan,
+            save_path=save_path,
+            category=category,
+            tags=tags,
+            paused=not start,
+        )
+
+    applied = run_mutation(
+        operation=MutationOperation.TORRENTS_IMPORT,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        matched=len(plan.ready),
+        has_changes=len(plan.ready) > 0,
+        apply_fn=_apply,
+        summary_rows=lambda status: rendering.import_summary_rows(
+            plan,
+            status=status,
+            save_path=save_path,
+            category=category,
+            tags=tags,
+            paused=not start,
+        ),
+        confirmation_message=rendering.import_confirmation_message(plan),
+        quiet=output_format == OutputFormat.json,
+    )
+
+    if not skip_existing and plan.existing_hashes:
+        rendering.print_existing_notice(len(plan.existing_hashes))
+
+    if output_format == OutputFormat.json:
+        rendering.print_json_output(
+            rendering.import_result_to_dict(
+                plan, result, dry_run=not applied, source=str(source)
+            )
+        )
+
+    exit_if_no_targeted_matches(len(plan.ready))
+
+    if (result is not None and result.failed) or plan.invalid_entries:
+        raise typer.Exit(code=ExitCode.ERROR)
