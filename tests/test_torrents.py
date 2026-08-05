@@ -22,7 +22,10 @@ from qbit_core.features.torrents import (
     torrent_filter_to_dict,
     validate_torrent_selector,
 )
-from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selectors import (
+    AmbiguousTorrentHashError,
+    InvalidTorrentSelectorError,
+)
 
 
 class FakeQbitClient:
@@ -42,9 +45,11 @@ class FakeQbitClient:
         self.reannounced_hashes: list[str | list[str]] = []
         self.torrents_trackers_calls = 0
         self.torrents_trackers_call_order: list[str] = []
+        self.torrents_info_calls = 0
 
     def torrents_info(self) -> list[dict[str, Any]]:
         """Return fake torrents."""
+        self.torrents_info_calls += 1
         return self.torrents
 
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, str]]:
@@ -1001,6 +1006,103 @@ def test_pause_and_resume_by_hash_do_not_accept_an_action_parameter() -> None:
         "client",
         "hashes",
     ]
+
+
+# --- Audit: empty/duplicate/invalid/large hash collections, determinism ----
+
+
+def test_empty_hash_collection_makes_no_api_call() -> None:
+    client = FakeQbitClient(torrents=[_torrent()])
+
+    result = pause_torrents_by_hash(client, [])
+
+    assert result.outcomes == ()
+    assert client.torrents_info_calls == 0
+    assert client.paused_hashes == []
+
+
+def test_case_insensitive_duplicate_hashes_collapse_to_one_outcome() -> None:
+    torrent = _torrent(hash="a" * 40, name="Torrent A", state="uploading")
+    client = FakeQbitClient(torrents=[torrent])
+
+    result = pause_torrents_by_hash(client, ["A" * 40, "a" * 40, "A" * 40])
+
+    assert len(result.outcomes) == 1
+    assert result.outcomes[0].torrent_hash == "a" * 40
+    assert result.changed_hashes == ("a" * 40,)
+    # A single bulk call, not one per requested (duplicate) spelling.
+    assert client.paused_hashes == [["a" * 40]]
+
+
+def test_blank_hash_is_rejected_before_any_api_call() -> None:
+    client = FakeQbitClient(torrents=[_torrent()])
+
+    with pytest.raises(InvalidTorrentSelectorError):
+        pause_torrents_by_hash(client, ["   "])
+
+    assert client.torrents_info_calls == 0
+
+
+def test_unmatched_well_formed_hash_is_not_found_not_an_error() -> None:
+    client = FakeQbitClient(torrents=[_torrent(hash="a" * 40)])
+
+    result = pause_torrents_by_hash(client, ["b" * 40])
+
+    assert result.not_found_hashes == ("b" * 40,)
+
+
+def test_large_hash_batch_uses_one_torrents_info_and_one_mutator_call() -> None:
+    torrents = [
+        _torrent(hash=f"{i:040x}", state="uploading") for i in range(500)
+    ]
+    client = FakeQbitClient(torrents=torrents)
+    requested = [f"{i:040x}" for i in range(1_000)]  # half unmatched
+
+    result = pause_torrents_by_hash(client, requested)
+
+    assert client.torrents_info_calls == 1
+    assert len(client.paused_hashes) == 1
+    assert len(result.changed_hashes) == 500
+    assert len(result.not_found_hashes) == 500
+    assert len(result.outcomes) == 1_000
+
+
+def test_outcomes_are_sorted_by_hash_regardless_of_request_order() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="c" * 40, state="uploading"),
+            _torrent(hash="a" * 40, state="uploading"),
+            _torrent(hash="b" * 40, state="uploading"),
+        ]
+    )
+
+    result = pause_torrents_by_hash(
+        client, ["c" * 40, "a" * 40, "d" * 40, "b" * 40]
+    )
+
+    assert [outcome.torrent_hash for outcome in result.outcomes] == [
+        "a" * 40,
+        "b" * 40,
+        "c" * 40,
+        "d" * 40,
+    ]
+
+
+def test_result_is_identical_across_repeated_calls_with_the_same_input() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="a" * 40, state="uploading"),
+            _torrent(hash="b" * 40, state="pausedUP"),
+        ]
+    )
+    hashes = ["b" * 40, "a" * 40, "c" * 40]
+
+    first = pause_torrents_by_hash(client, hashes)
+    second = pause_torrents_by_hash(client, hashes)
+
+    assert first.outcomes == second.outcomes
 
 
 # --- Unrelated read-only helpers ---------------------------------------
