@@ -1,19 +1,19 @@
 """Compatibility contract tests: torrent payload fixtures.
 
 Exercises the exact production boundary functions the CLI and TUI use
-(`qbit_ops.qbit.fields.get_field_as_*`,
-`qbit_ops.shared.torrent_states.classify_torrent_state`) against fixture
+(`qbit_core.qbit.fields.get_field_as_*`,
+`qbit_core.shared.torrent_states.classify_torrent_state`) against fixture
 payloads -- never a separate fixture-only parsing path.
 """
 
 from __future__ import annotations
 
-from qbit_ops.qbit.fields import (
+from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
 )
-from qbit_ops.shared.torrent_states import (
+from qbit_core.shared.torrent_states import (
     classify_torrent_state,
     is_stopped_state,
 )

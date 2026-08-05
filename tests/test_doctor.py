@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-import qbit_ops.features.doctor as doctor_module
-from qbit_ops.features.doctor import (
+import qbit_core.features.doctor as doctor_module
+from qbit_core.features.doctor import (
     CheckStatus,
     ConnectionOutcome,
     collect_doctor_report,
@@ -13,7 +13,7 @@ from qbit_ops.features.doctor import (
     doctor_report_to_csv_rows,
     doctor_report_to_json_dict,
 )
-from qbit_ops.qbit.compatibility import (
+from qbit_core.qbit.compatibility import (
     CompatibilityManifestError,
     load_compatibility_evidence,
 )

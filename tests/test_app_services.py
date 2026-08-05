@@ -1,12 +1,41 @@
-"""Tests for `classify_recoverable_qbit_failure`'s classification contract."""
+"""Tests for `classify_recoverable_qbit_failure`'s classification contract
+and the `create_qbit_client()` config-loading wrapper."""
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
+import qbit_ops.app_services as app_services
+from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
 from qbit_ops.app_services import (
     RecoverableFailure,
     classify_recoverable_qbit_failure,
 )
-from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
+from tests.support import make_config
+
+
+def test_create_qbit_client_loads_config_then_builds_the_core_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The zero-argument CLI/TUI entry point loads `.env`/environment
+    configuration, then delegates to `qbit_core.qbit.client.create_qbit_client`
+    -- the only place that knows how to build a `qbittorrentapi.Client`."""
+    config = make_config()
+    calls: list[Any] = []
+
+    monkeypatch.setattr(app_services, "load_qbit_config", lambda: config)
+    monkeypatch.setattr(
+        app_services,
+        "_create_qbit_client",
+        lambda passed_config: calls.append(passed_config) or "the-client",
+    )
+
+    result = app_services.create_qbit_client()
+
+    assert result == "the-client"
+    assert calls == [config]
 
 
 def test_authentication_error_is_classified_as_recoverable() -> None:

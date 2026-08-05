@@ -1,23 +1,17 @@
 """Load qBittorrent connection settings from the environment."""
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from qbit_core.config import QbitConfig
 
 PROJECT_ENV_FILE = ".env"
 APP_ENV_FILE_VARIABLE = "QBIT_OPS_ENV_FILE"
 APP_CONFIG_DIR = "qbit-ops"
 
-
-@dataclass(frozen=True)
-class QbitConfig:
-    """Store qBittorrent connection settings."""
-
-    host: str
-    username: str
-    password: str
+__all__ = ["QbitConfig", "ConfigError", "load_qbit_config"]
 
 
 class ConfigError(RuntimeError):

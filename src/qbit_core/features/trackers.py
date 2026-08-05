@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from qbit_ops.qbit.fields import (
+from qbit_core.qbit.fields import (
     get_active_tracker_urls,
     get_field_as_float,
     get_field_as_int,

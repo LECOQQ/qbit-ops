@@ -9,10 +9,10 @@ from typing import Annotated
 
 import typer
 
+from qbit_core.errors import ErrorCategory
 from qbit_ops.cli import error_boundary
 from qbit_ops.cli.commands.status import DEFAULT_STATUS_WATCH_INTERVAL_SECONDS
 from qbit_ops.config import ConfigError
-from qbit_ops.errors import ErrorCategory
 
 
 def register(app: typer.Typer) -> None:

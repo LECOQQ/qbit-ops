@@ -12,7 +12,7 @@ from typing import Any
 
 from textual.widgets import Input, Static
 
-from qbit_ops.features.status import StatusSnapshot
+from qbit_core.features.status import StatusSnapshot
 from qbit_ops.tui.formatting import (
     _format_command_bar,
     _format_command_entry,

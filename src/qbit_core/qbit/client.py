@@ -6,17 +6,19 @@ from typing import Any
 
 import qbittorrentapi
 
-from qbit_ops.config import load_qbit_config
-from qbit_ops.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_core.config import QbitConfig
+from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
 
 
-def create_qbit_client() -> Any:
-    """Create and authenticate a qBittorrent API client.
+def create_qbit_client(config: QbitConfig) -> Any:
+    """Create and authenticate a qBittorrent API client from `config`.
 
     Never prints or exits: raises `QbitAuthenticationError`/
-    `QbitConnectionError` for the caller to render or classify.
+    `QbitConnectionError` for the caller to render or classify. Callers
+    that load configuration from the environment (the CLI) resolve a
+    `QbitConfig` first -- this function has no knowledge of `.env` or
+    environment variables.
     """
-    config = load_qbit_config()
     client = qbittorrentapi.Client(
         host=config.host,
         username=config.username,

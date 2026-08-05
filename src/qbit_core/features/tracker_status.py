@@ -1,7 +1,7 @@
 """Collect and represent a filter-aware tracker status report.
 
 Tracker identities are always `host` or `host:port`
-(`qbit_ops.features.trackers.normalize_tracker_host`), never a full
+(`qbit_core.features.trackers.normalize_tracker_host`), never a full
 announce URL, so a passkey embedded in a tracker's path or query
 string never reaches this module's output. DHT/PeX/LSD pseudo-tracker
 entries are excluded from aggregation entirely, since they have no
@@ -15,19 +15,19 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
     TorrentFilter,
     select_torrents,
     torrent_filter_to_dict,
 )
-from qbit_ops.features.trackers import (
+from qbit_core.features.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
     compute_tracker_aggregate_health,
     normalize_tracker_host,
     sanitize_tracker_text,
 )
-from qbit_ops.qbit.fields import get_field_as_string, get_raw_tracker_status
+from qbit_core.qbit.fields import get_field_as_string, get_raw_tracker_status
 
 __all__ = [
     "SCHEMA_VERSION",

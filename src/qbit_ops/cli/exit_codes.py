@@ -20,7 +20,7 @@ class ExitCode(IntEnum):
 class StatusExitCode(IntEnum):
     """Define exit codes specific to the `status` command.
 
-    0-3 map to `qbit_ops.features.status.Health`; 4 is invalid local
+    0-3 map to `qbit_core.features.status.Health`; 4 is invalid local
     configuration or CLI usage. `status --watch` does **not** use this
     health mapping: a running watch cannot continuously update the exit
     code, and warning/critical/unavailable snapshots must never stop the
@@ -39,7 +39,7 @@ class StatusExitCode(IntEnum):
 class DoctorExitCode(IntEnum):
     """Define exit codes specific to the `doctor` command.
 
-    `0`/`1`/`2` mirror `qbit_ops.features.doctor.doctor_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_core.features.doctor.doctor_exit_code`'s
     pass/warning/failure mapping.
     """
 
@@ -68,7 +68,7 @@ class TrackerStatusExitCode(IntEnum):
 class ExplainExitCode(IntEnum):
     """Define exit codes specific to the `explain` command group.
 
-    `0`/`1`/`2` mirror `qbit_ops.features.explain.explanation_exit_code`'s
+    `0`/`1`/`2` mirror `qbit_core.features.explain.explanation_exit_code`'s
     info/warning-or-unknown/critical mapping. `3` (`TARGET_UNAVAILABLE`)
     means there is nothing to explain at all (unresolved hash, or a
     tracker with zero observations), deliberately distinct from

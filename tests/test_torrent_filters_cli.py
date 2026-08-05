@@ -2,7 +2,7 @@
 
 Covers `torrents list` and the four bulk mutation commands
 (`pause`/`resume`/`start`/`reannounce`) sharing one filter model
-(`qbit_ops.features.torrents.TorrentFilter`/`select_torrents`): each
+(`qbit_core.features.torrents.TorrentFilter`/`select_torrents`): each
 supported filter, repetition/combination semantics, selection-safety
 refusals, NO_MATCH/NO_CHANGES under filtering, and that a filter
 preview never renders a tracker passkey. `tests/test_torrents.py`

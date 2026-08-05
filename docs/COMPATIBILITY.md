@@ -39,5 +39,5 @@ The tests use disposable Docker containers and isolated configuration. The Docke
 The executable source of truth is:
 
 ```text
-src/qbit_ops/data/qbittorrent-matrix.toml
+src/qbit_core/data/qbittorrent-matrix.toml
 ```

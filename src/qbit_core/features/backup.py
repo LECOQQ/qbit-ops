@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from qbit_ops.config import QbitConfig
-from qbit_ops.features.torrents import list_torrents_with_trackers
-from qbit_ops.features.trackers import (
+from qbit_core.config import QbitConfig
+from qbit_core.features.torrents import list_torrents_with_trackers
+from qbit_core.features.trackers import (
     TrackerMatchMode,
     describe_tracker_url,
     list_tracker_usage,

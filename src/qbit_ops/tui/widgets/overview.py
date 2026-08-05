@@ -13,8 +13,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
+from qbit_core.features.status import Health
 from qbit_ops import __version__
-from qbit_ops.features.status import Health
 from qbit_ops.tui.formatting import (
     _BRAND_ACCENT,
     _GRADIENT_END,

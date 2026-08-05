@@ -5,6 +5,25 @@ from typing import Annotated
 
 import typer
 
+from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
+from qbit_core.features.torrents import build_torrent_filter
+from qbit_core.features.tracker_status import (
+    collect_tracker_status,
+    tracker_status_exit_code,
+)
+from qbit_core.features.trackers import (
+    apply_tracker_addition,
+    apply_tracker_passkey_replacement,
+    apply_tracker_removal,
+    apply_tracker_replacement,
+    export_tracker_state,
+    inspect_tracker,
+    plan_tracker_addition,
+    plan_tracker_passkey_replacement,
+    plan_tracker_removal,
+    plan_tracker_replacement,
+)
+from qbit_core.shared.execution import MutationOperation
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
@@ -18,25 +37,6 @@ from qbit_ops.cli.commands.torrents import (
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
-from qbit_ops.features.torrents import build_torrent_filter
-from qbit_ops.features.tracker_status import (
-    collect_tracker_status,
-    tracker_status_exit_code,
-)
-from qbit_ops.features.trackers import (
-    apply_tracker_addition,
-    apply_tracker_passkey_replacement,
-    apply_tracker_removal,
-    apply_tracker_replacement,
-    export_tracker_state,
-    inspect_tracker,
-    plan_tracker_addition,
-    plan_tracker_passkey_replacement,
-    plan_tracker_removal,
-    plan_tracker_replacement,
-)
-from qbit_ops.shared.execution import MutationOperation
 
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
 

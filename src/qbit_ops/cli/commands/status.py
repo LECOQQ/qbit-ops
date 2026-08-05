@@ -6,18 +6,18 @@ from typing import Annotated
 
 import typer
 
-from qbit_ops.cli import error_boundary, rendering
-from qbit_ops.cli.exit_codes import ExitCode
-from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.config import ConfigError
-from qbit_ops.features.status import (
+from qbit_core.features.status import (
     StatusSnapshot,
     build_unavailable_snapshot,
     collect_status_snapshot,
     status_exit_code,
     watch_status,
 )
+from qbit_ops.cli import error_boundary, rendering
+from qbit_ops.cli.exit_codes import ExitCode
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.validation import validate_format_support
+from qbit_ops.config import ConfigError
 
 DEFAULT_STATUS_WATCH_INTERVAL_SECONDS = 5.0
 

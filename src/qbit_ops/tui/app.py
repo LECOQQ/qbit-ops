@@ -35,18 +35,18 @@ from textual.widgets.data_table import (
 )
 from textual.worker import Worker, WorkerState
 
+from qbit_core.features.explain import ExplanationReport
+from qbit_core.features.torrents import (
+    BulkTorrentActionPlan,
+    TorrentBulkAction,
+    describe_torrent_filter,
+)
+from qbit_core.shared.execution import MutationStatus
 from qbit_ops import __version__
 from qbit_ops.app_services import (
     TuiRefreshResult,
     create_qbit_client,
 )
-from qbit_ops.features.explain import ExplanationReport
-from qbit_ops.features.torrents import (
-    BulkTorrentActionPlan,
-    TorrentBulkAction,
-    describe_torrent_filter,
-)
-from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.formatting import (
     _COLUMN_WIDTHS,
     NARROW_WIDTH_THRESHOLD,

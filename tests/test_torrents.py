@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
+    HashActionStatus,
     TorrentBulkAction,
     TorrentFilter,
     apply_bulk_torrent_action,
@@ -13,13 +14,15 @@ from qbit_ops.features.torrents import (
     inspect_torrent,
     list_category_usage,
     list_torrents_with_trackers,
+    pause_torrents_by_hash,
     plan_bulk_torrent_action,
+    resume_torrents_by_hash,
     search_torrents_by_name,
     select_torrents,
     torrent_filter_to_dict,
     validate_torrent_selector,
 )
-from qbit_ops.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selectors import AmbiguousTorrentHashError
 
 
 class FakeQbitClient:
@@ -850,6 +853,154 @@ def test_no_selector_at_all_is_rejected_before_mutation_planning() -> None:
         plan_bulk_torrent_action(client=client, action="pause")
 
     assert client.paused_hashes == []
+
+
+# --- pause_torrents_by_hash / resume_torrents_by_hash: exact-hash entry
+# points for non-CLI callers (e.g. Waitarr).
+
+
+def test_pause_active_torrent_is_reported_changed() -> None:
+    torrent = _torrent(hash="a" * 40, name="Active", state="uploading")
+    client = FakeQbitClient(torrents=[torrent])
+
+    result = pause_torrents_by_hash(client, ["a" * 40])
+
+    outcome = result.outcomes[0]
+    assert outcome.status is HashActionStatus.CHANGED
+    assert outcome.previous_state == "uploading"
+    assert result.changed_hashes == ("a" * 40,)
+    assert result.unchanged_hashes == ()
+    assert client.paused_hashes == [["a" * 40]]
+
+
+def test_pause_already_stopped_torrent_is_unchanged_with_no_mutator_call() -> (
+    None
+):
+    torrent = _torrent(hash="a" * 40, name="Stopped", state="pausedUP")
+    client = FakeQbitClient(torrents=[torrent])
+
+    result = pause_torrents_by_hash(client, ["a" * 40])
+
+    outcome = result.outcomes[0]
+    assert outcome.status is HashActionStatus.UNCHANGED
+    assert outcome.previous_state == "pausedUP"
+    assert outcome.reason == "already_stopped"
+    assert "a" * 40 not in result.changed_hashes
+    assert result.unchanged_hashes == ("a" * 40,)
+    assert client.paused_hashes == []
+
+
+def test_resume_stopped_torrent_is_reported_changed() -> None:
+    torrent = _torrent(hash="a" * 40, name="Stopped", state="pausedDL")
+    client = FakeQbitClient(torrents=[torrent])
+
+    result = resume_torrents_by_hash(client, ["a" * 40])
+
+    outcome = result.outcomes[0]
+    assert outcome.status is HashActionStatus.CHANGED
+    assert result.changed_hashes == ("a" * 40,)
+    assert client.started_hashes == [["a" * 40]]
+
+
+def test_resume_active_torrent_is_unchanged() -> None:
+    torrent = _torrent(hash="a" * 40, name="Active", state="downloading")
+    client = FakeQbitClient(torrents=[torrent])
+
+    result = resume_torrents_by_hash(client, ["a" * 40])
+
+    assert result.outcomes[0].status is HashActionStatus.UNCHANGED
+    assert result.changed_hashes == ()
+    assert client.started_hashes == []
+
+
+def test_unknown_hash_is_reported_not_found_and_excluded_from_changed() -> None:
+    client = FakeQbitClient(torrents=[])
+
+    result = pause_torrents_by_hash(client, ["a" * 40])
+
+    outcome = result.outcomes[0]
+    assert outcome.status is HashActionStatus.NOT_FOUND
+    assert result.not_found_hashes == ("a" * 40,)
+    assert "a" * 40 not in result.changed_hashes
+    assert client.paused_hashes == []
+
+
+def test_failed_api_call_is_reported_failed_with_explicit_error() -> None:
+    torrent = _torrent(hash="a" * 40, name="Torrent A", state="uploading")
+    client = FakeQbitClient(torrents=[torrent])
+
+    def _raise(*_: object, **__: object) -> None:
+        raise RuntimeError("qBittorrent unreachable")
+
+    client.torrents_pause = _raise  # type: ignore[method-assign]
+
+    result = pause_torrents_by_hash(client, ["a" * 40])
+
+    outcome = result.outcomes[0]
+    assert outcome.status is HashActionStatus.FAILED
+    assert outcome.error is not None
+    assert "qBittorrent unreachable" in outcome.error
+    assert result.changed_hashes == ()
+    assert result.failed_hashes == ("a" * 40,)
+
+
+def test_mixed_batch_success_populates_changed_unchanged_and_not_found() -> (
+    None
+):
+    changed = _torrent(hash="a" * 40, name="Active", state="uploading")
+    unchanged = _torrent(hash="b" * 40, name="Stopped", state="pausedUP")
+    client = FakeQbitClient(torrents=[changed, unchanged])
+
+    result = pause_torrents_by_hash(client, ["a" * 40, "b" * 40, "c" * 40])
+
+    assert result.changed_hashes == ("a" * 40,)
+    assert result.unchanged_hashes == ("b" * 40,)
+    assert result.not_found_hashes == ("c" * 40,)
+    assert result.failed_hashes == ()
+    assert set(result.successful_hashes) == {"a" * 40, "b" * 40}
+
+
+def test_mixed_batch_failure_marks_every_attempted_change_as_failed() -> None:
+    """qBittorrent's bulk endpoints accept multiple hashes in one HTTP
+    request and report success/failure for that request as a whole --
+    never per torrent. So when two torrents both need pausing and the
+    single grouped call fails, both are `FAILED` together; a torrent
+    that needed no call (`unchanged`) or was never found is unaffected
+    by that failure."""
+    changed_a = _torrent(hash="a" * 40, name="Active A", state="uploading")
+    changed_c = _torrent(hash="c" * 40, name="Active C", state="uploading")
+    unchanged = _torrent(hash="b" * 40, name="Stopped", state="pausedUP")
+    client = FakeQbitClient(torrents=[changed_a, unchanged, changed_c])
+
+    def _raise(*_: object, **__: object) -> None:
+        raise RuntimeError("boom")
+
+    client.torrents_pause = _raise  # type: ignore[method-assign]
+
+    result = pause_torrents_by_hash(
+        client, ["a" * 40, "b" * 40, "c" * 40, "d" * 40]
+    )
+
+    assert set(result.failed_hashes) == {"a" * 40, "c" * 40}
+    assert result.unchanged_hashes == ("b" * 40,)
+    assert result.not_found_hashes == ("d" * 40,)
+    assert result.changed_hashes == ()
+
+
+def test_pause_and_resume_by_hash_do_not_accept_an_action_parameter() -> None:
+    """The public wrappers statically fix the action -- there is no
+    parameter through which a caller could pass an unsupported or
+    misspelled action string."""
+    import inspect
+
+    assert list(inspect.signature(pause_torrents_by_hash).parameters) == [
+        "client",
+        "hashes",
+    ]
+    assert list(inspect.signature(resume_torrents_by_hash).parameters) == [
+        "client",
+        "hashes",
+    ]
 
 
 # --- Unrelated read-only helpers ---------------------------------------

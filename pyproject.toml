@@ -4,7 +4,10 @@ version = "0.3.0"
 description = "qBittorrent administration CLI for homelab operations."
 authors = []
 readme = "README.md"
-packages = [{ include = "qbit_ops", from = "src" }]
+packages = [
+    { include = "qbit_ops", from = "src" },
+    { include = "qbit_core", from = "src" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.12"

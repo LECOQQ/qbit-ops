@@ -6,7 +6,7 @@ raw-secret-producing helper, an out-of-scope mutation function, or the
 CLI module -- see docs/ARCHITECTURE.md §4.
 
 TUI 2 narrowed, not removed, this boundary: the TUI may now import
-exactly `qbit_ops.features.torrents.apply_bulk_torrent_action`/
+exactly `qbit_core.features.torrents.apply_bulk_torrent_action`/
 `build_bulk_action_plan_from_snapshot` (Pause/Resume/Reannounce only,
 frozen-plan-in, frozen-plan-out, never a rescan, never `--all`).
 `plan_bulk_torrent_action` (always rescans and accepts an unbounded
@@ -106,10 +106,10 @@ def test_tui_modules_never_import_the_cli_package() -> None:
 def test_tui_never_imports_raw_tracker_helpers_or_unbounded_planner() -> None:
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        torrents_names = imports.get("qbit_ops.features.torrents", set())
+        torrents_names = imports.get("qbit_core.features.torrents", set())
         leaked = torrents_names & _FORBIDDEN_TORRENTS_NAMES
         assert not leaked, (
-            f"{path} imports forbidden qbit_ops.features.torrents names: "
+            f"{path} imports forbidden qbit_core.features.torrents names: "
             f"{leaked} -- raw tracker details and the "
             "always-rescanning/`--all` planner must never reach the TUI."
         )
@@ -124,7 +124,7 @@ def test_tui_may_only_import_the_two_low_risk_bulk_mutation_functions() -> None:
     found: set[str] = set()
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        found |= imports.get("qbit_ops.features.torrents", set()) & (
+        found |= imports.get("qbit_core.features.torrents", set()) & (
             _ALLOWED_TORRENTS_MUTATION_NAMES | _FORBIDDEN_TORRENTS_NAMES
         )
     assert found <= _ALLOWED_TORRENTS_MUTATION_NAMES
@@ -139,10 +139,10 @@ def test_tui_modules_never_import_tracker_mutation_functions() -> None:
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        trackers_names = imports.get("qbit_ops.features.trackers", set())
+        trackers_names = imports.get("qbit_core.features.trackers", set())
         leaked = trackers_names & _FORBIDDEN_TRACKERS_NAMES
         assert not leaked, (
-            f"{path} imports forbidden qbit_ops.features.trackers "
+            f"{path} imports forbidden qbit_core.features.trackers "
             f"mutation names: {leaked} -- no tracker mutation is "
             "reachable from the TUI."
         )
@@ -151,8 +151,8 @@ def test_tui_modules_never_import_tracker_mutation_functions() -> None:
 def test_tui_modules_never_import_backup_module() -> None:
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
-        assert "qbit_ops.features.backup" not in imports, (
-            f"{path} must never import qbit_ops.features.backup -- "
+        assert "qbit_core.features.backup" not in imports, (
+            f"{path} must never import qbit_core.features.backup -- "
             "backup raw content is out of scope for TUI 1."
         )
 

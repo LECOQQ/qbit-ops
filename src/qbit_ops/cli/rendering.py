@@ -32,38 +32,38 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
-from qbit_ops.features.doctor import (
+from qbit_core.features.doctor import (
     CheckStatus,
     DoctorReport,
     doctor_report_to_csv_rows,
     doctor_report_to_json_dict,
 )
-from qbit_ops.features.explain import (
+from qbit_core.features.explain import (
     Evidence,
     ExplanationReport,
     ExplanationSeverity,
     explanation_report_to_dict,
 )
-from qbit_ops.features.status import (
+from qbit_core.features.status import (
     Health,
     StatusSnapshot,
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
 )
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentSelection,
     describe_torrent_filter,
     torrent_filter_to_dict,
 )
-from qbit_ops.features.tracker_status import (
+from qbit_core.features.tracker_status import (
     TRACKER_STATUS_CSV_FIELDNAMES,
     TrackerStatusReport,
     tracker_status_report_to_csv_rows,
     tracker_status_report_to_dict,
 )
-from qbit_ops.features.trackers import (
+from qbit_core.features.trackers import (
     PasskeyReplacementPlan,
     TrackerAdditionPlan,
     TrackerRemovalPlan,
@@ -71,8 +71,8 @@ from qbit_ops.features.trackers import (
     redact_tracker_identity,
     sanitize_tracker_text,
 )
-from qbit_ops.shared.execution import MutationStatus
-from qbit_ops.shared.selectors import ResolvedTorrent
+from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.selectors import ResolvedTorrent
 
 console = Console()
 err_console = Console(stderr=True)
@@ -780,7 +780,7 @@ def print_torrent_selection(
     """Print a torrent selection, one shared shape for every filter.
 
     JSON/JSONL always include a normalized `filters` representation
-    (`qbit_ops.features.torrents.torrent_filter_to_dict`) alongside the
+    (`qbit_core.features.torrents.torrent_filter_to_dict`) alongside the
     usual `summary`/`torrents`.
     """
     torrents = [

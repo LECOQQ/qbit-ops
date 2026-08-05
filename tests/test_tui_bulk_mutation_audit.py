@@ -22,9 +22,9 @@ from textual.widgets import Button, Input, Static
 from textual.worker import Worker, WorkerState
 
 import qbit_ops.tui
+from qbit_core.errors import ErrorCategory, QbitConnectionError
+from qbit_core.shared.execution import MutationStatus
 from qbit_ops.config import ConfigError
-from qbit_ops.errors import ErrorCategory, QbitConnectionError
-from qbit_ops.shared.execution import MutationStatus
 from qbit_ops.tui.app import (
     MUTATION_WORKER_GROUP,
     HelpScreen,
@@ -1638,7 +1638,7 @@ def _frozen_plan_for(app: Any) -> Any:
 def test_cancelled_before_dispatch_never_reports_success() -> None:
     """Pure classification check, no UI: a non-dispatched mutation is
     never APPLIED and never carries submitted hashes."""
-    from qbit_ops.features.torrents import build_bulk_action_plan_from_snapshot
+    from qbit_core.features.torrents import build_bulk_action_plan_from_snapshot
 
     plan = build_bulk_action_plan_from_snapshot(
         [make_torrent(hash=HASH_A, name="Alpha", state="downloading")],

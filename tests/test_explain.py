@@ -2,7 +2,7 @@
 
 import pytest
 
-from qbit_ops.features.explain import (
+from qbit_core.features.explain import (
     ExplanationSeverity,
     build_torrent_explanation,
     evidence_to_dict,
@@ -12,8 +12,8 @@ from qbit_ops.features.explain import (
     explanation_report_to_dict,
     finding_to_dict,
 )
-from qbit_ops.features.torrents import get_safe_tracker_details
-from qbit_ops.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.features.torrents import get_safe_tracker_details
+from qbit_core.shared.selectors import AmbiguousTorrentHashError
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40

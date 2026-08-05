@@ -23,8 +23,8 @@ hundred MB of image storage and roughly 10-30 seconds per matrix entry.
 
 | File | Purpose |
 |---|---|
-| `../../src/qbit_ops/data/qbittorrent-matrix.toml` | The single source of truth: image references, digests, expected versions, capabilities, per matrix entry. Packaged with `qbit-ops` and loaded via `qbit_ops.qbit.compatibility.load_compatibility_evidence()` (`importlib.resources`), never a repository-relative path. |
-| `_matrix.py` | Test-side adapter over the package loader (`qbit_ops.qbit.compatibility`) -- re-exports `QbitMatrixEntry` as `MatrixEntry` and the loader convenience wrappers Docker harness code uses; does not re-parse the manifest itself. |
+| `../../src/qbit_core/data/qbittorrent-matrix.toml` | The single source of truth: image references, digests, expected versions, capabilities, per matrix entry. Packaged with `qbit-ops` and loaded via `qbit_core.qbit.compatibility.load_compatibility_evidence()` (`importlib.resources`), never a repository-relative path. |
+| `_matrix.py` | Test-side adapter over the package loader (`qbit_core.qbit.compatibility`) -- re-exports `QbitMatrixEntry` as `MatrixEntry` and the loader convenience wrappers Docker harness code uses; does not re-parse the manifest itself. |
 | `_harness.py` | Docker network/container lifecycle, hermetic environment construction, the disposable-host and no-ambient-config guards, version-mismatch fail-closed check, teardown + leak detection. |
 | `_qbit_conf_template.py` | Builds a pre-seeded `qBittorrent.conf` (DHT/PeX/LSD/UPnP/GeoIP-update disabled from first boot, fixed WebUI credential) — see the module docstring for how the password hash format was reverse-engineered. |
 | `_bencode.py` | Minimal BEP 0003 bencode encoder (no dependency added). |

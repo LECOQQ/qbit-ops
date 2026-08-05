@@ -1,6 +1,6 @@
 """Classify raw qBittorrent torrent states into a stable public vocabulary.
 
-Shared by `qbit_ops.features.status` and `qbit_ops.features.torrents`
+Shared by `qbit_core.features.status` and `qbit_core.features.torrents`
 to avoid an import cycle between the two.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from qbit_ops.qbit.fields import get_field_as_float, get_field_as_string
+from qbit_core.qbit.fields import get_field_as_float, get_field_as_string
 
 TorrentStateGroup = Literal[
     "downloading",

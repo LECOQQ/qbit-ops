@@ -1,37 +1,51 @@
 # 🏗️ Architecture
 
-qbit-ops has one application core and two presentation layers:
+qbit-ops ships two packages from one distribution: a reusable core
+(`qbit_core`) with no UI dependency, and a thin CLI/TUI presentation
+layer (`qbit_ops`) built on top of it.
 
 ```text
 CLI (Typer + Rich) ─┐
-                    ├── features ── shared ── qbit ── qbittorrent-api
+                    ├── qbit_core: features ── shared ── qbit ── qbittorrent-api
 TUI (Textual) ──────┘
 ```
+
+`qbit_core` never imports Typer, Rich, Textual, or `qbit_ops`; never
+prints, prompts, or calls `sys.exit`. A future non-CLI Python consumer
+(e.g. Waitarr) can depend on `qbit_core` alone. See the module
+docstring of `qbit_core/__init__.py` for a minimal usage example.
 
 ## 📦 Package layout
 
 ```text
-qbit_ops/
-├── cli/        # Typer commands, Rich rendering, exit handling
-├── tui/        # Textual app, widgets, modals, TUI state
+qbit_core/
 ├── features/   # user-facing use cases shared by CLI and TUI
 ├── shared/     # reusable selection, execution and state primitives
 ├── qbit/       # qBittorrent client boundary and payload handling
 ├── data/       # packaged compatibility evidence
-├── config.py
-├── errors.py
-└── app_services.py
+├── config.py   # QbitConfig -- connection settings, no env/dotenv logic
+└── errors.py   # QbitCoreError hierarchy
+
+qbit_ops/
+├── cli/        # Typer commands, Rich rendering, exit handling
+├── tui/        # Textual app, widgets, modals, TUI state
+├── config.py   # .env/environment loading -> qbit_core.config.QbitConfig
+└── app_services.py  # create_qbit_client() env wrapper + TUI refresh glue
 ```
 
 ## 🔗 Dependency rules
 
-- ⬇️ `cli/` and `tui/` may call `features/`.
-- ⬇️ `features/` may use `shared/` and `qbit/`.
-- 🚫 `shared/` does not depend on features or presentation code.
-- 🚫 `qbit/` does not depend on CLI or TUI code.
+- ⬇️ `qbit_ops/cli/` and `qbit_ops/tui/` may call `qbit_core.features`.
+- ⬇️ `qbit_core.features` may use `qbit_core.shared` and `qbit_core.qbit`.
+- 🚫 `qbit_core.shared` does not depend on features or presentation code.
+- 🚫 `qbit_core.qbit` does not depend on CLI or TUI code.
+- 🚫 No module under `qbit_core/` imports `qbit_ops`, Typer, Rich, or
+  Textual, at any nesting.
 - 🐢 Textual is imported only when `qbit-ops tui` is invoked.
 
-These boundaries are checked by architecture tests.
+These boundaries are checked by architecture tests
+(`tests/test_layering.py`, `tests/test_package_layout.py`,
+`tests/test_qbit_architecture.py`, `tests/test_qbit_boundary.py`).
 
 ## 🛡️ Safety-critical flows
 
@@ -52,7 +66,7 @@ Blocking qBittorrent calls run outside Textual's event loop. Refreshes and mutat
 Exact qBittorrent test evidence is packaged in:
 
 ```text
-qbit_ops/data/qbittorrent-matrix.toml
+qbit_core/data/qbittorrent-matrix.toml
 ```
 
 Both the Docker matrix and `qbit-ops doctor` read the same source.

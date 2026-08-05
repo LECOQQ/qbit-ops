@@ -1,6 +1,6 @@
 """Collect and represent a qbit-ops diagnostic report.
 
-Callable without Typer or Rich, mirroring `qbit_ops.features.status`'s
+Callable without Typer or Rich, mirroring `qbit_core.features.status`'s
 collection/render split. Performs a bounded, documented number of
 remote calls: one login (by the caller) plus up to four read calls
 (`app_version`, `app_web_api_version`, `transfer_info`,
@@ -18,15 +18,15 @@ from urllib.parse import urlsplit
 
 from packaging.version import InvalidVersion, Version
 
-from qbit_ops.config import QbitConfig
-from qbit_ops.qbit.compatibility import (
+from qbit_core.config import QbitConfig
+from qbit_core.qbit.compatibility import (
     CompatibilityEvidence,
     CompatibilityManifestError,
     QbitMatrixEntry,
     load_compatibility_evidence,
 )
-from qbit_ops.qbit.fields import get_field_as_string
-from qbit_ops.shared.torrent_states import classify_torrent_state
+from qbit_core.qbit.fields import get_field_as_string
+from qbit_core.shared.torrent_states import classify_torrent_state
 
 SCHEMA_VERSION = "1"
 
@@ -63,7 +63,7 @@ class CheckStatus(StrEnum):
 class ConnectionOutcome(StrEnum):
     """Classify the result of one client-creation/login attempt.
 
-    Kept independent from `qbit_ops.errors.QbitConnectionError`/
+    Kept independent from `qbit_core.errors.QbitConnectionError`/
     `QbitAuthenticationError` so this module never imports
     `qbit_ops.cli.commands.doctor` (which imports this module) — the
     caller classifies its own exceptions into this enum before calling
@@ -853,7 +853,7 @@ def _transfer_info_check(
 def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
     """Build the torrent-state-vocabulary runtime check.
 
-    Reuses `qbit_ops.shared.torrent_states.classify_torrent_state` so
+    Reuses `qbit_core.shared.torrent_states.classify_torrent_state` so
     the notion of an "unrecognized" torrent state can never diverge
     from `status`, which classifies its own torrents through the same
     function.

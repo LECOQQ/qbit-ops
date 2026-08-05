@@ -14,18 +14,18 @@ from typing import Any, NoReturn
 
 import typer
 
-from qbit_ops.app_services import create_qbit_client
-from qbit_ops.cli.exit_codes import ExitCode, StatusExitCode
-from qbit_ops.cli.rendering import print_ambiguous_hash_error, print_error
-from qbit_ops.config import ConfigError, load_qbit_config
-from qbit_ops.errors import (
+from qbit_core.errors import (
     AppError,
     ErrorCategory,
     QbitAuthenticationError,
     QbitConnectionError,
 )
-from qbit_ops.qbit.client import is_qbit_error
-from qbit_ops.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.qbit.client import is_qbit_error
+from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_ops.app_services import create_qbit_client
+from qbit_ops.cli.exit_codes import ExitCode, StatusExitCode
+from qbit_ops.cli.rendering import print_ambiguous_hash_error, print_error
+from qbit_ops.config import ConfigError, load_qbit_config
 
 __all__ = [
     "create_qbit_client",

@@ -4,19 +4,19 @@ from typing import Annotated
 
 import typer
 
+from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
+from qbit_core.features.explain import (
+    explain_torrent,
+    explain_tracker,
+    explanation_exit_code,
+)
+from qbit_core.features.trackers import normalize_tracker_host
+from qbit_core.shared.selectors import AmbiguousTorrentHashError
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands.torrents import TRACKER_FILTER_HELP
 from qbit_ops.cli.exit_codes import ExplainExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.errors import ErrorCategory, InvalidInputError, require_non_blank
-from qbit_ops.features.explain import (
-    explain_torrent,
-    explain_tracker,
-    explanation_exit_code,
-)
-from qbit_ops.features.trackers import normalize_tracker_host
-from qbit_ops.shared.selectors import AmbiguousTorrentHashError
 
 explain_app = typer.Typer(
     help="Explain torrent or tracker state using deterministic evidence."

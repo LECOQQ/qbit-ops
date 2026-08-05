@@ -5,15 +5,15 @@ from typing import Any
 
 import typer
 
-from qbit_ops.cli import error_boundary, rendering
-from qbit_ops.cli.exit_codes import ExitCode
-from qbit_ops.shared.execution import (
+from qbit_core.shared.execution import (
     MUTATION_RISK,
     ExecutionDecision,
     ExecutionPolicy,
     MutationOperation,
     MutationStatus,
 )
+from qbit_ops.cli import error_boundary, rendering
+from qbit_ops.cli.exit_codes import ExitCode
 
 
 def run_mutation(

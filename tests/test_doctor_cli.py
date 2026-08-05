@@ -137,7 +137,7 @@ def test_authentication_failure_exits_two(
     """A rejected login fails CONN002 specifically, while CONN001 (reachability)
     still passes.
     """
-    from qbit_ops.errors import QbitAuthenticationError
+    from qbit_core.errors import QbitAuthenticationError
 
     configure_qbit_backend(
         config=CLEAN_CONFIG,

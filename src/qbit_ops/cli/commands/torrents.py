@@ -4,17 +4,7 @@ from typing import Annotated
 
 import typer
 
-from qbit_ops.cli import error_boundary, rendering
-from qbit_ops.cli.commands._shared import (
-    exit_if_no_targeted_matches,
-    run_mutation,
-)
-from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.cli.validation import (
-    validate_format_support,
-    validate_hash_option,
-)
-from qbit_ops.features.torrents import (
+from qbit_core.features.torrents import (
     STATE_FILTER_VALUES,
     TorrentBulkAction,
     apply_bulk_torrent_action,
@@ -26,8 +16,18 @@ from qbit_ops.features.torrents import (
     select_torrents,
     validate_torrent_selector,
 )
-from qbit_ops.shared.execution import MutationOperation
-from qbit_ops.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.execution import MutationOperation
+from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_ops.cli import error_boundary, rendering
+from qbit_ops.cli.commands._shared import (
+    exit_if_no_targeted_matches,
+    run_mutation,
+)
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.validation import (
+    validate_format_support,
+    validate_hash_option,
+)
 
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 

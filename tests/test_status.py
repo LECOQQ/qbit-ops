@@ -4,8 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from qbit_ops.cli.rendering import format_byte_rate
-from qbit_ops.features.status import (
+from qbit_core.features.status import (
     Health,
     StatusAlert,
     StatusSnapshot,
@@ -20,6 +19,7 @@ from qbit_ops.features.status import (
     status_exit_code,
     watch_status,
 )
+from qbit_ops.cli.rendering import format_byte_rate
 from tests.support import FakeQbitClient, make_torrent
 
 
@@ -486,7 +486,7 @@ def test_watch_status_recovers_to_healthy_after_unavailable() -> None:
 
 def test_malformed_non_mapping_transfer_info_fails_explicitly() -> None:
     """`build_status_snapshot_from_data` does not bypass
-    `qbit_ops.qbit.fields.get_transfer_rates` with a direct `.get()`
+    `qbit_core.qbit.fields.get_transfer_rates` with a direct `.get()`
     call: a non-mapping payload must fail with an explicit `TypeError`,
     not an accidental `AttributeError`.
     """

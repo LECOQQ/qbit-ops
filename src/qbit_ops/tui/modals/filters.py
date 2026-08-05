@@ -14,7 +14,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
-from qbit_ops.features.torrents import TorrentFilter
+from qbit_core.features.torrents import TorrentFilter
 from qbit_ops.tui.widgets.filters import FiltersPanel
 
 if TYPE_CHECKING:
