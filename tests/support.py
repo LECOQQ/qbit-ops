@@ -29,6 +29,7 @@ class FakeQbitClient:
         all_time_uploaded: int = 0,
         global_ratio: str = "-1",
         connected_peers: int = 0,
+        torrents_add_error: Exception | None = None,
     ) -> None:
         """Store fake instance data returned to callers.
 
@@ -48,7 +49,9 @@ class FakeQbitClient:
         self.all_time_uploaded = all_time_uploaded
         self.global_ratio = global_ratio
         self.connected_peers = connected_peers
+        self.torrents_add_error = torrents_add_error
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.added_torrent_files: list[list[bytes]] = []
         self.app_version_calls = 0
         self.app_web_api_version_calls = 0
         self.torrents_trackers_calls = 0
@@ -160,6 +163,14 @@ class FakeQbitClient:
         self._record(
             "torrents_edit_tracker", torrent_hash, original_url, new_url
         )
+
+    def torrents_add(self, **kwargs: Any) -> str:
+        """Record a fake add call; raise `torrents_add_error` if set."""
+        self._record("torrents_add", **kwargs)
+        if self.torrents_add_error is not None:
+            raise self.torrents_add_error
+        self.added_torrent_files.append(list(kwargs.get("torrent_files") or []))
+        return "Ok."
 
 
 def make_config(**overrides: Any) -> QbitConfig:

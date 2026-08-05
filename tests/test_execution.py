@@ -21,7 +21,10 @@ LOW_RISK_OPERATIONS = [
     MutationOperation.TORRENTS_START,
     MutationOperation.TORRENTS_REANNOUNCE,
 ]
-MEDIUM_RISK_OPERATIONS = [MutationOperation.TRACKERS_ADD_IF_PRESENT]
+MEDIUM_RISK_OPERATIONS = [
+    MutationOperation.TRACKERS_ADD_IF_PRESENT,
+    MutationOperation.TORRENTS_IMPORT,
+]
 HIGH_RISK_OPERATIONS = [
     MutationOperation.TRACKERS_REMOVE,
     MutationOperation.TRACKERS_REPLACE,
@@ -44,7 +47,9 @@ def test_torrent_bulk_actions_are_low_risk(
 
 
 @pytest.mark.parametrize("operation", MEDIUM_RISK_OPERATIONS)
-def test_add_if_present_is_medium_risk(operation: MutationOperation) -> None:
+def test_medium_risk_operations_are_classified_medium(
+    operation: MutationOperation,
+) -> None:
     assert MUTATION_RISK[operation] is MutationRisk.MEDIUM
 
 

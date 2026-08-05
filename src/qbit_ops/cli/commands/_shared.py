@@ -26,6 +26,7 @@ def run_mutation(
     apply_fn: Callable[[], None],
     summary_rows: Callable[[MutationStatus], dict[str, Any]],
     confirmation_message: str | None = None,
+    quiet: bool = False,
 ) -> bool:
     """Run the shared confirm/apply/refuse flow for an already-built plan.
 
@@ -34,7 +35,9 @@ def run_mutation(
     selector matched nothing) from `NO_CHANGES` (matched, but already
     satisfied) -- neither ever prompts or calls a mutation API. Returns
     whether the plan was applied; exits via `typer.Exit` on a
-    non-interactive refusal or a declined confirmation.
+    non-interactive refusal or a declined confirmation. `quiet` skips
+    the Rich summary table -- for a command that also offers `--format
+    json`, so stdout carries only the JSON payload.
     """
     policy = ExecutionPolicy(
         dry_run=dry_run,
@@ -43,12 +46,16 @@ def run_mutation(
         risk=MUTATION_RISK[operation],
     )
 
+    def _print(status: MutationStatus) -> None:
+        if not quiet:
+            rendering.print_summary(summary_rows(status))
+
     if matched == 0:
-        rendering.print_summary(summary_rows(MutationStatus.NO_MATCH))
+        _print(MutationStatus.NO_MATCH)
         return False
 
     if not has_changes:
-        rendering.print_summary(summary_rows(MutationStatus.NO_CHANGES))
+        _print(MutationStatus.NO_CHANGES)
         return False
 
     decision = policy.decide()
@@ -58,21 +65,23 @@ def run_mutation(
 
     if decision is ExecutionDecision.APPLY_WITHOUT_PROMPT:
         apply_fn()
-        rendering.print_summary(summary_rows(MutationStatus.APPLIED))
+        _print(MutationStatus.APPLIED)
         return True
 
-    rendering.print_summary(summary_rows(MutationStatus.PREVIEW))
+    _print(MutationStatus.PREVIEW)
 
     if decision is ExecutionDecision.PREVIEW_ONLY:
         return False
 
     assert confirmation_message is not None
     if not rendering.confirm(confirmation_message):
-        rendering.print_cancelled()
+        if not quiet:
+            rendering.print_cancelled()
         raise typer.Exit(code=ExitCode.SUCCESS)
 
     apply_fn()
-    rendering.print_applied()
+    if not quiet:
+        rendering.print_applied()
     return True
 
 
