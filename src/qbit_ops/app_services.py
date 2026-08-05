@@ -37,13 +37,8 @@ __all__ = [
 
 
 def create_qbit_client() -> Any:
-    """Load `.env`/environment configuration, then build a qBittorrent client.
-
-    The CLI/TUI-facing zero-argument entry point: loading configuration
-    from the environment is a `qbit_ops` concern (see `qbit_ops.config`),
-    never `qbit_core`'s -- `qbit_core.qbit.client.create_qbit_client`
-    takes an explicit `QbitConfig` instead.
-    """
+    """Zero-arg CLI/TUI entry point: load `.env` config, then delegate to
+    `qbit_core.qbit.client.create_qbit_client(config)`."""
     return _create_qbit_client(load_qbit_config())
 
 
@@ -101,13 +96,12 @@ def collect_tui_refresh(
     *,
     host: str | None = None,
 ) -> TuiRefreshResult:
-    """Collect one refresh cycle's worth of data with exactly five API calls.
-
-    Calls `app_version()`, `app_web_api_version()`, `transfer_info()`,
-    `torrents_info()`, and `sync_maindata()` exactly once each, feeding
-    the single `torrents_info()` result to both the status counters and
-    the unfiltered torrent selection. Raises unchanged on any failure;
-    callers apply `classify_recoverable_qbit_failure` themselves.
+    """Collect one refresh cycle: exactly five API calls (`app_version`,
+    `app_web_api_version`, `transfer_info`, `torrents_info`,
+    `sync_maindata`, each once), the single `torrents_info()` result
+    feeding both the status counters and the unfiltered selection.
+    Raises unchanged; callers classify via
+    `classify_recoverable_qbit_failure`.
     """
     qbittorrent_version = getattr(client, "app_version", lambda: None)()
     api_version = getattr(client, "app_web_api_version", lambda: None)()
@@ -125,8 +119,7 @@ def collect_tui_refresh(
         torrents=torrents,
         host=host,
     )
-    # `instance_id=status.host`: the already-redacted host, never the
-    # raw configured value, which may carry embedded credentials.
+    # status.host is already credential-redacted; never pass the raw host.
     instance_stats = collect_instance_stats(client, instance_id=status.host)
     selection = select_torrents_from_items(torrents, TorrentFilter())
 

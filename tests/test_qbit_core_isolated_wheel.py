@@ -1,14 +1,6 @@
-"""Prove `qbit_core`'s Waitarr-facing surface is importable from a real,
-built wheel, without qbit-ops's `src/` checkout, `tests/`, or any
-network connection to a qBittorrent instance.
-
-Builds the wheel and extracts only `qbit_core/` (never `qbit_ops/`)
-into a scratch directory, then runs a subprocess with that directory as
-the *sole* entry on `PYTHONPATH` -- proving `qbit_ops` need not be on
-disk at all for the exact-hash pause/resume API to import and work.
-Mirrors `tests/test_doctor_isolated_wheel.py`'s pattern for `qbit_ops`.
-`qbit_core`'s own code never importing Typer/Rich/Textual is a separate,
-already-covered claim -- see `tests/test_layering.py`.
+"""Prove `qbit_core`'s Waitarr-facing surface imports and works from a
+built wheel with only `qbit_core/` on disk -- never `qbit_ops/`.
+Mirrors `tests/test_doctor_isolated_wheel.py`'s pattern.
 """
 
 from __future__ import annotations
@@ -56,9 +48,7 @@ assert callable(pause_torrents_by_hash)
 assert callable(resume_torrents_by_hash)
 assert HashActionStatus.CHANGED.value == "changed"
 
-# No live qBittorrent connection -- only prove the public shapes exist
-# and hold together, e.g. an outcome/result can be constructed and its
-# aggregate properties queried without a network call.
+# No qBittorrent connection -- just prove the shapes hold together.
 outcome = HashActionOutcome(
     torrent_hash="a" * 40, status=HashActionStatus.CHANGED
 )
@@ -66,11 +56,8 @@ result = BulkHashActionResult(action="pause", outcomes=(outcome,))
 assert result.changed_hashes == ("a" * 40,)
 assert result.unchanged_hashes == ()
 
-# `qbit_ops` must never be reachable here -- the wheel extraction below
-# only ships qbit_core/. (Typer/Rich/Textual are not asserted absent:
-# this subprocess reuses the dev interpreter, which has qbit-ops's own
-# runtime dependencies installed; whether qbit_core's *code* avoids
-# importing them is already enforced by tests/test_layering.py.)
+# Typer/Rich/Textual aren't asserted absent here: the dev interpreter
+# has them installed regardless -- see tests/test_layering.py for that.
 assert "qbit_ops" not in sys.modules
 
 print("OK")
@@ -96,9 +83,7 @@ def test_qbit_core_pause_resume_surface_works_from_a_built_wheel(
     wheels = list(wheel_dir.glob("*.whl"))
     assert len(wheels) == 1, wheels
 
-    # Extract only `qbit_core/` -- deliberately never `qbit_ops/`, so a
-    # stray import of the CLI package would fail loudly instead of
-    # silently succeeding because it happened to be on disk anyway.
+    # Extract only qbit_core/ -- a stray qbit_ops import must fail loudly.
     extracted = tmp_path / "site-packages"
     extracted.mkdir()
     with zipfile.ZipFile(wheels[0]) as archive:
@@ -114,12 +99,8 @@ def test_qbit_core_pause_resume_surface_works_from_a_built_wheel(
     outside_repo_cwd = tmp_path / "outside_repo_cwd"
     outside_repo_cwd.mkdir()
 
-    # Run with the current (dev) interpreter -- it already has
-    # qbittorrent-api/python-dotenv/packaging installed, so no
-    # network-dependent `pip install` is needed -- but with the
-    # extracted wheel's `qbit_core/` prepended on `PYTHONPATH`, ahead of
-    # this repository's editable `src/` install, so the module actually
-    # imported is the packaged one, not the checkout.
+    # Dev interpreter (deps already installed), but PYTHONPATH points at
+    # the extracted wheel, not this repo's editable src/ checkout.
     env = dict(os.environ)
     env["PYTHONPATH"] = str(extracted)
     result = subprocess.run(

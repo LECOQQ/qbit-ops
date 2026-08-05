@@ -128,19 +128,9 @@ def test_no_production_module_imports_the_tests_package() -> None:
 def test_client_construction_exists_in_exactly_two_documented_locations() -> (
     None
 ):
-    """`create_qbit_client` is defined in exactly two places, each with a
-    distinct, documented responsibility:
-
-    - `qbit_core/qbit/client.py`: takes an explicit `QbitConfig`, builds
-      and authenticates the `qbittorrentapi.Client` -- no environment
-      or `.env` knowledge.
-    - `qbit_ops/app_services.py`: the zero-argument CLI/TUI entry point
-      that loads `.env`/environment configuration, then delegates to
-      the one above.
-
-    `qbit_ops.cli.error_boundary` only re-exports the `app_services`
-    function object (proven in `tests/test_qbit_client.py`), never
-    redefines it."""
+    """`qbit_core/qbit/client.py` (takes an explicit `QbitConfig`) and
+    `qbit_ops/app_services.py` (zero-arg, loads `.env` then delegates)
+    -- `qbit_ops.cli.error_boundary` only re-exports the latter."""
     defining_files: list[str] = []
     for path in _all_production_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))

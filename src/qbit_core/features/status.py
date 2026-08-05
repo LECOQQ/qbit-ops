@@ -62,20 +62,11 @@ class TransferRates:
 
 @dataclass(frozen=True)
 class InstanceStats:
-    """Report one qBittorrent instance's lifetime transfer totals.
-
-    Distinct from `TransferRates` (current speed): these are the
-    cumulative "Statistics" figures qBittorrent's WebUI shows, reset
-    only when the operator resets them (or the session database is
-    lost) -- not derived from `transfer_info()`, which never carries
-    them. `all_time_ratio` is `None` when qBittorrent has not yet
-    computed one (e.g. no data transferred), never a fabricated `0.0`
-    or `-1`. `instance_id` identifies which qBittorrent instance this
-    came from -- today always the single configured instance, but kept
-    on the model (rather than assumed implicit) so a future caller
-    aggregating more than one instance has something to key on without
-    a breaking change to this type.
-    """
+    """Lifetime transfer totals ("Statistics" dialog), distinct from
+    `TransferRates` (current speed) -- not derived from `transfer_info()`.
+    `all_time_ratio` is `None`, never a fabricated `0.0`/`-1`, when
+    qBittorrent hasn't computed one yet. `instance_id`: unused hook for
+    a future multi-instance caller."""
 
     instance_id: str | None
     all_time_downloaded_bytes: int
@@ -89,15 +80,9 @@ def build_instance_stats_from_server_state(
     *,
     instance_id: str | None = None,
 ) -> InstanceStats:
-    """Build `InstanceStats` from `sync_maindata()`'s `server_state` object.
-
-    Zero API calls itself, mirroring `build_status_snapshot_from_data`:
-    the caller already fetched `sync_maindata()`. `global_ratio` arrives
-    as a string from the Web API; qBittorrent reports `-1` for "no
-    ratio computed yet", which this normalizes to `None` alongside any
-    other unparsable value, rather than surfacing a misleading negative
-    ratio.
-    """
+    """Build `InstanceStats` from `sync_maindata()`'s `server_state`, zero
+    API calls itself. `global_ratio` (`-1`/unparsable) normalizes to
+    `None`."""
     raw_ratio = get_field(server_state, "global_ratio", None)
     ratio: float | None
     try:
@@ -123,12 +108,7 @@ def collect_instance_stats(
     *,
     instance_id: str | None = None,
 ) -> InstanceStats:
-    """Collect instance-wide lifetime stats with exactly one API call.
-
-    Calls `sync_maindata()` once and reads only its `server_state`
-    entry -- the rest of that payload (torrents, categories, tags) is
-    ignored here; callers already fetch torrents via `torrents_info()`.
-    """
+    """One `sync_maindata()` call; only its `server_state` is used."""
     maindata = client.sync_maindata()
     server_state = get_field(maindata, "server_state", {})
     return build_instance_stats_from_server_state(
