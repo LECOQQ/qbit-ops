@@ -28,6 +28,7 @@ from qbit_core.qbit.fields import (
     is_disabled_tracker,
 )
 from qbit_core.shared.selectors import (
+    InvalidTorrentSelectorError,
     TorrentNotFoundError,
     resolve_torrent_hash,
 )
@@ -841,9 +842,10 @@ class HashActionOutcome:
 
 @dataclass(frozen=True)
 class BulkHashActionResult:
-    """One `HashActionOutcome` per requested hash. To later reverse only
-    what this call changed, use `changed_hashes` -- never
-    `successful_hashes`, which also includes `UNCHANGED`."""
+    """One deduplicated `HashActionOutcome` per requested hash, sorted by
+    hash. To later reverse only what this call changed, use
+    `changed_hashes` -- never `successful_hashes`, which also includes
+    `UNCHANGED`."""
 
     action: TorrentBulkAction
     outcomes: tuple[HashActionOutcome, ...]
@@ -904,7 +906,16 @@ def _apply_bulk_action_to_hashes(
     """Classify `hashes` from one `torrents_info()` call, then issue at
     most one bulk mutating call for those that need it. On failure every
     attempted hash is reported `FAILED` with the same `error` --
-    qBittorrent's bulk endpoints give no per-torrent status."""
+    qBittorrent's bulk endpoints give no per-torrent status. Hashes are
+    deduplicated case-insensitively (deterministic, sorted order); a
+    blank hash raises `InvalidTorrentSelectorError` before any API call.
+    """
+    normalized_hashes = sorted(
+        {_normalize_requested_hash(value) for value in hashes}
+    )
+    if not normalized_hashes:
+        return BulkHashActionResult(action=action, outcomes=())
+
     raw_torrents = list(client.torrents_info())
     by_hash: dict[str, Any] = {
         get_field_as_string(item, "hash").lower(): item for item in raw_torrents
@@ -913,33 +924,37 @@ def _apply_bulk_action_to_hashes(
     outcomes: dict[str, HashActionOutcome] = {}
     to_apply: list[str] = []
 
-    for torrent_hash in sorted(dict.fromkeys(hashes)):
-        torrent = by_hash.get(torrent_hash.lower())
+    for normalized_hash in normalized_hashes:
+        torrent = by_hash.get(normalized_hash)
         if torrent is None:
-            outcomes[torrent_hash] = HashActionOutcome(
-                torrent_hash=torrent_hash,
+            outcomes[normalized_hash] = HashActionOutcome(
+                torrent_hash=normalized_hash,
                 status=HashActionStatus.NOT_FOUND,
                 reason="not_found",
             )
             continue
 
+        # Use qBittorrent's own casing, not the caller's -- two requested
+        # hashes for the same torrent already collapsed above, so this
+        # can never collide with another entry.
+        canonical_hash = get_field_as_string(torrent, "hash")
         state = get_field_as_string(torrent, "state")
         skip_reason = _bulk_action_skip_reason(action, state)
         if skip_reason is not None:
-            outcomes[torrent_hash] = HashActionOutcome(
-                torrent_hash=torrent_hash,
+            outcomes[canonical_hash] = HashActionOutcome(
+                torrent_hash=canonical_hash,
                 status=HashActionStatus.UNCHANGED,
                 previous_state=state,
                 reason=skip_reason,
             )
             continue
 
-        outcomes[torrent_hash] = HashActionOutcome(
-            torrent_hash=torrent_hash,
+        outcomes[canonical_hash] = HashActionOutcome(
+            torrent_hash=canonical_hash,
             status=HashActionStatus.CHANGED,  # provisional, see below
             previous_state=state,
         )
-        to_apply.append(torrent_hash)
+        to_apply.append(canonical_hash)
 
     if to_apply:
         try:
@@ -958,6 +973,14 @@ def _apply_bulk_action_to_hashes(
     return BulkHashActionResult(
         action=action, outcomes=tuple(outcomes.values())
     )
+
+
+def _normalize_requested_hash(value: str) -> str:
+    """Lowercase and validate one requested hash before any API call."""
+    normalized = value.strip().lower()
+    if normalized == "":
+        raise InvalidTorrentSelectorError("Provide a non-empty torrent hash.")
+    return normalized
 
 
 def pause_torrents_by_hash(
