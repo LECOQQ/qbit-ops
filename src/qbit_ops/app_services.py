@@ -14,8 +14,10 @@ from typing import Any
 
 from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
 from qbit_core.features.status import (
+    InstanceStats,
     StatusSnapshot,
     build_status_snapshot_from_data,
+    collect_instance_stats,
 )
 from qbit_core.features.torrents import (
     TorrentFilter,
@@ -89,6 +91,7 @@ class TuiRefreshResult:
     """
 
     status: StatusSnapshot
+    instance_stats: InstanceStats
     torrents: TorrentSelection  # unfiltered (every torrent)
     raw_torrents: list[Any]
 
@@ -98,12 +101,12 @@ def collect_tui_refresh(
     *,
     host: str | None = None,
 ) -> TuiRefreshResult:
-    """Collect one refresh cycle's worth of data with exactly four API calls.
+    """Collect one refresh cycle's worth of data with exactly five API calls.
 
     Calls `app_version()`, `app_web_api_version()`, `transfer_info()`,
-    and `torrents_info()` exactly once each, feeding the single
-    `torrents_info()` result to both the status counters and the
-    unfiltered torrent selection. Raises unchanged on any failure;
+    `torrents_info()`, and `sync_maindata()` exactly once each, feeding
+    the single `torrents_info()` result to both the status counters and
+    the unfiltered torrent selection. Raises unchanged on any failure;
     callers apply `classify_recoverable_qbit_failure` themselves.
     """
     qbittorrent_version = getattr(client, "app_version", lambda: None)()
@@ -122,8 +125,14 @@ def collect_tui_refresh(
         torrents=torrents,
         host=host,
     )
+    # `instance_id=status.host`: the already-redacted host, never the
+    # raw configured value, which may carry embedded credentials.
+    instance_stats = collect_instance_stats(client, instance_id=status.host)
     selection = select_torrents_from_items(torrents, TorrentFilter())
 
     return TuiRefreshResult(
-        status=status, torrents=selection, raw_torrents=torrents
+        status=status,
+        instance_stats=instance_stats,
+        torrents=selection,
+        raw_torrents=torrents,
     )

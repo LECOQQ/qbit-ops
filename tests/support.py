@@ -25,11 +25,17 @@ class FakeQbitClient:
         api_version: str = "2.9.3",
         download_speed: int = 0,
         upload_speed: int = 0,
+        all_time_downloaded: int = 0,
+        all_time_uploaded: int = 0,
+        global_ratio: str = "-1",
+        connected_peers: int = 0,
     ) -> None:
         """Store fake instance data returned to callers.
 
         `tracker_error_hashes` names torrents whose `torrents_trackers()`
-        call raises instead of returning data.
+        call raises instead of returning data. `global_ratio` defaults
+        to `"-1"`, matching qBittorrent's own "no ratio computed yet"
+        convention -- see `build_instance_stats_from_server_state`.
         """
         self.torrents = torrents or []
         self.trackers_by_hash = trackers_by_hash or {}
@@ -38,12 +44,17 @@ class FakeQbitClient:
         self.api_version = api_version
         self.download_speed = download_speed
         self.upload_speed = upload_speed
+        self.all_time_downloaded = all_time_downloaded
+        self.all_time_uploaded = all_time_uploaded
+        self.global_ratio = global_ratio
+        self.connected_peers = connected_peers
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.app_version_calls = 0
         self.app_web_api_version_calls = 0
         self.torrents_trackers_calls = 0
         self.torrents_info_calls = 0
         self.transfer_info_calls = 0
+        self.sync_maindata_calls = 0
         self.paused_hashes: list[str | list[str]] = []
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
@@ -75,6 +86,19 @@ class FakeQbitClient:
         return {
             "dl_info_speed": self.download_speed,
             "up_info_speed": self.upload_speed,
+        }
+
+    def sync_maindata(self) -> dict[str, Any]:
+        """Return a fake `sync_maindata()` payload, `server_state` only."""
+        self.sync_maindata_calls += 1
+        self._record("sync_maindata")
+        return {
+            "server_state": {
+                "alltime_dl": self.all_time_downloaded,
+                "alltime_ul": self.all_time_uploaded,
+                "global_ratio": self.global_ratio,
+                "total_peer_connections": self.connected_peers,
+            }
         }
 
     def torrents_info(self) -> list[dict[str, Any]]:

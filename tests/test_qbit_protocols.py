@@ -85,6 +85,7 @@ def test_protocols_contain_only_methods_actually_consumed() -> None:
         "torrents_info",
         "torrents_trackers",
         "transfer_info",
+        "sync_maindata",
         "app_version",
         "app_web_api_version",
         "torrents_pause",

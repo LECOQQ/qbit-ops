@@ -20,6 +20,7 @@ from qbit_ops.tui.formatting import (
     _GRADIENT_END,
     _GRADIENT_START,
     _INACTIVE_TAB_ACCENT,
+    _format_bytes,
 )
 from qbit_ops.tui.state import ConnectionState, TuiState, Workspace
 
@@ -236,16 +237,18 @@ class OverviewPanel(VerticalScroll):
 
     Four visual levels, in mount order: `BrandHeader` (branding);
     `#overview-rail` (compact connection + transfer status); the
-    `#overview-cards` primary/secondary pair (Torrents, then Health);
-    and the Browse-torrents nav hint. The header and nav hint are
-    mounted once and never torn down; `render_state()` only updates
-    the rail's text and replaces the two cards.
+    `#overview-cards` section (Torrents/Health as a primary/secondary
+    pair, then a full-width Instance card below them); and the
+    Browse-torrents nav hint. The header and nav hint are mounted once
+    and never torn down; `render_state()` only updates the rail's text
+    and replaces the three cards.
 
     Torrents and Health each fold two formerly-separate cards
     (Activity+Completion, Attention+Health) into one section without
     implying their sub-counts partition the total -- a torrent can
     count toward more than one at once (e.g. seeding *and* completed
-    *and* stalled).
+    *and* stalled). Instance is lifetime instance-wide totals
+    (`TuiState.instance_stats`), never derived from the torrent list.
     """
 
     def compose(self) -> ComposeResult:
@@ -267,7 +270,10 @@ class OverviewPanel(VerticalScroll):
         torrents = Static(_overview_torrents_text(state), classes="ov-torrents")
         health_class = f"ov-health ov-health-{state.status.health.value}"
         health = Static(_overview_health_text(state), classes=health_class)
-        cards.mount(torrents, health)
+        instance = Static(
+            _overview_instance_stats_text(state), classes="ov-instance"
+        )
+        cards.mount(torrents, health, instance)
 
 
 def _format_rail_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
@@ -372,3 +378,29 @@ def _overview_health_text(state: TuiState) -> str:
         f"{counts.errored} errored · {counts.unknown} unknown",
     ]
     return "\n".join(lines)
+
+
+def _format_ratio(ratio: float | None) -> str:
+    """Format an all-time share ratio, or '–' when qBittorrent has not
+    computed one yet (`InstanceStats.all_time_ratio is None`)."""
+    if ratio is None:
+        return "–"
+    return f"{ratio:.2f}"
+
+
+def _overview_instance_stats_text(state: TuiState) -> str:
+    """Lifetime instance-wide totals: qBittorrent's own "Statistics"
+    dialog figures, never derived from the current torrent list.
+
+    Single-instance today (`InstanceStats.instance_id` is carried on
+    the model for a future multi-instance TUI, not rendered here)."""
+    stats = state.instance_stats
+    assert stats is not None
+    return (
+        "[bold]Instance[/bold]\n"
+        "\n"
+        f"↓ All-time {_format_bytes(stats.all_time_downloaded_bytes)}"
+        f"    ↑ All-time {_format_bytes(stats.all_time_uploaded_bytes)}\n"
+        f"Ratio {_format_ratio(stats.all_time_ratio)}"
+        f"    Connected peers {stats.connected_peers}"
+    )

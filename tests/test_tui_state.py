@@ -55,7 +55,7 @@ def test_refresh_performs_exactly_one_torrents_info_call() -> None:
     assert client.torrents_info_calls == 1
 
 
-def test_refresh_uses_the_documented_four_call_budget() -> None:
+def test_refresh_uses_the_documented_five_call_budget() -> None:
     client = FakeQbitClient(
         torrents=[make_torrent(), make_torrent(hash="b" * 40)]
     )
@@ -67,6 +67,7 @@ def test_refresh_uses_the_documented_four_call_budget() -> None:
     assert client.app_web_api_version_calls == 1
     assert client.transfer_info_calls == 1
     assert client.torrents_info_calls == 1
+    assert client.sync_maindata_calls == 1
     assert client.torrents_trackers_calls == 0
 
 

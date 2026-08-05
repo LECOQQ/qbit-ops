@@ -7,14 +7,19 @@ Typer and without Rich so it can be reused by future consumers (a
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from qbit_core.qbit.fields import get_field_as_string, get_transfer_rates
+from qbit_core.qbit.fields import (
+    get_field,
+    get_field_as_int,
+    get_field_as_string,
+    get_transfer_rates,
+)
 from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
@@ -53,6 +58,82 @@ class TransferRates:
 
     download_bytes_per_second: int
     upload_bytes_per_second: int
+
+
+@dataclass(frozen=True)
+class InstanceStats:
+    """Report one qBittorrent instance's lifetime transfer totals.
+
+    Distinct from `TransferRates` (current speed): these are the
+    cumulative "Statistics" figures qBittorrent's WebUI shows, reset
+    only when the operator resets them (or the session database is
+    lost) -- not derived from `transfer_info()`, which never carries
+    them. `all_time_ratio` is `None` when qBittorrent has not yet
+    computed one (e.g. no data transferred), never a fabricated `0.0`
+    or `-1`. `instance_id` identifies which qBittorrent instance this
+    came from -- today always the single configured instance, but kept
+    on the model (rather than assumed implicit) so a future caller
+    aggregating more than one instance has something to key on without
+    a breaking change to this type.
+    """
+
+    instance_id: str | None
+    all_time_downloaded_bytes: int
+    all_time_uploaded_bytes: int
+    all_time_ratio: float | None
+    connected_peers: int
+
+
+def build_instance_stats_from_server_state(
+    server_state: Mapping[str, Any],
+    *,
+    instance_id: str | None = None,
+) -> InstanceStats:
+    """Build `InstanceStats` from `sync_maindata()`'s `server_state` object.
+
+    Zero API calls itself, mirroring `build_status_snapshot_from_data`:
+    the caller already fetched `sync_maindata()`. `global_ratio` arrives
+    as a string from the Web API; qBittorrent reports `-1` for "no
+    ratio computed yet", which this normalizes to `None` alongside any
+    other unparsable value, rather than surfacing a misleading negative
+    ratio.
+    """
+    raw_ratio = get_field(server_state, "global_ratio", None)
+    ratio: float | None
+    try:
+        parsed_ratio = float(raw_ratio)
+    except (TypeError, ValueError):
+        ratio = None
+    else:
+        ratio = parsed_ratio if parsed_ratio >= 0 else None
+
+    return InstanceStats(
+        instance_id=instance_id,
+        all_time_downloaded_bytes=get_field_as_int(server_state, "alltime_dl"),
+        all_time_uploaded_bytes=get_field_as_int(server_state, "alltime_ul"),
+        all_time_ratio=ratio,
+        connected_peers=get_field_as_int(
+            server_state, "total_peer_connections"
+        ),
+    )
+
+
+def collect_instance_stats(
+    client: Any,
+    *,
+    instance_id: str | None = None,
+) -> InstanceStats:
+    """Collect instance-wide lifetime stats with exactly one API call.
+
+    Calls `sync_maindata()` once and reads only its `server_state`
+    entry -- the rest of that payload (torrents, categories, tags) is
+    ignored here; callers already fetch torrents via `torrents_info()`.
+    """
+    maindata = client.sync_maindata()
+    server_state = get_field(maindata, "server_state", {})
+    return build_instance_stats_from_server_state(
+        server_state, instance_id=instance_id
+    )
 
 
 @dataclass(frozen=True)

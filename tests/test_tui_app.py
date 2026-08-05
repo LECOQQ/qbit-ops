@@ -616,7 +616,45 @@ async def test_overview_sections_remain_mounted_at_every_brand_variant() -> (
             overview = app.query_one("#overview-workspace", OverviewPanel)
             assert len(overview.query(".ov-torrents")) == 1
             assert len(overview.query(".ov-health")) == 1
+            assert len(overview.query(".ov-instance")) == 1
             assert len(overview.query(BrandHeader)) == 1
+
+
+async def test_overview_instance_card_shows_lifetime_totals_and_peers() -> None:
+    """The Instance card renders `TuiState.instance_stats`, never
+    torrent-derived data -- see `qbit_core.features.status.InstanceStats`."""
+    client = FakeQbitClient(
+        torrents=[make_torrent()],
+        all_time_downloaded=1024**3,  # 1 GiB
+        all_time_uploaded=2 * 1024**3,  # 2 GiB
+        global_ratio="1.75",
+        connected_peers=9,
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        instance_section = overview.query_one(".ov-instance", Static)
+        content = str(instance_section.content)
+        assert "1.0 GiB" in content
+        assert "2.0 GiB" in content
+        assert "1.75" in content
+        assert "9" in content
+
+
+async def test_overview_instance_card_shows_dash_when_no_ratio_yet() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent()],
+        global_ratio="-1",
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        instance_section = overview.query_one(".ov-instance", Static)
+        assert "–" in str(instance_section.content)
 
 
 async def test_overview_torrents_section_does_not_pad_beyond_its_content() -> (
