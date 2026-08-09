@@ -1,14 +1,22 @@
 # 🧯 qbit-ops
 
-[![CI](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
-[![Version](https://img.shields.io/github/v/release/LECOQQ/qbit-ops?label=version&display_name=tag)](CHANGELOG.md)
+<p align="center">
+  <img src="docs/assets/qbit-ops-logo.png" alt="qbit-ops logo" width="200">
+</p>
 
-**A tiny qBittorrent CLI and TUI for people who don't want to nuke their
+<p align="center">
+  <a href="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml"><img src="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/release/LECOQQ/qbit-ops?label=version&display_name=tag" alt="Version"></a>
+</p>
+
+🧯 **A tiny qBittorrent CLI and TUI for people who don't want to nuke their
 seedbox by accident.**
 
-Inspect torrents and trackers, diagnose problems, and preview bulk changes before they reach qBittorrent.
+Inspect, diagnose and automate qBittorrent at scale - with composable filters, bulk operations, and dry-run safeguards.
+
+> ✨ Featured in [Self-Host Weekly](https://selfh.st/weekly/2026-08-07/) by selfh.st.
 
 ![qbit-ops TUI demo](docs/assets/qbit-ops-demo.gif)
 
