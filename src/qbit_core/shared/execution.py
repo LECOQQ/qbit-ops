@@ -27,6 +27,7 @@ class MutationOperation(StrEnum):
     TORRENTS_START = "torrents start"
     TORRENTS_REANNOUNCE = "torrents reannounce"
     TORRENTS_IMPORT = "torrents import"
+    BACKUP_RESTORE = "backup restore"
     TRACKERS_ADD_IF_PRESENT = "trackers add-if-present"
     TRACKERS_REMOVE = "trackers remove"
     TRACKERS_REPLACE = "trackers replace"
@@ -42,6 +43,7 @@ MUTATION_RISK: dict[MutationOperation, MutationRisk] = {
     MutationOperation.TORRENTS_START: MutationRisk.LOW,
     MutationOperation.TORRENTS_REANNOUNCE: MutationRisk.LOW,
     MutationOperation.TORRENTS_IMPORT: MutationRisk.MEDIUM,
+    MutationOperation.BACKUP_RESTORE: MutationRisk.MEDIUM,
     MutationOperation.TRACKERS_ADD_IF_PRESENT: MutationRisk.MEDIUM,
     MutationOperation.TRACKERS_REMOVE: MutationRisk.HIGH,
     MutationOperation.TRACKERS_REPLACE: MutationRisk.HIGH,

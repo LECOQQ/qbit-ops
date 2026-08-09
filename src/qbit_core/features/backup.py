@@ -1,6 +1,7 @@
-"""Export qBittorrent instance state."""
+"""Export and restore qBittorrent instance state."""
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,16 @@ from qbit_core.features.torrents import list_torrents_with_trackers
 from qbit_core.features.trackers import (
     TrackerMatchMode,
     describe_tracker_url,
+    is_pseudo_tracker_marker,
     list_tracker_usage,
     normalize_tracker_url,
     redact_tracker_identity,
+    sanitize_tracker_text,
+)
+from qbit_core.qbit.fields import (
+    get_field_as_string,
+    get_field_as_tag_list,
+    is_disabled_tracker,
 )
 
 
@@ -414,3 +422,275 @@ def _add_normalized_trackers(
         enriched_torrents.append(enriched_torrent)
 
     return enriched_torrents
+
+
+# --- Restore: additive-only replay of an export onto the live instance ----
+#
+# Never touches a torrent absent from the live instance (no torrent is
+# ever created here -- that is `torrents import`'s job). Every mutation
+# is additive: an existing category is never overwritten, an existing
+# tag or tracker is never removed. A field missing from an older export
+# (e.g. no "tags" key before this was added) naturally yields zero
+# changes for that field -- "not captured" is indistinguishable from
+# "nothing to add", which is exactly the safe behavior wanted.
+
+
+@dataclass(frozen=True)
+class BackupRestoreCategoryChange:
+    hash: str
+    name: str
+    category: str
+
+
+@dataclass(frozen=True)
+class BackupRestoreTagChange:
+    hash: str
+    name: str
+    added_tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BackupRestoreTrackerChange:
+    """`added_trackers` holds raw announce URLs (may carry a passkey) --
+    needed by `apply_backup_restore`, but never meant to be rendered.
+    Callers must only ever display `len(added_trackers)`."""
+
+    hash: str
+    name: str
+    added_trackers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BackupRestorePlan:
+    matched: int
+    unmatched_hashes: tuple[str, ...]
+    categories_to_create: tuple[str, ...]
+    category_changes: tuple[BackupRestoreCategoryChange, ...]
+    tag_changes: tuple[BackupRestoreTagChange, ...]
+    tracker_changes: tuple[BackupRestoreTrackerChange, ...]
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(
+            self.category_changes or self.tag_changes or self.tracker_changes
+        )
+
+
+@dataclass(frozen=True)
+class BackupRestoreFailure:
+    hash: str
+    name: str
+    action: str
+    message: str
+
+
+@dataclass(frozen=True)
+class BackupRestoreResult:
+    categories_created: tuple[str, ...]
+    categories_restored: int
+    tags_restored: int
+    trackers_restored: int
+    failures: tuple[BackupRestoreFailure, ...]
+
+
+def _real_tracker_urls_from_export(trackers: Any) -> set[str]:
+    """Extract real (non-disabled, non-pseudo) announce URLs from an
+    export torrent's raw `trackers` list."""
+    if not isinstance(trackers, list):
+        return set()
+
+    urls: set[str] = set()
+    for tracker in trackers:
+        if not isinstance(tracker, dict):
+            continue
+        if tracker.get("disabled"):
+            continue
+        url = str(tracker.get("url", "")).strip()
+        if url == "" or is_pseudo_tracker_marker(url):
+            continue
+        urls.add(url)
+
+    return urls
+
+
+def _real_tracker_urls_live(trackers: Any) -> set[str]:
+    """Extract real (non-disabled, non-pseudo) announce URLs from a live
+    `client.torrents_trackers()` response."""
+    urls: set[str] = set()
+    for tracker in trackers:
+        if is_disabled_tracker(tracker):
+            continue
+        url = get_field_as_string(tracker, "url")
+        if url == "" or is_pseudo_tracker_marker(url):
+            continue
+        urls.add(url)
+
+    return urls
+
+
+def plan_backup_restore(
+    client: Any, export: dict[str, Any]
+) -> BackupRestorePlan:
+    """Plan an additive restore of category/tags/trackers from `export`.
+
+    Only affects torrents already present locally (matched by hash);
+    never adds a torrent absent locally, never overwrites an existing
+    category, and never removes a tag or tracker.
+    """
+    live_torrents = {
+        get_field_as_string(torrent, "hash").lower(): torrent
+        for torrent in client.torrents_info()
+    }
+    existing_categories = set(client.torrents_categories().keys())
+
+    matched = 0
+    unmatched: list[str] = []
+    categories_needed: set[str] = set()
+    category_changes: list[BackupRestoreCategoryChange] = []
+    tag_changes: list[BackupRestoreTagChange] = []
+    tracker_changes: list[BackupRestoreTrackerChange] = []
+
+    for entry in export.get("torrents", []):
+        if not isinstance(entry, dict):
+            continue
+        export_hash = str(entry.get("hash", "")).strip()
+        if export_hash == "":
+            continue
+
+        live_torrent = live_torrents.get(export_hash.lower())
+        if live_torrent is None:
+            unmatched.append(export_hash)
+            continue
+        matched += 1
+
+        torrent_hash = get_field_as_string(live_torrent, "hash")
+        name = get_field_as_string(live_torrent, "name")
+
+        desired_category = str(entry.get("category", "")).strip()
+        current_category = get_field_as_string(live_torrent, "category").strip()
+        if desired_category != "" and current_category == "":
+            category_changes.append(
+                BackupRestoreCategoryChange(
+                    hash=torrent_hash, name=name, category=desired_category
+                )
+            )
+            if desired_category not in existing_categories:
+                categories_needed.add(desired_category)
+
+        desired_tags = {str(tag) for tag in entry.get("tags", []) or []}
+        current_tags = set(get_field_as_tag_list(live_torrent))
+        missing_tags = sorted(desired_tags - current_tags)
+        if missing_tags:
+            tag_changes.append(
+                BackupRestoreTagChange(
+                    hash=torrent_hash,
+                    name=name,
+                    added_tags=tuple(missing_tags),
+                )
+            )
+
+        desired_trackers = _real_tracker_urls_from_export(entry.get("trackers"))
+        current_trackers = _real_tracker_urls_live(
+            client.torrents_trackers(torrent_hash)
+        )
+        missing_trackers = sorted(desired_trackers - current_trackers)
+        if missing_trackers:
+            tracker_changes.append(
+                BackupRestoreTrackerChange(
+                    hash=torrent_hash,
+                    name=name,
+                    added_trackers=tuple(missing_trackers),
+                )
+            )
+
+    return BackupRestorePlan(
+        matched=matched,
+        unmatched_hashes=tuple(sorted(unmatched)),
+        categories_to_create=tuple(sorted(categories_needed)),
+        category_changes=tuple(category_changes),
+        tag_changes=tuple(tag_changes),
+        tracker_changes=tuple(tracker_changes),
+    )
+
+
+def apply_backup_restore(
+    client: Any, plan: BackupRestorePlan
+) -> BackupRestoreResult:
+    """Apply `plan`. Every action's outcome is recorded independently --
+    one failure (e.g. a category that can't be created) never hides or
+    blocks the others."""
+    categories_created: list[str] = []
+    failures: list[BackupRestoreFailure] = []
+
+    for category in plan.categories_to_create:
+        try:
+            client.torrents_create_category(name=category)
+            categories_created.append(category)
+        except Exception as error:
+            failures.append(
+                BackupRestoreFailure(
+                    hash="",
+                    name=category,
+                    action="create_category",
+                    message=str(error),
+                )
+            )
+
+    categories_restored = 0
+    for change in plan.category_changes:
+        try:
+            client.torrents_set_category(
+                torrent_hashes=change.hash, category=change.category
+            )
+            categories_restored += 1
+        except Exception as error:
+            failures.append(
+                BackupRestoreFailure(
+                    hash=change.hash,
+                    name=change.name,
+                    action="set_category",
+                    message=str(error),
+                )
+            )
+
+    tags_restored = 0
+    for change in plan.tag_changes:
+        try:
+            client.torrents_add_tags(
+                torrent_hashes=change.hash, tags=list(change.added_tags)
+            )
+            tags_restored += 1
+        except Exception as error:
+            failures.append(
+                BackupRestoreFailure(
+                    hash=change.hash,
+                    name=change.name,
+                    action="add_tags",
+                    message=str(error),
+                )
+            )
+
+    trackers_restored = 0
+    for change in plan.tracker_changes:
+        try:
+            client.torrents_add_trackers(
+                torrent_hash=change.hash, urls=list(change.added_trackers)
+            )
+            trackers_restored += 1
+        except Exception as error:
+            failures.append(
+                BackupRestoreFailure(
+                    hash=change.hash,
+                    name=change.name,
+                    action="add_trackers",
+                    message=sanitize_tracker_text(str(error)),
+                )
+            )
+
+    return BackupRestoreResult(
+        categories_created=tuple(categories_created),
+        categories_restored=categories_restored,
+        tags_restored=tags_restored,
+        trackers_restored=trackers_restored,
+        failures=tuple(failures),
+    )

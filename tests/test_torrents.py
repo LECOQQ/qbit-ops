@@ -1340,6 +1340,7 @@ def test_list_torrents_with_trackers_returns_tracker_details() -> None:
             "ratio": 2.5,
             "save_path": "/data/torrents",
             "category": "movies",
+            "tags": [],
             "added_on": 1710000000,
             "trackers": [
                 {

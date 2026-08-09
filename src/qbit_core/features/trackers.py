@@ -75,6 +75,15 @@ class SafeTrackerIdentity:
 _PSEUDO_TRACKER_PATTERN = re.compile(r"^\*\*\s*\[(.+?)\]\s*\*\*$")
 
 
+def is_pseudo_tracker_marker(url: str) -> bool:
+    """Return whether `url` is a DHT/PeX/LSD pseudo-tracker marker.
+
+    These are not real announce URLs -- never a target for a tracker
+    mutation (add/remove/replace/restore).
+    """
+    return _PSEUDO_TRACKER_PATTERN.match(url.strip()) is not None
+
+
 def describe_tracker_url(url: str) -> SafeTrackerIdentity:
     """Reduce a tracker announce URL to a `SafeTrackerIdentity`.
 

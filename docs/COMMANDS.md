@@ -18,7 +18,8 @@ qbit-ops
 ├── connection check
 ├── backup
 │   ├── export
-│   └── diff
+│   ├── diff
+│   └── restore
 ├── torrents
 │   ├── list
 │   ├── categories
@@ -57,6 +58,8 @@ qbit-ops torrents import ubuntu.torrent
 qbit-ops torrents import ./torrents/ --recursive
 qbit-ops torrents import archive.zip --category movies --save-path /downloads
 qbit-ops torrents import archive.zip --no-dry-run --yes --start
+qbit-ops backup export --format json > export.json
+qbit-ops backup restore export.json --no-dry-run --yes
 ```
 
 ## 📤 Output
@@ -82,6 +85,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `trackers export` | ✅ | ✅ | ✅ | — |
 | `backup export` | ✅ | ✅ | ✅ | — |
 | `backup diff` | ✅ | ✅ | ✅ | — |
+| `backup restore` | ✅ | ✅ | — | — |
 | `explain torrent` | ✅ | ✅ | ✅ | — |
 | `explain tracker` | ✅ | ✅ | ✅ | — |
 
@@ -132,3 +136,32 @@ qbit-ops torrents import archive.zip --no-dry-run --yes   # actually import
 - Exit code is non-zero if nothing is importable, an API call fails, or
   any invalid file was found -- even in dry-run, so a broken input is
   visible before `--yes` is ever used.
+
+## 📦 Restoring from a `backup export`
+
+`backup restore EXPORT_FILE` additively replays category/tags/trackers
+from a previous `backup export` onto torrents **already present** in
+the target instance, matched by hash. It never adds a torrent absent
+locally -- use `torrents import` for that.
+
+```bash
+qbit-ops backup export --format json > export.json
+qbit-ops backup restore export.json                        # dry-run
+qbit-ops backup restore export.json --no-dry-run --yes
+```
+
+- 🧪 Dry-run by default; real execution needs `--no-dry-run` and
+  (non-interactively) `--yes`, like every other medium-risk mutation.
+- ➕ **Additive only**: an existing category is never overwritten (only
+  filled in when currently blank), and an existing tag or tracker is
+  never removed -- only missing ones are added.
+- 🕳️ A field absent from an older export (e.g. `tags`, added after
+  `backup export` first shipped) means "not captured", never "clear
+  this field" -- it produces zero changes, not a deletion.
+- 🚫 Never creates a torrent: an export entry with no matching hash
+  locally is reported as `unmatched`, informational only.
+- 🔑 Restored trackers can carry a passkey; only a count is ever shown
+  in `--verbose` output or any format, never the raw URL.
+- Exit code is non-zero if no export entry matches a local torrent, or
+  any restore action (category creation, category/tag/tracker
+  assignment) fails via the API.

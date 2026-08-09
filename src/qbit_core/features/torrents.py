@@ -24,6 +24,7 @@ from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_field_as_tag_list,
     get_raw_tracker_status,
     is_disabled_tracker,
 )
@@ -457,6 +458,7 @@ def list_torrents_with_trackers(
                 "ratio": get_field_as_float(torrent, "ratio"),
                 "save_path": get_field_as_string(torrent, "save_path"),
                 "category": get_field_as_string(torrent, "category"),
+                "tags": get_field_as_tag_list(torrent),
                 "added_on": get_field_as_int(torrent, "added_on"),
                 "trackers": trackers,
                 "active_tracker_count": active_tracker_count,
