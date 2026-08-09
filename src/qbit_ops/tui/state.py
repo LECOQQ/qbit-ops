@@ -30,9 +30,7 @@ from qbit_core.features.explain import (
 from qbit_core.features.status import InstanceStats, StatusSnapshot
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
-    SelectedTorrent,
     TorrentBulkAction,
-    TorrentSelection,
     apply_bulk_torrent_action,
     build_bulk_action_plan_from_snapshot,
     get_safe_tracker_details,
@@ -42,9 +40,12 @@ from qbit_core.features.trackers import sanitize_tracker_text
 from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import (
+    Selection,
     TorrentFilter,
+    format_category_label,
 )
 from qbit_core.shared.torrent_states import (
+    TorrentSnapshot,
     classify_torrent_state,
     is_stopped_state,
 )
@@ -133,20 +134,20 @@ class SortOrder:
         return f"{_SORT_FIELD_LABELS[self.field]} {arrow}"
 
 
-_SORT_KEY_FUNCS: dict[SortField, Callable[[SelectedTorrent], Any]] = {
+_SORT_KEY_FUNCS: dict[SortField, Callable[[TorrentSnapshot], Any]] = {
     SortField.NAME: lambda t: t.name.casefold(),
     SortField.STATE: lambda t: _state_label(t.state),
     SortField.PROGRESS: lambda t: t.progress,
     SortField.DOWN: lambda t: t.download_rate,
     SortField.UP: lambda t: t.upload_rate,
     SortField.RATIO: lambda t: t.ratio,
-    SortField.CATEGORY: lambda t: t.category.casefold(),
+    SortField.CATEGORY: lambda t: format_category_label(t.category).casefold(),
 }
 
 
 def _sort_torrents(
-    matched: tuple[SelectedTorrent, ...], order: SortOrder
-) -> tuple[SelectedTorrent, ...]:
+    matched: tuple[TorrentSnapshot, ...], order: SortOrder
+) -> tuple[TorrentSnapshot, ...]:
     """Sort `matched` by `order`, purely in-memory -- zero API calls.
 
     Deterministic tie-break: canonical (casefolded) name, then full
@@ -209,11 +210,11 @@ class TuiState:
     connection: ConnectionState = ConnectionState.CONNECTING
     status: StatusSnapshot | None = None
     instance_stats: InstanceStats | None = None
-    torrent_snapshot: TorrentSelection | None = None
+    torrent_snapshot: Selection | None = None
     stopped_count: int = 0
     filters: TorrentFilter = field(default_factory=TorrentFilter)
     search: str = ""
-    visible: TorrentSelection | None = None
+    visible: Selection | None = None
     focused_hash: str | None = None
     focused_tracker_details: list[dict[str, Any]] | None = None
     focused_details_fetched_at: datetime | None = None
@@ -236,7 +237,7 @@ class TuiState:
     `TuiController.select_all_visible`/`reconcile_selection`.
     """
 
-    def focused_torrent(self) -> SelectedTorrent | None:
+    def focused_torrent(self) -> TorrentSnapshot | None:
         """Look up the focused torrent's live fields from `visible`.
 
         Deliberately a lookup, not a stored copy: name/state/progress/

@@ -20,11 +20,11 @@ from qbit_core.features.status import (
     collect_instance_stats,
 )
 from qbit_core.features.torrents import (
-    TorrentSelection,
     select_torrents_from_items,
 )
 from qbit_core.qbit.client import create_qbit_client as _create_qbit_client
 from qbit_core.shared.selection import (
+    Selection,
     TorrentFilter,
 )
 from qbit_ops.config import load_qbit_config
@@ -80,16 +80,14 @@ class TuiRefreshResult:
 
     `raw_torrents` is the raw `torrents_info()` result, kept alongside
     the unfiltered `torrents` selection so the TUI controller can
-    re-apply a `TorrentFilter` in memory without a second API call.
-    Re-filtering must use `raw_torrents`, not `torrents.matched`:
-    `SelectedTorrent.category` is display-formatted (e.g.
-    `(uncategorized)`) and would silently break the `uncategorized`
-    filter token -- see `qbit_core.features.torrents._category_matches`.
+    re-apply a `TorrentFilter` in memory without a second API call, and
+    so a bulk plan can be built against an already-fetched snapshot with
+    zero API calls (`build_bulk_action_plan_from_snapshot`).
     """
 
     status: StatusSnapshot
     instance_stats: InstanceStats
-    torrents: TorrentSelection  # unfiltered (every torrent)
+    torrents: Selection  # unfiltered (every torrent)
     raw_torrents: list[Any]
 
 

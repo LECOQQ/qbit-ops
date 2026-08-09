@@ -3,9 +3,10 @@
 Turns the pure SELECT stage (`qbit_core.shared.selection`) into
 client-facing use cases: fetching torrents, resolving a
 `SelectionRequest` against them, and planning/applying bulk actions.
-Also owns the `SelectedTorrent`/`TorrentSelection` presentation
-projection. Kept free of Typer and Rich so both the CLI and the TUI can
-reuse it without pulling in presentation concerns.
+Every result carries `TorrentSnapshot` directly -- display concerns
+such as the `(uncategorized)` label belong to the rendering layers.
+Kept free of Typer and Rich so both the CLI and the TUI can reuse it
+without pulling in presentation concerns.
 """
 
 from collections.abc import Callable, Collection, Sequence
@@ -52,40 +53,6 @@ from qbit_core.shared.torrent_states import (
 )
 
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce", "delete"]
-
-
-@dataclass(frozen=True)
-class SelectedTorrent:
-    """One torrent selected by `select_torrents`.
-
-    Carries the complete infohash plus fields for list rendering,
-    mutation plans, and TUI consumers. `tracker_count` is `None` when
-    tracker data wasn't collected (no `--tracker` filter), distinct
-    from `0` (collected, but no active trackers). `download_rate`/
-    `upload_rate` come straight from qBittorrent's own `dlspeed`/
-    `upspeed` fields -- no extra API call.
-    """
-
-    hash: str
-    name: str
-    category: str
-    state: str
-    size: int
-    progress: float
-    ratio: float
-    tracker_count: int | None
-    download_rate: int
-    upload_rate: int
-
-
-@dataclass(frozen=True)
-class TorrentSelection:
-    """The deterministic result of applying a `TorrentFilter`."""
-
-    scanned: int
-    matched: tuple[SelectedTorrent, ...]
-    filters: TorrentFilter
-    tracker_data_collected: bool
 
 
 def build_torrent_filter(
@@ -154,13 +121,19 @@ def select_torrents(
     client: Any,
     filters: TorrentFilter,
     on_progress: Callable[[int, int], None] | None = None,
-) -> TorrentSelection:
+) -> tuple[Selection, dict[str, int] | None]:
     """Select torrents by structured filter criteria.
 
     Loads once via `torrents_info()`, applies every cheap filter first,
     and only then calls `client.torrents_trackers()` -- at most once per
     surviving candidate, and only when `filters.tracker` is set.
     `on_progress` reports real progress over the calls actually made.
+
+    Returns the selection plus, when tracker data was collected, the
+    active tracker count per infohash. `None` means no inspection
+    happened at all -- never confuse it with an empty mapping, which
+    would mean "inspected, nothing found". The INSPECT stage will own
+    this second element.
     """
     all_torrents = list(client.torrents_info())
 
@@ -168,16 +141,16 @@ def select_torrents(
         selection = select_torrents_from_items(all_torrents, filters)
         if on_progress is not None:
             on_progress(selection.scanned, selection.scanned)
-        return selection
+        return selection, None
 
-    total = len(all_torrents)
     candidates = [
         torrent
         for torrent in all_torrents
         if matches_cheap_filters(torrent, filters)
     ]
 
-    selected: list[SelectedTorrent] = []
+    matched: list[TorrentSnapshot] = []
+    tracker_counts: dict[str, int] = {}
     candidate_total = len(candidates)
     for index, torrent in enumerate(candidates, start=1):
         torrent_hash = get_field_as_string(torrent, "hash")
@@ -192,27 +165,26 @@ def select_torrents(
         if not has_tracker_host(active_trackers, filters.tracker):
             continue
 
-        selected.append(
-            project_selected_torrent(
-                build_torrent_snapshot(torrent),
-                tracker_count=len(active_trackers),
-            )
-        )
+        snapshot = build_torrent_snapshot(torrent)
+        matched.append(snapshot)
+        tracker_counts[snapshot.hash] = len(active_trackers)
 
-    selected.sort(key=lambda item: item.name.casefold())
+    matched.sort(key=lambda item: item.name.casefold())
 
-    return TorrentSelection(
-        scanned=total,
-        matched=tuple(selected),
-        filters=filters,
-        tracker_data_collected=True,
+    return (
+        Selection(
+            scanned=len(all_torrents),
+            matched=tuple(matched),
+            request=SelectionRequest(filters=filters),
+        ),
+        tracker_counts,
     )
 
 
 def select_torrents_from_items(
     torrents: Sequence[Any],
     filters: TorrentFilter,
-) -> TorrentSelection:
+) -> Selection:
     """Apply only the cheap, `torrents_info()`-shaped filters in memory.
 
     Never calls the qBittorrent API -- for callers re-applying filters to
@@ -227,56 +199,7 @@ def select_torrents_from_items(
             "without a qBittorrent client; use select_torrents instead."
         )
 
-    return project_torrent_selection(
-        select_from_items(torrents, SelectionRequest(filters=filters)),
-        tracker_data_collected=False,
-    )
-
-
-def project_selected_torrent(
-    snapshot: TorrentSnapshot,
-    *,
-    tracker_count: int | None,
-) -> SelectedTorrent:
-    """Project the central `TorrentSnapshot` onto the display model.
-
-    The only place raw category values become the `(uncategorized)`
-    display label, and the only place `tracker_count` (a property of the
-    selection, not of the torrent) is attached.
-    """
-    return SelectedTorrent(
-        hash=snapshot.hash,
-        name=snapshot.name,
-        category=format_category_label(snapshot.category),
-        state=snapshot.state,
-        size=snapshot.size,
-        progress=snapshot.progress,
-        ratio=snapshot.ratio,
-        tracker_count=tracker_count,
-        download_rate=snapshot.download_rate,
-        upload_rate=snapshot.upload_rate,
-    )
-
-
-def project_torrent_selection(
-    selection: Selection,
-    *,
-    tracker_data_collected: bool,
-) -> TorrentSelection:
-    """Project a `Selection` onto the display model.
-
-    `tracker_count` is `None` throughout: a `Selection` alone never
-    carries tracker data (that is the INSPECT stage's output).
-    """
-    return TorrentSelection(
-        scanned=selection.scanned,
-        matched=tuple(
-            project_selected_torrent(snapshot, tracker_count=None)
-            for snapshot in selection.matched
-        ),
-        filters=selection.request.filters,
-        tracker_data_collected=tracker_data_collected,
-    )
+    return select_from_items(torrents, SelectionRequest(filters=filters))
 
 
 def list_torrent_snapshots(client: Any) -> tuple[TorrentSnapshot, ...]:
@@ -479,14 +402,14 @@ def select_torrents_for_mutation(
     select_all: bool,
     filters: TorrentFilter,
     on_progress: Callable[[int, int], None] | None = None,
-) -> tuple[TorrentSelection, str | None]:
-    """Resolve a full bulk-mutation selector to a `TorrentSelection`.
+) -> Selection:
+    """Resolve a full bulk-mutation selector to a `Selection`.
 
     Validates the selector first (see `validate_selection_request`), so
     an unsafe combination is rejected before any qBittorrent API call.
-    Returns `(selection, resolved_hash)`: `resolved_hash` is the
-    complete infohash when `--hash` was used, and `None` for `--all`, a
-    filter-based selection, or a hash matching nothing.
+    `Selection.resolved_hash` carries the complete infohash when
+    `--hash` was used, and is `None` for `--all`, a filter-based
+    selection, or a hash matching nothing.
     """
     request = SelectionRequest(
         torrent_hash=torrent_hash, select_all=select_all, filters=filters
@@ -497,17 +420,13 @@ def select_torrents_for_mutation(
         all_torrents = list(client.torrents_info())
         if on_progress is not None:
             on_progress(len(all_torrents), len(all_torrents))
-        selection = select_from_items(all_torrents, request)
-        return (
-            project_torrent_selection(selection, tracker_data_collected=False),
-            selection.resolved_hash,
-        )
+        return select_from_items(all_torrents, request)
 
     effective_filters = TorrentFilter() if select_all else filters
-    selection_result = select_torrents(
+    selection, _ = select_torrents(
         client, effective_filters, on_progress=on_progress
     )
-    return selection_result, None
+    return selection
 
 
 def plan_bulk_torrent_action(
@@ -529,7 +448,7 @@ def plan_bulk_torrent_action(
     any other filter that matches nothing. `delete_files` is only
     meaningful for `action="delete"`.
     """
-    selection, resolved_hash = select_torrents_for_mutation(
+    selection = select_torrents_for_mutation(
         client,
         torrent_hash=torrent_hash,
         select_all=select_all,
@@ -554,7 +473,7 @@ def plan_bulk_torrent_action(
 
     return BulkTorrentActionPlan(
         action=action,
-        torrent_hash=resolved_hash,
+        torrent_hash=selection.resolved_hash,
         select_all=select_all,
         filters=filters,
         scanned=selection.scanned,

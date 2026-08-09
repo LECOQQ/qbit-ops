@@ -246,8 +246,8 @@ def test_list_table_omits_trackers_column_when_not_collected(
 ) -> None:
     """A per-row placeholder would read as "zero trackers"; omitting the whole
     column instead makes "not collected" a property of the table, which is what
-    it actually is (tracker_data_collected is a whole-selection flag, never a
-    per-torrent one).
+    it actually is: whether tracker data was collected is a property of
+    the whole listing, never of a single row.
     """
     configure_qbit_backend(client=_client_with_categories_and_states())
 

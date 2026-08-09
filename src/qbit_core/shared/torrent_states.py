@@ -113,9 +113,9 @@ def is_actively_uploading_state(state: str) -> bool:
 class TorrentSnapshot:
     """Stable, qbittorrent-api-independent representation of one torrent.
 
-    `category` is the raw value (`""` when uncategorized) -- unlike
-    `qbit_core.features.torrents.SelectedTorrent.category`, which is
-    formatted for CLI/TUI display; the two models are not interchangeable.
+    `category` is the raw value (`""` when uncategorized); the
+    `(uncategorized)` display label is applied at render time by
+    `qbit_core.shared.selection.format_category_label`, never stored here.
     """
 
     hash: str
