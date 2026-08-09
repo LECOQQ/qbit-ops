@@ -18,12 +18,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from qbit_core.qbit.fields import (
     get_active_tracker_urls,
-    get_field_as_float,
-    get_field_as_int,
     get_field_as_string,
     get_raw_tracker_status,
 )
-from qbit_core.shared.inspection import Inspection
+from qbit_core.shared.inspection import Inspection, select_and_inspect
+from qbit_core.shared.selection import SelectionRequest
 
 TrackerMatchMode = Literal["exact", "without-query"]
 
@@ -463,15 +462,13 @@ def list_tracker_usage(
     export`'s `tracker_usage` field; no CLI command renders this
     directly.
     """
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
+    inspection = select_and_inspect(
+        client, SelectionRequest(), on_progress=on_progress
+    )
     tracker_usage: dict[str, int] = {}
 
-    for index, torrent in enumerate(all_torrents, start=1):
-        torrent_hash = _get_torrent_hash(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
+        trackers = list(inspected.active_tracker_urls)
         normalized_trackers = {
             normalized_tracker
             for tracker_url in trackers
@@ -489,9 +486,6 @@ def list_tracker_usage(
                 tracker_usage.get(normalized_tracker, 0) + 1
             )
 
-        if on_progress is not None:
-            on_progress(index, total)
-
     return dict(sorted(tracker_usage.items()))
 
 
@@ -508,15 +502,15 @@ def inspect_tracker(
     including disabled ones.
     """
     normalized_identity = describe_tracker_url(tracker).identity
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
+    inspection = select_and_inspect(
+        client, SelectionRequest(), on_progress=on_progress
+    )
     torrents: list[dict[str, Any]] = []
 
-    for index, torrent in enumerate(all_torrents, start=1):
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        raw_trackers = list(client.torrents_trackers(torrent_hash))
-        active_tracker_count = len(get_active_tracker_urls(raw_trackers))
+    for inspected in inspection.torrents:
+        torrent = inspected.snapshot
+        raw_trackers = list(inspected.raw_trackers)
+        active_tracker_count = inspected.tracker_count
 
         matching_endpoints: list[dict[str, Any]] = []
         for raw_tracker in raw_trackers:
@@ -550,23 +544,20 @@ def inspect_tracker(
         if matching_endpoints:
             torrents.append(
                 {
-                    "hash": torrent_hash,
-                    "name": torrent_name,
-                    "state": get_field_as_string(torrent, "state"),
-                    "size": get_field_as_int(torrent, "size"),
-                    "progress": get_field_as_float(torrent, "progress"),
-                    "ratio": get_field_as_float(torrent, "ratio"),
+                    "hash": torrent.hash,
+                    "name": torrent.name,
+                    "state": torrent.state,
+                    "size": torrent.size,
+                    "progress": torrent.progress,
+                    "ratio": torrent.ratio,
                     "active_tracker_count": active_tracker_count,
                     "matching_endpoints": matching_endpoints,
                 }
             )
 
-        if on_progress is not None:
-            on_progress(index, total)
-
     return {
         "tracker": normalized_identity,
-        "scanned": total,
+        "scanned": inspection.selection.scanned,
         "matched_tracker": len(torrents),
         "torrents": torrents,
     }
@@ -582,17 +573,14 @@ def export_tracker_state(
     never a full announce URL or passkey. Distinct from `backup export`,
     which legitimately carries raw announce URLs.
     """
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
+    inspection = select_and_inspect(
+        client, SelectionRequest(), on_progress=on_progress
+    )
     torrents: list[dict[str, Any]] = []
     all_identities: set[str] = set()
 
-    for index, torrent in enumerate(all_torrents, start=1):
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
+        trackers = list(inspected.active_tracker_urls)
         normalized_trackers = sorted(
             {
                 safe.identity
@@ -603,14 +591,11 @@ def export_tracker_state(
         all_identities.update(normalized_trackers)
         torrents.append(
             {
-                "hash": torrent_hash,
-                "name": torrent_name,
+                "hash": inspected.snapshot.hash,
+                "name": inspected.snapshot.name,
                 "normalized_trackers": normalized_trackers,
             }
         )
-
-        if on_progress is not None:
-            on_progress(index, total)
 
     return {
         "summary": {
