@@ -26,6 +26,7 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_core.qbit.fields import get_field_as_string, get_raw_tracker_status
+from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.selection import (
     TorrentFilter,
     torrent_filter_to_dict,
@@ -249,22 +250,23 @@ def collect_tracker_status(
     """
     cheap_filters = replace(filters, tracker=None)
     selection, _ = select_torrents(client, cheap_filters)
+    inspection = inspect_trackers(
+        client,
+        selection,
+        on_progress=on_progress,
+        tolerate_lookup_errors=True,
+    )
 
     aggregates: dict[str, _AggregateBuilder] = {}
-    collection_errors = 0
-    candidate_total = len(selection.matched)
+    collection_errors = inspection.lookup_failures
 
-    for index, torrent in enumerate(selection.matched, start=1):
-        try:
-            raw_trackers = list(client.torrents_trackers(torrent.hash))
-        except Exception:
-            collection_errors += 1
-            if on_progress is not None:
-                on_progress(index, candidate_total)
+    for inspected in inspection.torrents:
+        if inspected.lookup_failed:
             continue
 
+        torrent = inspected.snapshot
         identities_for_torrent: set[str] = set()
-        for raw_tracker in raw_trackers:
+        for raw_tracker in inspected.raw_trackers:
             url = get_field_as_string(raw_tracker, "url")
             if url == "" or _is_pseudo_tracker_url(url):
                 continue
@@ -294,9 +296,6 @@ def collect_tracker_status(
 
         for identity in identities_for_torrent:
             aggregates[identity].torrent_hashes.add(torrent.hash)
-
-        if on_progress is not None:
-            on_progress(index, candidate_total)
 
     if filters.tracker is not None:
         aggregates = {
