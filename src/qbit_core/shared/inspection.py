@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from qbit_core.qbit.fields import get_active_tracker_urls
-from qbit_core.shared.selection import Selection
+from qbit_core.shared.selection import (
+    Selection,
+    SelectionRequest,
+    select_from_items,
+)
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
 
@@ -110,3 +114,33 @@ def inspect_trackers(
             on_progress(index, total)
 
     return Inspection(selection=selection, torrents=tuple(inspected))
+
+
+def select_and_inspect(
+    reader: Any,
+    request: SelectionRequest,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+    tolerate_lookup_errors: bool = False,
+) -> Inspection:
+    """Run SELECT then INSPECT in one pass: one `torrents_info()` call,
+    then one `torrents_trackers()` call per selected torrent.
+
+    The composition every tracker operation plans from. A request whose
+    filters need tracker data is rejected: narrowing on a tracker host
+    is an interpretation of the inspection result, so it belongs to the
+    caller, after this returns.
+    """
+    if request.requires_tracker_data:
+        raise ValueError(
+            "select_and_inspect cannot resolve a tracker filter itself; "
+            "narrow the returned Inspection instead."
+        )
+
+    selection = select_from_items(list(reader.torrents_info()), request)
+    return inspect_trackers(
+        reader,
+        selection,
+        on_progress=on_progress,
+        tolerate_lookup_errors=tolerate_lookup_errors,
+    )
