@@ -556,12 +556,14 @@ def replace(
         with rendering.transient_progress(
             "Scanning torrents...", enabled=enabled
         ) as advance:
+            inspection = select_and_inspect(
+                client, SelectionRequest(), on_progress=advance
+            )
             plan = plan_tracker_replacement(
-                client=client,
+                inspection,
                 source_tracker=source,
                 target_tracker=target,
                 match_mode=match.value,
-                on_progress=advance,
             )
 
     def _apply() -> None:
@@ -644,11 +646,13 @@ def replace_tracker_passkey_command(
         with rendering.transient_progress(
             "Scanning torrents...", enabled=enabled
         ) as advance:
+            inspection = select_and_inspect(
+                client, SelectionRequest(), on_progress=advance
+            )
             plan = plan_tracker_passkey_replacement(
-                client=client,
+                inspection,
                 tracker_template=tracker,
                 new_passkey=new_passkey,
-                on_progress=advance,
             )
 
     def _apply() -> None:
@@ -769,11 +773,13 @@ def remove(
         with rendering.transient_progress(
             "Scanning torrents...", enabled=enabled
         ) as advance:
+            inspection = select_and_inspect(
+                client, SelectionRequest(), on_progress=advance
+            )
             plan = plan_tracker_removal(
-                client=client,
+                inspection,
                 tracker=tracker,
                 match_mode=match.value,
-                on_progress=advance,
             )
 
     def _apply() -> None:

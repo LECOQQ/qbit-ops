@@ -17,7 +17,6 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from qbit_core.qbit.fields import (
-    get_active_tracker_urls,
     get_field_as_string,
     get_raw_tracker_status,
 )
@@ -664,29 +663,20 @@ def apply_tracker_addition(client: Any, plan: TrackerAdditionPlan) -> None:
 
 
 def plan_tracker_removal(
-    client: Any,
+    inspection: Inspection,
     tracker: str,
     match_mode: TrackerMatchMode = "exact",
-    on_progress: Callable[[int, int], None] | None = None,
 ) -> TrackerRemovalPlan:
-    """Plan removing a tracker from every torrent using it."""
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    scanned = 0
+    """Plan removing a tracker from every torrent using it.
+
+    Pure: consumes an already-collected `Inspection` and makes no
+    qBittorrent call.
+    """
     changes: list[TrackerRemovalChange] = []
 
-    for torrent in all_torrents:
-        scanned += 1
-        if on_progress is not None:
-            on_progress(scanned, total)
-
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
         matching_tracker_urls = _get_matching_tracker_urls(
-            trackers,
+            list(inspected.active_tracker_urls),
             tracker,
             match_mode,
         )
@@ -696,8 +686,8 @@ def plan_tracker_removal(
 
         changes.append(
             TrackerRemovalChange(
-                hash=torrent_hash,
-                name=torrent_name,
+                hash=inspected.snapshot.hash,
+                name=inspected.snapshot.name,
                 urls=tuple(matching_tracker_urls),
             )
         )
@@ -705,7 +695,7 @@ def plan_tracker_removal(
     return TrackerRemovalPlan(
         tracker=tracker,
         match=match_mode,
-        scanned=scanned,
+        scanned=inspection.selection.scanned,
         matched_tracker=len(changes),
         changes=tuple(changes),
     )
@@ -727,34 +717,28 @@ def apply_tracker_removal(client: Any, plan: TrackerRemovalPlan) -> None:
 
 
 def plan_tracker_replacement(
-    client: Any,
+    inspection: Inspection,
     source_tracker: str,
     target_tracker: str,
     match_mode: TrackerMatchMode = "exact",
-    on_progress: Callable[[int, int], None] | None = None,
 ) -> TrackerReplacementPlan:
-    """Plan replacing a source tracker with a target on matching torrents."""
+    """Plan replacing a source tracker with a target on matching torrents.
+
+    Pure: consumes an already-collected `Inspection` and makes no
+    qBittorrent call.
+    """
     _ensure_distinct_tracker_identity(
         source_tracker,
         target_tracker,
         match_mode,
     )
 
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    scanned = 0
     changes: list[TrackerReplacementChange] = []
 
-    for torrent in all_torrents:
-        scanned += 1
-        if on_progress is not None:
-            on_progress(scanned, total)
-
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
+        torrent_hash = inspected.snapshot.hash
+        torrent_name = inspected.snapshot.name
+        trackers = list(inspected.active_tracker_urls)
         matching_source_urls = _get_matching_tracker_urls(
             trackers,
             source_tracker,
@@ -795,7 +779,7 @@ def plan_tracker_replacement(
         source_tracker=source_tracker,
         target_tracker=target_tracker,
         match=match_mode,
-        scanned=scanned,
+        scanned=inspection.selection.scanned,
         matched_source=len(changes),
         changes=tuple(changes),
     )
@@ -965,12 +949,14 @@ def _build_path_passkey_url(
 
 
 def plan_tracker_passkey_replacement(
-    client: Any,
+    inspection: Inspection,
     tracker_template: str,
     new_passkey: str,
-    on_progress: Callable[[int, int], None] | None = None,
 ) -> PasskeyReplacementPlan:
     """Plan replacing a tracker's passkey on every torrent using it.
+
+    Pure: consumes an already-collected `Inspection` and makes no
+    qBittorrent call.
 
     The tracker template locates the passkey with a literal
     '{passkey}' placeholder, either as a query parameter value or a
@@ -992,23 +978,14 @@ def plan_tracker_passkey_replacement(
         else ""
     )
 
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    scanned = 0
     matched_source = 0
     already_up_to_date = 0
     changes: list[PasskeyReplacementChange] = []
 
-    for torrent in all_torrents:
-        scanned += 1
-        if on_progress is not None:
-            on_progress(scanned, total)
-
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
+        torrent_hash = inspected.snapshot.hash
+        torrent_name = inspected.snapshot.name
+        trackers = list(inspected.active_tracker_urls)
 
         if mode == "query":
             assert isinstance(position, str)
@@ -1070,7 +1047,7 @@ def plan_tracker_passkey_replacement(
 
     return PasskeyReplacementPlan(
         tracker_template=tracker_template,
-        scanned=scanned,
+        scanned=inspection.selection.scanned,
         matched_source=matched_source,
         already_up_to_date=already_up_to_date,
         changes=tuple(changes),
