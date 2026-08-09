@@ -53,7 +53,7 @@ def test_canonical_core_root_is_src_qbit_core() -> None:
 # modules, not a structural property `rglob` could detect on its own.
 _PURE_DOMAIN_MODULE_NAMES = (
     "shared/torrent_states.py",
-    "shared/selectors.py",
+    "shared/selection.py",
     "errors.py",
     "shared/execution.py",
 )

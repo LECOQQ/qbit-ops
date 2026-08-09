@@ -32,7 +32,6 @@ from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentBulkAction,
-    TorrentFilter,
     TorrentSelection,
     apply_bulk_torrent_action,
     build_bulk_action_plan_from_snapshot,
@@ -42,6 +41,9 @@ from qbit_core.features.torrents import (
 from qbit_core.features.trackers import sanitize_tracker_text
 from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.selection import (
+    TorrentFilter,
+)
 from qbit_core.shared.torrent_states import (
     classify_torrent_state,
     is_stopped_state,

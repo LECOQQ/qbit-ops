@@ -259,7 +259,7 @@ def test_internal_error_does_not_leak_credentials(
 
 def test_ambiguous_hash_error_has_remediation() -> None:
     import qbit_ops.cli.error_boundary as error_boundary
-    from qbit_core.shared.selectors import (
+    from qbit_core.shared.selection import (
         AmbiguousTorrentHashError,
         ResolvedTorrent,
     )

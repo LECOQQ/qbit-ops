@@ -34,7 +34,7 @@ from qbit_core.qbit.fields import (
     get_field_as_int,
     get_field_as_string,
 )
-from qbit_core.shared.selectors import (
+from qbit_core.shared.selection import (
     ResolvedTorrent,
     TorrentNotFoundError,
     resolve_torrent_hash,
