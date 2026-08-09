@@ -30,6 +30,7 @@ class FakeQbitClient:
         global_ratio: str = "-1",
         connected_peers: int = 0,
         torrents_add_error: Exception | None = None,
+        torrents_delete_error: Exception | None = None,
         categories: dict[str, dict[str, Any]] | None = None,
         create_category_error: Exception | None = None,
         set_category_error: Exception | None = None,
@@ -55,6 +56,7 @@ class FakeQbitClient:
         self.global_ratio = global_ratio
         self.connected_peers = connected_peers
         self.torrents_add_error = torrents_add_error
+        self.torrents_delete_error = torrents_delete_error
         self.categories = dict(categories or {})
         self.create_category_error = create_category_error
         self.set_category_error = set_category_error
@@ -75,6 +77,7 @@ class FakeQbitClient:
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
+        self.deleted_hashes: list[tuple[str | list[str], bool]] = []
         self.added_trackers: list[tuple[str, str | list[str]]] = []
         self.removed_trackers: list[tuple[str, list[str]]] = []
         self.edited_trackers: list[tuple[str, str, str]] = []
@@ -150,6 +153,19 @@ class FakeQbitClient:
         """Record fake torrent reannouncements."""
         self.reannounced_hashes.append(torrent_hashes)
         self._record("torrents_reannounce", torrent_hashes)
+
+    def torrents_delete(
+        self, delete_files: bool, torrent_hashes: str | list[str]
+    ) -> None:
+        """Record a fake torrent deletion; raise `torrents_delete_error`."""
+        self._record(
+            "torrents_delete",
+            delete_files=delete_files,
+            torrent_hashes=torrent_hashes,
+        )
+        if self.torrents_delete_error is not None:
+            raise self.torrents_delete_error
+        self.deleted_hashes.append((torrent_hashes, delete_files))
 
     def torrents_add_trackers(
         self, torrent_hash: str, urls: str | list[str]

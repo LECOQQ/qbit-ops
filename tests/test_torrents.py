@@ -43,6 +43,7 @@ class FakeQbitClient:
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
+        self.deleted_hashes: list[tuple[str | list[str], bool]] = []
         self.torrents_trackers_calls = 0
         self.torrents_trackers_call_order: list[str] = []
         self.torrents_info_calls = 0
@@ -73,6 +74,12 @@ class FakeQbitClient:
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
         """Record fake torrent reannouncements."""
         self.reannounced_hashes.append(torrent_hashes)
+
+    def torrents_delete(
+        self, delete_files: bool, torrent_hashes: str | list[str]
+    ) -> None:
+        """Record a fake torrent deletion."""
+        self.deleted_hashes.append((torrent_hashes, delete_files))
 
 
 def _torrent(**overrides: Any) -> dict[str, Any]:
@@ -660,6 +667,63 @@ def test_plan_bulk_torrent_action_reannounces_by_tracker() -> None:
     assert plan.matched == 1
     assert len(plan.changes) == 1
     assert client.reannounced_hashes == [["a" * 40]]
+
+
+def test_plan_bulk_torrent_action_delete_never_skips_any_state() -> None:
+    """Unlike pause/resume/start, delete has no no-op state: paused,
+    running, or errored torrents are all always a change."""
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="a" * 40, name="A", state="pausedUP"),
+            _torrent(hash="b" * 40, name="B", state="uploading"),
+            _torrent(hash="c" * 40, name="C", state="error"),
+        ]
+    )
+
+    plan = plan_bulk_torrent_action(
+        client=client, action="delete", select_all=True
+    )
+
+    assert plan.matched == 3
+    assert len(plan.changes) == 3
+    assert plan.skipped == ()
+
+
+def test_apply_bulk_torrent_action_delete_defaults_to_keeping_data() -> None:
+    client = FakeQbitClient(torrents=[_torrent(hash="a" * 40, name="A")])
+
+    plan = plan_bulk_torrent_action(
+        client=client, action="delete", select_all=True
+    )
+    apply_bulk_torrent_action(client, plan)
+
+    assert plan.delete_files is False
+    assert client.deleted_hashes == [(["a" * 40], False)]
+
+
+def test_apply_bulk_torrent_action_delete_with_data() -> None:
+    client = FakeQbitClient(torrents=[_torrent(hash="a" * 40, name="A")])
+
+    plan = plan_bulk_torrent_action(
+        client=client, action="delete", select_all=True, delete_files=True
+    )
+    apply_bulk_torrent_action(client, plan)
+
+    assert plan.delete_files is True
+    assert client.deleted_hashes == [(["a" * 40], True)]
+
+
+def test_apply_bulk_torrent_action_delete_with_no_matches_never_calls_api() -> (
+    None
+):
+    client = FakeQbitClient(torrents=[])
+
+    plan = plan_bulk_torrent_action(
+        client=client, action="delete", select_all=True
+    )
+    apply_bulk_torrent_action(client, plan)
+
+    assert client.deleted_hashes == []
 
 
 def test_plan_bulk_torrent_action_combines_filters_with_and() -> None:

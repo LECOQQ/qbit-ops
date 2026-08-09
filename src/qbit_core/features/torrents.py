@@ -42,7 +42,7 @@ from qbit_core.shared.torrent_states import (
     is_stopped_state,
 )
 
-TorrentBulkAction = Literal["pause", "resume", "start", "reannounce"]
+TorrentBulkAction = Literal["pause", "resume", "start", "reannounce", "delete"]
 
 UNCATEGORIZED_LABEL = "(uncategorized)"
 UNCATEGORIZED_FILTER_TOKEN = "uncategorized"
@@ -564,6 +564,8 @@ class BulkTorrentActionPlan:
     rendering decision, not a planning one. `torrent_hash` is the
     resolved full hash when `--hash` selected the target, `None`
     otherwise; `filters` is empty when `--hash` or `--all` was used.
+    `delete_files` only matters for `action == "delete"`; ignored by
+    every other action.
     """
 
     action: TorrentBulkAction
@@ -574,6 +576,7 @@ class BulkTorrentActionPlan:
     matched: int
     changes: tuple[BulkTorrentChange, ...]
     skipped: tuple[BulkTorrentSkip, ...]
+    delete_files: bool = False
 
 
 def validate_torrent_selector(
@@ -694,6 +697,7 @@ def plan_bulk_torrent_action(
     torrent_hash: str | None = None,
     select_all: bool = False,
     filters: TorrentFilter = _EMPTY_TORRENT_FILTER,
+    delete_files: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> BulkTorrentActionPlan:
     """Plan a bulk torrent action against a filtered torrent selection.
@@ -702,7 +706,8 @@ def plan_bulk_torrent_action(
     accepts a complete hash or an unambiguous prefix; an ambiguous
     prefix raises `AmbiguousTorrentHashError` before any plan is built,
     while an unmatched hash resolves to zero selected torrents, same as
-    any other filter that matches nothing.
+    any other filter that matches nothing. `delete_files` is only
+    meaningful for `action="delete"`.
     """
     selection, resolved_hash = select_torrents_for_mutation(
         client,
@@ -736,6 +741,7 @@ def plan_bulk_torrent_action(
         matched=len(selection.matched),
         changes=tuple(changes),
         skipped=tuple(skips),
+        delete_files=delete_files,
     )
 
 
@@ -808,7 +814,9 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
 
     hashes = [change.hash for change in plan.changes]
     try:
-        _call_bulk_torrent_action(client, plan.action, hashes)
+        _call_bulk_torrent_action(
+            client, plan.action, hashes, delete_files=plan.delete_files
+        )
     except Exception as error:
         raise RuntimeError(
             f"Failed to {plan.action} selected torrents: {error}"
@@ -1006,13 +1014,16 @@ def _call_bulk_torrent_action(
     client: Any,
     action: TorrentBulkAction,
     torrent_hashes: list[str],
+    *,
+    delete_files: bool = False,
 ) -> None:
     """Call the qBittorrent API for a bulk torrent action.
 
     Calls `torrents_start` directly for "resume"/"start": the installed
     qbittorrent-api aliases `torrents_resume = torrents_start`, so the
     method is never absent on a real client (verified in
-    `tests/test_qbit_library_http_boundary.py`).
+    `tests/test_qbit_library_http_boundary.py`). `delete_files` is only
+    read for `action="delete"`.
     """
     if action == "pause":
         client.torrents_pause(torrent_hashes)
@@ -1022,6 +1033,12 @@ def _call_bulk_torrent_action(
         client.torrents_start(torrent_hashes)
         return
 
+    if action == "delete":
+        client.torrents_delete(
+            delete_files=delete_files, torrent_hashes=torrent_hashes
+        )
+        return
+
     client.torrents_reannounce(torrent_hashes)
 
 
@@ -1029,7 +1046,10 @@ def _bulk_action_skip_reason(
     action: TorrentBulkAction,
     state: str,
 ) -> str | None:
-    """Return a skip reason when a bulk action would be a no-op."""
+    """Return a skip reason when a bulk action would be a no-op.
+
+    "reannounce" and "delete" have no no-op state -- always a change.
+    """
     if action == "pause" and is_stopped_state(state):
         return "already_stopped"
 

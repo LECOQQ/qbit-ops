@@ -30,6 +30,7 @@ HIGH_RISK_OPERATIONS = [
     MutationOperation.TRACKERS_REMOVE,
     MutationOperation.TRACKERS_REPLACE,
     MutationOperation.TRACKERS_REPLACE_PASSKEY,
+    MutationOperation.TORRENTS_DELETE,
 ]
 
 
@@ -55,7 +56,7 @@ def test_medium_risk_operations_are_classified_medium(
 
 
 @pytest.mark.parametrize("operation", HIGH_RISK_OPERATIONS)
-def test_destructive_tracker_operations_are_high_risk(
+def test_destructive_operations_are_high_risk(
     operation: MutationOperation,
 ) -> None:
     assert MUTATION_RISK[operation] is MutationRisk.HIGH
