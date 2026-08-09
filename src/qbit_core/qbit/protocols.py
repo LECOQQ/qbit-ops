@@ -1,10 +1,12 @@
 """Minimal structural interfaces for the qBittorrent client qbit-ops needs.
 
-Five focused protocols split along read/mutate and
+Six focused protocols split along read/mutate and
 torrent/tracker/transfer/app-info lines, rather than one large
-`QbitClient` interface. `torrents_start` is deliberately absent:
-production probes it with `getattr(client, "torrents_start", None)`,
-an optional-attribute pattern a `Protocol` cannot express.
+`QbitClient` interface. Destructive removal gets its own protocol so a
+consumer restricted to LOW-risk mutations cannot reach it.
+`torrents_start` is deliberately absent: production probes it with
+`getattr(client, "torrents_start", None)`, an optional-attribute
+pattern a `Protocol` cannot express.
 """
 
 from __future__ import annotations
@@ -74,6 +76,22 @@ class QbitTorrentMutator(Protocol):
 
 
 @runtime_checkable
+class QbitDestructiveMutator(Protocol):
+    """Irreversible torrent removal -- deliberately its own protocol.
+
+    Kept out of `QbitTorrentMutator` so the TUI's mutation surface stays
+    provably limited to LOW-risk state changes: a consumer typed against
+    that protocol cannot reach this method at all.
+    """
+
+    def torrents_delete(
+        self, delete_files: bool, torrent_hashes: str | list[str]
+    ) -> None:
+        """Delete the given torrents, optionally with their files."""
+        ...
+
+
+@runtime_checkable
 class QbitTrackerMutator(Protocol):
     """Tracker-list mutations -- never reachable from the TUI."""
 
@@ -100,6 +118,7 @@ class QbitClient(
     QbitTransferReader,
     QbitAppInfoReader,
     QbitTorrentMutator,
+    QbitDestructiveMutator,
     QbitTrackerMutator,
     Protocol,
 ):
