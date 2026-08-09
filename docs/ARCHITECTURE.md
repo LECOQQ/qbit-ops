@@ -20,7 +20,7 @@ docstring of `qbit_core/__init__.py` for a minimal usage example.
 ```text
 qbit_core/
 ├── features/   # user-facing use cases shared by CLI and TUI
-├── shared/     # reusable selection, execution and state primitives
+├── shared/     # SELECT/INSPECT stages, execution policy, torrent model
 ├── qbit/       # qBittorrent client boundary and payload handling
 ├── data/       # packaged compatibility evidence
 ├── config.py   # QbitConfig -- connection settings, no env/dotenv logic
@@ -51,11 +51,36 @@ These boundaries are checked by architecture tests
 
 ### ✍️ Mutations
 
+Every torrent-facing operation runs the same four stages:
+
 ```text
-select → build frozen plan → preview → confirm → apply → refresh
+SELECT → INSPECT → PLAN → APPLY
 ```
 
-The apply step consumes the frozen plan; it does not rescan and silently change the target set.
+| Stage | Owner | Cost |
+| --- | --- | --- |
+| SELECT | `shared/selection.py` | one `torrents_info()` |
+| INSPECT | `shared/inspection.py` | one `torrents_trackers()` per selected torrent |
+| PLAN | the operation's own `features/` module | none -- pure |
+| APPLY | same module | the mutation calls only |
+
+Two properties this ordering buys:
+
+- **Bounded cost.** INSPECT only ever runs on what SELECT already
+  narrowed down, so a filtered command never pays one tracker lookup
+  per torrent in the instance.
+- **No preview/execute drift.** PLAN is read-only and APPLY consumes
+  the frozen plan; it never rescans and never silently changes the
+  target set.
+
+Plans and their change types stay typed per operation. Only SELECT and
+INSPECT are shared -- a generic change type would defeat the
+per-operation redaction rules that keep tracker passkeys out of any
+preview, log, or summary.
+
+Around this, `shared/execution.py` decides whether a plan previews,
+prompts, applies, or is refused (dry-run by default), and the TUI adds
+a refresh after APPLY.
 
 ### 🧵 TUI workers
 
