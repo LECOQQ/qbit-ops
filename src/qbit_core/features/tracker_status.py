@@ -16,9 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from qbit_core.features.torrents import (
-    TorrentFilter,
     select_torrents,
-    torrent_filter_to_dict,
 )
 from qbit_core.features.trackers import (
     TrackerHealth,
@@ -28,6 +26,10 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_core.qbit.fields import get_field_as_string, get_raw_tracker_status
+from qbit_core.shared.selection import (
+    TorrentFilter,
+    torrent_filter_to_dict,
+)
 
 __all__ = [
     "SCHEMA_VERSION",

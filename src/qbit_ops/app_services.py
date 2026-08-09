@@ -20,11 +20,13 @@ from qbit_core.features.status import (
     collect_instance_stats,
 )
 from qbit_core.features.torrents import (
-    TorrentFilter,
     TorrentSelection,
     select_torrents_from_items,
 )
 from qbit_core.qbit.client import create_qbit_client as _create_qbit_client
+from qbit_core.shared.selection import (
+    TorrentFilter,
+)
 from qbit_ops.config import load_qbit_config
 
 __all__ = [

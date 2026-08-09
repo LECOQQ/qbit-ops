@@ -11,7 +11,7 @@ from qbit_core.features.explain import (
     explanation_exit_code,
 )
 from qbit_core.features.trackers import normalize_tracker_host
-from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selection import AmbiguousTorrentHashError
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands.torrents import TRACKER_FILTER_HELP
 from qbit_ops.cli.exit_codes import ExplainExitCode

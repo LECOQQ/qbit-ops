@@ -12,7 +12,6 @@ from qbit_core.features.torrent_import import (
     plan_torrent_import,
 )
 from qbit_core.features.torrents import (
-    STATE_FILTER_VALUES,
     TorrentBulkAction,
     apply_bulk_torrent_action,
     build_torrent_filter,
@@ -24,7 +23,10 @@ from qbit_core.features.torrents import (
     validate_torrent_selector,
 )
 from qbit_core.shared.execution import MutationOperation
-from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selection import (
+    STATE_FILTER_VALUES,
+    AmbiguousTorrentHashError,
+)
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,

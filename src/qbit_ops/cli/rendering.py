@@ -59,8 +59,6 @@ from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     SelectedTorrent,
     TorrentSelection,
-    describe_torrent_filter,
-    torrent_filter_to_dict,
 )
 from qbit_core.features.tracker_status import (
     TRACKER_STATUS_CSV_FIELDNAMES,
@@ -77,7 +75,11 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_core.shared.execution import MutationStatus
-from qbit_core.shared.selectors import ResolvedTorrent
+from qbit_core.shared.selection import (
+    ResolvedTorrent,
+    describe_torrent_filter,
+    torrent_filter_to_dict,
+)
 
 console = Console()
 err_console = Console(stderr=True)

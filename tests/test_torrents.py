@@ -7,10 +7,8 @@ import pytest
 from qbit_core.features.torrents import (
     HashActionStatus,
     TorrentBulkAction,
-    TorrentFilter,
     apply_bulk_torrent_action,
     build_torrent_filter,
-    describe_torrent_filter,
     inspect_torrent,
     list_category_usage,
     list_torrents_with_trackers,
@@ -19,12 +17,14 @@ from qbit_core.features.torrents import (
     resume_torrents_by_hash,
     search_torrents_by_name,
     select_torrents,
-    torrent_filter_to_dict,
     validate_torrent_selector,
 )
-from qbit_core.shared.selectors import (
+from qbit_core.shared.selection import (
     AmbiguousTorrentHashError,
     InvalidTorrentSelectorError,
+    TorrentFilter,
+    describe_torrent_filter,
+    torrent_filter_to_dict,
 )
 
 

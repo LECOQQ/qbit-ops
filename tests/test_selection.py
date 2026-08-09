@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from qbit_core.shared.selectors import (
+from qbit_core.shared.selection import (
     AmbiguousTorrentHashError,
     InvalidTorrentSelectorError,
     ResolvedTorrent,

@@ -21,7 +21,7 @@ from qbit_core.errors import (
     QbitConnectionError,
 )
 from qbit_core.qbit.client import is_qbit_error
-from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selection import AmbiguousTorrentHashError
 from qbit_ops.app_services import create_qbit_client
 from qbit_ops.cli.exit_codes import ExitCode, StatusExitCode
 from qbit_ops.cli.rendering import print_ambiguous_hash_error, print_error

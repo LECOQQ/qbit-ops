@@ -13,7 +13,7 @@ from qbit_core.features.explain import (
     finding_to_dict,
 )
 from qbit_core.features.torrents import get_safe_tracker_details
-from qbit_core.shared.selectors import AmbiguousTorrentHashError
+from qbit_core.shared.selection import AmbiguousTorrentHashError
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40
