@@ -155,7 +155,7 @@ def test_inspect_tracker_lists_matching_torrents() -> None:
         }
     )
 
-    report = inspect_tracker(client=client, tracker="tracker.example")
+    report = inspect_tracker(client, tracker="tracker.example")
 
     assert report == {
         "tracker": "tracker.example",
@@ -215,7 +215,7 @@ def test_inspect_tracker_reports_a_disabled_matching_endpoint() -> None:
         }
     )
 
-    report = inspect_tracker(client=client, tracker="tracker.example")
+    report = inspect_tracker(client, tracker="tracker.example")
 
     assert report["matched_tracker"] == 1
     endpoint = report["torrents"][0]["matching_endpoints"][0]
@@ -325,7 +325,7 @@ def test_plan_tracker_removal_reports_matching_torrents() -> None:
     )
 
     plan = plan_tracker_removal(
-        client=client,
+        _inspection(client),
         tracker="https://tracker.example/announce",
     )
 
@@ -346,7 +346,7 @@ def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
     )
 
     plan = plan_tracker_removal(
-        client=client,
+        _inspection(client),
         tracker="https://tracker.example/announce",
         match_mode="without-query",
     )
@@ -374,7 +374,7 @@ def test_plan_tracker_removal_reports_matching_urls_per_torrent() -> None:
     )
 
     plan = plan_tracker_removal(
-        client=client,
+        _inspection(client),
         tracker="https://tracker.example/announce",
     )
 
@@ -396,7 +396,7 @@ def test_apply_tracker_removal_removes_matching_raw_urls() -> None:
     )
 
     plan = plan_tracker_removal(
-        client=client,
+        _inspection(client),
         tracker="https://tracker.example/announce",
     )
     apply_tracker_removal(client, plan)
@@ -424,7 +424,7 @@ def test_plan_tracker_replacement_reports_matching_torrents() -> None:
     )
 
     plan = plan_tracker_replacement(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -445,7 +445,7 @@ def test_apply_tracker_replacement_replaces_source_url() -> None:
     )
 
     plan = plan_tracker_replacement(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -474,7 +474,7 @@ def test_plan_tracker_replacement_removes_source_when_target_exists() -> None:
     )
 
     plan = plan_tracker_replacement(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -503,7 +503,7 @@ def test_apply_tracker_replacement_removes_extra_variants() -> None:
     )
 
     plan = plan_tracker_replacement(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
         match_mode="without-query",
@@ -530,7 +530,7 @@ def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
 
     with pytest.raises(RuntimeError, match="placeholder"):
         plan_tracker_passkey_replacement(
-            client=client,
+            _inspection(client),
             tracker_template="https://tracker.example/announce",
             new_passkey="new",
         )
@@ -547,7 +547,7 @@ def test_plan_passkey_replacement_updates_query_placeholder() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-query.example/announce?passkey={passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -578,7 +578,7 @@ def test_plan_passkey_replacement_preserves_other_query_params() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker.example/announce?passkey={passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -605,7 +605,7 @@ def test_plan_passkey_replacement_updates_path_before_announce() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-prefix.example/{passkey}/announce",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -630,7 +630,7 @@ def test_plan_passkey_replacement_updates_path_segment_after_announce() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -659,7 +659,7 @@ def test_plan_passkey_replacement_preserves_dynamic_query_params() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="http://tracker-port.example:8080/{passkey}/announce",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -690,7 +690,7 @@ def test_plan_passkey_replacement_never_leaks_secret_in_repr() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -708,7 +708,7 @@ def test_plan_passkey_replacement_is_pure_and_does_not_mutate() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -730,7 +730,7 @@ def test_plan_passkey_replacement_skips_torrents_already_up_to_date() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
         new_passkey="ALREADY-CURRENT",
     )
@@ -751,7 +751,7 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
     )
 
     plan = plan_tracker_passkey_replacement(
-        client=client,
+        _inspection(client),
         tracker_template="https://tracker-suffix.example/announce/{passkey}",
         new_passkey="UNMISTAKABLE-NEW-PASSKEY-VALUE",
     )
@@ -799,7 +799,7 @@ def test_plan_tracker_removal_matches_nothing() -> None:
     )
 
     plan = plan_tracker_removal(
-        client=client, tracker="https://tracker-a.example/announce"
+        _inspection(client), tracker="https://tracker-a.example/announce"
     )
 
     assert plan.matched_tracker == 0
@@ -816,7 +816,7 @@ def test_plan_tracker_replacement_matches_nothing() -> None:
     )
 
     plan = plan_tracker_replacement(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
