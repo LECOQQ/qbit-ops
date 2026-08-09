@@ -29,13 +29,13 @@ from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
     run_mutation,
 )
-from qbit_ops.cli.commands.torrents import (
+from qbit_ops.cli.exit_codes import TrackerStatusExitCode
+from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.selector_options import (
     CATEGORY_FILTER_HELP,
     STATE_FILTER_HELP,
     TRACKER_FILTER_HELP,
 )
-from qbit_ops.cli.exit_codes import TrackerStatusExitCode
-from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
 
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")

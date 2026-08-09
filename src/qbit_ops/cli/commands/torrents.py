@@ -20,12 +20,12 @@ from qbit_core.features.torrents import (
     plan_bulk_torrent_action,
     search_torrents_by_name,
     select_torrents,
-    validate_torrent_selector,
 )
 from qbit_core.shared.execution import MutationOperation
 from qbit_core.shared.selection import (
-    STATE_FILTER_VALUES,
     AmbiguousTorrentHashError,
+    SelectionRequest,
+    validate_selection_request,
 )
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
@@ -34,6 +34,30 @@ from qbit_ops.cli.commands._shared import (
 )
 from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
+from qbit_ops.cli.selector_options import (
+    ActiveOption,
+    CategoryOption,
+    CompletedOption,
+    DeleteAllOption,
+    DeleteHashOption,
+    DryRunOption,
+    ErroredOption,
+    InactiveOption,
+    IncompleteOption,
+    PauseAllOption,
+    PauseHashOption,
+    ReannounceAllOption,
+    ReannounceHashOption,
+    ResumeAllOption,
+    ResumeHashOption,
+    StalledOption,
+    StartAllOption,
+    StartCompletedOption,
+    StartHashOption,
+    StateOption,
+    TrackerOption,
+    VerboseOption,
+)
 from qbit_ops.cli.validation import (
     validate_format_support,
     validate_hash_option,
@@ -41,27 +65,10 @@ from qbit_ops.cli.validation import (
 
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
 
-# Shared help text for the torrent-filter options common to `torrents list`
-# and every bulk mutation command, so wording cannot drift between them.
-CATEGORY_FILTER_HELP = (
-    "Restrict to a category (repeatable; combines with OR). Use "
-    "'uncategorized' for torrents without a category."
-)
-STATE_FILTER_HELP = (
-    "Restrict to a state group (repeatable; combines with OR). Supported: "
-    f"{', '.join(sorted(STATE_FILTER_VALUES))}."
-)
-TRACKER_FILTER_HELP = (
-    "Restrict to torrents using a tracker, matched by host[:port] (a full "
-    "announce URL is also accepted; only its host and port are used)."
-)
 
-
-def _run_bulk_torrent_action(
+def _build_selection_request(
     *,
-    operation: MutationOperation,
-    action: TorrentBulkAction,
-    torrent_hash: str | None,
+    torrent_hash: str | None = None,
     category: list[str],
     state: list[str],
     tracker: str | None,
@@ -71,13 +78,15 @@ def _run_bulk_torrent_action(
     inactive: bool,
     stalled: bool,
     errored: bool,
-    select_all: bool,
-    dry_run: bool,
-    verbose: bool,
-    assume_yes: bool = False,
-    delete_files: bool = False,
-) -> None:
-    torrent_hash = validate_hash_option(torrent_hash)
+    select_all: bool = False,
+) -> SelectionRequest:
+    """Fold raw CLI selector inputs into one validated `SelectionRequest`.
+
+    Every rejection happens here, before any qBittorrent call: a blank
+    `--hash`, a contradictory filter combination, and an unsafe
+    selector (`--hash` with `--all`, or no selector at all).
+    """
+    validated_hash = validate_hash_option(torrent_hash)
     try:
         filters = build_torrent_filter(
             categories=category,
@@ -93,10 +102,23 @@ def _run_bulk_torrent_action(
     except ValueError as error:
         error_boundary.fail(str(error))
 
+    return SelectionRequest(
+        torrent_hash=validated_hash, select_all=select_all, filters=filters
+    )
+
+
+def _run_bulk_torrent_action(
+    *,
+    operation: MutationOperation,
+    action: TorrentBulkAction,
+    request: SelectionRequest,
+    dry_run: bool,
+    verbose: bool,
+    assume_yes: bool = False,
+    delete_files: bool = False,
+) -> None:
     try:
-        validate_torrent_selector(
-            torrent_hash=torrent_hash, select_all=select_all, filters=filters
-        )
+        validate_selection_request(request)
     except ValueError as error:
         error_boundary.fail(str(error))
 
@@ -112,9 +134,9 @@ def _run_bulk_torrent_action(
                 plan = plan_bulk_torrent_action(
                     client=client,
                     action=action,
-                    torrent_hash=torrent_hash,
-                    select_all=select_all,
-                    filters=filters,
+                    torrent_hash=request.torrent_hash,
+                    select_all=request.select_all,
+                    filters=request.filters,
                     delete_files=delete_files,
                     on_progress=advance,
                 )
@@ -154,46 +176,15 @@ def _run_bulk_torrent_action(
 @torrents_app.command(name="list")
 @error_boundary.catch_internal_errors
 def list_qbit_torrents(
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -401,93 +392,37 @@ def inspect_qbit_torrent(
 @torrents_app.command()
 @error_boundary.catch_internal_errors
 def pause(
-    torrent_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--hash",
-            help=(
-                "Pause the torrent matching a full infohash or unique "
-                "leading prefix (case-insensitive)."
-            ),
-        ),
-    ] = None,
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
-    select_all: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Pause all torrents.",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run/--no-dry-run",
-            help="Apply changes instead of previewing them.",
-        ),
-    ] = True,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            help="Print impacted torrent details.",
-        ),
-    ] = False,
+    torrent_hash: PauseHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    select_all: PauseAllOption = False,
+    dry_run: DryRunOption = True,
+    verbose: VerboseOption = False,
 ) -> None:
     """Pause torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_PAUSE,
         action="pause",
-        torrent_hash=torrent_hash,
-        category=category,
-        state=state,
-        tracker=tracker,
-        completed=completed,
-        incomplete=incomplete,
-        active=active,
-        inactive=inactive,
-        stalled=stalled,
-        errored=errored,
-        select_all=select_all,
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            select_all=select_all,
+        ),
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -496,93 +431,37 @@ def pause(
 @torrents_app.command()
 @error_boundary.catch_internal_errors
 def resume(
-    torrent_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--hash",
-            help=(
-                "Resume the torrent matching a full infohash or unique "
-                "leading prefix (case-insensitive)."
-            ),
-        ),
-    ] = None,
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
-    select_all: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Resume all stopped torrents.",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run/--no-dry-run",
-            help="Apply changes instead of previewing them.",
-        ),
-    ] = True,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            help="Print impacted torrent details.",
-        ),
-    ] = False,
+    torrent_hash: ResumeHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    select_all: ResumeAllOption = False,
+    dry_run: DryRunOption = True,
+    verbose: VerboseOption = False,
 ) -> None:
     """Resume torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_RESUME,
         action="resume",
-        torrent_hash=torrent_hash,
-        category=category,
-        state=state,
-        tracker=tracker,
-        completed=completed,
-        incomplete=incomplete,
-        active=active,
-        inactive=inactive,
-        stalled=stalled,
-        errored=errored,
-        select_all=select_all,
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            select_all=select_all,
+        ),
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -591,99 +470,37 @@ def resume(
 @torrents_app.command()
 @error_boundary.catch_internal_errors
 def start(
-    torrent_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--hash",
-            help=(
-                "Start the torrent matching a full infohash or unique "
-                "leading prefix (case-insensitive)."
-            ),
-        ),
-    ] = None,
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option(
-            "--completed",
-            help=(
-                "Restrict to completed torrents (Web UI 'Start All' is "
-                "--completed --all)."
-            ),
-        ),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
-    select_all: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Start all stopped torrents.",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run/--no-dry-run",
-            help="Apply changes instead of previewing them.",
-        ),
-    ] = True,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            help="Print impacted torrent details.",
-        ),
-    ] = False,
+    torrent_hash: StartHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: StartCompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    select_all: StartAllOption = False,
+    dry_run: DryRunOption = True,
+    verbose: VerboseOption = False,
 ) -> None:
     """Start stopped torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_START,
         action="start",
-        torrent_hash=torrent_hash,
-        category=category,
-        state=state,
-        tracker=tracker,
-        completed=completed,
-        incomplete=incomplete,
-        active=active,
-        inactive=inactive,
-        stalled=stalled,
-        errored=errored,
-        select_all=select_all,
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            select_all=select_all,
+        ),
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -692,93 +509,37 @@ def start(
 @torrents_app.command()
 @error_boundary.catch_internal_errors
 def reannounce(
-    torrent_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--hash",
-            help=(
-                "Reannounce the torrent matching a full infohash or "
-                "unique leading prefix (case-insensitive)."
-            ),
-        ),
-    ] = None,
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
-    select_all: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Reannounce all torrents.",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run/--no-dry-run",
-            help="Apply changes instead of previewing them.",
-        ),
-    ] = True,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            help="Print impacted torrent details.",
-        ),
-    ] = False,
+    torrent_hash: ReannounceHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    select_all: ReannounceAllOption = False,
+    dry_run: DryRunOption = True,
+    verbose: VerboseOption = False,
 ) -> None:
     """Reannounce torrents matching a hash, one or more filters, or all."""
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_REANNOUNCE,
         action="reannounce",
-        torrent_hash=torrent_hash,
-        category=category,
-        state=state,
-        tracker=tracker,
-        completed=completed,
-        incomplete=incomplete,
-        active=active,
-        inactive=inactive,
-        stalled=stalled,
-        errored=errored,
-        select_all=select_all,
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            select_all=select_all,
+        ),
         dry_run=dry_run,
         verbose=verbose,
     )
@@ -787,63 +548,17 @@ def reannounce(
 @torrents_app.command()
 @error_boundary.catch_internal_errors
 def delete(
-    torrent_hash: Annotated[
-        str | None,
-        typer.Option(
-            "--hash",
-            help=(
-                "Delete the torrent matching a full infohash or unique "
-                "leading prefix (case-insensitive)."
-            ),
-        ),
-    ] = None,
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
-    select_all: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Delete all torrents.",
-        ),
-    ] = False,
+    torrent_hash: DeleteHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    select_all: DeleteAllOption = False,
     with_data: Annotated[
         bool,
         typer.Option(
@@ -855,24 +570,12 @@ def delete(
             ),
         ),
     ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run/--no-dry-run",
-            help="Apply changes instead of previewing them.",
-        ),
-    ] = True,
+    dry_run: DryRunOption = True,
     assume_yes: Annotated[
         bool,
         typer.Option("--yes", help="Skip confirmation for real execution."),
     ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            help="Print impacted torrent details.",
-        ),
-    ] = False,
+    verbose: VerboseOption = False,
 ) -> None:
     """Permanently delete torrents matching a hash, one or more filters, or all.
 
@@ -884,17 +587,19 @@ def delete(
     _run_bulk_torrent_action(
         operation=MutationOperation.TORRENTS_DELETE,
         action="delete",
-        torrent_hash=torrent_hash,
-        category=category,
-        state=state,
-        tracker=tracker,
-        completed=completed,
-        incomplete=incomplete,
-        active=active,
-        inactive=inactive,
-        stalled=stalled,
-        errored=errored,
-        select_all=select_all,
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            select_all=select_all,
+        ),
         dry_run=dry_run,
         verbose=verbose,
         assume_yes=assume_yes,
