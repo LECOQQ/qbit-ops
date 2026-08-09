@@ -28,6 +28,7 @@ qbit-ops
 │   ├── resume
 │   ├── start
 │   ├── reannounce
+│   ├── delete
 │   └── import
 ├── trackers
 │   ├── list
@@ -60,6 +61,8 @@ qbit-ops torrents import archive.zip --category movies --save-path /downloads
 qbit-ops torrents import archive.zip --no-dry-run --yes --start
 qbit-ops backup export --format json > export.json
 qbit-ops backup restore export.json --no-dry-run --yes
+qbit-ops torrents delete --category radarr-old --no-dry-run --yes
+qbit-ops torrents delete --hash abc123 --with-data --no-dry-run --yes
 ```
 
 ## 📤 Output
@@ -93,9 +96,31 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 
 - 🧪 Mutations default to dry-run.
 - ▶️ `--no-dry-run` requests real execution.
-- ❓ Low-risk mutations apply without a prompt; medium/high-risk tracker mutations prompt in an interactive terminal.
+- ❓ Low-risk mutations apply without a prompt; medium/high-risk mutations (tracker changes, `torrents delete`) prompt in an interactive terminal.
 - ⏭️ `--yes` skips that prompt but never enables real execution by itself.
 - 🚫 Empty selections never mean “all”.
+
+## 🗑️ Deleting torrents
+
+`torrents delete` is HIGH risk and irreversible: unlike
+`pause`/`resume`/`start`/`reannounce`, every matched torrent is always
+a change -- there is no "already satisfied" state to skip.
+
+```bash
+qbit-ops torrents delete --category radarr-old            # dry-run
+qbit-ops torrents delete --category radarr-old --no-dry-run --yes
+qbit-ops torrents delete --hash abc123 --with-data --no-dry-run --yes
+```
+
+- 🧪 Dry-run by default. Real execution needs `--no-dry-run` and
+  (non-interactively) `--yes`.
+- 💾 **Downloaded data is kept by default.** `--with-data` also deletes
+  the files from disk -- without it, only the torrent entry is removed
+  from qBittorrent.
+- ❓ Interactive confirmation states plainly whether data will be kept
+  or deleted, so the two outcomes are never confused at the prompt.
+- Selection follows the same `--hash`/filters/`--all` rules as every
+  other bulk torrent command -- no selector ever silently means "all".
 
 ## 📥 Importing `.torrent` files
 

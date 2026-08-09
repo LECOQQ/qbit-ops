@@ -72,6 +72,8 @@ def _run_bulk_torrent_action(
     select_all: bool,
     dry_run: bool,
     verbose: bool,
+    assume_yes: bool = False,
+    delete_files: bool = False,
 ) -> None:
     torrent_hash = validate_hash_option(torrent_hash)
     try:
@@ -111,6 +113,7 @@ def _run_bulk_torrent_action(
                     torrent_hash=torrent_hash,
                     select_all=select_all,
                     filters=filters,
+                    delete_files=delete_files,
                     on_progress=advance,
                 )
     except AmbiguousTorrentHashError as error:
@@ -127,12 +130,17 @@ def _run_bulk_torrent_action(
     applied = run_mutation(
         operation=operation,
         dry_run=dry_run,
-        assume_yes=False,
+        assume_yes=assume_yes,
         matched=plan.matched,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
         summary_rows=lambda status: rendering.bulk_torrent_summary_rows(
             plan, status=status
+        ),
+        confirmation_message=(
+            rendering.bulk_delete_confirmation_message(plan)
+            if action == "delete"
+            else None
         ),
     )
 
@@ -771,6 +779,124 @@ def reannounce(
         select_all=select_all,
         dry_run=dry_run,
         verbose=verbose,
+    )
+
+
+@torrents_app.command()
+@error_boundary.catch_internal_errors
+def delete(
+    torrent_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--hash",
+            help=(
+                "Delete the torrent matching a full infohash or unique "
+                "leading prefix (case-insensitive)."
+            ),
+        ),
+    ] = None,
+    category: Annotated[
+        list[str],
+        typer.Option("--category", help=CATEGORY_FILTER_HELP),
+    ] = [],  # noqa: B006
+    state: Annotated[
+        list[str],
+        typer.Option("--state", help=STATE_FILTER_HELP),
+    ] = [],  # noqa: B006
+    tracker: Annotated[
+        str | None,
+        typer.Option("--tracker", help=TRACKER_FILTER_HELP),
+    ] = None,
+    completed: Annotated[
+        bool,
+        typer.Option("--completed", help="Restrict to completed torrents."),
+    ] = False,
+    incomplete: Annotated[
+        bool,
+        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
+    ] = False,
+    active: Annotated[
+        bool,
+        typer.Option(
+            "--active", help="Restrict to torrents that are not stopped."
+        ),
+    ] = False,
+    inactive: Annotated[
+        bool,
+        typer.Option("--inactive", help="Restrict to stopped torrents."),
+    ] = False,
+    stalled: Annotated[
+        bool,
+        typer.Option("--stalled", help="Restrict to stalled torrents."),
+    ] = False,
+    errored: Annotated[
+        bool,
+        typer.Option(
+            "--errored", help="Restrict to torrents reporting an error."
+        ),
+    ] = False,
+    select_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Delete all torrents.",
+        ),
+    ] = False,
+    with_data: Annotated[
+        bool,
+        typer.Option(
+            "--with-data",
+            help=(
+                "Also delete the torrent's downloaded files. Without "
+                "this, only the torrent is removed from qBittorrent; "
+                "its data stays on disk."
+            ),
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Apply changes instead of previewing them.",
+        ),
+    ] = True,
+    assume_yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip confirmation for real execution."),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Print impacted torrent details.",
+        ),
+    ] = False,
+) -> None:
+    """Permanently delete torrents matching a hash, one or more filters, or all.
+
+    Irreversible. Never skipped as a no-op: every matched torrent is
+    always a change, unlike pause/resume/start. `--with-data` also
+    deletes the downloaded files -- omitted, the torrent is only
+    removed from qBittorrent and its data stays on disk.
+    """
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_DELETE,
+        action="delete",
+        torrent_hash=torrent_hash,
+        category=category,
+        state=state,
+        tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
+        select_all=select_all,
+        dry_run=dry_run,
+        verbose=verbose,
+        assume_yes=assume_yes,
+        delete_files=with_data,
     )
 
 

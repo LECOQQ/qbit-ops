@@ -1111,7 +1111,7 @@ def bulk_torrent_summary_rows(
             describe_torrent_filter(plan.filters),
         )
 
-    return {
+    rows: dict[str, Any] = {
         "action": plan.action,
         "filter": selector_kind,
         "value": selector_value,
@@ -1119,8 +1119,23 @@ def bulk_torrent_summary_rows(
         "matched": plan.matched,
         "modified": len(plan.changes),
         "skipped": len(plan.skipped),
-        "status": status,
     }
+    if plan.action == "delete":
+        rows["with_data"] = plan.delete_files
+    rows["status"] = status
+    return rows
+
+
+def bulk_delete_confirmation_message(plan: BulkTorrentActionPlan) -> str:
+    scope = (
+        "and their downloaded data"
+        if plan.delete_files
+        else "(downloaded data is kept on disk)"
+    )
+    return (
+        f"Permanently delete {len(plan.changes)} torrent(s) {scope}? "
+        "This cannot be undone."
+    )
 
 
 def print_bulk_torrent_details(
