@@ -32,6 +32,7 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
+from qbit_core.features.backup import BackupRestorePlan, BackupRestoreResult
 from qbit_core.features.doctor import (
     CheckStatus,
     DoctorReport,
@@ -1394,3 +1395,109 @@ def import_result_to_dict(
         "invalid": len(plan.invalid_entries),
         "results": results,
     }
+
+
+def backup_restore_summary_rows(
+    plan: BackupRestorePlan,
+    *,
+    status: MutationStatus,
+) -> dict[str, Any]:
+    return {
+        "matched": plan.matched,
+        "unmatched": len(plan.unmatched_hashes),
+        "categories_to_create": len(plan.categories_to_create),
+        "category_changes": len(plan.category_changes),
+        "tag_changes": len(plan.tag_changes),
+        "tracker_changes": len(plan.tracker_changes),
+        "status": status,
+    }
+
+
+def backup_restore_confirmation_message(plan: BackupRestorePlan) -> str:
+    return (
+        f"Restore category/tags/trackers on {plan.matched} matched "
+        f"torrent(s) ({len(plan.category_changes)} category, "
+        f"{len(plan.tag_changes)} tag, {len(plan.tracker_changes)} "
+        "tracker change(s))?"
+    )
+
+
+def print_backup_restore_details(
+    plan: BackupRestorePlan,
+    *,
+    applied: bool,
+) -> None:
+    """Print per-torrent restore details.
+
+    Tracker changes only ever show a count -- `added_trackers` carries
+    raw announce URLs (possible passkeys), never rendered here.
+    """
+    if not plan.has_changes:
+        return
+
+    label = "restored" if applied else "would_restore"
+    rows: list[list[str]] = []
+    for change in plan.category_changes:
+        rows.append(
+            [label, "category", change.name, change.hash, change.category]
+        )
+    for change in plan.tag_changes:
+        rows.append(
+            [
+                label,
+                "tags",
+                change.name,
+                change.hash,
+                ", ".join(change.added_tags),
+            ]
+        )
+    for change in plan.tracker_changes:
+        rows.append(
+            [
+                label,
+                "trackers",
+                change.name,
+                change.hash,
+                f"{len(change.added_trackers)} url(s)",
+            ]
+        )
+
+    print_table("Details", ["Action", "Field", "Name", "Hash", "Detail"], rows)
+
+
+def backup_restore_result_to_dict(
+    plan: BackupRestorePlan,
+    result: BackupRestoreResult | None,
+    *,
+    dry_run: bool,
+    source: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "dry_run": dry_run,
+        "source": source,
+        "matched": plan.matched,
+        "unmatched": len(plan.unmatched_hashes),
+        "categories_to_create": list(plan.categories_to_create),
+        "category_changes": len(plan.category_changes),
+        "tag_changes": len(plan.tag_changes),
+        "tracker_changes": len(plan.tracker_changes),
+        "result": None,
+    }
+    if result is not None:
+        payload["result"] = {
+            "categories_created": list(result.categories_created),
+            "categories_restored": result.categories_restored,
+            "tags_restored": result.tags_restored,
+            "trackers_restored": result.trackers_restored,
+            "failures": [
+                {
+                    "hash": failure.hash,
+                    "name": failure.name,
+                    "action": failure.action,
+                    "message": failure.message,
+                }
+                for failure in result.failures
+            ],
+        }
+
+    return payload

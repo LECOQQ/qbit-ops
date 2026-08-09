@@ -28,9 +28,10 @@ TORRENT_HASH = "abc123def456000000000000000000000000000a"
 TRACKER_URL = "https://tracker.example/announce"
 
 # Full argv (including any required options) for every read-only command
-# except `backup diff` (needs on-disk export files) and `torrents import`
-# (a mutation command, not read-only; its own `--format` coverage lives
-# in `tests/test_torrents_import_cli.py`).
+# except `backup diff`/`backup restore` (need on-disk export files) and
+# `torrents import` (a mutation command, not read-only). Their own
+# `--format` coverage lives in `tests/test_torrents_import_cli.py` and
+# `tests/test_backup_restore_cli.py`.
 COMMAND_ARGV: dict[str, list[str]] = {
     "status": ["status"],
     "connection_check": ["connection", "check"],
@@ -65,9 +66,10 @@ COMMAND_PATH: dict[str, list[str]] = {
     "explain_torrent": ["explain", "torrent"],
     "explain_tracker": ["explain", "tracker"],
     "torrents_import": ["torrents", "import"],
+    "backup_restore": ["backup", "restore"],
 }
 
-_EXCLUDED_FROM_ARGV = {"backup_diff", "torrents_import"}
+_EXCLUDED_FROM_ARGV = {"backup_diff", "torrents_import", "backup_restore"}
 assert set(COMMAND_ARGV) == set(FORMAT_SUPPORT) - _EXCLUDED_FROM_ARGV
 assert set(COMMAND_PATH) == set(FORMAT_SUPPORT)
 

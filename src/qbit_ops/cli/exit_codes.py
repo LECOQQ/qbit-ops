@@ -105,6 +105,7 @@ EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "trackers replace-passkey": ExitCode,
     "backup export": ExitCode,
     "backup diff": ExitCode,
+    "backup restore": ExitCode,
     "trackers export": ExitCode,
     "trackers remove": ExitCode,
     "explain torrent": ExplainExitCode,

@@ -24,6 +24,7 @@ LOW_RISK_OPERATIONS = [
 MEDIUM_RISK_OPERATIONS = [
     MutationOperation.TRACKERS_ADD_IF_PRESENT,
     MutationOperation.TORRENTS_IMPORT,
+    MutationOperation.BACKUP_RESTORE,
 ]
 HIGH_RISK_OPERATIONS = [
     MutationOperation.TRACKERS_REMOVE,
@@ -69,7 +70,7 @@ def test_every_mutation_operation_is_registered_as_a_cli_command() -> None:
     misnaming) a mutation command relative to the risk table.
     """
     registered: set[str] = set()
-    for group_name in ("torrents", "trackers"):
+    for group_name in ("torrents", "trackers", "backup"):
         group = next(
             group.typer_instance
             for group in app.registered_groups

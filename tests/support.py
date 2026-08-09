@@ -30,6 +30,11 @@ class FakeQbitClient:
         global_ratio: str = "-1",
         connected_peers: int = 0,
         torrents_add_error: Exception | None = None,
+        categories: dict[str, dict[str, Any]] | None = None,
+        create_category_error: Exception | None = None,
+        set_category_error: Exception | None = None,
+        add_tags_error: Exception | None = None,
+        add_trackers_error: Exception | None = None,
     ) -> None:
         """Store fake instance data returned to callers.
 
@@ -50,8 +55,16 @@ class FakeQbitClient:
         self.global_ratio = global_ratio
         self.connected_peers = connected_peers
         self.torrents_add_error = torrents_add_error
+        self.categories = dict(categories or {})
+        self.create_category_error = create_category_error
+        self.set_category_error = set_category_error
+        self.add_tags_error = add_tags_error
+        self.add_trackers_error = add_trackers_error
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.added_torrent_files: list[list[bytes]] = []
+        self.created_categories: list[str] = []
+        self.set_categories: list[tuple[str | list[str], str]] = []
+        self.added_tags: list[tuple[str | list[str], list[str]]] = []
         self.app_version_calls = 0
         self.app_web_api_version_calls = 0
         self.torrents_trackers_calls = 0
@@ -62,7 +75,7 @@ class FakeQbitClient:
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
-        self.added_trackers: list[tuple[str, str]] = []
+        self.added_trackers: list[tuple[str, str | list[str]]] = []
         self.removed_trackers: list[tuple[str, list[str]]] = []
         self.edited_trackers: list[tuple[str, str, str]] = []
 
@@ -138,10 +151,14 @@ class FakeQbitClient:
         self.reannounced_hashes.append(torrent_hashes)
         self._record("torrents_reannounce", torrent_hashes)
 
-    def torrents_add_trackers(self, torrent_hash: str, urls: str) -> None:
-        """Record fake tracker additions."""
-        self.added_trackers.append((torrent_hash, urls))
+    def torrents_add_trackers(
+        self, torrent_hash: str, urls: str | list[str]
+    ) -> None:
+        """Record fake tracker additions; raise `add_trackers_error` if set."""
         self._record("torrents_add_trackers", torrent_hash, urls)
+        if self.add_trackers_error is not None:
+            raise self.add_trackers_error
+        self.added_trackers.append((torrent_hash, urls))
 
     def torrents_remove_trackers(
         self,
@@ -163,6 +180,44 @@ class FakeQbitClient:
         self._record(
             "torrents_edit_tracker", torrent_hash, original_url, new_url
         )
+
+    def torrents_categories(self) -> dict[str, dict[str, Any]]:
+        """Return fake registered categories."""
+        self._record("torrents_categories")
+        return dict(self.categories)
+
+    def torrents_create_category(self, name: str, **kwargs: Any) -> None:
+        """Record a fake category creation; raise `create_category_error`."""
+        self._record("torrents_create_category", name, **kwargs)
+        if self.create_category_error is not None:
+            raise self.create_category_error
+        self.created_categories.append(name)
+        self.categories[name] = {"name": name}
+
+    def torrents_set_category(
+        self, torrent_hashes: str | list[str], category: str
+    ) -> None:
+        """Record a fake category assignment; raise `set_category_error`."""
+        self._record(
+            "torrents_set_category",
+            torrent_hashes=torrent_hashes,
+            category=category,
+        )
+        if self.set_category_error is not None:
+            raise self.set_category_error
+        self.set_categories.append((torrent_hashes, category))
+
+    def torrents_add_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Record a fake tag addition; raise `add_tags_error` if set."""
+        self._record(
+            "torrents_add_tags", torrent_hashes=torrent_hashes, tags=tags
+        )
+        if self.add_tags_error is not None:
+            raise self.add_tags_error
+        tag_list = [tags] if isinstance(tags, str) else list(tags)
+        self.added_tags.append((torrent_hashes, tag_list))
 
     def torrents_add(self, **kwargs: Any) -> str:
         """Record a fake add call; raise `torrents_add_error` if set."""

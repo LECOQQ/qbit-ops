@@ -44,6 +44,12 @@ def get_field_as_float(item: Any, field_name: str) -> float:
         return 0.0
 
 
+def get_field_as_tag_list(item: Any) -> list[str]:
+    """Parse qBittorrent's comma-separated `tags` field into a sorted list."""
+    raw = get_field_as_string(item, "tags")
+    return sorted({tag.strip() for tag in raw.split(",") if tag.strip() != ""})
+
+
 def get_transfer_rates(transfer_info: Any) -> tuple[int, int]:
     """Read `(download, upload)` byte rates from a `transfer_info()` payload.
 
