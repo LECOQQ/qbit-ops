@@ -4513,6 +4513,88 @@ async def test_raw_qbittorrent_state_is_not_the_primary_table_label() -> None:
         assert "stalledUP" not in str(state_cell)
 
 
+# --- Category display contract (see docs/PIPELINE.md, C1) -------------------
+#
+# Black-box counterpart to `tests/test_selection_output_contract.py`:
+# only rendered cells and panel text, never a domain object's field, so
+# replacing `SelectedTorrent` with `TorrentSnapshot` (raw `""` category)
+# cannot require editing these.
+
+
+async def test_table_renders_the_uncategorized_label_not_an_empty_cell() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        table = app.query_one("#torrents", DataTable)
+        cell = table.get_row_at(0)[table.get_column_index("Category")]
+        assert str(cell) == "(uncategorized)"
+
+
+async def test_details_modal_renders_the_uncategorized_label() -> None:
+    """Regression guard: the Details grid must not fall back to a second
+    spelling (`(none)`) for a torrent qBittorrent reports with an empty
+    category -- one vocabulary across table, details and `--category`.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        panel = await _open_details(app, pilot)
+
+        text = _static_text(panel)
+        assert "(uncategorized)" in text
+        assert "(none)" not in text
+
+
+async def test_sorting_by_category_orders_uncategorized_deterministically() -> (
+    None
+):
+    """Locks the observed order, not a rationale: the label's leading
+    `(` sorts before any letter, so the uncategorized torrent comes
+    first. Ordering alone cannot distinguish sorting on the label from
+    sorting on a raw `""` (both sort first) -- the rendered labels
+    asserted alongside it are what makes this a contract.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="alpha"),
+            make_torrent(hash="b" * 40, name="Blank", category=""),
+            make_torrent(hash="c" * 40, name="Zulu", category="zeta"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("s")
+        await pilot.pause()
+        app.screen.query_one("#sort-category-asc", RadioButton).value = True
+        await pilot.pause()
+        await _settle(app, pilot)
+
+        table = app.query_one("#torrents", DataTable)
+        column = table.get_column_index("Category")
+        assert [str(table.get_row_at(row)[column]) for row in range(3)] == [
+            "(uncategorized)",
+            "alpha",
+            "zeta",
+        ]
+
+
 def test_progress_cells_render_representative_bar_and_percent_values() -> None:
     from qbit_ops.tui.formatting import _progress_cell
 
