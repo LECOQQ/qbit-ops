@@ -1185,6 +1185,7 @@ def addition_summary_rows(
 ) -> dict[str, Any]:
     return {
         "scanned": plan.scanned,
+        "matched": plan.matched,
         "matched_source": plan.matched_source,
         "already_had_target": len(plan.already_had_target),
         "modified": len(plan.changes),

@@ -53,6 +53,7 @@ qbit-ops torrents list --state stalled
 qbit-ops torrents list --category sonarr --format json
 qbit-ops explain torrent --hash abc123
 qbit-ops trackers status
+qbit-ops trackers add-if-present --source old.example --target new.example --category sonarr
 qbit-ops torrents pause --category sonarr
 qbit-ops torrents pause --category sonarr --no-dry-run
 qbit-ops torrents import ubuntu.torrent
@@ -91,6 +92,49 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `backup restore` | ✅ | ✅ | — | — |
 | `explain torrent` | ✅ | ✅ | ✅ | — |
 | `explain tracker` | ✅ | ✅ | ✅ | — |
+
+## 🎯 Selecting torrents
+
+Every command that acts on torrents answers the same question the same
+way: **which torrents, and what do we know about them?**
+
+```text
+SELECT ──► INSPECT ──► PLAN ──► APPLY
+```
+
+- **SELECT** picks torrents from one listing call, using the filters
+  below. Cheap.
+- **INSPECT** looks up each selected torrent's trackers. One call per
+  torrent, so it only ever runs on what SELECT already narrowed down.
+- **PLAN** works out what would change. Read-only.
+- **APPLY** executes exactly that plan -- it never re-scans, so the
+  preview you confirmed is what runs.
+
+### Filters
+
+| Filter | Meaning |
+| --- | --- |
+| `--category NAME` | Repeatable. Use `uncategorized` for torrents with no category. |
+| `--state GROUP` | Repeatable. `downloading`, `seeding`, `checking`, `stalled`, `errored`, `unknown`. |
+| `--tracker HOST` | Torrents announcing to a tracker, matched on `host[:port]`. |
+| `--completed` / `--incomplete` | Download finished or not. |
+| `--active` / `--inactive` | Running or stopped. |
+| `--stalled`, `--errored` | Shorthands for the matching state group. |
+
+Repeating one filter means OR; combining different filters means AND.
+So `--category a --category b --stalled` reads as *(a or b) and
+stalled*.
+
+Two selectors stand apart, and never combine with a filter or each
+other:
+
+- `--hash` targets one torrent by full infohash or an unambiguous
+  prefix. An ambiguous prefix is refused and lists the candidates.
+- `--all` acts on the whole instance, and has to be typed out.
+
+`trackers add-if-present` accepts the same filters to scope its scan.
+It has no `--tracker` filter: `--source` already names the tracker it
+looks for.
 
 ## ⚠️ Mutation rules
 

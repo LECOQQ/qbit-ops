@@ -244,12 +244,18 @@ class TrackerAdditionChange:
 
 @dataclass(frozen=True)
 class TrackerAdditionPlan:
-    """Plan for `add_tracker_if_source_present`."""
+    """Plan for `add_tracker_if_source_present`.
+
+    `scanned` counts every torrent in the instance, `matched` those the
+    torrent filters kept, and `matched_source` those among them actually
+    using the source tracker. Without a filter, `matched == scanned`.
+    """
 
     source_tracker: str
     target_tracker: str
     match: TrackerMatchMode
     scanned: int
+    matched: int
     matched_source: int
     already_had_target: tuple[TrackerAdditionChange, ...]
     changes: tuple[TrackerAdditionChange, ...]
@@ -650,6 +656,7 @@ def plan_tracker_addition(
         target_tracker=target_tracker,
         match=match_mode,
         scanned=inspection.selection.scanned,
+        matched=len(inspection.torrents),
         matched_source=len(already_had_target) + len(changes),
         already_had_target=tuple(already_had_target),
         changes=tuple(changes),

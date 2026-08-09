@@ -652,3 +652,86 @@ def test_mutation_command_creates_client_exactly_once(
     )
 
     assert calls == [{}]
+
+
+# --- add-if-present: torrent filters scope the scan ------------------------
+
+
+def test_add_if_present_filter_scopes_both_the_scan_and_the_mutation(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """A torrent filter narrows which torrents are inspected at all, so a
+    torrent outside it is never looked at and never mutated -- even when
+    it uses the source tracker.
+    """
+    in_scope = "a" * 40
+    out_of_scope = "b" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=in_scope, name="A", category="movies"),
+            make_torrent(hash=out_of_scope, name="B", category="series"),
+        ],
+        trackers_by_hash={
+            in_scope: [{"url": "https://tracker.example/announce"}],
+            out_of_scope: [{"url": "https://tracker.example/announce"}],
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "https://tracker.example/announce",
+            "--target",
+            "https://other.example/announce",
+            "--category",
+            "movies",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.added_trackers == [
+        (in_scope, "https://other.example/announce")
+    ]
+    assert client.torrents_trackers_calls == 1
+
+
+def test_add_if_present_without_a_filter_still_scans_everything(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="A", category="movies"),
+            make_torrent(hash="b" * 40, name="B", category="series"),
+        ],
+        trackers_by_hash={
+            "a" * 40: [{"url": "https://tracker.example/announce"}],
+            "b" * 40: [{"url": "https://tracker.example/announce"}],
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "https://tracker.example/announce",
+            "--target",
+            "https://other.example/announce",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert len(client.added_trackers) == 2
+    assert client.torrents_trackers_calls == 2

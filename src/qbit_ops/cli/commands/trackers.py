@@ -37,6 +37,14 @@ from qbit_ops.cli.selector_options import (
     CATEGORY_FILTER_HELP,
     STATE_FILTER_HELP,
     TRACKER_FILTER_HELP,
+    ActiveOption,
+    CategoryOption,
+    CompletedOption,
+    ErroredOption,
+    InactiveOption,
+    IncompleteOption,
+    StalledOption,
+    StateOption,
 )
 from qbit_ops.cli.validation import validate_format_support
 
@@ -65,6 +73,14 @@ def add_if_present(
             help="Target tracker to add when missing.",
         ),
     ],
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -94,12 +110,32 @@ def add_if_present(
         ),
     ] = False,
 ) -> None:
-    """Add a target tracker when a source tracker is already present."""
+    """Add a target tracker when a source tracker is already present.
+
+    Torrent filters narrow which torrents are scanned at all, so the
+    source tracker is only looked for inside that subset. No filter
+    means the whole instance, as before.
+    """
     try:
         source = require_non_blank(source, field_name="--source")
         target = require_non_blank(target, field_name="--target")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+
+    try:
+        filters = build_torrent_filter(
+            categories=category,
+            states=state,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
     enabled = rendering.progress_enabled(
         interactive=rendering.is_interactive_terminal()
     )
@@ -109,7 +145,9 @@ def add_if_present(
             "Scanning torrents...", enabled=enabled
         ) as advance:
             inspection = select_and_inspect(
-                client, SelectionRequest(), on_progress=advance
+                client,
+                SelectionRequest(filters=filters),
+                on_progress=advance,
             )
             plan = plan_tracker_addition(
                 inspection,
