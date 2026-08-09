@@ -36,7 +36,7 @@ _FEATURE_MODULES = {
     "trackers",
     "tracker_status",
 }
-_SHARED_MODULES = {"execution", "selection", "torrent_states"}
+_SHARED_MODULES = {"execution", "inspection", "selection", "torrent_states"}
 _GENERIC_DUMPING_GROUND_NAMES = {"utils.py", "helpers.py", "common.py"}
 
 

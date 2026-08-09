@@ -10,7 +10,7 @@ without pulling in presentation concerns.
 """
 
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Literal
@@ -23,7 +23,6 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_core.qbit.fields import (
-    get_active_tracker_urls,
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
@@ -31,6 +30,7 @@ from qbit_core.qbit.fields import (
     get_raw_tracker_status,
     is_disabled_tracker,
 )
+from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.selection import (
     EMPTY_TORRENT_FILTER,
     STATE_FILTER_VALUES,
@@ -40,7 +40,6 @@ from qbit_core.shared.selection import (
     TorrentFilter,
     TorrentNotFoundError,
     format_category_label,
-    matches_cheap_filters,
     resolve_torrent_hash,
     select_from_items,
     validate_selection_request,
@@ -129,11 +128,10 @@ def select_torrents(
     surviving candidate, and only when `filters.tracker` is set.
     `on_progress` reports real progress over the calls actually made.
 
-    Returns the selection plus, when tracker data was collected, the
-    active tracker count per infohash. `None` means no inspection
-    happened at all -- never confuse it with an empty mapping, which
-    would mean "inspected, nothing found". The INSPECT stage will own
-    this second element.
+    Returns the selection plus, when the INSPECT stage ran, the active
+    tracker count per infohash. `None` means no inspection happened at
+    all -- never confuse it with an empty mapping, which would mean
+    "inspected, nothing found".
     """
     all_torrents = list(client.torrents_info())
 
@@ -143,41 +141,28 @@ def select_torrents(
             on_progress(selection.scanned, selection.scanned)
         return selection, None
 
-    candidates = [
+    # SELECT on the cheap criteria first, INSPECT only the survivors:
+    # this ordering is what bounds the `torrents_trackers()` call count.
+    candidates = select_torrents_from_items(
+        all_torrents, replace(filters, tracker=None)
+    )
+    inspection = inspect_trackers(client, candidates, on_progress=on_progress)
+
+    # requires_tracker_data implies filters.tracker is not None
+    assert filters.tracker is not None
+    matched = [
         torrent
-        for torrent in all_torrents
-        if matches_cheap_filters(torrent, filters)
+        for torrent in inspection.torrents
+        if has_tracker_host(list(torrent.active_tracker_urls), filters.tracker)
     ]
-
-    matched: list[TorrentSnapshot] = []
-    tracker_counts: dict[str, int] = {}
-    candidate_total = len(candidates)
-    for index, torrent in enumerate(candidates, start=1):
-        torrent_hash = get_field_as_string(torrent, "hash")
-        active_trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
-        if on_progress is not None:
-            on_progress(index, candidate_total)
-
-        # requires_tracker_data implies filters.tracker is not None
-        assert filters.tracker is not None
-        if not has_tracker_host(active_trackers, filters.tracker):
-            continue
-
-        snapshot = build_torrent_snapshot(torrent)
-        matched.append(snapshot)
-        tracker_counts[snapshot.hash] = len(active_trackers)
-
-    matched.sort(key=lambda item: item.name.casefold())
 
     return (
         Selection(
-            scanned=len(all_torrents),
-            matched=tuple(matched),
+            scanned=candidates.scanned,
+            matched=tuple(torrent.snapshot for torrent in matched),
             request=SelectionRequest(filters=filters),
         ),
-        tracker_counts,
+        {torrent.snapshot.hash: torrent.tracker_count for torrent in matched},
     )
 
 
