@@ -23,6 +23,7 @@ from qbit_core.qbit.fields import (
     get_field_as_string,
     get_raw_tracker_status,
 )
+from qbit_core.shared.inspection import Inspection
 
 TrackerMatchMode = Literal["exact", "without-query"]
 
@@ -615,48 +616,40 @@ def export_tracker_state(
 
 
 def plan_tracker_addition(
-    client: Any,
+    inspection: Inspection,
     source_tracker: str,
     target_tracker: str,
     match_mode: TrackerMatchMode = "exact",
-    on_progress: Callable[[int, int], None] | None = None,
 ) -> TrackerAdditionPlan:
-    """Plan adding a target tracker to torrents already using the source."""
-    all_torrents = list(client.torrents_info())
-    total = len(all_torrents)
-    scanned = 0
+    """Plan adding a target tracker to torrents already using the source.
+
+    Pure: consumes an already-collected `Inspection` and makes no
+    qBittorrent call, so planning is testable without a client and the
+    scan it plans from can be scoped by any `SelectionRequest`.
+    """
     already_had_target: list[TrackerAdditionChange] = []
     changes: list[TrackerAdditionChange] = []
 
-    for torrent in all_torrents:
-        scanned += 1
-        if on_progress is not None:
-            on_progress(scanned, total)
-
-        torrent_hash = _get_torrent_hash(torrent)
-        torrent_name = _get_torrent_name(torrent)
-        trackers = get_active_tracker_urls(
-            client.torrents_trackers(torrent_hash)
-        )
+    for inspected in inspection.torrents:
+        trackers = list(inspected.active_tracker_urls)
 
         if not has_tracker(trackers, source_tracker, match_mode):
             continue
 
+        change = TrackerAdditionChange(
+            hash=inspected.snapshot.hash, name=inspected.snapshot.name
+        )
         if has_tracker(trackers, target_tracker, match_mode):
-            already_had_target.append(
-                TrackerAdditionChange(hash=torrent_hash, name=torrent_name)
-            )
+            already_had_target.append(change)
             continue
 
-        changes.append(
-            TrackerAdditionChange(hash=torrent_hash, name=torrent_name)
-        )
+        changes.append(change)
 
     return TrackerAdditionPlan(
         source_tracker=source_tracker,
         target_tracker=target_tracker,
         match=match_mode,
-        scanned=scanned,
+        scanned=inspection.selection.scanned,
         matched_source=len(already_had_target) + len(changes),
         already_had_target=tuple(already_had_target),
         changes=tuple(changes),

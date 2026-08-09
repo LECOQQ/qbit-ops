@@ -19,6 +19,8 @@ from qbit_core.features.trackers import (
     plan_tracker_removal,
     plan_tracker_replacement,
 )
+from qbit_core.shared.inspection import Inspection, select_and_inspect
+from qbit_core.shared.selection import SelectionRequest
 
 TrackersByHash = dict[str, list[dict[str, Any]]]
 
@@ -260,7 +262,7 @@ def test_plan_tracker_addition_reports_matching_torrents() -> None:
     )
 
     plan = plan_tracker_addition(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -281,7 +283,7 @@ def test_apply_tracker_addition_adds_target_tracker() -> None:
     )
 
     plan = plan_tracker_addition(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -303,7 +305,7 @@ def test_plan_tracker_addition_reports_already_had_target() -> None:
     )
 
     plan = plan_tracker_addition(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -777,7 +779,7 @@ def test_plan_tracker_addition_matches_nothing() -> None:
     )
 
     plan = plan_tracker_addition(
-        client=client,
+        _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
     )
@@ -821,6 +823,15 @@ def test_plan_tracker_replacement_matches_nothing() -> None:
 
     assert plan.matched_source == 0
     assert plan.changes == ()
+
+
+def _inspection(client: "FakeQbitClient") -> Inspection:
+    """Run the real SELECT + INSPECT stages against a fake client.
+
+    Planning itself needs no client; this only builds the input the
+    planner consumes, exercising the same composition the CLI uses.
+    """
+    return select_and_inspect(client, SelectionRequest())
 
 
 class FakeQbitClient:

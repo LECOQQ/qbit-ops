@@ -24,6 +24,8 @@ from qbit_core.features.trackers import (
     plan_tracker_replacement,
 )
 from qbit_core.shared.execution import MutationOperation
+from qbit_core.shared.inspection import select_and_inspect
+from qbit_core.shared.selection import SelectionRequest
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
@@ -106,12 +108,14 @@ def add_if_present(
         with rendering.transient_progress(
             "Scanning torrents...", enabled=enabled
         ) as advance:
+            inspection = select_and_inspect(
+                client, SelectionRequest(), on_progress=advance
+            )
             plan = plan_tracker_addition(
-                client=client,
+                inspection,
                 source_tracker=source,
                 target_tracker=target,
                 match_mode=match.value,
-                on_progress=advance,
             )
 
     def _apply() -> None:
