@@ -12,7 +12,7 @@ import csv
 import io
 import json
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -57,8 +57,6 @@ from qbit_core.features.torrent_import import (
 )
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
-    SelectedTorrent,
-    TorrentSelection,
 )
 from qbit_core.features.tracker_status import (
     TRACKER_STATUS_CSV_FIELDNAMES,
@@ -77,9 +75,12 @@ from qbit_core.features.trackers import (
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import (
     ResolvedTorrent,
+    Selection,
     describe_torrent_filter,
+    format_category_label,
     torrent_filter_to_dict,
 )
+from qbit_core.shared.torrent_states import TorrentSnapshot
 
 console = Console()
 err_console = Console(stderr=True)
@@ -760,41 +761,66 @@ def torrent_audit_row(
     )
 
 
-def selected_torrent_to_dict(torrent: SelectedTorrent) -> dict[str, Any]:
-    """Convert a `SelectedTorrent` into a JSON/CSV/table-ready dict.
+def torrent_snapshot_to_dict(
+    snapshot: TorrentSnapshot,
+    *,
+    tracker_count: int | None,
+) -> dict[str, Any]:
+    """Convert a `TorrentSnapshot` into a JSON/CSV/table-ready dict.
 
-    `download_rate`/`upload_rate` (bytes/second) are deliberately not
-    added to the `table`/`csv` renderers -- only to `json`/`jsonl`.
+    Applies the `(uncategorized)` display label -- the domain model
+    carries the raw category. `tracker_count` is `None` when no tracker
+    inspection ran, which is distinct from `0` (inspected, no active
+    tracker). `download_rate`/`upload_rate` (bytes/second) are
+    deliberately not added to the `table`/`csv` renderers -- only to
+    `json`/`jsonl`.
     """
     return {
-        "hash": torrent.hash,
-        "name": torrent.name,
-        "category": torrent.category,
-        "state": torrent.state,
-        "size": torrent.size,
-        "progress": torrent.progress,
-        "ratio": torrent.ratio,
-        "tracker_count": torrent.tracker_count,
-        "download_rate": torrent.download_rate,
-        "upload_rate": torrent.upload_rate,
+        "hash": snapshot.hash,
+        "name": snapshot.name,
+        "category": format_category_label(snapshot.category),
+        "state": snapshot.state,
+        "size": snapshot.size,
+        "progress": snapshot.progress,
+        "ratio": snapshot.ratio,
+        "tracker_count": tracker_count,
+        "download_rate": snapshot.download_rate,
+        "upload_rate": snapshot.upload_rate,
     }
 
 
 def print_torrent_selection(
-    selection: TorrentSelection,
+    selection: Selection,
     output_format: OutputFormat,
+    *,
+    tracker_counts: Mapping[str, int] | None = None,
 ) -> None:
     """Print a torrent selection, one shared shape for every filter.
 
     JSON/JSONL always include a normalized `filters` representation
-    (`qbit_core.features.torrents.torrent_filter_to_dict`) alongside the
+    (`qbit_core.shared.selection.torrent_filter_to_dict`) alongside the
     usual `summary`/`torrents`.
+
+    `tracker_counts` being `None` means no tracker inspection ran: every
+    `tracker_count` renders as `null` and the `Trackers` column is
+    omitted entirely, because "not collected" is a property of the whole
+    listing rather than of any single row.
     """
+    inspected = tracker_counts is not None
     torrents = [
-        selected_torrent_to_dict(torrent) for torrent in selection.matched
+        torrent_snapshot_to_dict(
+            snapshot,
+            tracker_count=(
+                tracker_counts.get(snapshot.hash, 0)
+                if tracker_counts is not None
+                else None
+            ),
+        )
+        for snapshot in selection.matched
     ]
+    filters = selection.request.filters
     payload = {
-        "filters": torrent_filter_to_dict(selection.filters),
+        "filters": torrent_filter_to_dict(filters),
         "summary": {
             "scanned": selection.scanned,
             "matched": len(selection.matched),
@@ -817,24 +843,21 @@ def print_torrent_selection(
         )
         return
 
-    if not selection.filters.is_empty:
-        typer.echo(f"Filter: {describe_torrent_filter(selection.filters)}")
+    if not filters.is_empty:
+        typer.echo(f"Filter: {describe_torrent_filter(filters)}")
 
     if not torrents:
         typer.echo("No torrents found.")
     else:
         columns = ["Name", "Hash", "Category", "State", "Progress", "Ratio"]
-        if selection.tracker_data_collected:
+        if inspected:
             columns.append("Trackers")
 
         print_table(
             "Torrents",
             columns,
             [
-                _torrent_audit_row(
-                    torrent,
-                    include_tracker_count=selection.tracker_data_collected,
-                )
+                _torrent_audit_row(torrent, include_tracker_count=inspected)
                 for torrent in torrents
             ],
             fold_columns={"Hash"},

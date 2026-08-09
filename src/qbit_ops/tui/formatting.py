@@ -1,7 +1,7 @@
 """Pure, presentation-only helpers shared by `qbit_ops.tui` widgets/modals.
 
 Every function here takes already-safe structured domain data
-(`TuiState`, `SelectedTorrent`, `BulkTorrentActionPlan`,
+(`TuiState`, `TorrentSnapshot`, `BulkTorrentActionPlan`,
 `MutationUiResult`, `ExplanationReport`/`Evidence`) and renders it as a
 string/`Text` -- never a qBittorrent call, never a widget mount, never
 a mutation.
@@ -23,9 +23,11 @@ from qbit_core.features.explain import (
     ExplanationReport,
 )
 from qbit_core.features.explain import ExplanationSeverity as Severity
-from qbit_core.features.torrents import BulkTorrentActionPlan, SelectedTorrent
+from qbit_core.features.torrents import BulkTorrentActionPlan
 from qbit_core.features.trackers import TrackerHealth
 from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.selection import format_category_label
+from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.state import (
     MutationUiResult,
     SortDirection,
@@ -447,7 +449,7 @@ def _highlighted_name_cell(name: str, search: str, width: int) -> Text:
 
 
 def _torrent_row_values(
-    torrent: SelectedTorrent,
+    torrent: TorrentSnapshot,
     *,
     focused: bool,
     selected: bool,
@@ -462,7 +464,7 @@ def _torrent_row_values(
         "Progress": _progress_cell(torrent.progress, bar=bar),
         "Rate": _format_rate_cell(torrent.download_rate, torrent.upload_rate),
         "Ratio": f"{torrent.ratio:.2f}",
-        "Category": torrent.category,
+        "Category": format_category_label(torrent.category),
     }
 
 
@@ -560,7 +562,7 @@ _METRIC_COLUMN_GAP = "   "
 
 
 def _format_details_identity(
-    torrent: SelectedTorrent, *, name_width: int
+    torrent: TorrentSnapshot, *, name_width: int
 ) -> str:
     """Render the Details modal's centered header: full name (wrapped,
     never truncated), state/completion, and a wide progress bar.
@@ -611,12 +613,12 @@ def _format_details_metric_row(pairs: tuple[tuple[str, str], ...]) -> str:
     return f"[dim]{label_line}[/dim]\n[bold]{value_line}[/bold]"
 
 
-def _format_details_metrics(torrent: SelectedTorrent) -> str:
+def _format_details_metrics(torrent: TorrentSnapshot) -> str:
     """Render the Details modal's centered metric grid + hash line."""
     row1 = (
         ("Progress", _progress_percent_text(torrent.progress)),
         ("Ratio", f"{torrent.ratio:.2f}"),
-        ("Category", torrent.category or "(none)"),
+        ("Category", format_category_label(torrent.category)),
     )
     row2 = (
         ("Download", _format_byte_rate(torrent.download_rate)),

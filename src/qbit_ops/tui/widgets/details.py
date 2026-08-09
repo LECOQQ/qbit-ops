@@ -21,7 +21,7 @@ class DetailsPanel(VerticalScroll):
     progress header, a centered metric grid, a Trackers section, and a
     contextual-actions footer.
 
-    Only ever renders `SelectedTorrent` fields (live from the periodic
+    Only ever renders `TorrentSnapshot` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker
     data -- never a raw announce URL, path, query value, or
     unsanitized message.

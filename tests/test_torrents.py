@@ -108,12 +108,12 @@ def test_select_torrents_with_empty_filter_matches_everything() -> None:
         ]
     )
 
-    selection = select_torrents(client, TorrentFilter())
+    selection, tracker_counts = select_torrents(client, TorrentFilter())
 
     assert selection.scanned == 2
     assert len(selection.matched) == 2
-    assert selection.filters == TorrentFilter()
-    assert selection.tracker_data_collected is False
+    assert selection.request.filters == TorrentFilter()
+    assert tracker_counts is None
     assert client.torrents_trackers_calls == 0
 
 
@@ -126,7 +126,7 @@ def test_select_torrents_repeated_categories_use_or() -> None:
         ]
     )
 
-    selection = select_torrents(
+    selection, _ = select_torrents(
         client, TorrentFilter(categories=("movies", "series"))
     )
 
@@ -142,7 +142,7 @@ def test_select_torrents_different_filter_types_use_and() -> None:
         ]
     )
 
-    selection = select_torrents(
+    selection, _ = select_torrents(
         client,
         TorrentFilter(categories=("movies",), states=("stalled",)),
     )
@@ -158,12 +158,12 @@ def test_select_torrents_uncategorized_token_matches_bare_category() -> None:
         ]
     )
 
-    selection = select_torrents(
+    selection, _ = select_torrents(
         client, TorrentFilter(categories=("uncategorized",))
     )
 
     assert [t.hash for t in selection.matched] == ["a" * 40]
-    assert selection.matched[0].category == "(uncategorized)"
+    assert selection.matched[0].category == ""
 
 
 def test_select_torrents_display_label_token_also_matches_uncategorized() -> (
@@ -176,7 +176,7 @@ def test_select_torrents_display_label_token_also_matches_uncategorized() -> (
         ]
     )
 
-    selection = select_torrents(
+    selection, _ = select_torrents(
         client, TorrentFilter(categories=("(uncategorized)",))
     )
 
@@ -191,8 +191,8 @@ def test_select_torrents_completed_and_incomplete() -> None:
         ]
     )
 
-    completed = select_torrents(client, TorrentFilter(completed=True))
-    incomplete = select_torrents(client, TorrentFilter(completed=False))
+    completed, _ = select_torrents(client, TorrentFilter(completed=True))
+    incomplete, _ = select_torrents(client, TorrentFilter(completed=False))
 
     assert [t.hash for t in completed.matched] == ["a" * 40]
     assert [t.hash for t in incomplete.matched] == ["b" * 40]
@@ -207,8 +207,8 @@ def test_select_torrents_active_and_inactive() -> None:
         ]
     )
 
-    active = select_torrents(client, TorrentFilter(active=True))
-    inactive = select_torrents(client, TorrentFilter(active=False))
+    active, _ = select_torrents(client, TorrentFilter(active=True))
+    inactive, _ = select_torrents(client, TorrentFilter(active=False))
 
     assert [t.hash for t in active.matched] == ["a" * 40]
     assert {t.hash for t in inactive.matched} == {"b" * 40, "c" * 40}
@@ -222,7 +222,7 @@ def test_select_torrents_stalled() -> None:
         ]
     )
 
-    selection = select_torrents(client, TorrentFilter(stalled=True))
+    selection, _ = select_torrents(client, TorrentFilter(stalled=True))
 
     assert [t.hash for t in selection.matched] == ["a" * 40]
 
@@ -235,7 +235,7 @@ def test_select_torrents_errored() -> None:
         ]
     )
 
-    selection = select_torrents(client, TorrentFilter(errored=True))
+    selection, _ = select_torrents(client, TorrentFilter(errored=True))
 
     assert [t.hash for t in selection.matched] == ["a" * 40]
 
@@ -249,7 +249,7 @@ def test_select_torrents_state_normalization() -> None:
         ]
     )
 
-    selection = select_torrents(client, TorrentFilter(states=("seeding",)))
+    selection, _ = select_torrents(client, TorrentFilter(states=("seeding",)))
 
     assert {t.hash for t in selection.matched} == {"a" * 40, "b" * 40}
 
@@ -264,10 +264,10 @@ def test_select_torrents_unknown_state_is_filterable_and_not_discarded() -> (
         ]
     )
 
-    unfiltered = select_torrents(client, TorrentFilter())
+    unfiltered, _ = select_torrents(client, TorrentFilter())
     assert {t.hash for t in unfiltered.matched} == {"a" * 40, "b" * 40}
 
-    filtered = select_torrents(client, TorrentFilter(states=("unknown",)))
+    filtered, _ = select_torrents(client, TorrentFilter(states=("unknown",)))
     assert [t.hash for t in filtered.matched] == ["a" * 40]
 
 
@@ -290,13 +290,12 @@ def test_select_torrents_tracker_matches_by_host() -> None:
         },
     )
 
-    selection = select_torrents(
+    selection, tracker_counts = select_torrents(
         client, TorrentFilter(tracker="tracker.example:6969")
     )
 
     assert [t.hash for t in selection.matched] == ["a" * 40]
-    assert selection.tracker_data_collected is True
-    assert selection.matched[0].tracker_count == 1
+    assert tracker_counts == {"a" * 40: 1}
 
 
 def test_select_torrents_tracker_filter_never_exposes_secrets() -> None:
@@ -319,7 +318,7 @@ def test_select_torrents_tracker_filter_never_exposes_secrets() -> None:
             ]
         },
     )
-    selection = select_torrents(client, filters)
+    selection, _ = select_torrents(client, filters)
 
     assert "SUPER-SECRET-PASSKEY" not in str(torrent_filter_to_dict(filters))
     assert "SUPER-SECRET-PASSKEY" not in str(selection.matched)
@@ -334,7 +333,7 @@ def test_select_torrents_result_is_deterministically_ordered() -> None:
         ]
     )
 
-    selection = select_torrents(client, TorrentFilter())
+    selection, _ = select_torrents(client, TorrentFilter())
 
     assert [t.name for t in selection.matched] == ["Apple", "banana", "zebra"]
 
@@ -371,7 +370,7 @@ def test_select_torrents_narrows_before_tracker_lookups() -> None:
         },
     )
 
-    selection = select_torrents(
+    selection, _ = select_torrents(
         client,
         TorrentFilter(categories=("movies",), tracker="tracker.example"),
     )

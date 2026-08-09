@@ -248,7 +248,7 @@ def collect_tracker_status(
     API-call volume.
     """
     cheap_filters = replace(filters, tracker=None)
-    selection = select_torrents(client, cheap_filters)
+    selection, _ = select_torrents(client, cheap_filters)
 
     aggregates: dict[str, _AggregateBuilder] = {}
     collection_errors = 0

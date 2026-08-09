@@ -53,7 +53,8 @@ from textual.widgets import (
 from textual.worker import Worker, WorkerState
 
 import qbit_ops
-from qbit_core.features.torrents import TorrentFilter
+from qbit_core.shared.selection import TorrentFilter
+from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.app import (
     ActionsScreen,
     ConnectionBanner,
@@ -4845,21 +4846,12 @@ async def test_sorting_makes_zero_qbittorrent_api_calls() -> None:
 
 
 def test_sort_torrents_tie_breaks_by_name_then_hash_deterministically() -> None:
-    from qbit_core.features.torrents import SelectedTorrent
+    from qbit_core.shared.torrent_states import build_torrent_snapshot
     from qbit_ops.tui.state import _sort_torrents
 
-    def _t(hash_: str, name: str, ratio: float) -> SelectedTorrent:
-        return SelectedTorrent(
-            hash=hash_,
-            name=name,
-            category="",
-            state="uploading",
-            size=1,
-            progress=1.0,
-            ratio=ratio,
-            tracker_count=None,
-            download_rate=0,
-            upload_rate=0,
+    def _t(hash_: str, name: str, ratio: float) -> TorrentSnapshot:
+        return build_torrent_snapshot(
+            make_torrent(hash=hash_, name=name, ratio=ratio)
         )
 
     torrents = (

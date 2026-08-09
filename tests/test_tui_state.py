@@ -109,9 +109,11 @@ def test_filter_change_performs_zero_api_calls() -> None:
 
 
 def test_filter_handles_uncategorized_token_against_cached_raw_items() -> None:
-    """Regression: re-filtering must use raw items, not display-formatted
-    `SelectedTorrent.category`, or the `uncategorized` token would never
-    match anything (see qbit_ops.app_services.TuiRefreshResult's docstring).
+    """Re-filtering resolves the `uncategorized` token against raw
+    categories. Once a regression risk (matching ran against
+    display-formatted values); now structurally impossible, since
+    selections carry raw `TorrentSnapshot.category`. Kept as the
+    behavioural guarantee, independent of how it is achieved.
     """
     client = FakeQbitClient(torrents=[make_torrent(name="Alpha", category="")])
     controller = _controller(client)

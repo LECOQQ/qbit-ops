@@ -232,9 +232,13 @@ def list_qbit_torrents(
     with error_boundary.qbit_error_boundary():
         client = error_boundary.create_qbit_client()
         with progress_cm as advance:
-            selection = select_torrents(client, filters, on_progress=advance)
+            selection, tracker_counts = select_torrents(
+                client, filters, on_progress=advance
+            )
 
-    rendering.print_torrent_selection(selection, output_format)
+    rendering.print_torrent_selection(
+        selection, output_format, tracker_counts=tracker_counts
+    )
     if not filters.is_empty:
         exit_if_no_targeted_matches(len(selection.matched))
 
