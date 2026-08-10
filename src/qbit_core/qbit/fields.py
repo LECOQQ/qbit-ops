@@ -3,10 +3,27 @@
 Every field read goes through a `Mapping`-or-`getattr` accessor, since
 a response item can be either a plain `dict`/qbittorrent-api mapping
 type or an attribute-bearing object.
+
+Two deliberately different reading policies coexist here:
+
+- `get_field_as_*` **coerce**: an absent, null or unparsable field
+  becomes `0` / `0.0` / `""`. Right for display and for counting, where
+  a blank is the honest rendering and callers already rely on it.
+- `get_optional_*` **report absence**: the same cases become `None`,
+  meaning *unknown*. Required by any bounded predicate, where coercing
+  a missing `size` to `0` would silently satisfy `--size-max` and widen
+  a destructive selection.
+
+Never swap one family for the other to "simplify": the difference is
+the safety property, not a style choice.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
+
+# Distinguishes "field absent" from "field present and set to None",
+# which `get_field`'s caller-supplied default cannot express.
+_MISSING = object()
 
 
 def get_field(item: Any, field_name: str, default: Any) -> Any:
@@ -15,6 +32,80 @@ def get_field(item: Any, field_name: str, default: Any) -> Any:
         return item.get(field_name, default)
 
     return getattr(item, field_name, default)
+
+
+def get_optional_field(item: Any, field_name: str) -> Any | None:
+    """Read a field, returning `None` when absent *or* explicitly null.
+
+    qBittorrent sends both shapes -- an omitted key on an older
+    version, an explicit `null` on a field it cannot compute -- and
+    both mean the same thing to a predicate: unknown.
+    """
+    value = get_field(item, field_name, _MISSING)
+    return None if value is _MISSING else value
+
+
+def get_optional_int(
+    item: Any,
+    field_name: str,
+    *,
+    sentinels: Collection[int] = (),
+) -> int | None:
+    """Read an integer field as a known value, or `None` when unknown.
+
+    Unknown covers four cases: absent, explicitly null, unparsable, and
+    listed in `sentinels`. qBittorrent encodes "unset" as a negative
+    value on several fields (`-1` for an uncomputed `availability`,
+    `-2` for "use the global setting"), and `seen_complete` even uses a
+    *different* sentinel per version -- so the caller declares which
+    values mean nothing for the field it is reading, rather than this
+    module guessing.
+    """
+    value = get_optional_field(item, field_name)
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    return None if parsed in sentinels else parsed
+
+
+def get_optional_float(
+    item: Any,
+    field_name: str,
+    *,
+    sentinels: Collection[float] = (),
+) -> float | None:
+    """Read a float field as a known value, or `None` when unknown.
+
+    Same policy as `get_optional_int`; see its docstring for why
+    sentinels are declared by the caller.
+    """
+    value = get_optional_field(item, field_name)
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    return None if parsed in sentinels else parsed
+
+
+def get_optional_bool(item: Any, field_name: str) -> bool | None:
+    """Read a boolean field, or `None` when the field is unknown.
+
+    Deliberately strict: only a real `bool` counts. A field qBittorrent
+    does not expose on this version (`private` before 5.0) must read as
+    unknown, never as `False` -- otherwise `--public` would match every
+    torrent on an older instance.
+    """
+    value = get_optional_field(item, field_name)
+    return value if isinstance(value, bool) else None
 
 
 def get_field_as_string(item: Any, field_name: str) -> str:

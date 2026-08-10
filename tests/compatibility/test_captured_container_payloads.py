@@ -14,6 +14,7 @@ from qbit_core.features.trackers import classify_raw_tracker_status
 from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_string,
+    get_optional_bool,
     get_raw_tracker_status,
     get_transfer_rates,
     is_disabled_tracker,
@@ -170,3 +171,30 @@ def test_no_captured_fixture_leaks_a_real_secret() -> None:
         text = fixture.path.read_text(encoding="utf-8")
         violations = scan_text(text)
         assert not violations, f"{fixture.path}: {violations}"
+
+
+def test_private_reads_unknown_on_captures_that_do_not_expose_it() -> None:
+    """`private` ships from qBittorrent 5.0. On a 4.6.7 capture the field
+    is genuinely absent, so it must read unknown -- never `False`, which
+    would make `--public` match every torrent on an older instance.
+
+    Asserted against whichever captures exist rather than a hardcoded
+    version list, so this stays true as the matrix grows.
+    """
+    seen_absent = False
+    seen_present = False
+
+    for matrix_id in discover_matrix_ids():
+        for fixture in load_captured_fixtures(matrix_id):
+            if fixture.name != "torrent_complete":
+                continue
+            value = get_optional_bool(fixture.payload, "private")
+            if "private" in fixture.payload:
+                assert isinstance(value, bool), fixture.path
+                seen_present = True
+            else:
+                assert value is None, fixture.path
+                seen_absent = True
+
+    assert seen_absent, "no capture without `private` -- 4.6.7 evidence lost"
+    assert seen_present, "no capture with `private` -- 5.x evidence lost"

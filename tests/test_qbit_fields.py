@@ -21,6 +21,10 @@ from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_optional_bool,
+    get_optional_field,
+    get_optional_float,
+    get_optional_int,
     get_raw_tracker_status,
     get_transfer_rates,
     is_disabled_tracker,
@@ -214,3 +218,113 @@ def test_get_active_tracker_urls_excludes_disabled_trackers() -> None:
     assert get_active_tracker_urls(trackers) == [
         "https://active.example/announce"
     ]
+
+
+# --- get_optional_*: absence is reported, never coerced ---------------------
+#
+# The coercing family (`get_field_as_*`) and this one answer different
+# questions on purpose. A bounded predicate that read a missing `size`
+# as `0` would silently satisfy `--size-max` and widen a destructive
+# selection -- see docs/SELECTION.md, decision M1.
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"size": 1000, "ratio": 1.5, "private": True},
+        _real_torrent(size=1000, ratio=1.5, private=True),
+    ],
+)
+def test_optional_helpers_read_present_values(item: object) -> None:
+    assert get_optional_int(item, "size") == 1000
+    assert get_optional_float(item, "ratio") == 1.5
+    assert get_optional_bool(item, "private") is True
+
+
+def test_optional_helpers_report_an_absent_field_as_unknown() -> None:
+    assert get_optional_field({}, "size") is None
+    assert get_optional_int({}, "size") is None
+    assert get_optional_float({}, "ratio") is None
+    assert get_optional_bool({}, "private") is None
+
+
+def test_optional_helpers_report_an_explicit_null_as_unknown() -> None:
+    """qBittorrent sends both an omitted key and an explicit null; both
+    mean unknown to a predicate."""
+    item = {"size": None, "ratio": None, "private": None}
+
+    assert get_optional_int(item, "size") is None
+    assert get_optional_float(item, "ratio") is None
+    assert get_optional_bool(item, "private") is None
+
+
+def test_coercing_and_optional_families_disagree_by_design() -> None:
+    """The whole point of the split: the same missing field is `0` for
+    display and `None` for a bounded predicate."""
+    assert get_field_as_int({}, "size") == 0
+    assert get_optional_int({}, "size") is None
+
+    assert get_field_as_float({}, "ratio") == 0.0
+    assert get_optional_float({}, "ratio") is None
+
+
+def test_optional_helpers_report_an_unparsable_value_as_unknown() -> None:
+    item = {"size": "not-a-number", "ratio": "nope"}
+
+    assert get_optional_int(item, "size") is None
+    assert get_optional_float(item, "ratio") is None
+
+
+def test_optional_numeric_helpers_reject_booleans() -> None:
+    """`bool` is an `int` subclass, so `int(True)` is `1`. A boolean in a
+    numeric field is a malformed payload; unknown beats a wrong `1`."""
+    assert get_optional_int({"size": True}, "size") is None
+    assert get_optional_float({"ratio": False}, "ratio") is None
+
+
+def test_optional_bool_rejects_non_boolean_values() -> None:
+    """`private` must never be inferred from a truthy value."""
+    assert get_optional_bool({"private": 1}, "private") is None
+    assert get_optional_bool({"private": "true"}, "private") is None
+    assert get_optional_bool({"private": False}, "private") is False
+
+
+@pytest.mark.parametrize("sentinel", [-1, -2])
+def test_declared_sentinels_read_as_unknown(sentinel: int) -> None:
+    """qBittorrent encodes "unset" as a negative value on several fields
+    (`-1` uncomputed, `-2` "use the global setting")."""
+    item = {"availability": sentinel}
+
+    assert get_optional_int(item, "availability") == sentinel
+    assert get_optional_int(item, "availability", sentinels=(-1, -2)) is None
+
+
+def test_sentinels_are_declared_per_call_not_guessed() -> None:
+    """`seen_complete` uses `0` on 4.6.7 and `-1` on 5.x, so no global
+    sentinel table could be correct for every field and version."""
+    assert get_optional_int({"seen_complete": 0}, "seen_complete") == 0
+    assert (
+        get_optional_int({"seen_complete": 0}, "seen_complete", sentinels=(0,))
+        is None
+    )
+    assert (
+        get_optional_int(
+            {"seen_complete": -1}, "seen_complete", sentinels=(-1,)
+        )
+        is None
+    )
+
+
+def test_a_legitimate_zero_survives_when_no_sentinel_is_declared() -> None:
+    """`trackers_count == 0` is exactly what `--no-tracker` looks for:
+    zero must stay a value, not become unknown."""
+    assert get_optional_int({"trackers_count": 0}, "trackers_count") == 0
+    assert get_optional_float({"ratio": 0.0}, "ratio") == 0.0
+
+
+def test_optional_helpers_accept_attribute_based_objects() -> None:
+    class _AttrItem:
+        size = 4096
+
+    assert get_optional_int(_AttrItem(), "size") == 4096
+    assert get_optional_int(_AttrItem(), "ratio") is None
