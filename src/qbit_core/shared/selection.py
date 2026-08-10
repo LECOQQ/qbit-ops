@@ -56,11 +56,12 @@ STATE_FILTER_VALUES: frozenset[TorrentStateGroup] = frozenset(
 # negative, so nothing legitimate is lost by refusing to compare them.
 _UNSET_NUMERIC = (-1, -2)
 
-# `added_on` additionally treats `0` as unknown. No torrent is really
-# added at the Unix epoch, so a zero means "not recorded" -- and
-# reading it as 1970 would make `--older-than` match it, which is the
-# dangerous direction on a destructive command.
-_UNSET_ADDED_ON = (0, -1, -2)
+# Timestamp fields additionally treat `0` as unknown. No torrent is
+# really added -- or last active -- at the Unix epoch, so a zero means
+# "not recorded", and reading it as 1970 would make `--older-than` or
+# `--inactive-for` match it: the dangerous direction on a destructive
+# command.
+_UNSET_TIMESTAMP = (0, -1, -2)
 
 
 @dataclass(frozen=True)
@@ -275,6 +276,7 @@ class TorrentFilter:
     uploaded: Range[int] = Range()
     seeding_time: Range[int] = Range()
     added: Range[datetime] = Range()
+    last_activity: Range[datetime] = Range()
 
     # --- trackers
     trackers: tuple[str, ...] = ()
@@ -384,6 +386,12 @@ def validate_torrent_filter(filters: TorrentFilter) -> None:
         raise InvalidInputError(
             "--newer-than and --older-than describe an empty time window; "
             "no torrent can satisfy both."
+        )
+
+    if filters.last_activity.is_impossible:
+        raise InvalidInputError(
+            "--inactive-for and --active-within describe an empty time "
+            "window; no torrent can satisfy both."
         )
 
     for included, excluded, option, exclude_option in _EXCLUSION_OPTIONS:
@@ -693,7 +701,7 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 
     if not filters.added.is_unset:
         added_on = get_optional_int(
-            torrent, "added_on", sentinels=_UNSET_ADDED_ON
+            torrent, "added_on", sentinels=_UNSET_TIMESTAMP
         )
         added_at = (
             None
@@ -701,6 +709,18 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
             else datetime.fromtimestamp(added_on, tz=UTC)
         )
         if not filters.added.contains(added_at):
+            return False
+
+    if not filters.last_activity.is_unset:
+        last_activity = get_optional_int(
+            torrent, "last_activity", sentinels=_UNSET_TIMESTAMP
+        )
+        moment = (
+            None
+            if last_activity is None
+            else datetime.fromtimestamp(last_activity, tz=UTC)
+        )
+        if not filters.last_activity.contains(moment):
             return False
 
     if filters.has_trackers is not None:
@@ -794,6 +814,7 @@ def torrent_filter_to_dict(filters: TorrentFilter) -> dict[str, Any]:
         "uploaded": _range_to_dict(filters.uploaded),
         "seeding_time": _range_to_dict(filters.seeding_time),
         "added": _range_to_dict(filters.added),
+        "last_activity": _range_to_dict(filters.last_activity),
         "tracker": filters.trackers[0] if len(filters.trackers) == 1 else None,
         "trackers": list(filters.trackers),
         "trackers_excluded": list(filters.trackers_excluded),
@@ -859,6 +880,7 @@ def describe_torrent_filter(filters: TorrentFilter) -> str:
     _append_bounds(parts, "uploaded", filters.uploaded)
     _append_bounds(parts, "seeding-time", filters.seeding_time)
     _append_bounds(parts, "added", filters.added)
+    _append_bounds(parts, "last-activity", filters.last_activity)
 
     _append_values(parts, "tracker", filters.trackers)
     _append_values(parts, "exclude-tracker", filters.trackers_excluded)
