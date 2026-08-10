@@ -135,7 +135,7 @@ def select_torrents(
     """
     all_torrents = list(client.torrents_info())
 
-    if not filters.requires_tracker_data:
+    if not filters.requires_inspection:
         selection = select_torrents_from_items(all_torrents, filters)
         if on_progress is not None:
             on_progress(selection.scanned, selection.scanned)
@@ -148,7 +148,7 @@ def select_torrents(
     )
     inspection = inspect_trackers(client, candidates, on_progress=on_progress)
 
-    # requires_tracker_data implies filters.tracker is not None
+    # requires_inspection implies filters.tracker is not None
     assert filters.tracker is not None
     matched = [
         torrent
@@ -178,7 +178,7 @@ def select_torrents_from_items(
     `tracker=None` here and use `select_torrents` instead when a tracker
     filter is required.
     """
-    if filters.requires_tracker_data:
+    if filters.requires_inspection:
         raise ValueError(
             "select_torrents_from_items cannot resolve a --tracker filter "
             "without a qBittorrent client; use select_torrents instead."
