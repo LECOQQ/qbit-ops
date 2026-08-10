@@ -293,3 +293,152 @@ def test_cheap_filters_never_trigger_a_tracker_lookup(
     assert result.exit_code == ExitCode.SUCCESS
     assert client.torrents_info_calls == 1
     assert client.torrents_trackers_calls == 0
+
+
+# --- the same selector drives mutations -------------------------------------
+
+
+def test_the_same_filters_target_a_mutation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Selection is independent of the action: the flags that narrow a
+    listing narrow a mutation identically."""
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "torrents",
+            "pause",
+            "--ratio-min",
+            "1",
+            "--exclude-tag",
+            "keep",
+            "--no-dry-run",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.paused_hashes == [[TORRENT_A]]
+
+
+def test_a_mutation_filter_is_dry_run_by_default(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, ["torrents", "pause", "--size-min", "1GiB"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "PREVIEW" in result.stdout
+    assert client.paused_hashes == []
+
+
+def test_a_mutation_filter_matching_nothing_is_no_match(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--tag", "nonexistent", "--no-dry-run"]
+    )
+
+    assert result.exit_code == ExitCode.NO_MATCH
+    assert client.paused_hashes == []
+
+
+def test_a_new_filter_still_counts_as_a_selector(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A mutation needs --hash, --all or at least one filter. The new
+    families must satisfy that requirement, or they would be unusable."""
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--seeded-for", "7d", "--no-dry-run"]
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.paused_hashes == [[TORRENT_A]]
+
+
+def test_a_new_filter_still_conflicts_with_hash(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--hash` stays an exclusive selector: combining it with any
+    filter is refused, including the ones added here."""
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "pause", "--hash", TORRENT_A, "--tag", "archive"],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--hash alone" in result.stderr
+    assert client.paused_hashes == []
+
+
+def test_a_new_filter_still_conflicts_with_all(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--all", "--ratio-min", "1"]
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--all alone" in result.stderr
+    assert client.paused_hashes == []
+
+
+def test_delete_accepts_the_filters_and_still_requires_confirmation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The most destructive command is the biggest beneficiary of
+    scoping, and gains no shortcut around its HIGH-risk gate."""
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    preview = runner.invoke(
+        app, ["torrents", "delete", "--exclude-tag", "keep"]
+    )
+    applied = runner.invoke(
+        app,
+        [
+            "torrents",
+            "delete",
+            "--exclude-tag",
+            "keep",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert preview.exit_code == ExitCode.SUCCESS
+    assert "PREVIEW" in preview.stdout
+    assert applied.exit_code == ExitCode.SUCCESS
+    assert client.deleted_hashes == [([TORRENT_A], False)]
+
+
+def test_a_filtered_mutation_costs_one_bulk_call(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "pause", "--tag", "archive", "--size-min", "1GiB"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 0
