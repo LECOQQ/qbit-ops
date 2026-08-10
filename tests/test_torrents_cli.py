@@ -103,14 +103,21 @@ def test_pause_with_unknown_hash_performs_no_mutation(
     assert client.paused_hashes == []
 
 
-def test_pause_help_no_longer_mentions_name(
+def test_pause_help_documents_only_deterministic_name_targeting(
     runner: CliRunner,
 ) -> None:
+    """The fuzzy `--name` selector stays gone from mutations (see
+    `test_pause_rejects_the_removed_name_option`, the behavioural
+    guarantee). `--name-contains` and `--name-regex` are a different
+    thing: exact, deterministic predicates that cannot silently widen a
+    selection, so they are legitimate mutation targeting.
+    """
     result = runner.invoke(app, ["torrents", "pause", "--help"])
 
     assert result.exit_code == ExitCode.SUCCESS
-    assert "--name" not in result.stdout
     assert "--hash" in result.stdout
+    assert "--name-contains" in result.stdout
+    assert "--name-regex" in result.stdout
 
 
 def test_pause_rejects_the_removed_name_option(
@@ -296,7 +303,6 @@ def test_reannounce_help_exposes_hash(runner: CliRunner) -> None:
 
     assert result.exit_code == ExitCode.SUCCESS
     assert "--hash" in result.stdout
-    assert "--name" not in result.stdout
 
 
 def test_reannounce_with_unique_hash_prefix_selects_one_torrent(
