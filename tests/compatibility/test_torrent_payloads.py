@@ -12,6 +12,8 @@ from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_optional_float,
+    get_optional_int,
 )
 from qbit_core.shared.torrent_states import (
     build_torrent_snapshot,
@@ -106,6 +108,33 @@ def test_explicit_none_fields_use_the_same_fallbacks_as_missing_fields() -> (
     assert get_field_as_int(torrent, "upspeed") == 0
     assert get_field_as_string(torrent, "save_path") == ""
     assert get_field_as_int(torrent, "added_on") == 0
+
+
+def test_missing_fields_are_unknown_to_a_bounded_predicate() -> None:
+    """Same fixture, opposite reading: `get_field_as_*` answers "what do
+    I display" with `0`, `get_optional_*` answers "what do I know" with
+    `None`. A predicate must use the second, or `--size-max` would match
+    a torrent whose size qBittorrent never sent.
+    """
+    fixture = load_fixture("torrents", "missing_optional_fields")
+    torrent = fixture.payload
+
+    assert get_optional_float(torrent, "ratio") is None
+    assert get_optional_int(torrent, "added_on") is None
+    assert get_optional_int(torrent, "uploaded") is None
+    assert get_optional_int(torrent, "seeding_time") is None
+    assert get_optional_int(torrent, "trackers_count") is None
+    # Present in this fixture, so genuinely known.
+    assert get_optional_int(torrent, "size") == 4700372992
+    assert get_optional_float(torrent, "progress") == 0.5
+
+
+def test_explicit_null_fields_are_unknown_too() -> None:
+    fixture = load_fixture("torrents", "explicit_none_fields")
+    torrent = fixture.payload
+
+    assert get_optional_float(torrent, "ratio") is None
+    assert get_optional_int(torrent, "added_on") is None
 
 
 def test_unknown_state_classifies_as_unknown_not_an_exception() -> None:
