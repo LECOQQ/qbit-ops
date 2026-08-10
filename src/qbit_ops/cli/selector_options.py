@@ -44,8 +44,9 @@ STATE_FILTER_HELP = (
     f"{', '.join(sorted(STATE_FILTER_VALUES))}."
 )
 TRACKER_FILTER_HELP = (
-    "Restrict to torrents using a tracker, matched by host[:port] (a full "
-    "announce URL is also accepted; only its host and port are used)."
+    "Restrict to torrents using a tracker, matched by host[:port] (repeatable; "
+    "combines with OR). A full announce URL is also accepted; only its host "
+    "and port are used."
 )
 
 
@@ -73,7 +74,7 @@ StateOption = Annotated[
     list[str], typer.Option("--state", help=STATE_FILTER_HELP)
 ]
 TrackerOption = Annotated[
-    str | None, typer.Option("--tracker", help=TRACKER_FILTER_HELP)
+    list[str], typer.Option("--tracker", help=TRACKER_FILTER_HELP)
 ]
 CompletedOption = Annotated[
     bool, typer.Option("--completed", help="Restrict to completed torrents.")
@@ -373,7 +374,7 @@ def build_filter_from_options(
     name_regex: str | None = None,
     state: list[str] = [],  # noqa: B006
     exclude_state: list[str] = [],  # noqa: B006
-    tracker: str | None = None,
+    tracker: list[str] = [],  # noqa: B006
     exclude_tracker: list[str] = [],  # noqa: B006
     no_tracker: bool = False,
     completed: bool = False,
@@ -419,7 +420,7 @@ def build_filter_from_options(
         name_regex=name_regex,
         states=state,
         states_excluded=exclude_state,
-        tracker=tracker,
+        trackers=tracker,
         trackers_excluded=exclude_tracker,
         has_trackers=False if no_tracker else None,
         completed=completed,

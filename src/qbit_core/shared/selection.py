@@ -277,7 +277,7 @@ class TorrentFilter:
     added: Range[datetime] = Range()
 
     # --- trackers
-    tracker: str | None = None
+    trackers: tuple[str, ...] = ()
     trackers_excluded: tuple[str, ...] = ()
     has_trackers: bool | None = None
 
@@ -300,7 +300,7 @@ class TorrentFilter:
         from the same bulk listing as everything else, so asking "does
         this torrent have any tracker at all" costs nothing.
         """
-        return self.tracker is not None or bool(self.trackers_excluded)
+        return bool(self.trackers or self.trackers_excluded)
 
 
 EMPTY_TORRENT_FILTER = TorrentFilter()
@@ -401,9 +401,9 @@ def validate_torrent_filter(filters: TorrentFilter) -> None:
         exclude_option="--exclude-tag",
     )
 
-    if filters.tracker is not None:
+    if filters.trackers:
         _reject_overlap(
-            (filters.tracker,),
+            filters.trackers,
             filters.trackers_excluded,
             option="--tracker",
             exclude_option="--exclude-tracker",
@@ -754,32 +754,94 @@ def format_category_label(category: str) -> str:
 
 
 def torrent_filter_to_dict(filters: TorrentFilter) -> dict[str, Any]:
-    """Build a stable, JSON-safe representation of a torrent filter."""
+    """Build a stable, JSON-safe representation of a torrent filter.
+
+    `tracker` is kept for compatibility as a *projection* of `trackers`,
+    which is authoritative: the single requested host when exactly one
+    was given, `null` otherwise. It is deliberately `null` rather than
+    the first of several -- a script reading the old key then sees
+    either the value it expected or nothing, never a partial answer
+    that looks like a complete one.
+
+    Durations serialize as whole seconds and sizes as bytes, matching
+    how the filter stores them; `added` serializes as resolved ISO-8601
+    instants, because a relative `90d` is user intent that belongs to
+    the layer holding the request, not to the resolved filter.
+    """
     return {
         "categories": list(filters.categories),
+        "categories_excluded": list(filters.categories_excluded),
+        "tags": {
+            "any_of": list(filters.tags.any_of),
+            "all_of": list(filters.tags.all_of),
+            "none_of": list(filters.tags.none_of),
+        },
+        "save_paths": list(filters.save_path_prefixes),
+        "save_paths_excluded": list(filters.save_paths_excluded),
+        "name_contains": list(filters.name_contains),
+        "name_excluded": list(filters.name_excluded),
+        "name_regex": filters.name_regex,
         "states": list(filters.states),
-        "tracker": filters.tracker,
+        "states_excluded": list(filters.states_excluded),
         "completed": filters.completed,
         "active": filters.active,
         "stalled": filters.stalled,
         "errored": filters.errored,
+        "private": filters.private,
+        "ratio": _range_to_dict(filters.ratio),
+        "size": _range_to_dict(filters.size),
+        "progress": _range_to_dict(filters.progress),
+        "uploaded": _range_to_dict(filters.uploaded),
+        "seeding_time": _range_to_dict(filters.seeding_time),
+        "added": _range_to_dict(filters.added),
+        "tracker": filters.trackers[0] if len(filters.trackers) == 1 else None,
+        "trackers": list(filters.trackers),
+        "trackers_excluded": list(filters.trackers_excluded),
+        "has_trackers": filters.has_trackers,
     }
+
+
+def _range_to_dict(bounds: Range[Any]) -> dict[str, Any]:
+    """Serialize one range, rendering datetimes as ISO-8601 instants."""
+    return {
+        "min": _serializable_bound(bounds.min),
+        "max": _serializable_bound(bounds.max),
+    }
+
+
+def _serializable_bound(value: Any) -> Any:
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def describe_torrent_filter(filters: TorrentFilter) -> str:
     """Build a concise, deterministic human description of a torrent filter.
 
-    Never renders anything beyond what `TorrentFilter` itself carries --
-    `tracker` is already host-only by construction, so this can never
-    leak a passkey.
+    Renders only the families actually set, in a fixed order, so the
+    same filter always reads the same way. Never renders anything beyond
+    what `TorrentFilter` carries -- tracker values are host-only by
+    construction, so this can never leak a passkey.
+
+    Bounds render their stored value (bytes, seconds, ISO instants)
+    rather than the operator's `10GiB`/`90d` shorthand: this line is an
+    echo of what will actually be matched, and the resolved value is the
+    one that decides.
     """
     parts: list[str] = []
-    if filters.categories:
-        parts.append("category=" + "|".join(filters.categories))
-    if filters.states:
-        parts.append("state=" + "|".join(filters.states))
-    if filters.tracker is not None:
-        parts.append(f"tracker={filters.tracker}")
+
+    _append_values(parts, "category", filters.categories)
+    _append_values(parts, "exclude-category", filters.categories_excluded)
+    _append_values(parts, "tag", filters.tags.any_of)
+    _append_values(parts, "tag-all", filters.tags.all_of)
+    _append_values(parts, "exclude-tag", filters.tags.none_of)
+    _append_values(parts, "save-path", filters.save_path_prefixes)
+    _append_values(parts, "exclude-save-path", filters.save_paths_excluded)
+    _append_values(parts, "name-contains", filters.name_contains)
+    _append_values(parts, "exclude-name", filters.name_excluded)
+    if filters.name_regex is not None:
+        parts.append(f"name-regex={filters.name_regex}")
+    _append_values(parts, "state", filters.states)
+    _append_values(parts, "exclude-state", filters.states_excluded)
+
     if filters.completed is not None:
         parts.append("completed" if filters.completed else "incomplete")
     if filters.active is not None:
@@ -788,8 +850,36 @@ def describe_torrent_filter(filters: TorrentFilter) -> str:
         parts.append("stalled")
     if filters.errored is not None:
         parts.append("errored")
+    if filters.private is not None:
+        parts.append("private" if filters.private else "public")
+
+    _append_bounds(parts, "ratio", filters.ratio)
+    _append_bounds(parts, "size", filters.size)
+    _append_bounds(parts, "progress", filters.progress)
+    _append_bounds(parts, "uploaded", filters.uploaded)
+    _append_bounds(parts, "seeding-time", filters.seeding_time)
+    _append_bounds(parts, "added", filters.added)
+
+    _append_values(parts, "tracker", filters.trackers)
+    _append_values(parts, "exclude-tracker", filters.trackers_excluded)
+    if filters.has_trackers is not None:
+        parts.append("has-tracker" if filters.has_trackers else "no-tracker")
 
     return ", ".join(parts) if parts else "none"
+
+
+def _append_values(parts: list[str], label: str, values: Sequence[str]) -> None:
+    """Render one repeatable family as `label=a|b`, or nothing when unset."""
+    if values:
+        parts.append(f"{label}=" + "|".join(values))
+
+
+def _append_bounds(parts: list[str], label: str, bounds: Range[Any]) -> None:
+    """Render each posed bound separately, so `>=` and `<=` stay explicit."""
+    if bounds.min is not None:
+        parts.append(f"{label}>={_serializable_bound(bounds.min)}")
+    if bounds.max is not None:
+        parts.append(f"{label}<={_serializable_bound(bounds.max)}")
 
 
 def _sorted_by_name(

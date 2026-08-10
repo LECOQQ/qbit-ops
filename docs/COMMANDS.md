@@ -112,25 +112,95 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 
 ### Filters
 
+**Organisation**
+
 | Filter | Meaning |
 | --- | --- |
 | `--category NAME` | Repeatable. Use `uncategorized` for torrents with no category. |
+| `--tag NAME` | Repeatable. Has **any** of these tags. Ignores case. |
+| `--tag-all NAME` | Repeatable. Has **every** one of these tags. |
+| `--save-path PATH` | Repeatable. Saved at this path or below it. Case-sensitive. |
+| `--name-contains TEXT` | Repeatable. Name contains this text. Ignores case. |
+| `--name-regex PATTERN` | Name matches this regular expression (searched, not anchored; case-sensitive — use `(?i)`). |
+
+**State**
+
+| Filter | Meaning |
+| --- | --- |
 | `--state GROUP` | Repeatable. `downloading`, `seeding`, `checking`, `stalled`, `errored`, `unknown`. |
-| `--tracker HOST` | Torrents announcing to a tracker, matched on `host[:port]`. |
 | `--completed` / `--incomplete` | Download finished or not. |
-| `--active` / `--inactive` | Running or stopped. |
+| `--active` / `--inactive` | **Not stopped** / stopped. Note: `--active` is about run state, not traffic — a stalled seed at 0 B/s is active. |
 | `--stalled`, `--errored` | Shorthands for the matching state group. |
+| `--private` / `--public` | Private or public torrent. Needs qBittorrent 5.0+; on older versions nothing matches. |
 
-Repeating one filter means OR; combining different filters means AND.
-So `--category a --category b --stalled` reads as *(a or b) and
-stalled*.
+**Measures** — each pair is an inclusive range.
 
-Two selectors stand apart, and never combine with a filter or each
-other:
+| Filter | Value |
+| --- | --- |
+| `--size-min` / `--size-max` | `1024`, `500MB`, `1.5TiB` |
+| `--ratio-min` / `--ratio-max` | `1`, `2.5` |
+| `--progress-min` / `--progress-max` | `95%` or a `0`–`1` fraction like `0.95` |
+| `--uploaded-min` / `--uploaded-max` | same size syntax |
+| `--seeded-for` | `30d` — seeded for **at least** this long |
+| `--older-than` / `--newer-than` | `90d`, `12h` — based on when the torrent was added |
+
+**Trackers**
+
+| Filter | Meaning |
+| --- | --- |
+| `--tracker HOST` | Repeatable. Announces to one of these trackers, matched on `host[:port]`. |
+| `--no-tracker` | Has no active tracker. |
+
+**Exclusions** — every family has one: `--exclude-category`,
+`--exclude-tag`, `--exclude-state`, `--exclude-save-path`,
+`--exclude-name`, `--exclude-tracker`. All repeatable.
+
+### Combining
+
+- Repeating one filter means **OR**.
+- Different filters mean **AND**.
+- Exclusions are applied last.
+
+So `--category a --category b --stalled --exclude-tag keep` reads as
+*(a or b) and stalled, except anything tagged keep*.
+
+```bash
+# every torrent over 20 GiB added more than 6 months ago
+qbit-ops torrents list --size-min 20GiB --older-than 180d
+
+# well-seeded and idle, except what you marked to keep
+qbit-ops torrents list --ratio-min 2 --seeded-for 90d --exclude-tag keep
+
+# almost done
+qbit-ops torrents list --incomplete --progress-min 99%
+```
+
+### Units, without ambiguity
+
+- **Sizes**: the suffix decides. `KiB/MiB/GiB/TiB` are 1024-based,
+  `KB/MB/GB/TB` are 1000-based. `500M` is refused — it belongs to
+  neither.
+- **Durations**: `s`, `m`, `h`, `d`, `w`. One unit per value (`1d12h` is
+  refused). No months or years: they have no fixed length, so write
+  `365d`.
+- **Percentages**: `95%`, or a bare fraction between `0` and `1`. A bare
+  `95` is refused, since it could mean either.
+
+### Two selectors that stand apart
+
+Neither combines with a filter, or with each other:
 
 - `--hash` targets one torrent by full infohash or an unambiguous
   prefix. An ambiguous prefix is refused and lists the candidates.
 - `--all` acts on the whole instance, and has to be typed out.
+
+### Cost
+
+One listing call, then the cheap filters, and only then — if you asked
+for `--tracker` or `--exclude-tracker` — one tracker lookup per
+surviving torrent. Filtering first is what keeps that count
+proportional to your selection instead of your whole instance.
+`--no-tracker` needs no lookup at all.
 
 `trackers add-if-present` accepts the same filters to scope its scan.
 It has no `--tracker` filter: `--source` already names the tracker it

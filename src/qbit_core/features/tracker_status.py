@@ -246,9 +246,9 @@ def collect_tracker_status(
     never read fully healthy while errors > 0. When `filters.tracker` is
     set, every surviving torrent is still scanned and the aggregates are
     filtered afterward -- `--tracker` restricts the report, not the
-    API-call volume.
+    API-call volume. Several values combine with OR.
     """
-    cheap_filters = replace(filters, tracker=None, trackers_excluded=())
+    cheap_filters = replace(filters, trackers=(), trackers_excluded=())
     selection, _ = select_torrents(client, cheap_filters)
     inspection = inspect_trackers(
         client,
@@ -297,11 +297,11 @@ def collect_tracker_status(
         for identity in identities_for_torrent:
             aggregates[identity].torrent_hashes.add(torrent.hash)
 
-    if filters.tracker is not None:
+    if filters.trackers:
         aggregates = {
             identity: builder
             for identity, builder in aggregates.items()
-            if identity == filters.tracker
+            if identity in filters.trackers
         }
 
     trackers = tuple(

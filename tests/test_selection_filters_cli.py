@@ -572,3 +572,162 @@ def test_exclude_tracker_targets_a_mutation(
 
     assert result.exit_code == ExitCode.SUCCESS
     assert client.paused_hashes == [[TORRENT_A, "c" * 40]]
+
+
+# --- the serialized filter contract -----------------------------------------
+
+
+def _filters_payload(runner: CliRunner, *options: str) -> dict:
+    result = runner.invoke(
+        app, ["torrents", "list", "--format", "json", *options]
+    )
+    return json.loads(result.stdout)["filters"]
+
+
+def test_the_seven_original_filter_keys_keep_their_name_and_shape(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Scripts written against the pre-composable output must keep
+    working: same names, same types, same meaning."""
+    configure_qbit_backend(client=_client())
+
+    payload = _filters_payload(runner)
+
+    assert payload["categories"] == []
+    assert payload["states"] == []
+    assert payload["tracker"] is None
+    assert payload["completed"] is None
+    assert payload["active"] is None
+    assert payload["stalled"] is None
+    assert payload["errored"] is None
+
+
+def test_tracker_is_a_projection_of_the_authoritative_list(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """One requested host projects onto the legacy key; several do not.
+    `null` rather than the first value, so a script reading the old key
+    sees either what it expected or nothing -- never a partial answer
+    that looks complete.
+    """
+    configure_qbit_backend(client=_tracked_client())
+
+    one = _filters_payload(runner, "--tracker", "old.example")
+    assert one["tracker"] == "old.example"
+    assert one["trackers"] == ["old.example"]
+
+    several = _filters_payload(
+        runner, "--tracker", "old.example", "--tracker", "new.example"
+    )
+    assert several["tracker"] is None
+    assert several["trackers"] == ["old.example", "new.example"]
+
+
+def test_bounded_families_serialize_as_resolved_values(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Sizes as bytes, durations as whole seconds, dates as ISO-8601
+    instants -- never the operator's `10GiB`/`90d` shorthand, which is
+    intent rather than what actually gets matched."""
+    configure_qbit_backend(client=_client())
+
+    payload = _filters_payload(
+        runner,
+        "--size-min",
+        "1GiB",
+        "--ratio-max",
+        "4",
+        "--seeded-for",
+        "7d",
+        "--older-than",
+        "30d",
+    )
+
+    assert payload["size"] == {"min": 1_073_741_824, "max": None}
+    assert payload["ratio"] == {"min": None, "max": 4.0}
+    assert payload["seeding_time"] == {"min": 604_800, "max": None}
+    assert payload["added"]["min"] is None
+    assert payload["added"]["max"].endswith("+00:00")
+
+
+def test_tags_serialize_with_their_three_shapes(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client())
+
+    payload = _filters_payload(
+        runner,
+        "--tag",
+        "archive",
+        "--tag-all",
+        "verified",
+        "--exclude-tag",
+        "keep",
+    )
+
+    assert payload["tags"] == {
+        "any_of": ["archive"],
+        "all_of": ["verified"],
+        "none_of": ["keep"],
+    }
+
+
+def test_the_regex_is_serialized_as_its_source_pattern(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client())
+
+    payload = _filters_payload(runner, "--name-regex", r"^S\d+E\d+")
+
+    assert payload["name_regex"] == r"^S\d+E\d+"
+
+
+def test_json_and_jsonl_still_carry_the_same_filter_schema(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client())
+    options = ["--tag", "archive", "--size-min", "1GiB"]
+
+    as_json = runner.invoke(
+        app, ["torrents", "list", "--format", "json", *options]
+    )
+    as_jsonl = runner.invoke(
+        app, ["torrents", "list", "--format", "jsonl", *options]
+    )
+
+    assert json.loads(as_json.stdout) == json.loads(as_jsonl.stdout)
+
+
+def test_the_filter_line_echoes_only_the_families_actually_set(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client())
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--tag", "archive", "--ratio-min", "1"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "tag=archive" in result.stdout
+    assert "ratio>=1" in result.stdout
+    assert "size" not in result.stdout.split("Filter:")[1].split("\n")[0]
+
+
+def test_the_filter_line_never_renders_a_tracker_secret(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_tracked_client())
+
+    result = runner.invoke(
+        app,
+        [
+            "torrents",
+            "list",
+            "--tracker",
+            "https://old.example/announce/SUPER-SECRET",
+        ],
+    )
+
+    assert "SUPER-SECRET" not in result.stdout
+    assert "tracker=old.example" in result.stdout
