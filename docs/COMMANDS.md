@@ -202,9 +202,27 @@ surviving torrent. Filtering first is what keeps that count
 proportional to your selection instead of your whole instance.
 `--no-tracker` needs no lookup at all.
 
-`trackers add-if-present` accepts the same filters to scope its scan.
-It has no `--tracker` filter: `--source` already names the tracker it
-looks for.
+### Where the filters work
+
+Everywhere a command acts on a set of torrents: `torrents list`, the
+five bulk mutations (`pause`, `resume`, `start`, `reannounce`,
+`delete`), and the four tracker operations (`add-if-present`, `remove`,
+`replace`, `replace-passkey`).
+
+The tracker operations accept every filter **except** the tracker
+family (`--tracker`, `--exclude-tracker`, `--no-tracker`). On those
+commands `--tracker` or `--source` already names the tracker being
+acted on, so a second tracker notion on the same line would be
+ambiguous.
+
+```bash
+# drop a tracker, but only within one category
+qbit-ops trackers remove --tracker old.example --category sonarr
+```
+
+Their summaries read left to right: `scanned` is the whole instance,
+`matched` what the filters kept, and `matched_tracker` /
+`matched_source` what actually uses the tracker.
 
 ## ⚠️ Mutation rules
 

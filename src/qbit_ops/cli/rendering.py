@@ -1220,6 +1220,7 @@ def removal_summary_rows(
 ) -> dict[str, Any]:
     return {
         "scanned": plan.scanned,
+        "matched": plan.matched,
         "matched_tracker": plan.matched_tracker,
         "modified": len(plan.changes),
         "removed_urls": plan.removed_url_count,
@@ -1261,6 +1262,7 @@ def replacement_summary_rows(
     )
     return {
         "scanned": plan.scanned,
+        "matched": plan.matched,
         "matched_source": plan.matched_source,
         "already_had_target": already_had_target,
         "modified": len(plan.changes),
@@ -1315,6 +1317,7 @@ def passkey_summary_rows(
     """
     return {
         "scanned": plan.scanned,
+        "matched": plan.matched,
         "matched_source": plan.matched_source,
         "already_up_to_date": plan.already_up_to_date,
         "modified": len(plan.changes),

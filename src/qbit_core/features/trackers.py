@@ -275,6 +275,7 @@ class TrackerRemovalPlan:
     tracker: str
     match: TrackerMatchMode
     scanned: int
+    matched: int
     matched_tracker: int
     changes: tuple[TrackerRemovalChange, ...]
 
@@ -303,6 +304,7 @@ class TrackerReplacementPlan:
     target_tracker: str
     match: TrackerMatchMode
     scanned: int
+    matched: int
     matched_source: int
     changes: tuple[TrackerReplacementChange, ...]
 
@@ -344,6 +346,7 @@ class PasskeyReplacementPlan:
 
     tracker_template: str
     scanned: int
+    matched: int
     matched_source: int
     already_up_to_date: int
     changes: tuple[PasskeyReplacementChange, ...]
@@ -696,6 +699,7 @@ def plan_tracker_removal(
         tracker=tracker,
         match=match_mode,
         scanned=inspection.selection.scanned,
+        matched=len(inspection.torrents),
         matched_tracker=len(changes),
         changes=tuple(changes),
     )
@@ -780,6 +784,7 @@ def plan_tracker_replacement(
         target_tracker=target_tracker,
         match=match_mode,
         scanned=inspection.selection.scanned,
+        matched=len(inspection.torrents),
         matched_source=len(changes),
         changes=tuple(changes),
     )
@@ -1048,6 +1053,7 @@ def plan_tracker_passkey_replacement(
     return PasskeyReplacementPlan(
         tracker_template=tracker_template,
         scanned=inspection.selection.scanned,
+        matched=len(inspection.torrents),
         matched_source=matched_source,
         already_up_to_date=already_up_to_date,
         changes=tuple(changes),
