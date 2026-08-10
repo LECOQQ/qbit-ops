@@ -116,7 +116,7 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 
 > `qbit-ops` is deliberately not a daemon or background rules engine: select precisely, inspect the scope, preview the plan, then apply it.
 
-See [PHILOSOPHY](PHILOSOPHY.md) for the reasoning behind that design.
+See [PHILOSOPHY.md](PHILOSOPHY.md) for the reasoning behind that design.
 
 ## 🖥️ TUI
 
@@ -158,6 +158,10 @@ qbit-ops trackers --help
 ```
 
 A compact command overview is available in [docs/COMMANDS.md](docs/COMMANDS.md).
+
+## 🗺️ Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for where the project is heading.
 
 ## 🧑‍💻 Development
 
