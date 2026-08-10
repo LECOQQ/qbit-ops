@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-import time
 from typing import Any, cast
 
 import pytest
@@ -307,17 +306,17 @@ async def asyncio_wait_for_event(
     event: threading.Event, timeout: float = WAIT_TIMEOUT
 ) -> None:
     """Await a real `threading.Event` from async test code without
-    blocking the event loop or sleeping arbitrarily -- polls a tight
-    loop yielding control each time, bounded by `timeout`."""
-    deadline = time.monotonic() + timeout
-    while not event.is_set():
-        if time.monotonic() > deadline:
-            raise TimeoutError("timed out waiting for a real event")
-        await _yield()
+    blocking the event loop.
 
-
-async def _yield() -> None:
-    await asyncio.sleep(0)
+    Waits on the event itself, off-loop, rather than polling: a poll
+    loop built on `asyncio.sleep(0)` reschedules immediately and keeps
+    the GIL almost continuously, starving the very worker thread that
+    is supposed to set the event. Under CPU contention that turned into
+    a spurious timeout -- the event was never late, the thread setting
+    it just never got scheduled.
+    """
+    if not await asyncio.to_thread(event.wait, timeout):
+        raise TimeoutError("timed out waiting for a real event")
 
 
 # --- 1. Overview workspace ---------------------------------------------------
