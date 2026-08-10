@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
+from qbit_core.errors import InvalidInputError
 from qbit_core.features.torrents import (
     select_torrents,
 )
@@ -248,6 +249,18 @@ def collect_tracker_status(
     filtered afterward -- `--tracker` restricts the report, not the
     API-call volume. Several values combine with OR.
     """
+    if filters.trackers_excluded:
+        raise InvalidInputError(
+            "--exclude-tracker is not supported by `trackers status`: this "
+            "report aggregates every tracker of the selected torrents, so a "
+            "tracker exclusion cannot be applied to the selection. Narrow "
+            "with the torrent filters, or use --tracker to restrict the "
+            "report."
+        )
+
+    # `--tracker` is supported, but as a *report* restriction applied to
+    # the aggregates below, not as a selection criterion -- so it is
+    # removed from the cheap pass on purpose, not silently dropped.
     cheap_filters = replace(filters, trackers=(), trackers_excluded=())
     selection, _ = select_torrents(client, cheap_filters)
     inspection = inspect_trackers(

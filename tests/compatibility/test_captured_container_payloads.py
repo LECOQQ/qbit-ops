@@ -12,12 +12,14 @@ import pytest
 
 from qbit_core.features.trackers import classify_raw_tracker_status
 from qbit_core.qbit.fields import (
+    get_active_tracker_urls,
     get_field_as_float,
     get_field_as_string,
     get_optional_bool,
     get_raw_tracker_status,
     get_transfer_rates,
     is_disabled_tracker,
+    pseudo_tracker_label,
 )
 from qbit_core.shared.torrent_states import classify_torrent_state
 from tests.compatibility._captured_loader import (
@@ -128,6 +130,34 @@ def test_captured_tracker_payload_is_sanitized_and_readable() -> None:
                 assert (
                     "qbit-ops-tracker" not in url
                 ), f"unsanitized tracker hostname leaked into {fixture.path}"
+
+    assert found_any, "expected at least one trackers_tracked_torrent capture"
+
+
+def test_pseudo_trackers_are_excluded_on_every_captured_version() -> None:
+    """The counting rule, proven against real payloads rather than test
+    doubles: DHT/PeX/LSD are peer-discovery mechanisms, so on every
+    supported version the only announce URL left is the real tracker --
+    whatever status that version reports the pseudo entries with (`0` on
+    an idle capture, `2` once they are working)."""
+    found_any = False
+    for matrix_id in discover_matrix_ids():
+        for fixture in load_captured_fixtures(matrix_id):
+            if fixture.name != "trackers_tracked_torrent":
+                continue
+            found_any = True
+            labels = [
+                pseudo_tracker_label(tracker.get("url", ""))
+                for tracker in fixture.payload
+            ]
+            assert [label for label in labels if label is not None] == [
+                "DHT",
+                "PeX",
+                "LSD",
+            ], f"unexpected pseudo-tracker set in {fixture.path}"
+            assert get_active_tracker_urls(fixture.payload) == [
+                "http://tracker.example:6969/announce"
+            ], f"a pseudo-tracker reached the active URLs in {fixture.path}"
 
     assert found_any, "expected at least one trackers_tracked_torrent capture"
 

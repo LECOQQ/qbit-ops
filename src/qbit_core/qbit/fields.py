@@ -18,6 +18,7 @@ Never swap one family for the other to "simplify": the difference is
 the safety property, not a style choice.
 """
 
+import re
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -197,11 +198,46 @@ def is_disabled_tracker(tracker: Any) -> bool:
     return is_disabled_tracker_status(get_raw_tracker_status(tracker))
 
 
+# qBittorrent lists DHT, PeX and LSD alongside real trackers, as
+# bracketed marker strings. They are peer-discovery mechanisms, not
+# announce endpoints: they cannot be added, removed or migrated, they
+# name no host, and qBittorrent's own `trackers_count` excludes them.
+_PSEUDO_TRACKER_PATTERN = re.compile(r"^\*\*\s*\[(.+?)\]\s*\*\*$")
+
+
+def pseudo_tracker_label(url: str) -> str | None:
+    """Return `DHT`/`PeX`/`LSD` for a pseudo-tracker marker, else `None`."""
+    match = _PSEUDO_TRACKER_PATTERN.match(url.strip())
+    return None if match is None else match.group(1).strip()
+
+
+def is_pseudo_tracker_marker(url: str) -> bool:
+    """Return whether `url` is a DHT/PeX/LSD pseudo-tracker marker.
+
+    These are not real announce URLs -- never a target for a tracker
+    mutation (add/remove/replace/restore), and never counted as a
+    tracker.
+    """
+    return pseudo_tracker_label(url) is not None
+
+
 def get_active_tracker_urls(trackers: Any) -> list[str]:
-    """Extract non-disabled tracker URLs from qBittorrent tracker objects."""
+    """Extract non-disabled *real* announce URLs from tracker objects.
+
+    Pseudo-trackers are excluded: they are peer-discovery mechanisms,
+    not trackers, so they must not reach a count or a selection. This is
+    the single definition of "which trackers does this torrent announce
+    to", shared by every counter and every tracker filter -- which is
+    what keeps `torrents list`, `torrents inspect` and `trackers status`
+    from disagreeing on the same torrent.
+
+    Use `features.torrents.get_peer_discovery_details` to report
+    them separately.
+    """
     return [
         tracker_url
         for tracker in trackers
         if not is_disabled_tracker(tracker)
         and (tracker_url := get_field_as_string(tracker, "url")) != ""
+        and not is_pseudo_tracker_marker(tracker_url)
     ]

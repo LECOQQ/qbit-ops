@@ -43,7 +43,7 @@ class InspectedTorrent:
 
     @property
     def active_tracker_urls(self) -> tuple[str, ...]:
-        """Return announce URLs excluding disabled pseudo-trackers."""
+        """Return real announce URLs: no disabled tracker, no DHT/PeX/LSD."""
         return tuple(get_active_tracker_urls(self.raw_trackers))
 
     @property

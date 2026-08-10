@@ -662,11 +662,19 @@ def _format_details_tracker_line(endpoint: dict[str, Any]) -> str:
     return line
 
 
+def _format_peer_discovery_entry(entry: dict[str, Any]) -> str:
+    """Render one peer-discovery mechanism as `Name state`, muted."""
+    health = str(entry["health"])
+    style = _TRACKER_STYLES.get(health, "dim")
+    return f"[{style}]{entry['mechanism']} {health.title()}[/{style}]"
+
+
 def _format_details_trackers(
     tracker_details: list[dict[str, Any]] | None,
     fetched_at: datetime | None,
     *,
     fetch_failed: bool = False,
+    peer_discovery: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render the Details modal's Trackers section from already-
     sanitized endpoints.
@@ -689,6 +697,18 @@ def _format_details_trackers(
         lines = [
             _format_details_tracker_line(entry) for entry in tracker_details
         ]
+
+    # DHT/PeX/LSD are peer-discovery mechanisms, not trackers: they are
+    # never listed or counted above, but an operator still wants to know
+    # whether they are on, so they get their own line.
+    if peer_discovery:
+        lines.append("")
+        lines.append(
+            "[dim]Peer discovery[/dim]  "
+            + "  ".join(
+                _format_peer_discovery_entry(entry) for entry in peer_discovery
+            )
+        )
     if fetched_at is not None:
         lines.append("")
         lines.append(

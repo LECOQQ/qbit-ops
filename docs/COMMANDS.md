@@ -244,6 +244,25 @@ Their summaries read left to right: `scanned` is the whole instance,
 `matched` what the filters kept, and `matched_tracker` /
 `matched_source` what actually uses the tracker.
 
+`trackers status` is one more exception: it inspects every selected
+torrent to aggregate their trackers, so `--tracker` restricts the
+*report* rather than the selection, and `--exclude-tracker` is not
+offered at all. A filter that cannot be honoured is refused, never
+silently dropped.
+
+### What counts as a tracker
+
+qBittorrent lists DHT, PeX and LSD next to real trackers, as `** [DHT]
+**` markers. They are peer-discovery mechanisms, not announce
+endpoints — so qbit-ops never counts them as trackers and never matches
+them with `--tracker`. A torrent whose only entries are DHT/PeX/LSD has
+zero trackers, and `--no-tracker` finds it.
+
+They are still reported, separately: `torrents inspect` and
+`backup export` carry a `peer_discovery` field listing each mechanism
+and whether it is enabled, and the TUI details pane shows them on their
+own line.
+
 ## ⚠️ Mutation rules
 
 - 🧪 Mutations default to dry-run.

@@ -616,3 +616,44 @@ def test_inspect_name_search_remains_functional(
     assert result.exit_code == ExitCode.SUCCESS
     assert "Debian ISO" in result.stdout
     assert UNIQUE_HASH in _collapse_whitespace(result.stdout)
+
+
+def test_inspect_separates_peer_discovery_from_trackers(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """DHT/PeX/LSD are counted nowhere and listed nowhere among the
+    trackers -- but an operator still reads their state, on their own
+    line."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=UNIQUE_HASH, name="Debian ISO")],
+            trackers_by_hash={
+                UNIQUE_HASH: [
+                    {"url": "** [DHT] **", "status": 2},
+                    {"url": "** [PeX] **", "status": 0},
+                    {"url": "https://tracker.example/announce", "status": 2},
+                ]
+            },
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["torrents", "inspect", "--hash", "zz0011"],
+        env={"COLUMNS": "200"},
+    )
+    collapsed = _collapse_whitespace(result.stdout)
+
+    trackers_section, _, peer_discovery_line = result.stdout.partition(
+        "Peer discovery"
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "Peerdiscovery:DHThealthy,PeXdisabled" in collapsed
+    # The pseudo-trackers appear only on that line: not in the table,
+    # and not in the active-tracker count above it.
+    assert "DHT" not in trackers_section
+    assert "PeX" not in trackers_section
+    assert "tracker.example" in trackers_section
+    assert "tracker.example" not in peer_discovery_line

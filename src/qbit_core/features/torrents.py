@@ -31,6 +31,8 @@ from qbit_core.qbit.fields import (
     get_field_as_tag_list,
     get_raw_tracker_status,
     is_disabled_tracker,
+    is_pseudo_tracker_marker,
+    pseudo_tracker_label,
 )
 from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.selection import (
@@ -333,7 +335,8 @@ def list_torrents_with_trackers(
 
     for index, torrent in enumerate(all_torrents, start=1):
         torrent_hash = get_field_as_string(torrent, "hash")
-        trackers = _get_tracker_details(client.torrents_trackers(torrent_hash))
+        raw_trackers = list(client.torrents_trackers(torrent_hash))
+        trackers = _get_tracker_details(raw_trackers)
         active_tracker_count = sum(
             1 for tracker in trackers if not tracker["disabled"]
         )
@@ -350,6 +353,7 @@ def list_torrents_with_trackers(
                 "tags": get_field_as_tag_list(torrent),
                 "added_on": get_field_as_int(torrent, "added_on"),
                 "trackers": trackers,
+                "peer_discovery": get_peer_discovery_details(raw_trackers),
                 "active_tracker_count": active_tracker_count,
             }
         )
@@ -916,6 +920,7 @@ def _build_torrent_details(
     active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])
 
     return {
+        "peer_discovery": get_peer_discovery_details(raw_trackers),
         "hash": torrent_hash,
         "name": get_field_as_string(torrent, "name"),
         "state": get_field_as_string(torrent, "state"),
@@ -1011,12 +1016,16 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     `list_torrents_with_trackers` (the `backup export` artifact), never
     for an ordinary command's rendered output. Use
     `get_safe_tracker_details` for anything user-facing.
+
+    Pseudo-trackers are excluded, like everywhere else: they are
+    peer-discovery mechanisms, cannot be restored, and are reported
+    separately under `peer_discovery`.
     """
     tracker_details: list[dict[str, Any]] = []
 
     for tracker in trackers:
         tracker_url = get_field_as_string(tracker, "url")
-        if tracker_url == "":
+        if tracker_url == "" or is_pseudo_tracker_marker(tracker_url):
             continue
 
         tracker_details.append(
@@ -1028,6 +1037,35 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
         )
 
     return tracker_details
+
+
+def get_peer_discovery_details(trackers: Any) -> list[dict[str, Any]]:
+    """Extract the DHT/PeX/LSD mechanisms, with their reported state.
+
+    These are peer-discovery mechanisms, not trackers: they are excluded
+    from every tracker list and every tracker count, and reported here
+    instead. Disabled ones are kept -- "DHT is off" is exactly what an
+    operator wants to see.
+    """
+    mechanisms: list[dict[str, Any]] = []
+
+    for tracker in trackers:
+        label = pseudo_tracker_label(get_field_as_string(tracker, "url"))
+        if label is None:
+            continue
+
+        health, enabled = classify_raw_tracker_status(
+            get_raw_tracker_status(tracker)
+        )
+        mechanisms.append(
+            {
+                "mechanism": label,
+                "health": health.value,
+                "enabled": enabled,
+            }
+        )
+
+    return mechanisms
 
 
 def get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
@@ -1042,7 +1080,7 @@ def get_safe_tracker_details(trackers: Any) -> list[dict[str, Any]]:
 
     for tracker in trackers:
         tracker_url = get_field_as_string(tracker, "url")
-        if tracker_url == "":
+        if tracker_url == "" or is_pseudo_tracker_marker(tracker_url):
             continue
 
         safe_identity = describe_tracker_url(tracker_url)
