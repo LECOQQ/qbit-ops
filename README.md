@@ -103,6 +103,21 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 - 🔒 **Secret-safe output.** Tracker passkeys and announce URLs stay redacted in normal output.
 - ✅ **Honest results.** qbit-ops reports what was submitted or observed, not what it cannot prove.
 
+## 🧭 How is `qbit-ops` different?
+
+| | [qbit-ops](https://github.com/LECOQQ/qbit-ops) | [qbit_manage](https://github.com/StuffAnThings/qbit_manage) | [qbittools](https://gitlab.com/AlexKM/qbittools) |
+| --- | --- | --- | --- |
+| Model | Safe operational toolkit | Rules / background management | Task-oriented utilities |
+| Interface | CLI + TUI | Config + scheduler + Web UI | CLI |
+| Targeting | Composable selectors | Rule/workflow specific | Command specific |
+| Execution | SELECT -> INSPECT -> PLAN -> APPLY | Apply configured rules | Run specialized commands |
+| Best fit | Precise and quick ops, scripting | Continuous library management | Maintenance tasks |
+
+
+> `qbit-ops` is deliberately not a daemon or background rules engine: select precisely, inspect the scope, preview the plan, then apply it.
+
+See [PHILOSOPHY](PHILOSOPHY.md) for the reasoning behind that design.
+
 ## 🖥️ TUI
 
 The optional Textual interface provides a branded overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
