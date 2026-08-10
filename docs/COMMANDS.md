@@ -151,7 +151,7 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | Filter | Meaning |
 | --- | --- |
 | `--tracker HOST` | Repeatable. Announces to one of these trackers, matched on `host[:port]`. |
-| `--no-tracker` | Has no active tracker. |
+| `--no-tracker` | Has **no configured tracker** — read from the bulk listing's tracker count, so DHT/PeX/LSD never count as one. |
 
 **Exclusions** — every family has one: `--exclude-category`,
 `--exclude-tag`, `--exclude-state`, `--exclude-save-path`,
@@ -220,10 +220,14 @@ proportional to your selection instead of your whole instance.
 
 ### Where the filters work
 
-Everywhere a command acts on a set of torrents: `torrents list`, the
-five bulk mutations (`pause`, `resume`, `start`, `reannounce`,
-`delete`), and the four tracker operations (`add-if-present`, `remove`,
-`replace`, `replace-passkey`).
+Everywhere a command acts on a set of torrents: `torrents list`,
+`torrents inspect`, `trackers status`, the five bulk mutations
+(`pause`, `resume`, `start`, `reannounce`, `delete`), and the four
+tracker operations (`add-if-present`, `remove`, `replace`,
+`replace-passkey`).
+
+The same filters always select the same torrents, whichever command
+consumes them — listing, inspecting or mutating.
 
 The tracker operations accept every filter **except** the tracker
 family (`--tracker`, `--exclude-tracker`, `--no-tracker`). On those

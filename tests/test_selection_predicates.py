@@ -270,14 +270,63 @@ def test_derived_state_aliases_keep_their_existing_reading() -> None:
     assert _matches(TorrentFilter(active=False), state="stoppedUP")
 
 
-def test_completed_still_reads_a_missing_progress_as_zero() -> None:
-    """Deliberately not M1: `--completed` is a pre-existing contract and
-    changing its reading would be a silent behaviour change."""
+def test_a_missing_progress_matches_neither_completed_nor_incomplete() -> None:
+    """Reversed after review: this used to read a missing `progress` as
+    `0`, so `--incomplete` selected a torrent whose progress qBittorrent
+    never reported. That is M1's exact failure mode -- an unreported
+    value widening a destructive selection -- so both directions now
+    fail closed."""
     torrent = _torrent()
     del torrent["progress"]
 
-    assert matches_cheap_filters(torrent, TorrentFilter(completed=False))
+    assert not matches_cheap_filters(torrent, TorrentFilter(completed=False))
     assert not matches_cheap_filters(torrent, TorrentFilter(completed=True))
+
+
+def test_a_missing_state_matches_no_state_criterion() -> None:
+    """`is_stopped_state("")` is False, so an absent state used to read
+    as "not stopped" and satisfy `--active`."""
+    torrent = _torrent()
+    del torrent["state"]
+
+    for filters in (
+        TorrentFilter(active=True),
+        TorrentFilter(active=False),
+        TorrentFilter(stalled=True),
+        TorrentFilter(errored=True),
+        TorrentFilter(states=("unknown",)),
+        TorrentFilter(states=("seeding",)),
+    ):
+        assert not matches_cheap_filters(torrent, filters), filters
+
+
+def test_an_explicitly_null_state_or_progress_is_unknown_too() -> None:
+    assert not _matches(TorrentFilter(active=True), state=None)
+    assert not _matches(TorrentFilter(completed=False), progress=None)
+
+
+def test_a_blank_state_is_treated_as_absent() -> None:
+    """qBittorrent never reports an empty state, so a blank one means
+    the field was missing rather than naming a real state."""
+    assert not _matches(TorrentFilter(active=True), state="")
+
+
+def test_an_excluded_state_does_not_fire_on_an_unknown_state() -> None:
+    """Exclusions stay "the criterion did not match": an unknown state
+    is not proof of the state being refused."""
+    torrent = _torrent()
+    del torrent["state"]
+
+    assert matches_cheap_filters(
+        torrent, TorrentFilter(states_excluded=("seeding",))
+    )
+
+
+def test_a_reported_state_and_progress_still_match_normally() -> None:
+    """Guard against the rule excluding everything."""
+    assert _matches(TorrentFilter(active=True), state="uploading")
+    assert _matches(TorrentFilter(completed=True), progress=1.0)
+    assert _matches(TorrentFilter(completed=False), progress=0.4)
 
 
 def test_private_matches_only_a_real_boolean() -> None:
@@ -494,3 +543,39 @@ def test_completion_and_age_are_different_questions() -> None:
         added_on=added,
         completion_on=finished,
     )
+
+
+def test_a_trailing_slash_names_the_same_directory() -> None:
+    """`/data` and `/data/` are the same directory, and an operator
+    should not have to guess which form qBittorrent stores. Reported by
+    review: `--exclude-save-path /data/` missed a torrent at `/data`.
+    """
+    for prefix in ("/data", "/data/"):
+        included = TorrentFilter(save_path_prefixes=(prefix,))
+        excluded = TorrentFilter(save_paths_excluded=(prefix,))
+
+        for save_path in ("/data", "/data/"):
+            assert _matches(included, save_path=save_path), (prefix, save_path)
+            assert not _matches(excluded, save_path=save_path), (
+                prefix,
+                save_path,
+            )
+
+
+def test_a_trailing_slash_does_not_widen_the_boundary() -> None:
+    """Normalizing the separator must not turn `/data` into a prefix of
+    `/data-old`."""
+    filters = TorrentFilter(save_path_prefixes=("/data/",))
+
+    assert _matches(filters, save_path="/data/movies")
+    assert not _matches(filters, save_path="/data-old")
+    assert not _matches(filters, save_path="/database")
+
+
+def test_a_root_only_prefix_is_refused_rather_than_matching_everything() -> (
+    None
+):
+    """`/` names no meaningful subtree; treating it as one would make a
+    single stray character select the whole instance."""
+    assert not _matches(TorrentFilter(save_path_prefixes=("/",)))
+    assert not _matches(TorrentFilter(save_path_prefixes=("",)))

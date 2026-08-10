@@ -6,8 +6,10 @@ plumbing, and rejection before any qBittorrent call.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
+import pytest
 from typer.testing import CliRunner
 
 from qbit_ops.cli.app import app
@@ -1193,3 +1195,273 @@ def test_completion_serializes_as_a_resolved_window(
 
     assert payload["completed_at"]["min"] is None
     assert payload["completed_at"]["max"].endswith("+00:00")
+
+
+# --- pseudo-trackers must never break a tracker filter ----------------------
+#
+# qBittorrent reports DHT/PeX/LSD as bracketed marker strings inside
+# `torrents_trackers()`, and they can carry status 2 (working) on a real
+# 5.2.3 instance. `normalize_tracker_host` raises `ValueError: Invalid
+# IPv6 URL` on them because of the brackets, so any code matching hosts
+# against qBittorrent-reported URLs has to skip them.
+
+PEX = {"url": "** [PeX] **", "status": 2}
+LSD = {"url": "** [LSD] **", "status": 2}
+DHT_DISABLED = {"url": "** [DHT] **", "status": 0}
+
+REAL_A = "a" * 40
+REAL_B = "b" * 40
+ORPHAN = "c" * 40
+
+
+def _pseudo_tracker_client() -> FakeQbitClient:
+    """One torrent per interesting shape, all with active pseudo-entries."""
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=REAL_A, name="OnOld", category="linux", trackers_count=1
+            ),
+            make_torrent(
+                hash=REAL_B, name="OnNew", category="linux", trackers_count=1
+            ),
+            make_torrent(
+                hash=ORPHAN, name="Orphan", category="linux", trackers_count=0
+            ),
+        ],
+        trackers_by_hash={
+            # Pseudo entries first, so a host match must walk past them.
+            REAL_A: [
+                PEX,
+                LSD,
+                {"url": "https://old.example/announce", "status": 2},
+            ],
+            REAL_B: [
+                PEX,
+                {"url": "https://new.example/announce", "status": 2},
+                LSD,
+            ],
+            ORPHAN: [PEX, LSD, DHT_DISABLED],
+        },
+    )
+
+
+def test_an_active_pseudo_tracker_does_not_break_a_tracker_filter(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Reproduces the reviewer's case: `** [PeX] **` with status 2."""
+    configure_qbit_backend(client=_pseudo_tracker_client())
+
+    assert _names(runner, "--tracker", "old.example") == ["OnOld"]
+    assert _names(runner, "--tracker", "absent.example") == []
+
+
+def test_an_active_pseudo_tracker_does_not_break_an_exclusion(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Exclusions always walk the whole tracker list, so they hit the
+    pseudo entries on every torrent."""
+    configure_qbit_backend(client=_pseudo_tracker_client())
+
+    assert _names(runner, "--exclude-tracker", "old.example") == [
+        "OnNew",
+        "Orphan",
+    ]
+
+
+def test_a_pseudo_tracker_is_never_matched_as_a_host(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A marker names no host, so it can never satisfy `--tracker`."""
+    configure_qbit_backend(client=_pseudo_tracker_client())
+
+    assert _names(runner, "--tracker", "PeX") == []
+    assert _names(runner, "--tracker", "LSD") == []
+
+
+def test_no_tracker_stays_authoritative_on_trackers_count(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--no-tracker` means "no configured tracker", read from the bulk
+    listing. Active PeX/LSD entries must not make an orphan look
+    tracked, nor a tracked torrent look orphaned."""
+    client = _pseudo_tracker_client()
+    configure_qbit_backend(client=client)
+
+    assert _names(runner, "--no-tracker") == ["Orphan"]
+    assert client.torrents_trackers_calls == 0
+
+
+def test_a_pseudo_tracker_does_not_break_a_mutation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Same fixture through a real mutation: the filter must select, not
+    raise, and must stay fail-closed on what it cannot match."""
+    client = _pseudo_tracker_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "pause", "--tracker", "old.example", "--no-dry-run"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.paused_hashes == [[REAL_A]]
+
+
+def test_a_pseudo_tracker_does_not_break_a_tracker_operation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _pseudo_tracker_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "remove",
+            "--tracker",
+            "https://old.example/announce",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert [call[0] for call in client.removed_trackers] == [REAL_A]
+
+
+def test_an_unparsable_tracker_url_does_not_become_an_internal_error(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=REAL_A, name="Broken", trackers_count=1)],
+        trackers_by_hash={
+            REAL_A: [{"url": "http://[not-an-ipv6", "status": 2}]
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app, ["torrents", "list", "--tracker", "real.example"]
+    )
+
+    assert result.exit_code == ExitCode.NO_MATCH
+    assert "Internal error" not in result.stderr
+
+
+def test_a_non_numeric_tracker_status_is_tolerated(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`get_raw_tracker_status` keeps the original type and only `0`
+    (or the literal "disabled") means disabled, so an unrecognized
+    status leaves the endpoint active and matchable."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=REAL_A, name="Odd", trackers_count=1)],
+        trackers_by_hash={
+            REAL_A: [
+                PEX,
+                {"url": "https://odd.example/announce", "status": "working"},
+            ]
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    assert _names(runner, "--tracker", "odd.example") == ["Odd"]
+
+
+# --- one selector, one torrent set, whatever consumes it --------------------
+
+
+def _mutation_target_names(
+    runner: CliRunner, client: FakeQbitClient, *options: str
+) -> list[str]:
+    """Run `torrents pause` for real and map the paused hashes to names."""
+    by_hash = {t["hash"]: t["name"] for t in client.torrents}
+    result = runner.invoke(app, ["torrents", "pause", "--no-dry-run", *options])
+    assert result.exit_code in (ExitCode.SUCCESS, ExitCode.NO_MATCH), (
+        result.stdout,
+        result.stderr,
+    )
+    paused = [h for batch in client.paused_hashes for h in batch]
+    return sorted(by_hash[h] for h in paused)
+
+
+def _inspect_names(runner: CliRunner, *options: str) -> list[str]:
+    result = runner.invoke(
+        app, ["torrents", "inspect", "--format", "json", *options]
+    )
+    assert result.exit_code in (ExitCode.SUCCESS, ExitCode.NO_MATCH), (
+        result.stdout,
+        result.stderr,
+    )
+    return [t["name"] for t in json.loads(result.stdout)["torrents"]]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--tracker", "old.example"],
+        ["--exclude-tracker", "old.example"],
+        ["--no-tracker"],
+        ["--category", "linux", "--exclude-tracker", "new.example"],
+        ["--tracker", "old.example", "--tracker", "new.example"],
+    ],
+    ids=["tracker", "exclude-tracker", "no-tracker", "combined", "repeated"],
+)
+def test_list_inspect_and_mutation_target_the_same_torrents(
+    runner: CliRunner, configure_qbit_backend, options: list[str]
+) -> None:
+    """The invariant the whole pass rests on: the same selector must
+    target the same set regardless of the action consuming it.
+
+    Exercised against active pseudo-trackers, which is where the three
+    paths previously diverged.
+    """
+    configure_qbit_backend(client=_pseudo_tracker_client())
+    listed = sorted(_names(runner, *options))
+    inspected = sorted(_inspect_names(runner, *options))
+
+    mutation_client = _pseudo_tracker_client()
+    configure_qbit_backend(client=mutation_client)
+    mutated = _mutation_target_names(runner, mutation_client, *options)
+
+    assert listed == inspected == mutated
+
+
+def test_a_dry_run_mutation_reports_the_same_matched_count_as_list(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_pseudo_tracker_client())
+    listed = _names(runner, "--exclude-tracker", "old.example")
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--exclude-tracker", "old.example"]
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    matched = re.search(r"^matched\s+(\d+)", result.stdout, re.MULTILINE)
+    assert matched is not None, result.stdout
+    assert int(matched.group(1)) == len(listed)
+
+
+def test_inspect_orders_its_results_by_name(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`torrents inspect --format json` is a public payload, so its
+    order must not depend on whatever order qBittorrent listed."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=REAL_A, name="Zulu", category="linux"),
+                make_torrent(hash=REAL_B, name="alpha", category="linux"),
+                make_torrent(hash=ORPHAN, name="Mike", category="linux"),
+            ],
+            trackers_by_hash={REAL_A: [], REAL_B: [], ORPHAN: []},
+        )
+    )
+
+    assert _inspect_names(runner, "--category", "linux") == [
+        "alpha",
+        "Mike",
+        "Zulu",
+    ]
