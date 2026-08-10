@@ -11,6 +11,7 @@ without pulling in presentation concerns.
 
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Literal
@@ -35,14 +36,17 @@ from qbit_core.shared.selection import (
     EMPTY_TORRENT_FILTER,
     STATE_FILTER_VALUES,
     InvalidTorrentSelectorError,
+    Range,
     Selection,
     SelectionRequest,
+    TagCriterion,
     TorrentFilter,
     TorrentNotFoundError,
     format_category_label,
     resolve_torrent_hash,
     select_from_items,
     validate_selection_request,
+    validate_torrent_filter,
 )
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
@@ -53,11 +57,28 @@ from qbit_core.shared.torrent_states import (
 
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce", "delete"]
 
+# Shared unbounded defaults. `Range` is frozen, so one instance per type
+# is safe to share -- and it keeps a constructor call out of the
+# argument defaults below.
+_UNBOUNDED_FLOAT: Range[float] = Range()
+_UNBOUNDED_INT: Range[int] = Range()
+_UNBOUNDED_TIME: Range[datetime] = Range()
+
 
 def build_torrent_filter(
     *,
     categories: Sequence[str] = (),
+    categories_excluded: Sequence[str] = (),
+    tags_any: Sequence[str] = (),
+    tags_all: Sequence[str] = (),
+    tags_excluded: Sequence[str] = (),
+    save_paths: Sequence[str] = (),
+    save_paths_excluded: Sequence[str] = (),
+    name_contains: Sequence[str] = (),
+    name_excluded: Sequence[str] = (),
+    name_regex: str | None = None,
     states: Sequence[str] = (),
+    states_excluded: Sequence[str] = (),
     tracker: str | None = None,
     completed: bool = False,
     incomplete: bool = False,
@@ -65,55 +86,98 @@ def build_torrent_filter(
     inactive: bool = False,
     stalled: bool = False,
     errored: bool = False,
+    private: bool | None = None,
+    ratio: Range[float] = _UNBOUNDED_FLOAT,
+    size: Range[int] = _UNBOUNDED_INT,
+    progress: Range[float] = _UNBOUNDED_FLOAT,
+    uploaded: Range[int] = _UNBOUNDED_INT,
+    seeding_time: Range[int] = _UNBOUNDED_INT,
+    added: Range[datetime] = _UNBOUNDED_TIME,
 ) -> TorrentFilter:
     """Validate and build a `TorrentFilter` from raw CLI-style inputs.
 
-    Rejects the two locally-provable contradictions (`--completed
-    --incomplete`, `--active --inactive`) and any unrecognized `--state`
-    value before any qBittorrent API call. Every other combination is
-    accepted and combines with AND, even where it can never match
-    anything -- not every zero-match combination is a contradiction.
+    The single validated construction point: it normalizes the token
+    vocabularies (categories, states, tracker host), then hands the
+    assembled filter to `validate_torrent_filter` for every
+    cross-family contradiction. Callers therefore never have to
+    remember to validate separately.
+
+    Bounded families arrive as `Range` objects because turning `10GiB`
+    or `90d` into a number is a presentation concern -- the filter
+    stores resolved values so it stays comparable and serializable.
     """
     if completed and incomplete:
         raise ValueError("Use --completed or --incomplete, not both.")
     if active and inactive:
         raise ValueError("Use --active or --inactive, not both.")
 
-    normalized_categories = tuple(
-        dict.fromkeys(
-            category.strip()
-            for category in categories
-            if category.strip() != ""
-        )
-    )
-
-    normalized_states: list[TorrentStateGroup] = []
-    for state in states:
-        normalized_state = state.strip().lower()
-        if normalized_state not in STATE_FILTER_VALUES:
-            supported = ", ".join(sorted(STATE_FILTER_VALUES))
-            raise ValueError(
-                f"Unknown --state value '{state}'. Supported values: "
-                f"{supported}."
-            )
-        if normalized_state not in normalized_states:
-            normalized_states.append(normalized_state)  # type: ignore[arg-type]
-
-    normalized_tracker: str | None = None
-    if tracker is not None:
-        normalized_tracker = normalize_tracker_host(tracker)
-        if normalized_tracker == "":
-            raise ValueError("--tracker must not be empty or whitespace-only.")
-
-    return TorrentFilter(
-        categories=normalized_categories,
-        states=tuple(normalized_states),
-        tracker=normalized_tracker,
+    filters = TorrentFilter(
+        categories=_normalize_tokens(categories),
+        categories_excluded=_normalize_tokens(categories_excluded),
+        tags=TagCriterion(
+            any_of=_normalize_tokens(tags_any),
+            all_of=_normalize_tokens(tags_all),
+            none_of=_normalize_tokens(tags_excluded),
+        ),
+        save_path_prefixes=_normalize_tokens(save_paths),
+        save_paths_excluded=_normalize_tokens(save_paths_excluded),
+        name_contains=_normalize_tokens(name_contains),
+        name_excluded=_normalize_tokens(name_excluded),
+        name_regex=name_regex,
+        states=_normalize_states(states, option="--state"),
+        states_excluded=_normalize_states(
+            states_excluded, option="--exclude-state"
+        ),
+        tracker=_normalize_tracker_option(tracker),
         completed=True if completed else (False if incomplete else None),
         active=True if active else (False if inactive else None),
         stalled=True if stalled else None,
         errored=True if errored else None,
+        private=private,
+        ratio=ratio,
+        size=size,
+        progress=progress,
+        uploaded=uploaded,
+        seeding_time=seeding_time,
+        added=added,
     )
+    validate_torrent_filter(filters)
+    return filters
+
+
+def _normalize_tokens(values: Sequence[str]) -> tuple[str, ...]:
+    """Strip, drop blanks and de-duplicate while preserving order."""
+    return tuple(
+        dict.fromkeys(value.strip() for value in values if value.strip() != "")
+    )
+
+
+def _normalize_states(
+    states: Sequence[str], *, option: str
+) -> tuple[TorrentStateGroup, ...]:
+    """Validate state tokens against the one public vocabulary."""
+    normalized: list[TorrentStateGroup] = []
+    for state in states:
+        candidate = state.strip().lower()
+        if candidate not in STATE_FILTER_VALUES:
+            supported = ", ".join(sorted(STATE_FILTER_VALUES))
+            raise ValueError(
+                f"Unknown {option} value '{state}'. Supported values: "
+                f"{supported}."
+            )
+        if candidate not in normalized:
+            normalized.append(candidate)  # type: ignore[arg-type]
+    return tuple(normalized)
+
+
+def _normalize_tracker_option(tracker: str | None) -> str | None:
+    """Reduce a tracker option to a bare `host[:port]`, never a URL."""
+    if tracker is None:
+        return None
+    normalized = normalize_tracker_host(tracker)
+    if normalized == "":
+        raise ValueError("--tracker must not be empty or whitespace-only.")
+    return normalized
 
 
 def select_torrents(

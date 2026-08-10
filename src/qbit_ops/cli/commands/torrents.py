@@ -42,21 +42,44 @@ from qbit_ops.cli.selector_options import (
     DeleteHashOption,
     DryRunOption,
     ErroredOption,
+    ExcludeCategoryOption,
+    ExcludeNameOption,
+    ExcludeSavePathOption,
+    ExcludeStateOption,
+    ExcludeTagOption,
     InactiveOption,
     IncompleteOption,
+    NameContainsOption,
+    NameRegexOption,
+    NewerThanOption,
+    OlderThanOption,
     PauseAllOption,
     PauseHashOption,
+    PrivateOption,
+    ProgressMaxOption,
+    ProgressMinOption,
+    RatioMaxOption,
+    RatioMinOption,
     ReannounceAllOption,
     ReannounceHashOption,
     ResumeAllOption,
     ResumeHashOption,
+    SavePathOption,
+    SeededForOption,
+    SizeMaxOption,
+    SizeMinOption,
     StalledOption,
     StartAllOption,
     StartCompletedOption,
     StartHashOption,
     StateOption,
+    TagAllOption,
+    TagOption,
     TrackerOption,
+    UploadedMaxOption,
+    UploadedMinOption,
     VerboseOption,
+    build_filter_from_options,
 )
 from qbit_ops.cli.validation import (
     validate_format_support,
@@ -185,6 +208,28 @@ def list_qbit_torrents(
     inactive: InactiveOption = False,
     stalled: StalledOption = False,
     errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -202,9 +247,19 @@ def list_qbit_torrents(
     """
     validate_format_support("torrents_list", output_format)
     try:
-        filters = build_torrent_filter(
-            categories=category,
-            states=state,
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
             tracker=tracker,
             completed=completed,
             incomplete=incomplete,
@@ -212,6 +267,18 @@ def list_qbit_torrents(
             inactive=inactive,
             stalled=stalled,
             errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
