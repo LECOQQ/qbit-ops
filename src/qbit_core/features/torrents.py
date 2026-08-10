@@ -80,6 +80,8 @@ def build_torrent_filter(
     states: Sequence[str] = (),
     states_excluded: Sequence[str] = (),
     tracker: str | None = None,
+    trackers_excluded: Sequence[str] = (),
+    has_trackers: bool | None = None,
     completed: bool = False,
     incomplete: bool = False,
     active: bool = False,
@@ -129,6 +131,13 @@ def build_torrent_filter(
             states_excluded, option="--exclude-state"
         ),
         tracker=_normalize_tracker_option(tracker),
+        trackers_excluded=tuple(
+            dict.fromkeys(
+                _normalize_tracker_option(excluded) or ""
+                for excluded in trackers_excluded
+            )
+        ),
+        has_trackers=has_trackers,
         completed=True if completed else (False if incomplete else None),
         active=True if active else (False if inactive else None),
         stalled=True if stalled else None,
@@ -171,12 +180,22 @@ def _normalize_states(
 
 
 def _normalize_tracker_option(tracker: str | None) -> str | None:
-    """Reduce a tracker option to a bare `host[:port]`, never a URL."""
+    """Reduce `--tracker` to a bare `host[:port]`, never a URL."""
     if tracker is None:
         return None
-    normalized = normalize_tracker_host(tracker)
+    return _normalize_tracker_host_option(tracker, option="--tracker")
+
+
+def _normalize_tracker_host_option(value: str, *, option: str) -> str:
+    """Reduce one tracker option value to a bare `host[:port]`.
+
+    Accepting a full announce URL is a convenience, but only its host
+    and port survive -- which is also what keeps a passkey out of the
+    filter, and therefore out of every summary built from it.
+    """
+    normalized = normalize_tracker_host(value)
     if normalized == "":
-        raise ValueError("--tracker must not be empty or whitespace-only.")
+        raise ValueError(f"{option} must not be empty or whitespace-only.")
     return normalized
 
 
@@ -208,16 +227,14 @@ def select_torrents(
     # SELECT on the cheap criteria first, INSPECT only the survivors:
     # this ordering is what bounds the `torrents_trackers()` call count.
     candidates = select_torrents_from_items(
-        all_torrents, replace(filters, tracker=None)
+        all_torrents, replace(filters, tracker=None, trackers_excluded=())
     )
     inspection = inspect_trackers(client, candidates, on_progress=on_progress)
 
-    # requires_inspection implies filters.tracker is not None
-    assert filters.tracker is not None
     matched = [
         torrent
         for torrent in inspection.torrents
-        if has_tracker_host(list(torrent.active_tracker_urls), filters.tracker)
+        if _matches_tracker_hosts(list(torrent.active_tracker_urls), filters)
     ]
 
     return (
@@ -227,6 +244,26 @@ def select_torrents(
             request=SelectionRequest(filters=filters),
         ),
         {torrent.snapshot.hash: torrent.tracker_count for torrent in matched},
+    )
+
+
+def _matches_tracker_hosts(
+    active_tracker_urls: list[str], filters: TorrentFilter
+) -> bool:
+    """Apply the tracker-host criteria to one inspected torrent.
+
+    Runs after INSPECT, in memory: `has_tracker_host` interprets a
+    tracker URL, which is feature knowledge the shared stages
+    deliberately do not carry.
+    """
+    if filters.tracker is not None and not has_tracker_host(
+        active_tracker_urls, filters.tracker
+    ):
+        return False
+
+    return not any(
+        has_tracker_host(active_tracker_urls, excluded)
+        for excluded in filters.trackers_excluded
     )
 
 

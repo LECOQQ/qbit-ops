@@ -442,3 +442,133 @@ def test_a_filtered_mutation_costs_one_bulk_call(
     assert result.exit_code == ExitCode.SUCCESS
     assert client.torrents_info_calls == 1
     assert client.torrents_trackers_calls == 0
+
+
+# --- tracker filters: cheap presence vs inspected host ----------------------
+
+
+def _tracked_client() -> FakeQbitClient:
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=TORRENT_A, name="A", category="linux", trackers_count=1
+            ),
+            make_torrent(
+                hash=TORRENT_B, name="B", category="movies", trackers_count=1
+            ),
+            make_torrent(
+                hash="c" * 40, name="C", category="music", trackers_count=0
+            ),
+        ],
+        trackers_by_hash={
+            TORRENT_A: [{"url": "https://old.example/announce", "status": "2"}],
+            TORRENT_B: [{"url": "https://new.example/announce", "status": "2"}],
+            "c" * 40: [],
+        },
+    )
+
+
+def test_no_tracker_costs_no_extra_call(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`trackers_count` ships with the bulk listing, so asking for
+    orphaned torrents never triggers a per-torrent lookup."""
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    assert _names(runner, "--no-tracker") == ["C"]
+    assert client.torrents_trackers_calls == 0
+
+
+def test_exclude_tracker_narrows_after_inspection(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    assert _names(runner, "--exclude-tracker", "old.example") == ["B", "C"]
+
+
+def test_exclude_tracker_inspects_only_cheap_survivors(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The ordering guarantee: a cheap filter narrows first, so the
+    tracker lookup runs once instead of once per torrent."""
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    assert _names(
+        runner, "--category", "linux", "--exclude-tracker", "new.example"
+    ) == ["A"]
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 1
+
+
+def test_tracker_and_exclude_tracker_combine(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    assert _names(
+        runner, "--tracker", "old.example", "--exclude-tracker", "new.example"
+    ) == ["A"]
+
+
+def test_exclude_tracker_accepts_a_full_announce_url_but_keeps_only_the_host(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Only host and port survive, which is what keeps a passkey out of
+    the filter and therefore out of every summary built from it."""
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "torrents",
+            "list",
+            "--exclude-tracker",
+            "https://old.example/announce/SECRET-PASSKEY",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "SECRET-PASSKEY" not in result.stdout
+    assert "SECRET-PASSKEY" not in result.stderr
+
+
+def test_no_tracker_conflicts_with_a_tracker_host(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--no-tracker", "--tracker", "old.example"],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert client.torrents_info_calls == 0
+
+
+def test_exclude_tracker_targets_a_mutation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "torrents",
+            "pause",
+            "--exclude-tracker",
+            "new.example",
+            "--no-dry-run",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.paused_hashes == [[TORRENT_A, "c" * 40]]
