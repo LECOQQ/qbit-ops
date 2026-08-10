@@ -19,9 +19,12 @@ from qbit_core.features.torrents import (
     select_torrents,
     validate_torrent_selector,
 )
+from qbit_core.features.tracker_status import collect_tracker_status
+from qbit_core.shared.inspection import select_and_inspect
 from qbit_core.shared.selection import (
     AmbiguousTorrentHashError,
     InvalidTorrentSelectorError,
+    SelectionRequest,
     TorrentFilter,
     describe_torrent_filter,
     torrent_filter_to_dict,
@@ -1216,15 +1219,9 @@ def test_inspect_torrent_returns_detailed_report() -> None:
                 "query_keys": [],
                 "message": None,
             },
-            {
-                "tracker": "DHT",
-                "health": "disabled",
-                "enabled": False,
-                "scheme": None,
-                "path_shape": None,
-                "query_keys": [],
-                "message": None,
-            },
+        ],
+        "peer_discovery": [
+            {"mechanism": "DHT", "health": "disabled", "enabled": False}
         ],
         "active_tracker_count": 1,
     }
@@ -1413,12 +1410,146 @@ def test_list_torrents_with_trackers_returns_tracker_details() -> None:
                     "status": "2",
                     "disabled": False,
                 },
-                {
-                    "url": "** [DHT] **",
-                    "status": "0",
-                    "disabled": True,
-                },
+            ],
+            "peer_discovery": [
+                {"mechanism": "DHT", "health": "disabled", "enabled": False}
             ],
             "active_tracker_count": 1,
         }
     ]
+
+
+# --- Pseudo-trackers count nowhere, and are reported separately -------------
+#
+# qBittorrent reports DHT/PeX/LSD as `** [X] **` markers, and on 5.2.3
+# every one of them is *working* (status 2) -- so "skip the disabled
+# ones" was never enough. They are peer-discovery mechanisms, not
+# announce endpoints: they must not reach a tracker count, a tracker
+# list, or a selection, on any command. `peer_discovery` is where they
+# belong.
+
+_PEER_DISCOVERY_HASH = "e" * 40
+_REAL_ANNOUNCE = "https://tracker.example/announce"
+
+
+def _client_with_peer_discovery() -> FakeQbitClient:
+    """One torrent announcing to a single real tracker, plus the three
+    pseudo-trackers qBittorrent lists next to it."""
+    return FakeQbitClient(
+        torrents=[
+            {
+                "hash": _PEER_DISCOVERY_HASH,
+                "name": "Torrent A",
+                "state": "uploading",
+                "progress": 1,
+                "trackers_count": 1,
+            }
+        ],
+        trackers_by_hash={
+            _PEER_DISCOVERY_HASH: [
+                {"url": "** [DHT] **", "status": 2},
+                {"url": "** [PeX] **", "status": 2},
+                {"url": "** [LSD] **", "status": 2},
+                {"url": _REAL_ANNOUNCE, "status": 2},
+            ],
+        },
+    )
+
+
+def test_every_tracker_counter_agrees_on_one_tracker() -> None:
+    """The bug this pins down was a *disagreement*: `trackers_count` said
+    1 while four other counters said 4 for the same torrent. They now
+    share one definition, `get_active_tracker_urls`."""
+    listed = list_torrents_with_trackers(_client_with_peer_discovery())[0]
+    inspected = inspect_torrent(
+        _client_with_peer_discovery(), _PEER_DISCOVERY_HASH
+    )
+    assert inspected is not None
+    inspection = select_and_inspect(
+        _client_with_peer_discovery(), SelectionRequest(select_all=True)
+    )
+    status = collect_tracker_status(
+        _client_with_peer_discovery(), build_torrent_filter()
+    )
+
+    assert listed["active_tracker_count"] == 1
+    assert inspected["active_tracker_count"] == 1
+    assert inspection.torrents[0].tracker_count == 1
+    assert [aggregate.endpoint_count for aggregate in status.trackers] == [1]
+    assert [aggregate.identity for aggregate in status.trackers] == [
+        "tracker.example"
+    ]
+
+
+def test_pseudo_trackers_are_reported_under_peer_discovery() -> None:
+    """Excluded from the counts, not hidden: an operator still needs to
+    read "DHT is off" somewhere."""
+    listed = list_torrents_with_trackers(_client_with_peer_discovery())[0]
+    inspected = inspect_torrent(
+        _client_with_peer_discovery(), _PEER_DISCOVERY_HASH
+    )
+    assert inspected is not None
+
+    expected = [
+        {"mechanism": "DHT", "health": "healthy", "enabled": True},
+        {"mechanism": "PeX", "health": "healthy", "enabled": True},
+        {"mechanism": "LSD", "health": "healthy", "enabled": True},
+    ]
+    assert listed["peer_discovery"] == expected
+    assert inspected["peer_discovery"] == expected
+    assert [tracker["url"] for tracker in listed["trackers"]] == [
+        _REAL_ANNOUNCE
+    ]
+    assert [tracker["tracker"] for tracker in inspected["trackers"]] == [
+        "tracker.example"
+    ]
+
+
+def test_a_disabled_mechanism_stays_visible_in_peer_discovery() -> None:
+    client = FakeQbitClient(
+        torrents=[{"hash": _PEER_DISCOVERY_HASH, "name": "Torrent A"}],
+        trackers_by_hash={
+            _PEER_DISCOVERY_HASH: [
+                {"url": "** [DHT] **", "status": 0},
+                {"url": _REAL_ANNOUNCE, "status": 2},
+            ],
+        },
+    )
+
+    listed = list_torrents_with_trackers(client)[0]
+
+    assert listed["peer_discovery"] == [
+        {"mechanism": "DHT", "health": "disabled", "enabled": False}
+    ]
+    assert listed["active_tracker_count"] == 1
+
+
+def test_a_torrent_with_only_pseudo_trackers_has_no_tracker() -> None:
+    """`--no-tracker` must find it: three working pseudo-trackers are
+    still zero trackers."""
+    client = FakeQbitClient(
+        torrents=[
+            {
+                "hash": _PEER_DISCOVERY_HASH,
+                "name": "Torrent A",
+                "trackers_count": 0,
+            }
+        ],
+        trackers_by_hash={
+            _PEER_DISCOVERY_HASH: [
+                {"url": "** [DHT] **", "status": 2},
+                {"url": "** [PeX] **", "status": 2},
+            ],
+        },
+    )
+
+    listed = list_torrents_with_trackers(client)[0]
+    inspection = select_and_inspect(client, SelectionRequest(select_all=True))
+    selection, _ = select_torrents(
+        client, build_torrent_filter(has_trackers=False)
+    )
+
+    assert listed["trackers"] == []
+    assert listed["active_tracker_count"] == 0
+    assert inspection.torrents[0].tracker_count == 0
+    assert [torrent.name for torrent in selection.matched] == ["Torrent A"]

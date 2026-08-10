@@ -975,6 +975,18 @@ def print_torrent_details(report: dict[str, Any]) -> None:
     else:
         typer.echo("Trackers: none")
 
+    # DHT/PeX/LSD are counted nowhere above -- they are peer-discovery
+    # mechanisms, not announce endpoints -- but "DHT is off" is still
+    # something an operator reads here rather than in the WebUI.
+    if report["peer_discovery"]:
+        typer.echo(
+            "Peer discovery: "
+            + ", ".join(
+                f"{entry['mechanism']} {entry['health']}"
+                for entry in report["peer_discovery"]
+            )
+        )
+
 
 def print_filtered_torrent_inspection(
     report: dict[str, Any],

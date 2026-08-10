@@ -1,5 +1,8 @@
 """Test the `trackers status` domain model: collection and aggregation."""
 
+import pytest
+
+from qbit_core.errors import InvalidInputError
 from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.features.tracker_status import (
     TrackerHealth,
@@ -308,6 +311,29 @@ def test_tracker_filter_restricts_the_report_not_the_scan() -> None:
 
     assert [t.identity for t in report.trackers] == ["tracker.example"]
     assert client.torrents_trackers_calls == 2
+
+
+def test_exclude_tracker_fails_explicitly_rather_than_being_dropped() -> None:
+    """`collect_tracker_status` strips the tracker criteria from its cheap
+    pass, because it inspects every selected torrent anyway. `--tracker`
+    survives as a *report* restriction; `--exclude-tracker` has no such
+    meaning here, so it must fail loudly instead of silently selecting
+    more torrents than the operator asked for."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=HASH_A, name="T1")],
+        trackers_by_hash={
+            HASH_A: [{"url": "https://tracker.example/announce", "status": 2}],
+        },
+    )
+
+    with pytest.raises(InvalidInputError) as error:
+        collect_tracker_status(
+            client,
+            build_torrent_filter(trackers_excluded=["tracker.example"]),
+        )
+
+    assert "--exclude-tracker" in str(error.value)
+    assert client.torrents_info_calls == 0
 
 
 def test_tracker_filter_matching_no_identity_is_healthy_empty() -> None:

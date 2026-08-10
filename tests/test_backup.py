@@ -94,11 +94,9 @@ def test_export_instance_state_includes_metadata_and_trackers() -> None:
                     "status": "2",
                     "disabled": False,
                 },
-                {
-                    "url": "** [DHT] **",
-                    "status": "0",
-                    "disabled": True,
-                },
+            ],
+            "peer_discovery": [
+                {"mechanism": "DHT", "health": "disabled", "enabled": False}
             ],
             "active_tracker_count": 1,
             "normalized_trackers": [

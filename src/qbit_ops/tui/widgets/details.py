@@ -56,5 +56,6 @@ class DetailsPanel(VerticalScroll):
                 state.focused_tracker_details,
                 state.focused_details_fetched_at,
                 fetch_failed=state.focused_tracker_fetch_failed,
+                peer_discovery=state.focused_peer_discovery,
             )
         )

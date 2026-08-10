@@ -33,6 +33,7 @@ from qbit_core.features.torrents import (
     TorrentBulkAction,
     apply_bulk_torrent_action,
     build_bulk_action_plan_from_snapshot,
+    get_peer_discovery_details,
     get_safe_tracker_details,
     select_torrents_from_items,
 )
@@ -219,6 +220,10 @@ class TuiState:
     visible: Selection | None = None
     focused_hash: str | None = None
     focused_tracker_details: list[dict[str, Any]] | None = None
+    focused_peer_discovery: list[dict[str, Any]] | None = None
+    """DHT/PeX/LSD for the focused torrent. Reported apart from
+    `focused_tracker_details`: they are peer-discovery mechanisms,
+    never trackers, so they are neither listed nor counted as one."""
     focused_details_fetched_at: datetime | None = None
     focused_tracker_fetch_failed: bool = False
     refreshing: bool = False
@@ -751,6 +756,9 @@ class TuiController:
         # Safe, structural fields only -- never a raw announce URL, path,
         # query value, or unsanitized message (see qbit_core.features.torrents).
         self.state.focused_tracker_details = get_safe_tracker_details(
+            raw_trackers
+        )
+        self.state.focused_peer_discovery = get_peer_discovery_details(
             raw_trackers
         )
         self.state.focused_details_fetched_at = datetime.now(UTC)

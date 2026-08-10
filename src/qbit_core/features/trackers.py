@@ -19,6 +19,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from qbit_core.qbit.fields import (
     get_field_as_string,
     get_raw_tracker_status,
+    is_pseudo_tracker_marker,
+    pseudo_tracker_label,
 )
 from qbit_core.shared.inspection import Inspection, select_and_inspect
 from qbit_core.shared.selection import SelectionRequest
@@ -71,18 +73,6 @@ class SafeTrackerIdentity:
     query_keys: tuple[str, ...]
 
 
-_PSEUDO_TRACKER_PATTERN = re.compile(r"^\*\*\s*\[(.+?)\]\s*\*\*$")
-
-
-def is_pseudo_tracker_marker(url: str) -> bool:
-    """Return whether `url` is a DHT/PeX/LSD pseudo-tracker marker.
-
-    These are not real announce URLs -- never a target for a tracker
-    mutation (add/remove/replace/restore).
-    """
-    return _PSEUDO_TRACKER_PATTERN.match(url.strip()) is not None
-
-
 def describe_tracker_url(url: str) -> SafeTrackerIdentity:
     """Reduce a tracker announce URL to a `SafeTrackerIdentity`.
 
@@ -93,10 +83,10 @@ def describe_tracker_url(url: str) -> SafeTrackerIdentity:
     """
     stripped = url.strip()
 
-    pseudo_match = _PSEUDO_TRACKER_PATTERN.match(stripped)
-    if pseudo_match is not None:
+    pseudo_label = pseudo_tracker_label(stripped)
+    if pseudo_label is not None:
         return SafeTrackerIdentity(
-            identity=pseudo_match.group(1).strip(),
+            identity=pseudo_label,
             scheme=None,
             host=None,
             port=None,

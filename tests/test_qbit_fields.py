@@ -29,6 +29,8 @@ from qbit_core.qbit.fields import (
     get_transfer_rates,
     is_disabled_tracker,
     is_disabled_tracker_status,
+    is_pseudo_tracker_marker,
+    pseudo_tracker_label,
 )
 
 
@@ -212,6 +214,51 @@ def test_get_active_tracker_urls_excludes_disabled_trackers() -> None:
     trackers = [
         {"url": "** [DHT] **", "status": 0},
         {"url": "https://disabled.example/announce", "status": "disabled"},
+        {"url": "https://active.example/announce", "status": 2},
+    ]
+
+    assert get_active_tracker_urls(trackers) == [
+        "https://active.example/announce"
+    ]
+
+
+# --- Pseudo-trackers are not trackers ---------------------------------------
+#
+# qBittorrent lists DHT/PeX/LSD alongside real trackers, as bracketed
+# markers. They are peer-discovery mechanisms: they name no host, cannot
+# be added or removed, and qBittorrent's own `trackers_count` excludes
+# them. So every counter and every selection here excludes them too.
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("** [DHT] **", "DHT"),
+        ("** [PeX] **", "PeX"),
+        ("** [LSD] **", "LSD"),
+        ("  ** [DHT] **  ", "DHT"),
+        ("**[DHT]**", "DHT"),
+        ("https://tracker.example/announce", None),
+        ("", None),
+        ("** [] **", None),
+    ],
+)
+def test_pseudo_tracker_label_reads_the_marker_not_a_url(
+    url: str, expected: str | None
+) -> None:
+    assert pseudo_tracker_label(url) == expected
+    assert is_pseudo_tracker_marker(url) is (expected is not None)
+
+
+def test_get_active_tracker_urls_excludes_working_pseudo_trackers() -> None:
+    """The regression that made tracker filters crash: on 5.2.3 every
+    pseudo-tracker is reported as *working* (status 2), so excluding only
+    the disabled ones let `** [DHT] **` reach `urlsplit` -- and be
+    counted as a tracker."""
+    trackers = [
+        {"url": "** [DHT] **", "status": 2},
+        {"url": "** [PeX] **", "status": 2},
+        {"url": "** [LSD] **", "status": 2},
         {"url": "https://active.example/announce", "status": 2},
     ]
 
