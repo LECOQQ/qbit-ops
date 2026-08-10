@@ -6,6 +6,7 @@ plumbing, and rejection before any qBittorrent call.
 """
 
 import json
+from datetime import UTC, datetime
 
 from typer.testing import CliRunner
 
@@ -1018,3 +1019,92 @@ def test_trackers_status_accepts_the_full_cheap_filter_set(
 
     assert result.exit_code in (0, 1, 2, 3)
     assert "trackers" in json.loads(result.stdout)
+
+
+# --- inactivity through the CLI ---------------------------------------------
+
+
+def _activity_client() -> FakeQbitClient:
+    now = int(datetime.now(tz=UTC).timestamp())
+    old = now - 86_400 * 200
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=TORRENT_A,
+                name="Idle",
+                added_on=old,
+                last_activity=old,
+            ),
+            make_torrent(
+                hash=TORRENT_B,
+                name="Busy",
+                added_on=old,
+                last_activity=now - 60,
+            ),
+        ]
+    )
+
+
+def test_inactive_for_selects_only_what_stopped_transferring(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Both torrents are 200 days old; only one still moves data."""
+    configure_qbit_backend(client=_activity_client())
+
+    assert _names(runner, "--inactive-for", "30d") == ["Idle"]
+    assert _names(runner, "--active-within", "24h") == ["Busy"]
+
+
+def test_inactive_for_differs_from_older_than(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--older-than` is about age, `--inactive-for` about activity; on
+    this fixture the two disagree, which is the reason both exist."""
+    configure_qbit_backend(client=_activity_client())
+
+    assert _names(runner, "--older-than", "30d") == ["Busy", "Idle"]
+    assert _names(runner, "--inactive-for", "30d") == ["Idle"]
+
+
+def test_the_two_activity_bounds_describe_a_usable_window(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """ "Idle for at least a day, but not dead for a month" is a real
+    request, not a contradiction: the bounds simply nest."""
+    configure_qbit_backend(client=_activity_client())
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--inactive-for", "1d", "--active-within", "30d"],
+    )
+
+    assert result.exit_code in (ExitCode.SUCCESS, ExitCode.NO_MATCH)
+
+
+def test_an_inverted_activity_window_is_rejected(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Inactive for 30 days *and* active within the last day cannot both
+    hold -- refused before any API call."""
+    client = _activity_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--inactive-for", "30d", "--active-within", "1d"],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "empty time window" in result.stderr
+    assert client.torrents_info_calls == 0
+
+
+def test_inactivity_serializes_as_a_resolved_window(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_activity_client())
+
+    payload = _filters_payload(runner, "--inactive-for", "30d")
+
+    assert payload["last_activity"]["min"] is None
+    assert payload["last_activity"]["max"].endswith("+00:00")

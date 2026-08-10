@@ -37,6 +37,7 @@ from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
     ActiveOption,
+    ActiveWithinOption,
     CategoryOption,
     CompletedOption,
     DeleteAllOption,
@@ -49,6 +50,7 @@ from qbit_ops.cli.selector_options import (
     ExcludeStateOption,
     ExcludeTagOption,
     ExcludeTrackerOption,
+    InactiveForOption,
     InactiveOption,
     IncompleteOption,
     NameContainsOption,
@@ -128,6 +130,8 @@ def _build_selection_request(
     seeded_for: str | None,
     older_than: str | None,
     newer_than: str | None,
+    inactive_for: str | None,
+    active_within: str | None,
     select_all: bool = False,
 ) -> SelectionRequest:
     """Fold raw CLI selector inputs into one validated `SelectionRequest`.
@@ -172,6 +176,8 @@ def _build_selection_request(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -283,6 +289,8 @@ def list_qbit_torrents(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -334,6 +342,8 @@ def list_qbit_torrents(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -487,6 +497,8 @@ def inspect_qbit_torrent(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -540,6 +552,8 @@ def inspect_qbit_torrent(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -659,6 +673,8 @@ def pause(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     select_all: PauseAllOption = False,
     dry_run: DryRunOption = True,
     verbose: VerboseOption = False,
@@ -702,6 +718,8 @@ def pause(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
             select_all=select_all,
         ),
         dry_run=dry_run,
@@ -746,6 +764,8 @@ def resume(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     select_all: ResumeAllOption = False,
     dry_run: DryRunOption = True,
     verbose: VerboseOption = False,
@@ -789,6 +809,8 @@ def resume(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
             select_all=select_all,
         ),
         dry_run=dry_run,
@@ -833,6 +855,8 @@ def start(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     select_all: StartAllOption = False,
     dry_run: DryRunOption = True,
     verbose: VerboseOption = False,
@@ -876,6 +900,8 @@ def start(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
             select_all=select_all,
         ),
         dry_run=dry_run,
@@ -920,6 +946,8 @@ def reannounce(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     select_all: ReannounceAllOption = False,
     dry_run: DryRunOption = True,
     verbose: VerboseOption = False,
@@ -963,6 +991,8 @@ def reannounce(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
             select_all=select_all,
         ),
         dry_run=dry_run,
@@ -1007,6 +1037,8 @@ def delete(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     select_all: DeleteAllOption = False,
     with_data: Annotated[
         bool,
@@ -1071,6 +1103,8 @@ def delete(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
             select_all=select_all,
         ),
         dry_run=dry_run,

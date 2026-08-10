@@ -370,3 +370,63 @@ def test_different_families_combine_with_and() -> None:
 def test_an_empty_filter_matches_everything() -> None:
     assert _matches(TorrentFilter())
     assert matches_cheap_filters({}, TorrentFilter())
+
+
+# --- inactivity -------------------------------------------------------------
+#
+# `last_activity` semantics were observed on real containers (qBittorrent
+# 4.6.7 and 5.2.3, see docs/SELECTION.md): it is the timestamp of the
+# last byte transferred, it equals `added_on` while nothing has ever
+# transferred, and it does not move on announce, on a state change, or
+# with the passage of time.
+
+
+def test_inactivity_window_uses_last_activity_not_added_on() -> None:
+    """The whole point of the filter: a torrent added long ago but still
+    transferring must not read as inactive."""
+    now = datetime.now(tz=UTC)
+    long_ago = int((now - timedelta(days=200)).timestamp())
+    recent = int((now - timedelta(minutes=5)).timestamp())
+
+    inactive_30d = TorrentFilter(
+        last_activity=Range(max=now - timedelta(days=30))
+    )
+
+    assert not _matches(inactive_30d, added_on=long_ago, last_activity=recent)
+    assert _matches(inactive_30d, added_on=long_ago, last_activity=long_ago)
+
+
+def test_active_within_is_the_other_bound() -> None:
+    now = datetime.now(tz=UTC)
+    recent = int((now - timedelta(hours=1)).timestamp())
+    stale = int((now - timedelta(days=10)).timestamp())
+
+    active_24h = TorrentFilter(
+        last_activity=Range(min=now - timedelta(hours=24))
+    )
+
+    assert _matches(active_24h, last_activity=recent)
+    assert not _matches(active_24h, last_activity=stale)
+
+
+def test_a_torrent_that_never_transferred_counts_from_when_it_was_added() -> (
+    None
+):
+    """Observed on both tested versions: `last_activity` is initialized
+    to `added_on`, so a torrent that never moved a byte becomes inactive
+    as its age grows -- which is the intuitive reading."""
+    now = datetime.now(tz=UTC)
+    added = int((now - timedelta(days=60)).timestamp())
+
+    filters = TorrentFilter(last_activity=Range(max=now - timedelta(days=30)))
+
+    assert _matches(filters, added_on=added, last_activity=added)
+
+
+def test_an_unknown_last_activity_never_matches_an_inactivity_bound() -> None:
+    torrent = _torrent()
+    torrent.pop("last_activity", None)
+    filters = TorrentFilter(last_activity=Range(max=datetime.now(tz=UTC)))
+
+    assert not matches_cheap_filters(torrent, filters)
+    assert not _matches(filters, last_activity=0)

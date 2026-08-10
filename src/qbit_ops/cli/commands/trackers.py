@@ -38,6 +38,7 @@ from qbit_ops.cli.selector_options import (
     STATE_FILTER_HELP,
     TRACKER_FILTER_HELP,
     ActiveOption,
+    ActiveWithinOption,
     CategoryOption,
     CompletedOption,
     ErroredOption,
@@ -46,6 +47,7 @@ from qbit_ops.cli.selector_options import (
     ExcludeSavePathOption,
     ExcludeStateOption,
     ExcludeTagOption,
+    InactiveForOption,
     InactiveOption,
     IncompleteOption,
     NameContainsOption,
@@ -126,6 +128,8 @@ def add_if_present(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -199,6 +203,8 @@ def add_if_present(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -411,6 +417,8 @@ def trackers_status_command(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -468,6 +476,8 @@ def trackers_status_command(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         rendering.print_error(str(error))
@@ -682,6 +692,8 @@ def replace(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
 ) -> None:
     """Replace a tracker on every torrent using it."""
     try:
@@ -721,6 +733,8 @@ def replace(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -840,6 +854,8 @@ def replace_tracker_passkey_command(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
 ) -> None:
     """Replace a tracker's passkey on every torrent using that tracker."""
     try:
@@ -879,6 +895,8 @@ def replace_tracker_passkey_command(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -1036,6 +1054,8 @@ def remove(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
 ) -> None:
     """Remove a tracker from every torrent using it."""
     try:
@@ -1074,6 +1094,8 @@ def remove(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            inactive_for=inactive_for,
+            active_within=active_within,
         )
     except ValueError as error:
         error_boundary.fail(str(error))

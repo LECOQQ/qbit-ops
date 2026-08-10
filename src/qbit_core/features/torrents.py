@@ -97,6 +97,7 @@ def build_torrent_filter(
     uploaded: Range[int] = _UNBOUNDED_INT,
     seeding_time: Range[int] = _UNBOUNDED_INT,
     added: Range[datetime] = _UNBOUNDED_TIME,
+    last_activity: Range[datetime] = _UNBOUNDED_TIME,
 ) -> TorrentFilter:
     """Validate and build a `TorrentFilter` from raw CLI-style inputs.
 
@@ -158,6 +159,7 @@ def build_torrent_filter(
         uploaded=uploaded,
         seeding_time=seeding_time,
         added=added,
+        last_activity=last_activity,
     )
     validate_torrent_filter(filters)
     return filters

@@ -348,6 +348,26 @@ OlderThanOption = Annotated[
         ),
     ),
 ]
+InactiveForOption = Annotated[
+    str | None,
+    typer.Option(
+        "--inactive-for",
+        help=(
+            "Restrict to torrents with no upload or download for at least "
+            f"this long. {DURATION_VALUE_HELP}"
+        ),
+    ),
+]
+ActiveWithinOption = Annotated[
+    str | None,
+    typer.Option(
+        "--active-within",
+        help=(
+            "Restrict to torrents that transferred data within this long. "
+            f"{DURATION_VALUE_HELP}"
+        ),
+    ),
+]
 NewerThanOption = Annotated[
     str | None,
     typer.Option(
@@ -395,6 +415,8 @@ def build_filter_from_options(
     seeded_for: str | None = None,
     older_than: str | None = None,
     newer_than: str | None = None,
+    inactive_for: str | None = None,
+    active_within: str | None = None,
     now: datetime | None = None,
 ) -> TorrentFilter:
     """Parse raw option values and assemble one validated `TorrentFilter`.
@@ -447,16 +469,26 @@ def build_filter_from_options(
         ),
         seeding_time=Range(min=_maybe(parse_duration, seeded_for)),
         added=_resolve_added_window(older_than, newer_than, moment),
+        last_activity=_resolve_relative_window(
+            inactive_for, active_within, moment
+        ),
     )
 
 
 def _resolve_added_window(
     older_than: str | None, newer_than: str | None, moment: datetime
 ) -> Range[datetime]:
-    """Turn relative durations into an absolute window.
+    """Resolve `--older-than` / `--newer-than` against `added_on`."""
+    return _resolve_relative_window(older_than, newer_than, moment)
 
-    `--older-than 90d` means "added before 90 days ago", so it bounds
-    the window's *upper* end; `--newer-than` bounds its lower end. The
+
+def _resolve_relative_window(
+    at_least_ago: str | None, within: str | None, moment: datetime
+) -> Range[datetime]:
+    """Turn a pair of relative durations into an absolute window.
+
+    "at least N ago" bounds the window's *upper* end (the timestamp must
+    be older than that instant); "within N" bounds its lower end. The
     filter stores the resolved instants, keeping the relative form as
     user intent at this boundary -- which is what a saved selector will
     later need to re-resolve rather than freeze.
@@ -464,13 +496,13 @@ def _resolve_added_window(
     return Range(
         min=(
             None
-            if newer_than is None
-            else moment - timedelta(seconds=parse_duration(newer_than))
+            if within is None
+            else moment - timedelta(seconds=parse_duration(within))
         ),
         max=(
             None
-            if older_than is None
-            else moment - timedelta(seconds=parse_duration(older_than))
+            if at_least_ago is None
+            else moment - timedelta(seconds=parse_duration(at_least_ago))
         ),
     )
 

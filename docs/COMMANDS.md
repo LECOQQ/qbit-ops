@@ -143,6 +143,7 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | `--uploaded-min` / `--uploaded-max` | same size syntax |
 | `--seeded-for` | `30d` — seeded for **at least** this long |
 | `--older-than` / `--newer-than` | `90d`, `12h` — based on when the torrent was added |
+| `--inactive-for` / `--active-within` | `90d`, `24h` — based on the last byte transferred |
 
 **Trackers**
 
@@ -185,6 +186,15 @@ qbit-ops torrents list --incomplete --progress-min 99%
   `365d`.
 - **Percentages**: `95%`, or a bare fraction between `0` and `1`. A bare
   `95` is refused, since it could mean either.
+
+### Age vs inactivity
+
+`--older-than` asks how long ago a torrent was **added**;
+`--inactive-for` asks how long since it last **moved data**. A torrent
+added two years ago and still seeding is old but not inactive.
+
+A torrent that never transferred anything counts from the day it was
+added, so it becomes inactive as it ages.
 
 ### Two selectors that stand apart
 
