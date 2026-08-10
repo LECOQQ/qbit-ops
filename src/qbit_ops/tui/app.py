@@ -616,7 +616,7 @@ class QbitOpsTuiApp(App[None]):
         summary = self.query_one("#filter-summary", FilterSummary)
         state = self.controller.state
         visible = state.visible
-        total = state.torrent_snapshot.scanned if state.torrent_snapshot else 0
+        total = state.total_torrents or 0
         shown = len(visible.matched) if visible is not None else 0
 
         counts_line = f"{shown:,} shown / {total:,}"
@@ -1194,7 +1194,7 @@ class QbitOpsTuiApp(App[None]):
             return
         command_bar.set_search_state(text)
         state = self.controller.state
-        total = state.torrent_snapshot.scanned if state.torrent_snapshot else 0
+        total = state.total_torrents or 0
         footer_total.set_total(total)
 
     def _refresh_search_command_bar_if_active(self) -> None:

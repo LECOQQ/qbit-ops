@@ -43,8 +43,10 @@ from qbit_core.shared.selection import (
     TorrentFilter,
     TorrentNotFoundError,
     format_category_label,
+    matches_cheap_filters,
     resolve_torrent_hash,
     select_from_items,
+    torrent_filter_to_dict,
     validate_selection_request,
     validate_torrent_filter,
 )
@@ -913,6 +915,69 @@ def _build_torrent_details(
         "trackers": trackers,
         "active_tracker_count": active_tracker_count,
     }
+
+
+def inspect_filtered_torrents(
+    client: Any,
+    filters: TorrentFilter,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    """Build the detailed report of every torrent matching a filter.
+
+    The multi-torrent counterpart of `inspect_torrent`, with the same
+    secret-free per-torrent shape -- `get_safe_tracker_details`, never
+    the raw announce URLs `backup export` legitimately carries.
+
+    Costs one `torrents_info()` plus one `torrents_trackers()` per
+    torrent surviving the cheap filters. Tracker-host criteria are
+    applied afterward, against the safe identities already collected,
+    so they add no call of their own.
+    """
+    all_torrents = list(client.torrents_info())
+    candidates = [
+        torrent
+        for torrent in all_torrents
+        if matches_cheap_filters(torrent, filters)
+    ]
+
+    reports: list[dict[str, Any]] = []
+    for index, torrent in enumerate(candidates, start=1):
+        details = _build_torrent_details(
+            client, torrent, get_field_as_string(torrent, "hash")
+        )
+        if on_progress is not None:
+            on_progress(index, len(candidates))
+        if _matches_tracker_identities(details["trackers"], filters):
+            reports.append(details)
+
+    return {
+        "filters": torrent_filter_to_dict(filters),
+        "summary": {"scanned": len(all_torrents), "matched": len(reports)},
+        "torrents": reports,
+    }
+
+
+def _matches_tracker_identities(
+    tracker_details: list[dict[str, Any]], filters: TorrentFilter
+) -> bool:
+    """Apply the tracker-host criteria to already-collected safe details.
+
+    Compares normalized `host[:port]` identities, the same value
+    `--tracker` is reduced to, so no raw announce URL is needed.
+    """
+    identities = {
+        details["tracker"] for details in tracker_details if details["enabled"]
+    }
+
+    if filters.trackers and not (identities & set(filters.trackers)):
+        return False
+    if identities & set(filters.trackers_excluded):
+        return False
+    if filters.has_trackers is not None and (
+        bool(identities) != filters.has_trackers
+    ):
+        return False
+    return True
 
 
 def _score_name_match(name: str, query: str) -> float:

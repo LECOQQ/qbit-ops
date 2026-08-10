@@ -19,14 +19,7 @@ from qbit_core.features.status import (
     build_status_snapshot_from_data,
     collect_instance_stats,
 )
-from qbit_core.features.torrents import (
-    select_torrents_from_items,
-)
 from qbit_core.qbit.client import create_qbit_client as _create_qbit_client
-from qbit_core.shared.selection import (
-    Selection,
-    TorrentFilter,
-)
 from qbit_ops.config import load_qbit_config
 
 __all__ = [
@@ -78,16 +71,23 @@ def classify_recoverable_qbit_failure(
 class TuiRefreshResult:
     """One TUI periodic refresh's collected data.
 
-    `raw_torrents` is the raw `torrents_info()` result, kept alongside
-    the unfiltered `torrents` selection so the TUI controller can
-    re-apply a `TorrentFilter` in memory without a second API call, and
-    so a bulk plan can be built against an already-fetched snapshot with
-    zero API calls (`build_bulk_action_plan_from_snapshot`).
+    `raw_torrents` is the raw `torrents_info()` result. It is the only
+    torrent payload carried, and it is carried raw on purpose: the
+    controller re-applies a `TorrentFilter` in memory without a second
+    API call, and the composable filters read fields (`tags`,
+    `save_path`, `uploaded`, `seeding_time`, `added_on`, `private`)
+    that `TorrentSnapshot` deliberately does not hold. It also feeds
+    `build_bulk_action_plan_from_snapshot`'s zero-API planning path.
+
+    `total_torrents` is the instance-wide count the Overview shows --
+    kept as a plain integer rather than an unfiltered `Selection`,
+    which would rebuild a snapshot per torrent on every refresh cycle
+    for a number and a null check.
     """
 
     status: StatusSnapshot
     instance_stats: InstanceStats
-    torrents: Selection  # unfiltered (every torrent)
+    total_torrents: int
     raw_torrents: list[Any]
 
 
@@ -121,11 +121,10 @@ def collect_tui_refresh(
     )
     # status.host is already credential-redacted; never pass the raw host.
     instance_stats = collect_instance_stats(client, instance_id=status.host)
-    selection = select_torrents_from_items(torrents, TorrentFilter())
 
     return TuiRefreshResult(
         status=status,
         instance_stats=instance_stats,
-        torrents=selection,
+        total_torrents=len(torrents),
         raw_torrents=torrents,
     )
