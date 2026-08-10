@@ -24,6 +24,7 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_core.qbit.fields import (
+    get_active_tracker_urls,
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
@@ -376,7 +377,11 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     for torrent in all_torrents:
         current_hash = get_field_as_string(torrent, "hash")
         if current_hash.lower() == resolved.hash.lower():
-            return _build_torrent_details(client, torrent, resolved.hash)
+            return _build_torrent_details(
+                client.torrents_trackers(resolved.hash),
+                torrent,
+                resolved.hash,
+            )
 
     return None  # pragma: no cover - resolved hash always exists
 
@@ -892,18 +897,22 @@ def _bulk_action_skip_reason(
 
 
 def _build_torrent_details(
-    client: Any,
+    raw_trackers: Any,
     torrent: Any,
     torrent_hash: str,
 ) -> dict[str, Any]:
-    """Build a detailed torrent report with tracker information.
+    """Build a detailed torrent report from already-fetched trackers.
+
+    Takes the raw tracker payload rather than a client so one
+    `torrents_trackers()` call can serve both the tracker selection
+    decision and the report -- and so the two can never disagree.
 
     Uses `get_safe_tracker_details`, not `_get_tracker_details`: this
     feeds `torrents inspect`, an ordinary read command, so trackers must
     be secret-free. Raw announce URLs are only ever returned by
     `list_torrents_with_trackers`, for the sensitive `backup export`.
     """
-    trackers = get_safe_tracker_details(client.torrents_trackers(torrent_hash))
+    trackers = get_safe_tracker_details(raw_trackers)
     active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])
 
     return {
@@ -932,10 +941,15 @@ def inspect_filtered_torrents(
     secret-free per-torrent shape -- `get_safe_tracker_details`, never
     the raw announce URLs `backup export` legitimately carries.
 
+    Selection is delegated to exactly the same two steps `torrents list`
+    and every mutation use: `matches_cheap_filters`, then
+    `_matches_tracker_hosts` over the inspected trackers. Reproducing
+    either of them here would let the same selector target different
+    torrents depending on the command consuming it.
+
     Costs one `torrents_info()` plus one `torrents_trackers()` per
-    torrent surviving the cheap filters. Tracker-host criteria are
-    applied afterward, against the safe identities already collected,
-    so they add no call of their own.
+    torrent surviving the cheap filters. Results are ordered by
+    canonical name, like every other selection.
     """
     all_torrents = list(client.torrents_info())
     candidates = [
@@ -943,45 +957,31 @@ def inspect_filtered_torrents(
         for torrent in all_torrents
         if matches_cheap_filters(torrent, filters)
     ]
+    candidates.sort(
+        key=lambda item: get_field_as_string(item, "name").casefold()
+    )
 
     reports: list[dict[str, Any]] = []
     for index, torrent in enumerate(candidates, start=1):
-        details = _build_torrent_details(
-            client, torrent, get_field_as_string(torrent, "hash")
-        )
+        torrent_hash = get_field_as_string(torrent, "hash")
+        raw_trackers = list(client.torrents_trackers(torrent_hash))
         if on_progress is not None:
             on_progress(index, len(candidates))
-        if _matches_tracker_identities(details["trackers"], filters):
-            reports.append(details)
+
+        if not _matches_tracker_hosts(
+            get_active_tracker_urls(raw_trackers), filters
+        ):
+            continue
+
+        reports.append(
+            _build_torrent_details(raw_trackers, torrent, torrent_hash)
+        )
 
     return {
         "filters": torrent_filter_to_dict(filters),
         "summary": {"scanned": len(all_torrents), "matched": len(reports)},
         "torrents": reports,
     }
-
-
-def _matches_tracker_identities(
-    tracker_details: list[dict[str, Any]], filters: TorrentFilter
-) -> bool:
-    """Apply the tracker-host criteria to already-collected safe details.
-
-    Compares normalized `host[:port]` identities, the same value
-    `--tracker` is reduced to, so no raw announce URL is needed.
-    """
-    identities = {
-        details["tracker"] for details in tracker_details if details["enabled"]
-    }
-
-    if filters.trackers and not (identities & set(filters.trackers)):
-        return False
-    if identities & set(filters.trackers_excluded):
-        return False
-    if filters.has_trackers is not None and (
-        bool(identities) != filters.has_trackers
-    ):
-        return False
-    return True
 
 
 def _score_name_match(name: str, query: str) -> float:

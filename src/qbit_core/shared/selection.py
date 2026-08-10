@@ -24,6 +24,7 @@ from qbit_core.qbit.fields import (
     get_field_as_string,
     get_field_as_tag_list,
     get_optional_bool,
+    get_optional_field,
     get_optional_float,
     get_optional_int,
 )
@@ -32,7 +33,6 @@ from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     build_torrent_snapshot,
     classify_torrent_state,
-    is_completed_torrent,
     is_stopped_state,
 )
 
@@ -635,36 +635,43 @@ def _matches_name(torrent: Any, filters: TorrentFilter) -> bool:
 def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
     """State group, its exclusions, and the derived state aliases.
 
-    `completed`/`active`/`stalled`/`errored` keep their long-standing
-    reading, coercion included: `--active` means "not stopped", not "is
-    transferring", and `--completed` reads a missing progress as `0`.
-    Only the new bounded predicates apply the unknown-never-matches
-    rule -- changing these would be a silent contract change.
+    `--active` keeps its long-standing meaning of "not stopped" rather
+    than "is transferring" -- that is a documented contract, unchanged.
+
+    What *is* enforced here is the unknown-never-matches rule: a torrent
+    whose `state` or `progress` qBittorrent did not report satisfies no
+    criterion built on it. Coercing an absent `progress` to `0` made
+    `--incomplete` match such a torrent, and an absent `state` made
+    `--active` match it -- both widening a destructive selection with a
+    value nobody ever reported.
+
+    Exclusions stay "the criterion did not match, so nothing is
+    excluded": an unknown state is not proof of the state being refused.
     """
-    state = get_field_as_string(torrent, "state")
-    group = classify_torrent_state(state)
+    state = _known_state(torrent)
+    group = None if state is None else classify_torrent_state(state)
+    progress = get_optional_float(torrent, "progress")
 
     if filters.states and group not in filters.states:
         return False
-    if filters.states_excluded and group in filters.states_excluded:
+    if group is not None and group in filters.states_excluded:
         return False
 
-    if (
-        filters.completed is not None
-        and is_completed_torrent(torrent) != filters.completed
-    ):
-        return False
+    if filters.completed is not None:
+        if progress is None or (progress >= 1.0) != filters.completed:
+            return False
 
-    if filters.active is not None and (not is_stopped_state(state)) != (
-        filters.active
-    ):
-        return False
+    if filters.active is not None:
+        if state is None or (not is_stopped_state(state)) != filters.active:
+            return False
 
-    if filters.stalled is not None and (group == "stalled") != filters.stalled:
-        return False
+    if filters.stalled is not None:
+        if group is None or (group == "stalled") != filters.stalled:
+            return False
 
-    if filters.errored is not None and (group == "errored") != filters.errored:
-        return False
+    if filters.errored is not None:
+        if group is None or (group == "errored") != filters.errored:
+            return False
 
     if filters.private is not None and (
         get_optional_bool(torrent, "private") is not filters.private
@@ -672,6 +679,19 @@ def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
         return False
 
     return True
+
+
+def _known_state(torrent: Any) -> str | None:
+    """Return the reported raw state, or `None` when there is none.
+
+    A blank state is treated as absent: qBittorrent never reports one,
+    so an empty string means the field was missing or null rather than
+    naming a real state.
+    """
+    raw = get_optional_field(torrent, "state")
+    if not isinstance(raw, str) or raw.strip() == "":
+        return None
+    return raw
 
 
 def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
@@ -759,15 +779,22 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 def _is_under_path(save_path: str, prefix: str) -> bool:
     """Return whether `save_path` is `prefix` or lives beneath it.
 
-    Case-sensitive, and no normalization beyond a trailing separator:
-    these are real POSIX paths, and rewriting them would make the filter
-    disagree with what qBittorrent reports. The separator check is what
-    stops `/downloads` from matching `/downloads-old`.
+    Case-sensitive, and the only normalization is a trailing separator
+    on either side: `/data` and `/data/` name the same directory, and an
+    operator should not have to guess which form qBittorrent stores.
+    Nothing else is rewritten -- these are real POSIX paths, and
+    resolving or case-folding them would make the filter disagree with
+    what qBittorrent reports.
+
+    The separator check is what stops `/downloads` from matching
+    `/downloads-old`.
     """
-    if prefix == "":
-        return False
     boundary = prefix.rstrip("/")
-    return save_path == prefix or save_path.startswith(f"{boundary}/")
+    if boundary == "":
+        # `/` (or a blank prefix) names no meaningful subtree to filter on.
+        return False
+    target = save_path.rstrip("/")
+    return target == boundary or target.startswith(f"{boundary}/")
 
 
 def category_matches(torrent_category: str, requested_category: str) -> bool:

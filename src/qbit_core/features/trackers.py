@@ -446,10 +446,35 @@ def has_tracker_host(tracker_urls: list[str], normalized_host: str) -> bool:
     """Return whether any tracker URL's host[:port] matches a normalized host.
 
     `normalized_host` must already be `normalize_tracker_host`'s output.
+
+    Entries that cannot name a host -- qBittorrent's DHT/PeX/LSD markers,
+    or anything unparsable -- simply do not match. They are skipped
+    rather than raising: an instance reporting an *active* `** [PeX] **`
+    endpoint must never turn a filter into an internal error, and
+    "not this host" is the conservative reading for the inclusion
+    direction.
     """
     return any(
-        normalize_tracker_host(url) == normalized_host for url in tracker_urls
+        tracker_host_or_none(url) == normalized_host for url in tracker_urls
     )
+
+
+def tracker_host_or_none(url: str) -> str | None:
+    """Reduce a tracker URL to `host[:port]`, or `None` when it has none.
+
+    `None` covers the three cases where a URL cannot name a host: a
+    DHT/PeX/LSD pseudo-tracker marker, an unparsable value, and an empty
+    result. Code matching against qBittorrent-reported URLs must use
+    this rather than `normalize_tracker_host`, which raises by design
+    when validating an operator-supplied value.
+    """
+    if is_pseudo_tracker_marker(url):
+        return None
+    try:
+        normalized = normalize_tracker_host(url)
+    except ValueError:
+        return None
+    return normalized or None
 
 
 def list_tracker_usage(
