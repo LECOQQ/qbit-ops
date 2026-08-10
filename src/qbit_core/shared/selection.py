@@ -276,6 +276,7 @@ class TorrentFilter:
     uploaded: Range[int] = Range()
     seeding_time: Range[int] = Range()
     added: Range[datetime] = Range()
+    completed_at: Range[datetime] = Range()
     last_activity: Range[datetime] = Range()
 
     # --- trackers
@@ -392,6 +393,12 @@ def validate_torrent_filter(filters: TorrentFilter) -> None:
         raise InvalidInputError(
             "--inactive-for and --active-within describe an empty time "
             "window; no torrent can satisfy both."
+        )
+
+    if filters.completed_at.is_impossible:
+        raise InvalidInputError(
+            "--completed-before and --completed-within describe an empty "
+            "time window; no torrent can satisfy both."
         )
 
     for included, excluded, option, exclude_option in _EXCLUSION_OPTIONS:
@@ -711,6 +718,22 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
         if not filters.added.contains(added_at):
             return False
 
+    if not filters.completed_at.is_unset:
+        # `-1` is qBittorrent's "never completed" marker, observed on
+        # every tested version -- so an unfinished torrent is unknown
+        # here and matches no completion bound, rather than pretending
+        # to have finished at the epoch.
+        completed_on = get_optional_int(
+            torrent, "completion_on", sentinels=_UNSET_TIMESTAMP
+        )
+        finished_at = (
+            None
+            if completed_on is None
+            else datetime.fromtimestamp(completed_on, tz=UTC)
+        )
+        if not filters.completed_at.contains(finished_at):
+            return False
+
     if not filters.last_activity.is_unset:
         last_activity = get_optional_int(
             torrent, "last_activity", sentinels=_UNSET_TIMESTAMP
@@ -814,6 +837,7 @@ def torrent_filter_to_dict(filters: TorrentFilter) -> dict[str, Any]:
         "uploaded": _range_to_dict(filters.uploaded),
         "seeding_time": _range_to_dict(filters.seeding_time),
         "added": _range_to_dict(filters.added),
+        "completed_at": _range_to_dict(filters.completed_at),
         "last_activity": _range_to_dict(filters.last_activity),
         "tracker": filters.trackers[0] if len(filters.trackers) == 1 else None,
         "trackers": list(filters.trackers),
@@ -880,6 +904,7 @@ def describe_torrent_filter(filters: TorrentFilter) -> str:
     _append_bounds(parts, "uploaded", filters.uploaded)
     _append_bounds(parts, "seeding-time", filters.seeding_time)
     _append_bounds(parts, "added", filters.added)
+    _append_bounds(parts, "completed-at", filters.completed_at)
     _append_bounds(parts, "last-activity", filters.last_activity)
 
     _append_values(parts, "tracker", filters.trackers)

@@ -1108,3 +1108,88 @@ def test_inactivity_serializes_as_a_resolved_window(
 
     assert payload["last_activity"]["min"] is None
     assert payload["last_activity"]["max"].endswith("+00:00")
+
+
+# --- completion date through the CLI ----------------------------------------
+
+
+def _completion_client() -> FakeQbitClient:
+    now = int(datetime.now(tz=UTC).timestamp())
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=TORRENT_A,
+                name="Old",
+                progress=1.0,
+                completion_on=now - 86_400 * 200,
+            ),
+            make_torrent(
+                hash=TORRENT_B,
+                name="Fresh",
+                progress=1.0,
+                completion_on=now - 86_400 * 2,
+            ),
+            make_torrent(
+                hash="c" * 40,
+                name="Unfinished",
+                state="downloading",
+                progress=0.4,
+                completion_on=-1,
+            ),
+        ]
+    )
+
+
+def test_completion_window_splits_finished_torrents_by_date(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_completion_client())
+
+    assert _names(runner, "--completed-before", "30d") == ["Old"]
+    assert _names(runner, "--completed-within", "7d") == ["Fresh"]
+
+
+def test_an_unfinished_torrent_is_never_picked_by_a_completion_bound(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`completion_on == -1` means "never finished"; it must not read as
+    a 1970 completion, which would sweep in-progress downloads into a
+    cleanup selection."""
+    configure_qbit_backend(client=_completion_client())
+
+    assert "Unfinished" not in _names(runner, "--completed-before", "30d")
+    assert "Unfinished" not in _names(runner, "--completed-within", "365d")
+
+
+def test_an_inverted_completion_window_is_rejected(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _completion_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "torrents",
+            "list",
+            "--completed-before",
+            "30d",
+            "--completed-within",
+            "1d",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "empty" in result.stderr
+    assert client.torrents_info_calls == 0
+
+
+def test_completion_serializes_as_a_resolved_window(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_completion_client())
+
+    payload = _filters_payload(runner, "--completed-before", "30d")
+
+    assert payload["completed_at"]["min"] is None
+    assert payload["completed_at"]["max"].endswith("+00:00")

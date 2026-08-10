@@ -34,6 +34,7 @@ def _torrent(**overrides: Any) -> dict[str, Any]:
         "uploaded": 9_400_000_000,
         "seeding_time": 86_400 * 30,
         "added_on": 1_700_000_000,
+        "completion_on": 1_700_000_100,
         "trackers_count": 2,
         "private": True,
     }
@@ -430,3 +431,66 @@ def test_an_unknown_last_activity_never_matches_an_inactivity_bound() -> None:
 
     assert not matches_cheap_filters(torrent, filters)
     assert not _matches(filters, last_activity=0)
+
+
+# --- completion date --------------------------------------------------------
+#
+# `completion_on` is `-1` for a torrent that never finished downloading,
+# observed on qBittorrent 4.6.7 and 5.2.3 (see docs/SELECTION.md). That
+# sentinel is what makes this filter safe to expose.
+
+
+def test_completion_window_selects_on_when_the_download_finished() -> None:
+    now = datetime.now(tz=UTC)
+    long_ago = int((now - timedelta(days=200)).timestamp())
+    recent = int((now - timedelta(days=2)).timestamp())
+
+    old_completions = TorrentFilter(
+        completed_at=Range(max=now - timedelta(days=30))
+    )
+
+    assert _matches(old_completions, completion_on=long_ago)
+    assert not _matches(old_completions, completion_on=recent)
+
+
+def test_completed_within_is_the_other_bound() -> None:
+    now = datetime.now(tz=UTC)
+    recent = int((now - timedelta(days=2)).timestamp())
+    long_ago = int((now - timedelta(days=200)).timestamp())
+
+    fresh = TorrentFilter(completed_at=Range(min=now - timedelta(days=7)))
+
+    assert _matches(fresh, completion_on=recent)
+    assert not _matches(fresh, completion_on=long_ago)
+
+
+def test_an_unfinished_torrent_matches_no_completion_bound() -> None:
+    """`-1` means "never completed", so an in-progress download is
+    unknown here -- never a torrent that finished at the epoch."""
+    now = datetime.now(tz=UTC)
+
+    assert not _matches(
+        TorrentFilter(completed_at=Range(max=now)), completion_on=-1
+    )
+    assert not _matches(
+        TorrentFilter(completed_at=Range(min=now - timedelta(days=1))),
+        completion_on=-1,
+    )
+
+
+def test_completion_and_age_are_different_questions() -> None:
+    """A torrent added long ago can have finished yesterday."""
+    now = datetime.now(tz=UTC)
+    added = int((now - timedelta(days=200)).timestamp())
+    finished = int((now - timedelta(days=1)).timestamp())
+
+    assert _matches(
+        TorrentFilter(added=Range(max=now - timedelta(days=30))),
+        added_on=added,
+        completion_on=finished,
+    )
+    assert not _matches(
+        TorrentFilter(completed_at=Range(max=now - timedelta(days=30))),
+        added_on=added,
+        completion_on=finished,
+    )

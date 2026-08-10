@@ -40,7 +40,9 @@ from qbit_ops.cli.selector_options import (
     ActiveOption,
     ActiveWithinOption,
     CategoryOption,
+    CompletedBeforeOption,
     CompletedOption,
+    CompletedWithinOption,
     ErroredOption,
     ExcludeCategoryOption,
     ExcludeNameOption,
@@ -128,6 +130,8 @@ def add_if_present(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
     dry_run: Annotated[
@@ -203,6 +207,8 @@ def add_if_present(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
             inactive_for=inactive_for,
             active_within=active_within,
         )
@@ -417,6 +423,8 @@ def trackers_status_command(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
     verbose: Annotated[
@@ -476,6 +484,8 @@ def trackers_status_command(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
             inactive_for=inactive_for,
             active_within=active_within,
         )
@@ -692,6 +702,8 @@ def replace(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
 ) -> None:
@@ -733,6 +745,8 @@ def replace(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
             inactive_for=inactive_for,
             active_within=active_within,
         )
@@ -854,6 +868,8 @@ def replace_tracker_passkey_command(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
 ) -> None:
@@ -895,6 +911,8 @@ def replace_tracker_passkey_command(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
             inactive_for=inactive_for,
             active_within=active_within,
         )
@@ -1054,6 +1072,8 @@ def remove(
     seeded_for: SeededForOption = None,
     older_than: OlderThanOption = None,
     newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
 ) -> None:
@@ -1094,6 +1114,8 @@ def remove(
             seeded_for=seeded_for,
             older_than=older_than,
             newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
             inactive_for=inactive_for,
             active_within=active_within,
         )
