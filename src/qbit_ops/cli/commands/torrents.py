@@ -220,7 +220,7 @@ def list_qbit_torrents(
         output_format=output_format,
         interactive=rendering.is_interactive_terminal(),
     )
-    if filters.requires_tracker_data:
+    if filters.requires_inspection:
         progress_cm = rendering.transient_progress(
             "Scanning torrent trackers...", enabled=enabled
         )

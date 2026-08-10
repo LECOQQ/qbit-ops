@@ -131,7 +131,7 @@ def select_and_inspect(
     is an interpretation of the inspection result, so it belongs to the
     caller, after this returns.
     """
-    if request.requires_tracker_data:
+    if request.requires_inspection:
         raise ValueError(
             "select_and_inspect cannot resolve a tracker filter itself; "
             "narrow the returned Inspection instead."

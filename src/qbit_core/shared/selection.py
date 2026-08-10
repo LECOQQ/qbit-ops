@@ -13,11 +13,13 @@ holds; fetching them is the caller's job (`features.torrents`), and so
 is anything needing a per-torrent tracker lookup (the INSPECT stage).
 """
 
-from collections.abc import Iterable, Sequence
+import re
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
-from qbit_core.errors import QbitCoreError
+from qbit_core.errors import InvalidInputError, QbitCoreError
 from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
@@ -129,41 +131,157 @@ def resolve_torrent_hash(
 
 
 @dataclass(frozen=True)
+class Range[T: (int, float, datetime)]:
+    """An inclusive bound on both sides; `None` means unconstrained.
+
+    One type for every bounded family -- ratio, size, progress,
+    transferred bytes, seeding time, added date -- so adding a bounded
+    filter never means inventing a comparison rule.
+    """
+
+    min: T | None = None
+    max: T | None = None
+
+    @property
+    def is_unset(self) -> bool:
+        """Return whether this range constrains nothing."""
+        return self.min is None and self.max is None
+
+    @property
+    def is_impossible(self) -> bool:
+        """Return whether `min > max` makes this range unsatisfiable."""
+        return (
+            self.min is not None
+            and self.max is not None
+            and (self.min > self.max)
+        )
+
+    def contains(self, value: T | None) -> bool:
+        """Return whether a known value falls inside the bounds.
+
+        `None` means the source field was absent, null, unparsable or a
+        qBittorrent "unset" sentinel. It never satisfies a bound that
+        was actually posed: coercing an unknown size to `0` would make
+        `--size-max` match torrents nobody meant to target. An unset
+        range still matches everything, unknown value included -- no
+        bound was asked for.
+        """
+        if self.is_unset:
+            return True
+        if value is None:
+            return False
+        if self.min is not None and value < self.min:
+            return False
+        if self.max is not None and value > self.max:
+            return False
+        return True
+
+
+@dataclass(frozen=True)
+class TagCriterion:
+    """Set membership over a torrent's tags, in the three useful shapes.
+
+    A torrent carries several tags, so "has any of" and "has all of" are
+    genuinely different questions -- unlike category or state, which are
+    single-valued and need only `any_of`. Expressing both with three
+    explicit fields keeps the model free of a boolean expression tree.
+
+    Comparison is case-insensitive, matching how categories are already
+    compared.
+    """
+
+    any_of: tuple[str, ...] = ()
+    all_of: tuple[str, ...] = ()
+    none_of: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether this criterion constrains nothing."""
+        return not (self.any_of or self.all_of or self.none_of)
+
+    def matches(self, tags: Collection[str]) -> bool:
+        """Evaluate the criterion against a torrent's tags."""
+        present = {tag.casefold() for tag in tags}
+
+        if self.any_of and not any(
+            tag.casefold() in present for tag in self.any_of
+        ):
+            return False
+        if not all(tag.casefold() in present for tag in self.all_of):
+            return False
+        if any(tag.casefold() in present for tag in self.none_of):
+            return False
+        return True
+
+
+@dataclass(frozen=True)
 class TorrentFilter:
     """Structured, Typer/Rich-free torrent selection criteria.
 
-    Repeated `--category`/`--state` values combine with OR within the
-    same field; different fields combine with AND. `tracker`, when set,
-    is always pre-normalized to `host` or `host:port` -- never a full
-    URL, so a passkey can never reach this model. `categories` holds raw
-    requested tokens; `states` holds only `STATE_FILTER_VALUES` values.
+    Composition: repeated values inside one field combine with OR,
+    different fields combine with AND, and every `*_excluded` field is
+    an AND NOT applied after inclusion. Bounded fields are `Range`
+    objects, inclusive on both sides.
+
+    `tracker`, when set, is always pre-normalized to `host` or
+    `host:port` -- never a full URL, so a passkey can never reach this
+    model. `added` holds *resolved* datetimes: a relative duration like
+    `90d` is user intent, translated at the CLI boundary, so the filter
+    itself stays comparable and serializable.
     """
 
+    # --- identity and organisation
     categories: tuple[str, ...] = ()
+    categories_excluded: tuple[str, ...] = ()
+    tags: TagCriterion = TagCriterion()
+    save_path_prefixes: tuple[str, ...] = ()
+    save_paths_excluded: tuple[str, ...] = ()
+    name_contains: tuple[str, ...] = ()
+    name_excluded: tuple[str, ...] = ()
+    name_regex: str | None = None
+
+    # --- state
     states: tuple[TorrentStateGroup, ...] = ()
-    tracker: str | None = None
+    states_excluded: tuple[TorrentStateGroup, ...] = ()
     completed: bool | None = None
     active: bool | None = None
     stalled: bool | None = None
     errored: bool | None = None
+    private: bool | None = None
+
+    # --- measures
+    ratio: Range[float] = Range()
+    size: Range[int] = Range()
+    progress: Range[float] = Range()
+    uploaded: Range[int] = Range()
+    seeding_time: Range[int] = Range()
+    added: Range[datetime] = Range()
+
+    # --- trackers
+    tracker: str | None = None
+    trackers_excluded: tuple[str, ...] = ()
+    has_trackers: bool | None = None
 
     @property
     def is_empty(self) -> bool:
-        """Return whether this filter would select every torrent."""
-        return (
-            not self.categories
-            and not self.states
-            and self.tracker is None
-            and self.completed is None
-            and self.active is None
-            and self.stalled is None
-            and self.errored is None
-        )
+        """Return whether this filter would select every torrent.
+
+        Compared against a default instance rather than enumerated
+        field by field: an enumeration silently stops being true the
+        day a field is added and forgotten, and "no filter" is exactly
+        what must never be mistaken for "every torrent" on a mutation.
+        """
+        return self == TorrentFilter()
 
     @property
-    def requires_tracker_data(self) -> bool:
-        """Return whether this filter needs a per-torrent tracker lookup."""
-        return self.tracker is not None
+    def requires_inspection(self) -> bool:
+        """Return whether resolving this filter needs the INSPECT stage.
+
+        `has_trackers` is deliberately absent: `trackers_count` comes
+        from the same bulk listing as everything else, so asking "does
+        this torrent have any tracker at all" costs nothing.
+        """
+        return self.tracker is not None or bool(self.trackers_excluded)
 
 
 EMPTY_TORRENT_FILTER = TorrentFilter()
@@ -184,9 +302,9 @@ class SelectionRequest:
     filters: TorrentFilter = field(default_factory=TorrentFilter)
 
     @property
-    def requires_tracker_data(self) -> bool:
+    def requires_inspection(self) -> bool:
         """Return whether resolving this request needs an INSPECT pass."""
-        return self.filters.requires_tracker_data
+        return self.filters.requires_inspection
 
 
 @dataclass(frozen=True)
@@ -203,6 +321,116 @@ class Selection:
     matched: tuple[TorrentSnapshot, ...]
     request: SelectionRequest
     resolved_hash: str | None = None
+
+
+_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("ratio", "--ratio"),
+    ("size", "--size"),
+    ("progress", "--progress"),
+    ("uploaded", "--uploaded"),
+    ("seeding_time", "--seeded-for"),
+)
+
+_EXCLUSION_OPTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("categories", "categories_excluded", "--category", "--exclude-category"),
+    ("states", "states_excluded", "--state", "--exclude-state"),
+    (
+        "save_path_prefixes",
+        "save_paths_excluded",
+        "--save-path",
+        "--exclude-save-path",
+    ),
+    ("name_contains", "name_excluded", "--name-contains", "--exclude-name"),
+)
+
+
+def validate_torrent_filter(filters: TorrentFilter) -> None:
+    """Reject a filter that cannot match anything, before any API call.
+
+    Only *provably* empty combinations are refused. A combination that
+    merely happens to match nothing on this instance (`--state seeding
+    --incomplete`) is legitimate and left to return zero results: the
+    difference is whether the contradiction is in the request itself or
+    in the data.
+    """
+    for attribute, option in _RANGE_OPTIONS:
+        bounds: Range[Any] = getattr(filters, attribute)
+        if bounds.is_impossible:
+            raise InvalidInputError(
+                f"{option}-min ({bounds.min}) is greater than {option}-max "
+                f"({bounds.max}); no torrent can satisfy both."
+            )
+
+    if filters.added.is_impossible:
+        raise InvalidInputError(
+            "--newer-than and --older-than describe an empty time window; "
+            "no torrent can satisfy both."
+        )
+
+    for included, excluded, option, exclude_option in _EXCLUSION_OPTIONS:
+        _reject_overlap(
+            getattr(filters, included),
+            getattr(filters, excluded),
+            option=option,
+            exclude_option=exclude_option,
+        )
+
+    _reject_overlap(
+        filters.tags.any_of + filters.tags.all_of,
+        filters.tags.none_of,
+        option="--tag/--tag-all",
+        exclude_option="--exclude-tag",
+    )
+
+    if filters.tracker is not None:
+        _reject_overlap(
+            (filters.tracker,),
+            filters.trackers_excluded,
+            option="--tracker",
+            exclude_option="--exclude-tracker",
+        )
+        if filters.has_trackers is False:
+            raise InvalidInputError(
+                "--no-tracker cannot be combined with --tracker: a torrent "
+                "cannot both have no tracker and announce to one."
+            )
+
+    if filters.has_trackers is False and filters.trackers_excluded:
+        raise InvalidInputError(
+            "--exclude-tracker is redundant with --no-tracker: a torrent "
+            "with no tracker announces to none of them."
+        )
+
+    if filters.name_regex is not None:
+        try:
+            re.compile(filters.name_regex)
+        except re.error as error:
+            raise InvalidInputError(
+                f"--name-regex is not a valid regular expression: {error}."
+            ) from None
+
+
+def _reject_overlap(
+    included: Collection[str],
+    excluded: Collection[str],
+    *,
+    option: str,
+    exclude_option: str,
+) -> None:
+    """Reject a value asked for and excluded at once.
+
+    Never a deliberate request, and silently returning zero results
+    would hide the typo behind a plausible-looking empty selection.
+    """
+    overlap = sorted(
+        {value.casefold() for value in included}
+        & {value.casefold() for value in excluded}
+    )
+    if overlap:
+        raise InvalidInputError(
+            f"'{overlap[0]}' is required by {option} and refused by "
+            f"{exclude_option}; no torrent can satisfy both."
+        )
 
 
 def validate_selection_request(request: SelectionRequest) -> None:
