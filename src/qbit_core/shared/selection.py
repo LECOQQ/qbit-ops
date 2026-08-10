@@ -16,11 +16,17 @@ is anything needing a per-torrent tracker lookup (the INSPECT stage).
 import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from qbit_core.errors import InvalidInputError, QbitCoreError
-from qbit_core.qbit.fields import get_field_as_string
+from qbit_core.qbit.fields import (
+    get_field_as_string,
+    get_field_as_tag_list,
+    get_optional_bool,
+    get_optional_float,
+    get_optional_int,
+)
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
     TorrentStateGroup,
@@ -42,6 +48,19 @@ UNCATEGORIZED_FILTER_TOKEN = "uncategorized"
 STATE_FILTER_VALUES: frozenset[TorrentStateGroup] = frozenset(
     {"downloading", "seeding", "checking", "stalled", "errored", "unknown"}
 )
+
+# qBittorrent encodes "unset" as a negative value across its numeric
+# fields (`-1` uncomputed, `-2` "use the global setting"). None of the
+# V1 filter sources was ever observed carrying one, so this is a guard
+# rather than a correction: a real size, ratio or byte count is never
+# negative, so nothing legitimate is lost by refusing to compare them.
+_UNSET_NUMERIC = (-1, -2)
+
+# `added_on` additionally treats `0` as unknown. No torrent is really
+# added at the Unix epoch, so a zero means "not recorded" -- and
+# reading it as 1970 would make `--older-than` match it, which is the
+# dangerous direction on a destructive command.
+_UNSET_ADDED_ON = (0, -1, -2)
 
 
 @dataclass(frozen=True)
@@ -520,20 +539,99 @@ def _select_by_hash(
 def matches_cheap_filters(torrent: Any, filters: TorrentFilter) -> bool:
     """Return whether a torrent matches every `torrents_info()`-only filter.
 
-    Excludes `tracker`, which needs a per-torrent lookup -- callers that
-    set it must narrow the result after the INSPECT stage.
+    Excludes `tracker`/`trackers_excluded`, which need a per-torrent
+    lookup -- callers that set them must narrow the result after the
+    INSPECT stage.
     """
-    if filters.categories:
+    return (
+        _matches_organisation(torrent, filters)
+        and _matches_name(torrent, filters)
+        and _matches_state(torrent, filters)
+        and _matches_measures(torrent, filters)
+    )
+
+
+def _matches_organisation(torrent: Any, filters: TorrentFilter) -> bool:
+    """Category, tags, save path and their exclusions."""
+    if filters.categories or filters.categories_excluded:
         torrent_category = get_field_as_string(torrent, "category")
-        if not any(
+        if filters.categories and not any(
             category_matches(torrent_category, category)
             for category in filters.categories
         ):
             return False
+        if any(
+            category_matches(torrent_category, category)
+            for category in filters.categories_excluded
+        ):
+            return False
 
+    if not filters.tags.is_empty and not filters.tags.matches(
+        get_field_as_tag_list(torrent)
+    ):
+        return False
+
+    if filters.save_path_prefixes or filters.save_paths_excluded:
+        save_path = get_field_as_string(torrent, "save_path")
+        if filters.save_path_prefixes and not any(
+            _is_under_path(save_path, prefix)
+            for prefix in filters.save_path_prefixes
+        ):
+            return False
+        if any(
+            _is_under_path(save_path, prefix)
+            for prefix in filters.save_paths_excluded
+        ):
+            return False
+
+    return True
+
+
+def _matches_name(torrent: Any, filters: TorrentFilter) -> bool:
+    """Substring and regular-expression matching over the torrent name.
+
+    Substrings are case-insensitive (a torrent name's capitalization is
+    not something an operator should have to reproduce); the regular
+    expression is not, so a pattern stays exactly what the user wrote --
+    inline `(?i)` remains available.
+    """
+    if not (
+        filters.name_contains or filters.name_excluded or filters.name_regex
+    ):
+        return True
+
+    name = get_field_as_string(torrent, "name")
+    folded = name.casefold()
+
+    if filters.name_contains and not any(
+        needle.casefold() in folded for needle in filters.name_contains
+    ):
+        return False
+    if any(needle.casefold() in folded for needle in filters.name_excluded):
+        return False
+    if filters.name_regex is not None and (
+        re.search(filters.name_regex, name) is None
+    ):
+        return False
+
+    return True
+
+
+def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
+    """State group, its exclusions, and the derived state aliases.
+
+    `completed`/`active`/`stalled`/`errored` keep their long-standing
+    reading, coercion included: `--active` means "not stopped", not "is
+    transferring", and `--completed` reads a missing progress as `0`.
+    Only the new bounded predicates apply the unknown-never-matches
+    rule -- changing these would be a silent contract change.
+    """
     state = get_field_as_string(torrent, "state")
+    group = classify_torrent_state(state)
 
-    if filters.states and classify_torrent_state(state) not in filters.states:
+    if filters.states and group not in filters.states:
+        return False
+    if filters.states_excluded and group in filters.states_excluded:
         return False
 
     if (
@@ -547,15 +645,86 @@ def matches_cheap_filters(torrent: Any, filters: TorrentFilter) -> bool:
     ):
         return False
 
-    if filters.stalled is not None:
-        if (classify_torrent_state(state) == "stalled") != filters.stalled:
+    if filters.stalled is not None and (group == "stalled") != filters.stalled:
+        return False
+
+    if filters.errored is not None and (group == "errored") != filters.errored:
+        return False
+
+    if filters.private is not None and (
+        get_optional_bool(torrent, "private") is not filters.private
+    ):
+        return False
+
+    return True
+
+
+def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
+    """Bounded numeric predicates and the cheap tracker-presence check.
+
+    Every value is read through the optional accessors, so an absent,
+    null, unparsable or sentinel field reads as unknown and satisfies no
+    bound (decision M1).
+    """
+    if not filters.ratio.contains(
+        get_optional_float(torrent, "ratio", sentinels=_UNSET_NUMERIC)
+    ):
+        return False
+
+    if not filters.size.contains(
+        get_optional_int(torrent, "size", sentinels=_UNSET_NUMERIC)
+    ):
+        return False
+
+    if not filters.progress.contains(
+        get_optional_float(torrent, "progress", sentinels=_UNSET_NUMERIC)
+    ):
+        return False
+
+    if not filters.uploaded.contains(
+        get_optional_int(torrent, "uploaded", sentinels=_UNSET_NUMERIC)
+    ):
+        return False
+
+    if not filters.seeding_time.contains(
+        get_optional_int(torrent, "seeding_time", sentinels=_UNSET_NUMERIC)
+    ):
+        return False
+
+    if not filters.added.is_unset:
+        added_on = get_optional_int(
+            torrent, "added_on", sentinels=_UNSET_ADDED_ON
+        )
+        added_at = (
+            None
+            if added_on is None
+            else datetime.fromtimestamp(added_on, tz=UTC)
+        )
+        if not filters.added.contains(added_at):
             return False
 
-    if filters.errored is not None:
-        if (classify_torrent_state(state) == "errored") != filters.errored:
+    if filters.has_trackers is not None:
+        count = get_optional_int(
+            torrent, "trackers_count", sentinels=_UNSET_NUMERIC
+        )
+        if count is None or (count > 0) != filters.has_trackers:
             return False
 
     return True
+
+
+def _is_under_path(save_path: str, prefix: str) -> bool:
+    """Return whether `save_path` is `prefix` or lives beneath it.
+
+    Case-sensitive, and no normalization beyond a trailing separator:
+    these are real POSIX paths, and rewriting them would make the filter
+    disagree with what qBittorrent reports. The separator check is what
+    stops `/downloads` from matching `/downloads-old`.
+    """
+    if prefix == "":
+        return False
+    boundary = prefix.rstrip("/")
+    return save_path == prefix or save_path.startswith(f"{boundary}/")
 
 
 def category_matches(torrent_category: str, requested_category: str) -> bool:
