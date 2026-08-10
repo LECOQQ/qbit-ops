@@ -303,7 +303,7 @@ def test_tracker_filter_restricts_the_report_not_the_scan() -> None:
     )
 
     report = collect_tracker_status(
-        client, build_torrent_filter(tracker="tracker.example")
+        client, build_torrent_filter(trackers=("tracker.example",))
     )
 
     assert [t.identity for t in report.trackers] == ["tracker.example"]
@@ -319,7 +319,7 @@ def test_tracker_filter_matching_no_identity_is_healthy_empty() -> None:
     )
 
     report = collect_tracker_status(
-        client, build_torrent_filter(tracker="unrelated.example")
+        client, build_torrent_filter(trackers=("unrelated.example",))
     )
 
     assert report.trackers == ()

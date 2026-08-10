@@ -601,7 +601,7 @@ def explain_tracker(
     observation for the requested identity, deliberately distinct from
     `trackers status --tracker`'s empty-selection-is-healthy convention.
     """
-    filters = build_torrent_filter(tracker=tracker)
+    filters = build_torrent_filter(trackers=(tracker,))
     report = collect_tracker_status(client, filters, on_progress=on_progress)
 
     if not report.trackers:

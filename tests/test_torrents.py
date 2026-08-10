@@ -291,7 +291,7 @@ def test_select_torrents_tracker_matches_by_host() -> None:
     )
 
     selection, tracker_counts = select_torrents(
-        client, TorrentFilter(tracker="tracker.example:6969")
+        client, TorrentFilter(trackers=("tracker.example:6969",))
     )
 
     assert [t.hash for t in selection.matched] == ["a" * 40]
@@ -300,11 +300,11 @@ def test_select_torrents_tracker_matches_by_host() -> None:
 
 def test_select_torrents_tracker_filter_never_exposes_secrets() -> None:
     filters = build_torrent_filter(
-        tracker="https://tracker.example/announce/SUPER-SECRET-PASSKEY"
+        trackers=("https://tracker.example/announce/SUPER-SECRET-PASSKEY",)
     )
 
-    assert "SUPER-SECRET-PASSKEY" not in (filters.tracker or "")
-    assert filters.tracker == "tracker.example"
+    assert "SUPER-SECRET-PASSKEY" not in "".join(filters.trackers)
+    assert filters.trackers == ("tracker.example",)
 
     client = FakeQbitClient(
         torrents=[_torrent(hash="a" * 40)],
@@ -372,7 +372,7 @@ def test_select_torrents_narrows_before_tracker_lookups() -> None:
 
     selection, _ = select_torrents(
         client,
-        TorrentFilter(categories=("movies",), tracker="tracker.example"),
+        TorrentFilter(categories=("movies",), trackers=("tracker.example",)),
     )
 
     assert client.torrents_trackers_calls == 2
@@ -396,16 +396,18 @@ def test_build_torrent_filter_rejects_unknown_state() -> None:
 
 
 def test_build_torrent_filter_normalizes_tracker_host() -> None:
-    filters = build_torrent_filter(tracker="HTTP://Tracker.Example:80/announce")
+    filters = build_torrent_filter(
+        trackers=("HTTP://Tracker.Example:80/announce",)
+    )
 
-    assert filters.tracker == "tracker.example:80"
+    assert filters.trackers == ("tracker.example:80",)
 
 
 def test_describe_torrent_filter_is_concise_and_secret_free() -> None:
     filters = build_torrent_filter(
         categories=["movies", "series"],
         states=["stalled"],
-        tracker="https://tracker.example/announce/PASSKEY",
+        trackers=("https://tracker.example/announce/PASSKEY",),
     )
 
     description = describe_torrent_filter(filters)
@@ -659,7 +661,7 @@ def test_plan_bulk_torrent_action_reannounces_by_tracker() -> None:
     plan = plan_bulk_torrent_action(
         client=client,
         action="reannounce",
-        filters=TorrentFilter(tracker="tracker.example"),
+        filters=TorrentFilter(trackers=("tracker.example",)),
     )
     apply_bulk_torrent_action(client, plan)
 

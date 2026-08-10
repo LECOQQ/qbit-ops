@@ -350,7 +350,7 @@ def trackers_status_command(
         filters = build_torrent_filter(
             categories=category,
             states=state,
-            tracker=tracker,
+            trackers=() if tracker is None else (tracker,),
             completed=completed,
             incomplete=incomplete,
             active=active,

@@ -95,7 +95,7 @@ def _build_selection_request(
     torrent_hash: str | None = None,
     category: list[str],
     state: list[str],
-    tracker: str | None,
+    tracker: list[str],
     completed: bool,
     incomplete: bool,
     active: bool,
@@ -250,7 +250,7 @@ def _run_bulk_torrent_action(
 def list_qbit_torrents(
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
@@ -519,7 +519,7 @@ def pause(
     torrent_hash: PauseHashOption = None,
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
@@ -606,7 +606,7 @@ def resume(
     torrent_hash: ResumeHashOption = None,
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
@@ -693,7 +693,7 @@ def start(
     torrent_hash: StartHashOption = None,
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: StartCompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
@@ -780,7 +780,7 @@ def reannounce(
     torrent_hash: ReannounceHashOption = None,
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
@@ -867,7 +867,7 @@ def delete(
     torrent_hash: DeleteHashOption = None,
     category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
     state: StateOption = [],  # noqa: B006
-    tracker: TrackerOption = None,
+    tracker: TrackerOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,

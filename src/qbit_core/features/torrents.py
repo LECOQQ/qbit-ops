@@ -79,7 +79,7 @@ def build_torrent_filter(
     name_regex: str | None = None,
     states: Sequence[str] = (),
     states_excluded: Sequence[str] = (),
-    tracker: str | None = None,
+    trackers: Sequence[str] = (),
     trackers_excluded: Sequence[str] = (),
     has_trackers: bool | None = None,
     completed: bool = False,
@@ -130,10 +130,17 @@ def build_torrent_filter(
         states_excluded=_normalize_states(
             states_excluded, option="--exclude-state"
         ),
-        tracker=_normalize_tracker_option(tracker),
+        trackers=tuple(
+            dict.fromkeys(
+                _normalize_tracker_host_option(wanted, option="--tracker")
+                for wanted in trackers
+            )
+        ),
         trackers_excluded=tuple(
             dict.fromkeys(
-                _normalize_tracker_option(excluded) or ""
+                _normalize_tracker_host_option(
+                    excluded, option="--exclude-tracker"
+                )
                 for excluded in trackers_excluded
             )
         ),
@@ -179,13 +186,6 @@ def _normalize_states(
     return tuple(normalized)
 
 
-def _normalize_tracker_option(tracker: str | None) -> str | None:
-    """Reduce `--tracker` to a bare `host[:port]`, never a URL."""
-    if tracker is None:
-        return None
-    return _normalize_tracker_host_option(tracker, option="--tracker")
-
-
 def _normalize_tracker_host_option(value: str, *, option: str) -> str:
     """Reduce one tracker option value to a bare `host[:port]`.
 
@@ -208,7 +208,7 @@ def select_torrents(
 
     Loads once via `torrents_info()`, applies every cheap filter first,
     and only then calls `client.torrents_trackers()` -- at most once per
-    surviving candidate, and only when `filters.tracker` is set.
+    surviving candidate, and only when a tracker host filter is set.
     `on_progress` reports real progress over the calls actually made.
 
     Returns the selection plus, when the INSPECT stage ran, the active
@@ -227,7 +227,7 @@ def select_torrents(
     # SELECT on the cheap criteria first, INSPECT only the survivors:
     # this ordering is what bounds the `torrents_trackers()` call count.
     candidates = select_torrents_from_items(
-        all_torrents, replace(filters, tracker=None, trackers_excluded=())
+        all_torrents, replace(filters, trackers=(), trackers_excluded=())
     )
     inspection = inspect_trackers(client, candidates, on_progress=on_progress)
 
@@ -256,8 +256,9 @@ def _matches_tracker_hosts(
     tracker URL, which is feature knowledge the shared stages
     deliberately do not carry.
     """
-    if filters.tracker is not None and not has_tracker_host(
-        active_tracker_urls, filters.tracker
+    if filters.trackers and not any(
+        has_tracker_host(active_tracker_urls, wanted)
+        for wanted in filters.trackers
     ):
         return False
 

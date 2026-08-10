@@ -180,7 +180,7 @@ def test_default_filter_is_empty() -> None:
         TorrentFilter(uploaded=Range(min=1024)),
         TorrentFilter(seeding_time=Range(min=60)),
         TorrentFilter(added=Range(max=datetime(2026, 1, 1))),
-        TorrentFilter(tracker="tracker.example"),
+        TorrentFilter(trackers=("tracker.example",)),
         TorrentFilter(trackers_excluded=("tracker.example",)),
         TorrentFilter(has_trackers=False),
     ],
@@ -223,7 +223,7 @@ def test_is_empty_covers_every_declared_field() -> None:
         "uploaded",
         "seeding_time",
         "added",
-        "tracker",
+        "trackers",
         "trackers_excluded",
         "has_trackers",
     }
@@ -236,7 +236,7 @@ def test_is_empty_covers_every_declared_field() -> None:
 
 def test_only_tracker_host_filters_require_inspection() -> None:
     assert not TorrentFilter().requires_inspection
-    assert TorrentFilter(tracker="tracker.example").requires_inspection
+    assert TorrentFilter(trackers=("tracker.example",)).requires_inspection
     assert TorrentFilter(
         trackers_excluded=("tracker.example",)
     ).requires_inspection
@@ -290,7 +290,7 @@ def test_an_empty_time_window_is_rejected() -> None:
         TorrentFilter(tags=TagCriterion(any_of=("keep",), none_of=("keep",))),
         TorrentFilter(tags=TagCriterion(all_of=("keep",), none_of=("keep",))),
         TorrentFilter(
-            tracker="tracker.example",
+            trackers=("tracker.example",),
             trackers_excluded=("tracker.example",),
         ),
     ],
@@ -314,7 +314,7 @@ def test_overlap_detection_is_case_insensitive() -> None:
 
 
 def test_no_tracker_conflicts_with_a_tracker_host() -> None:
-    filters = TorrentFilter(tracker="tracker.example", has_trackers=False)
+    filters = TorrentFilter(trackers=("tracker.example",), has_trackers=False)
 
     with pytest.raises(InvalidInputError, match="--no-tracker"):
         validate_torrent_filter(filters)
