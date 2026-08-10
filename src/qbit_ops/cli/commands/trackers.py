@@ -41,10 +41,33 @@ from qbit_ops.cli.selector_options import (
     CategoryOption,
     CompletedOption,
     ErroredOption,
+    ExcludeCategoryOption,
+    ExcludeNameOption,
+    ExcludeSavePathOption,
+    ExcludeStateOption,
+    ExcludeTagOption,
     InactiveOption,
     IncompleteOption,
+    NameContainsOption,
+    NameRegexOption,
+    NewerThanOption,
+    OlderThanOption,
+    PrivateOption,
+    ProgressMaxOption,
+    ProgressMinOption,
+    RatioMaxOption,
+    RatioMinOption,
+    SavePathOption,
+    SeededForOption,
+    SizeMaxOption,
+    SizeMinOption,
     StalledOption,
     StateOption,
+    TagAllOption,
+    TagOption,
+    UploadedMaxOption,
+    UploadedMinOption,
+    build_filter_from_options,
 )
 from qbit_ops.cli.validation import validate_format_support
 
@@ -73,14 +96,36 @@ def add_if_present(
             help="Target tracker to add when missing.",
         ),
     ],
-    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    category: CategoryOption = [],  # noqa: B006
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
     state: StateOption = [],  # noqa: B006
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
     completed: CompletedOption = False,
     incomplete: IncompleteOption = False,
     active: ActiveOption = False,
     inactive: InactiveOption = False,
     stalled: StalledOption = False,
     errored: ErroredOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -123,15 +168,37 @@ def add_if_present(
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
 
     try:
-        filters = build_torrent_filter(
-            categories=category,
-            states=state,
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
             completed=completed,
             incomplete=incomplete,
             active=active,
             inactive=inactive,
             stalled=stalled,
             errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
         )
     except ValueError as error:
         error_boundary.fail(str(error))
@@ -541,6 +608,36 @@ def replace(
             help="Print impacted torrent details.",
         ),
     ] = False,
+    category: CategoryOption = [],  # noqa: B006
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    state: StateOption = [],  # noqa: B006
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
 ) -> None:
     """Replace a tracker on every torrent using it."""
     try:
@@ -548,6 +645,42 @@ def replace(
         target = require_non_blank(target, field_name="--target")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+    try:
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
     enabled = rendering.progress_enabled(
         interactive=rendering.is_interactive_terminal()
     )
@@ -557,7 +690,9 @@ def replace(
             "Scanning torrents...", enabled=enabled
         ) as advance:
             inspection = select_and_inspect(
-                client, SelectionRequest(), on_progress=advance
+                client,
+                SelectionRequest(filters=filters),
+                on_progress=advance,
             )
             plan = plan_tracker_replacement(
                 inspection,
@@ -631,6 +766,36 @@ def replace_tracker_passkey_command(
             help="Print impacted torrent details.",
         ),
     ] = False,
+    category: CategoryOption = [],  # noqa: B006
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    state: StateOption = [],  # noqa: B006
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
 ) -> None:
     """Replace a tracker's passkey on every torrent using that tracker."""
     try:
@@ -638,6 +803,42 @@ def replace_tracker_passkey_command(
         new_passkey = require_non_blank(new_passkey, field_name="--new-passkey")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+    try:
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
     enabled = rendering.progress_enabled(
         interactive=rendering.is_interactive_terminal()
     )
@@ -647,7 +848,9 @@ def replace_tracker_passkey_command(
             "Scanning torrents...", enabled=enabled
         ) as advance:
             inspection = select_and_inspect(
-                client, SelectionRequest(), on_progress=advance
+                client,
+                SelectionRequest(filters=filters),
+                on_progress=advance,
             )
             plan = plan_tracker_passkey_replacement(
                 inspection,
@@ -759,12 +962,78 @@ def remove(
             help="Print impacted torrent details.",
         ),
     ] = False,
+    category: CategoryOption = [],  # noqa: B006
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    state: StateOption = [],  # noqa: B006
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
 ) -> None:
     """Remove a tracker from every torrent using it."""
     try:
         tracker = require_non_blank(tracker, field_name="--tracker")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+    try:
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
     enabled = rendering.progress_enabled(
         interactive=rendering.is_interactive_terminal()
     )
@@ -774,7 +1043,9 @@ def remove(
             "Scanning torrents...", enabled=enabled
         ) as advance:
             inspection = select_and_inspect(
-                client, SelectionRequest(), on_progress=advance
+                client,
+                SelectionRequest(filters=filters),
+                on_progress=advance,
             )
             plan = plan_tracker_removal(
                 inspection,

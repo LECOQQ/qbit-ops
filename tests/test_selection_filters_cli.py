@@ -731,3 +731,173 @@ def test_the_filter_line_never_renders_a_tracker_secret(
 
     assert "SUPER-SECRET" not in result.stdout
     assert "tracker=old.example" in result.stdout
+
+
+# --- tracker operations scope their scan the same way -----------------------
+
+
+def _tracker_op_client() -> FakeQbitClient:
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A, name="A", category="sonarr"),
+            make_torrent(hash=TORRENT_B, name="B", category="radarr"),
+        ],
+        trackers_by_hash={
+            TORRENT_A: [{"url": "https://old.example/announce", "status": "2"}],
+            TORRENT_B: [{"url": "https://old.example/announce", "status": "2"}],
+        },
+    )
+
+
+def test_remove_scopes_its_scan_and_its_mutation(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The whole point of the consolidation: the most destructive tracker
+    operation can finally target a subset instead of the instance."""
+    client = _tracker_op_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "remove",
+            "--tracker",
+            "https://old.example/announce",
+            "--category",
+            "sonarr",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert [call[0] for call in client.removed_trackers] == [TORRENT_A]
+    assert client.torrents_trackers_calls == 1
+
+
+def test_replace_scopes_its_scan(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracker_op_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace",
+            "--source",
+            "https://old.example/announce",
+            "--target",
+            "https://new.example/announce",
+            "--category",
+            "radarr",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert [call[0] for call in client.edited_trackers] == [TORRENT_B]
+
+
+def test_a_tracker_operation_reports_what_the_filter_kept(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`scanned` is the instance, `matched` what the filter kept, and
+    `matched_tracker` what actually uses the tracker."""
+    configure_qbit_backend(client=_tracker_op_client())
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "remove",
+            "--tracker",
+            "https://old.example/announce",
+            "--category",
+            "sonarr",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "scanned" in result.stdout
+    assert "matched" in result.stdout
+
+
+def test_tracker_operations_refuse_a_tracker_family_filter(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """On these commands the tracker is the *object* of the operation, so
+    a second tracker notion on the same line would be ambiguous."""
+    configure_qbit_backend(client=_tracker_op_client())
+
+    for option in ("--exclude-tracker", "--no-tracker"):
+        result = runner.invoke(
+            app,
+            [
+                "trackers",
+                "remove",
+                "--tracker",
+                "https://old.example/announce",
+                option,
+                "x",
+            ],
+        )
+        assert result.exit_code != ExitCode.SUCCESS
+
+
+def test_a_tracker_operation_filter_is_still_dry_run_by_default(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracker_op_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "remove",
+            "--tracker",
+            "https://old.example/announce",
+            "--category",
+            "sonarr",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "PREVIEW" in result.stdout
+    assert client.removed_trackers == []
+
+
+def test_replace_passkey_accepts_filters_without_leaking_the_new_passkey(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Scoping must not weaken the secret-redaction invariant."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_A, name="A", category="sonarr")],
+        trackers_by_hash={
+            TORRENT_A: [
+                {"url": "https://old.example/announce/OLDKEY", "status": "2"}
+            ]
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace-passkey",
+            "--tracker",
+            "https://old.example/announce/{passkey}",
+            "--new-passkey",
+            "BRAND-NEW-SECRET",
+            "--category",
+            "sonarr",
+        ],
+    )
+
+    assert "BRAND-NEW-SECRET" not in result.stdout
+    assert "BRAND-NEW-SECRET" not in result.stderr
