@@ -54,6 +54,7 @@ def test_canonical_core_root_is_src_qbit_core() -> None:
 _PURE_DOMAIN_MODULE_NAMES = (
     "shared/torrent_states.py",
     "shared/selection.py",
+    "shared/parsers.py",
     "errors.py",
     "shared/execution.py",
 )
