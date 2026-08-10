@@ -248,7 +248,7 @@ def collect_tracker_status(
     filtered afterward -- `--tracker` restricts the report, not the
     API-call volume.
     """
-    cheap_filters = replace(filters, tracker=None)
+    cheap_filters = replace(filters, tracker=None, trackers_excluded=())
     selection, _ = select_torrents(client, cheap_filters)
     inspection = inspect_trackers(
         client,

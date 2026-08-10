@@ -46,11 +46,13 @@ from qbit_ops.cli.selector_options import (
     ExcludeSavePathOption,
     ExcludeStateOption,
     ExcludeTagOption,
+    ExcludeTrackerOption,
     InactiveOption,
     IncompleteOption,
     NameContainsOption,
     NameRegexOption,
     NewerThanOption,
+    NoTrackerOption,
     OlderThanOption,
     PauseAllOption,
     PauseHashOption,
@@ -110,6 +112,8 @@ def _build_selection_request(
     exclude_name: list[str],
     name_regex: str | None,
     exclude_state: list[str],
+    exclude_tracker: list[str],
+    no_tracker: bool,
     private: bool | None,
     ratio_min: str | None,
     ratio_max: str | None,
@@ -152,6 +156,8 @@ def _build_selection_request(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -261,6 +267,8 @@ def list_qbit_torrents(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -303,6 +311,8 @@ def list_qbit_torrents(
             name_regex=name_regex,
             state=state,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             tracker=tracker,
             completed=completed,
             incomplete=incomplete,
@@ -526,6 +536,8 @@ def pause(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -567,6 +579,8 @@ def pause(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -609,6 +623,8 @@ def resume(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -650,6 +666,8 @@ def resume(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -692,6 +710,8 @@ def start(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -733,6 +753,8 @@ def start(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -775,6 +797,8 @@ def reannounce(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -816,6 +840,8 @@ def reannounce(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -858,6 +884,8 @@ def delete(
     exclude_name: ExcludeNameOption = [],  # noqa: B006
     name_regex: NameRegexOption = None,
     exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -920,6 +948,8 @@ def delete(
             exclude_name=exclude_name,
             name_regex=name_regex,
             exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,

@@ -247,6 +247,29 @@ NameRegexOption = Annotated[
     ),
 ]
 
+# --- trackers ---------------------------------------------------------------
+
+ExcludeTrackerOption = Annotated[
+    list[str],
+    typer.Option(
+        "--exclude-tracker",
+        help=(
+            "Skip torrents announcing to a tracker, matched by host[:port] "
+            "(repeatable). Requires a per-torrent tracker lookup."
+        ),
+    ),
+]
+NoTrackerOption = Annotated[
+    bool,
+    typer.Option(
+        "--no-tracker",
+        help=(
+            "Restrict to torrents with no active tracker. Costs no extra "
+            "API call."
+        ),
+    ),
+]
+
 # --- privacy ----------------------------------------------------------------
 
 PrivateOption = Annotated[
@@ -351,6 +374,8 @@ def build_filter_from_options(
     state: list[str] = [],  # noqa: B006
     exclude_state: list[str] = [],  # noqa: B006
     tracker: str | None = None,
+    exclude_tracker: list[str] = [],  # noqa: B006
+    no_tracker: bool = False,
     completed: bool = False,
     incomplete: bool = False,
     active: bool = False,
@@ -395,6 +420,8 @@ def build_filter_from_options(
         states=state,
         states_excluded=exclude_state,
         tracker=tracker,
+        trackers_excluded=exclude_tracker,
+        has_trackers=False if no_tracker else None,
         completed=completed,
         incomplete=incomplete,
         active=active,
