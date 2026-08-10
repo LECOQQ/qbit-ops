@@ -348,6 +348,27 @@ OlderThanOption = Annotated[
         ),
     ),
 ]
+CompletedBeforeOption = Annotated[
+    str | None,
+    typer.Option(
+        "--completed-before",
+        help=(
+            "Restrict to torrents that finished downloading more than this "
+            f"long ago. Never matches an unfinished torrent. "
+            f"{DURATION_VALUE_HELP}"
+        ),
+    ),
+]
+CompletedWithinOption = Annotated[
+    str | None,
+    typer.Option(
+        "--completed-within",
+        help=(
+            "Restrict to torrents that finished downloading within this "
+            f"long. {DURATION_VALUE_HELP}"
+        ),
+    ),
+]
 InactiveForOption = Annotated[
     str | None,
     typer.Option(
@@ -415,6 +436,8 @@ def build_filter_from_options(
     seeded_for: str | None = None,
     older_than: str | None = None,
     newer_than: str | None = None,
+    completed_before: str | None = None,
+    completed_within: str | None = None,
     inactive_for: str | None = None,
     active_within: str | None = None,
     now: datetime | None = None,
@@ -469,6 +492,9 @@ def build_filter_from_options(
         ),
         seeding_time=Range(min=_maybe(parse_duration, seeded_for)),
         added=_resolve_added_window(older_than, newer_than, moment),
+        completed_at=_resolve_relative_window(
+            completed_before, completed_within, moment
+        ),
         last_activity=_resolve_relative_window(
             inactive_for, active_within, moment
         ),

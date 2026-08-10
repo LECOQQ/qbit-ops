@@ -144,6 +144,7 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | `--seeded-for` | `30d` — seeded for **at least** this long |
 | `--older-than` / `--newer-than` | `90d`, `12h` — based on when the torrent was added |
 | `--inactive-for` / `--active-within` | `90d`, `24h` — based on the last byte transferred |
+| `--completed-before` / `--completed-within` | `90d`, `7d` — based on when the download finished |
 
 **Trackers**
 
@@ -187,14 +188,19 @@ qbit-ops torrents list --incomplete --progress-min 99%
 - **Percentages**: `95%`, or a bare fraction between `0` and `1`. A bare
   `95` is refused, since it could mean either.
 
-### Age vs inactivity
+### Three different clocks
 
-`--older-than` asks how long ago a torrent was **added**;
-`--inactive-for` asks how long since it last **moved data**. A torrent
-added two years ago and still seeding is old but not inactive.
+- `--older-than` — how long ago the torrent was **added**.
+- `--inactive-for` — how long since it last **moved data**.
+- `--completed-before` — how long ago the **download finished**.
 
-A torrent that never transferred anything counts from the day it was
-added, so it becomes inactive as it ages.
+They disagree often, which is why all three exist: a torrent added two
+years ago and still seeding is old but neither inactive nor recently
+completed.
+
+Two edge cases worth knowing: a torrent that never transferred anything
+counts as inactive from the day it was added, and a torrent that never
+finished downloading is never selected by a completion bound.
 
 ### Two selectors that stand apart
 
