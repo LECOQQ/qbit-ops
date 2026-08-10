@@ -205,6 +205,56 @@ def _wait_for_webui(host: str, timeout_seconds: float = 60.0) -> None:
     )
 
 
+def build_container_run_args(
+    entry: MatrixEntry,
+    *,
+    run_id: str,
+    container_name: str,
+    network_name: str,
+    config_dir: Path,
+    downloads_dir: Path,
+) -> list[str]:
+    """Build the `docker run` argument list for one matrix container.
+
+    Extracted from `start_matrix_container` so the argument list can be
+    asserted without a Docker daemon.
+
+    `PUID`/`PGID` are the *running host user*, never a hardcoded 1000:
+    the linuxserver image chowns the bind-mounted `/config` and
+    `/downloads` to those ids at startup, so any other value takes the
+    directories away from the test process that created them -- the
+    seeding step then fails with EACCES, and so does teardown. A host
+    whose uid happens to be 1000 hides this entirely.
+    """
+    return [
+        "run",
+        "-d",
+        "--name",
+        container_name,
+        "--network",
+        network_name,
+        "--label",
+        f"{HARNESS_LABEL}={run_id}",
+        "--label",
+        f"{MATRIX_ID_LABEL}={entry.id}",
+        "-e",
+        f"PUID={os.getuid()}",
+        "-e",
+        f"PGID={os.getgid()}",
+        "-e",
+        "TZ=Etc/UTC",
+        "-e",
+        f"WEBUI_PORT={entry.webui_port}",
+        "-p",
+        f"{LOOPBACK_HOST}:{entry.webui_port}:{entry.webui_port}",
+        "-v",
+        f"{config_dir}:/config/qBittorrent",
+        "-v",
+        f"{downloads_dir}:/downloads",
+        entry.image_reference_with_digest,
+    ]
+
+
 def start_matrix_container(
     entry: MatrixEntry, *, run_id: str
 ) -> RunningQbitContainer:
@@ -252,33 +302,14 @@ def start_matrix_container(
 
     try:
         _run_docker(
-            [
-                "run",
-                "-d",
-                "--name",
-                container_name,
-                "--network",
-                network_name,
-                "--label",
-                f"{HARNESS_LABEL}={run_id}",
-                "--label",
-                f"{MATRIX_ID_LABEL}={entry.id}",
-                "-e",
-                "PUID=1000",
-                "-e",
-                "PGID=1000",
-                "-e",
-                "TZ=Etc/UTC",
-                "-e",
-                f"WEBUI_PORT={entry.webui_port}",
-                "-p",
-                f"{LOOPBACK_HOST}:{entry.webui_port}:{entry.webui_port}",
-                "-v",
-                f"{config_dir}:/config/qBittorrent",
-                "-v",
-                f"{downloads_dir}:/downloads",
-                entry.image_reference_with_digest,
-            ]
+            build_container_run_args(
+                entry,
+                run_id=run_id,
+                container_name=container_name,
+                network_name=network_name,
+                config_dir=config_dir,
+                downloads_dir=downloads_dir,
+            )
         )
     except subprocess.CalledProcessError as error:
         # `docker run` can leave a non-running "Created" container
