@@ -202,7 +202,7 @@ class TuiState:
     """The TUI's complete state, split into three kinds of field.
 
     Authoritative, replaced wholesale by a successful refresh:
-    `status`, `instance_stats`, `torrent_snapshot`, `stopped_count`.
+    `status`, `instance_stats`, `total_torrents`, `stopped_count`.
     Derived, recomputed locally, never fetched: `visible`. Everything
     else is ephemeral UI state, never persisted.
     """
@@ -210,7 +210,9 @@ class TuiState:
     connection: ConnectionState = ConnectionState.CONNECTING
     status: StatusSnapshot | None = None
     instance_stats: InstanceStats | None = None
-    torrent_snapshot: Selection | None = None
+    total_torrents: int | None = None
+    """Instance-wide torrent count from the last successful refresh;
+    `None` until one has landed."""
     stopped_count: int = 0
     filters: TorrentFilter = field(default_factory=TorrentFilter)
     search: str = ""
@@ -364,7 +366,7 @@ class TuiController:
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
         self.state.instance_stats = result.instance_stats
-        self.state.torrent_snapshot = result.torrents
+        self.state.total_torrents = result.total_torrents
         self.state.stopped_count = _count_stopped_torrents(result.raw_torrents)
         self.state.connection = ConnectionState.CONNECTED
         self.state.stale = False
@@ -835,7 +837,7 @@ class TuiController:
     # -- internal -----------------------------------------------------------
 
     def _recompute_visible(self) -> None:
-        if self.state.torrent_snapshot is None:
+        if self.state.total_torrents is None:
             self.state.visible = None
             return
 

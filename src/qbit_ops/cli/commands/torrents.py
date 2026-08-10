@@ -14,6 +14,7 @@ from qbit_core.features.torrent_import import (
 from qbit_core.features.torrents import (
     TorrentBulkAction,
     apply_bulk_torrent_action,
+    inspect_filtered_torrents,
     inspect_torrent,
     list_category_usage,
     plan_bulk_torrent_action,
@@ -24,6 +25,7 @@ from qbit_core.shared.execution import MutationOperation
 from qbit_core.shared.selection import (
     AmbiguousTorrentHashError,
     SelectionRequest,
+    describe_torrent_filter,
     validate_selection_request,
 )
 from qbit_ops.cli import error_boundary, rendering
@@ -452,6 +454,39 @@ def inspect_qbit_torrent(
             help="Maximum number of name search results. Use 0 for no limit.",
         ),
     ] = 20,
+    category: CategoryOption = [],  # noqa: B006
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    state: StateOption = [],  # noqa: B006
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -460,11 +495,85 @@ def inspect_qbit_torrent(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """Inspect a torrent by hash (or prefix) or search torrents by name."""
+    """Inspect torrents by hash, by name search, or by filter.
+
+    Exactly one selector: `--hash` for one torrent, `--name` for the
+    read-only fuzzy search, or any combination of filters for every
+    matching torrent. Filtered mode reports the same secret-free
+    per-torrent detail as `--hash`.
+    """
     validate_format_support("torrents_inspect", output_format)
     torrent_hash = validate_hash_option(torrent_hash)
-    if (torrent_hash is None) == (name is None):
-        error_boundary.fail("Provide exactly one of --hash or --name.")
+
+    try:
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
+            tracker=tracker,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
+    selectors = [
+        torrent_hash is not None,
+        name is not None,
+        not filters.is_empty,
+    ]
+    if sum(selectors) != 1:
+        error_boundary.fail(
+            "Provide exactly one of --hash, --name, or one or more filters."
+        )
+
+    if not filters.is_empty:
+        enabled = rendering.progress_enabled(
+            output_format=output_format,
+            interactive=rendering.is_interactive_terminal(),
+        )
+        with error_boundary.qbit_error_boundary():
+            client = error_boundary.create_qbit_client()
+            with rendering.transient_progress(
+                "Inspecting torrents...", enabled=enabled
+            ) as advance:
+                report = inspect_filtered_torrents(
+                    client, filters, on_progress=advance
+                )
+        rendering.print_filtered_torrent_inspection(
+            report,
+            output_format,
+            description=describe_torrent_filter(filters),
+        )
+        exit_if_no_targeted_matches(report["summary"]["matched"])
+        return
 
     enabled = rendering.progress_enabled(
         output_format=output_format,

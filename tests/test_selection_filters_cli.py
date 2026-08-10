@@ -901,3 +901,120 @@ def test_replace_passkey_accepts_filters_without_leaking_the_new_passkey(
 
     assert "BRAND-NEW-SECRET" not in result.stdout
     assert "BRAND-NEW-SECRET" not in result.stderr
+
+
+# --- torrents inspect: filters as a third selector mode ---------------------
+
+
+def test_inspect_by_filter_reports_every_match(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "inspect", "--category", "linux", "--format", "json"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"scanned": 3, "matched": 1}
+    assert [t["name"] for t in payload["torrents"]] == ["A"]
+
+
+def test_inspect_by_filter_never_exposes_a_raw_announce_url(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The filtered mode must keep the single-hash mode's guarantee:
+    ordinary read commands report tracker identities, never raw URLs."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_A, name="A", category="linux")],
+        trackers_by_hash={
+            TORRENT_A: [
+                {
+                    "url": "https://tracker.example/announce/SUPER-SECRET",
+                    "status": "2",
+                }
+            ]
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "inspect", "--category", "linux", "--format", "json"],
+    )
+
+    assert "SUPER-SECRET" not in result.stdout
+    assert "tracker.example" in result.stdout
+
+
+def test_inspect_requires_exactly_one_selector(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    none_given = runner.invoke(app, ["torrents", "inspect"])
+    two_given = runner.invoke(
+        app, ["torrents", "inspect", "--hash", TORRENT_A, "--category", "linux"]
+    )
+
+    assert none_given.exit_code == ExitCode.ERROR
+    assert two_given.exit_code == ExitCode.ERROR
+    assert "exactly one" in two_given.stderr
+
+
+def test_inspect_by_filter_costs_one_lookup_per_survivor(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, ["torrents", "inspect", "--category", "linux"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 1
+
+
+def test_inspect_by_filter_supports_tracker_criteria(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Tracker hosts are matched against the safe identities already
+    collected, so they cost no call of their own."""
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "inspect", "--tracker", "old.example", "--format", "json"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert [t["name"] for t in json.loads(result.stdout)["torrents"]] == ["A"]
+
+
+def test_trackers_status_accepts_the_full_cheap_filter_set(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _tracked_client()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "status",
+            "--size-min",
+            "1",
+            "--exclude-category",
+            "movies",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code in (0, 1, 2, 3)
+    assert "trackers" in json.loads(result.stdout)

@@ -66,6 +66,19 @@ qbit-ops torrents list --format json
 qbit-ops status --format jsonl
 ```
 
+## 🎯 Target exactly what you mean
+
+Filters compose - repeat one for **or**, mix different ones for **and**,
+exclude with `--exclude-*`:
+
+```bash
+qbit-ops torrents list --ratio-min 2 --seeded-for 90d --exclude-tag keep
+```
+
+Category, tag, save path, name, state, size, ratio, progress, age,
+tracker and more - the same selector everywhere, listing or mutating.
+Full grammar in [docs/COMMANDS.md](docs/COMMANDS.md).
+
 ## 🛠️ Make changes safely
 
 Mutations are dry-run by default:
@@ -86,6 +99,7 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 - 🎯 **Hash-based targeting.** Mutations never guess from a fuzzy torrent name.
 - 🧊 **Frozen plans.** The previewed selection is the selection that gets applied.
 - 🚫 **No silent “all”.** Bulk actions require a hash, `--all`, or an explicit filter.
+- ❔ **Unknown is never a match.** A value qBittorrent didn't report never widens a selection.
 - 🔒 **Secret-safe output.** Tracker passkeys and announce URLs stay redacted in normal output.
 - ✅ **Honest results.** qbit-ops reports what was submitted or observed, not what it cannot prove.
 

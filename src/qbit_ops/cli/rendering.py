@@ -976,6 +976,38 @@ def print_torrent_details(report: dict[str, Any]) -> None:
         typer.echo("Trackers: none")
 
 
+def print_filtered_torrent_inspection(
+    report: dict[str, Any],
+    output_format: OutputFormat,
+    *,
+    description: str = "",
+) -> None:
+    """Print `torrents inspect`'s filtered mode.
+
+    Same per-torrent shape as the single-hash mode, wrapped in the
+    `filters`/`summary`/`torrents` envelope `torrents list` already
+    uses, so one payload shape covers both read commands.
+    """
+    if output_format == OutputFormat.json:
+        print_json_output(report)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        print_jsonl_output(report)
+        return
+
+    if description:
+        typer.echo(f"Filter: {description}")
+
+    if not report["torrents"]:
+        typer.echo("No torrents found.")
+    else:
+        for torrent in report["torrents"]:
+            print_torrent_details(torrent)
+
+    print_summary(report["summary"])
+
+
 def print_torrent_name_search(
     report: dict[str, Any],
     output_format: OutputFormat,

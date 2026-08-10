@@ -7,6 +7,7 @@ event loop. Interface-level (Pilot) tests live in `tests/test_tui_app.py`.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from qbit_core.errors import (
 )
 from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.selection import TorrentFilter
 from qbit_ops.config import ConfigError
 from qbit_ops.tui.state import ConnectionState, TuiController, Workspace
 from tests.support import FakeQbitClient, make_torrent
@@ -71,7 +73,7 @@ def test_refresh_uses_the_documented_five_call_budget() -> None:
     assert client.torrents_trackers_calls == 0
 
 
-def test_refresh_populates_status_and_torrent_snapshot_from_one_fetch() -> None:
+def test_refresh_populates_status_and_torrent_data_from_one_fetch() -> None:
     client = FakeQbitClient(
         torrents=[
             make_torrent(name="Alpha"),
@@ -84,8 +86,9 @@ def test_refresh_populates_status_and_torrent_snapshot_from_one_fetch() -> None:
 
     assert controller.state.status is not None
     assert controller.state.status.counts.total == 2
-    assert controller.state.torrent_snapshot is not None
-    assert len(controller.state.torrent_snapshot.matched) == 2
+    assert controller.state.total_torrents == 2
+    assert controller.state.visible is not None
+    assert len(controller.state.visible.matched) == 2
     assert controller.state.connection is ConnectionState.CONNECTED
     assert controller.state.stale is False
 
@@ -200,13 +203,15 @@ def test_failed_refresh_preserves_last_good_data_and_marks_stale() -> None:
     controller = _controller(client)
     controller.refresh()
     good_status = controller.state.status
-    good_snapshot = controller.state.torrent_snapshot
+    good_total = controller.state.total_torrents
+    good_visible = controller.state.visible
 
     client.next_torrents_info_error = QbitConnectionError("connection lost")
     controller.refresh()
 
     assert controller.state.status is good_status
-    assert controller.state.torrent_snapshot is good_snapshot
+    assert controller.state.total_torrents == good_total
+    assert controller.state.visible is good_visible
     assert controller.state.stale is True
     assert controller.state.connection is ConnectionState.RECONNECTING
     assert controller.state.last_error is not None
@@ -941,3 +946,34 @@ def test_clear_selection_for_only_removes_given_hashes() -> None:
     controller.clear_selection_for(["a" * 40])
 
     assert controller.state.selected_hashes == {"b" * 40}
+
+
+def test_refresh_does_not_materialize_an_unfiltered_selection() -> None:
+    """The refresh cycle carries raw items plus a count, not a full
+    `Selection` over every torrent: rebuilding one snapshot per torrent
+    on every tick, for a number and a null check, is work nobody reads.
+    """
+    from qbit_ops.app_services import TuiRefreshResult
+
+    fields = {f.name for f in dataclasses.fields(TuiRefreshResult)}
+
+    assert "total_torrents" in fields
+    assert "raw_torrents" in fields
+    assert "torrents" not in fields
+
+
+def test_re_filtering_refuses_a_filter_it_cannot_evaluate() -> None:
+    """Re-filtering works from cached raw items and never calls
+    qBittorrent, so a tracker-host criterion is unevaluable here. It
+    must fail loudly rather than be silently ignored, which would show
+    a wider selection than the operator asked for.
+    """
+    client = FakeQbitClient(torrents=[make_torrent(name="Alpha")])
+    controller = _controller(client)
+    controller.refresh()
+    calls_before = len(client.calls)
+
+    with pytest.raises(ValueError):
+        controller.set_filters(TorrentFilter(trackers=("tracker.example",)))
+
+    assert len(client.calls) == calls_before
