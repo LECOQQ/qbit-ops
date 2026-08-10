@@ -22,6 +22,7 @@ from tests.integration._harness import (
     HermeticEnv,
     assert_no_ambient_qbit_ops_config,
     assert_target_is_disposable,
+    build_container_run_args,
     make_hermetic_env,
 )
 from tests.integration._matrix import load_matrix, load_matrix_entry
@@ -207,3 +208,58 @@ def test_sabotage_empty_matrix_manifest_fails_closed(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="zero matrix entries"):
         load_matrix(empty_manifest)
+
+
+# --- container ownership ----------------------------------------------------
+
+
+def _run_args(tmp_path: Path) -> list[str]:
+    entry = load_matrix_entry("qbit-5.2.3")
+    return build_container_run_args(
+        entry,
+        run_id="testrun",
+        container_name="c",
+        network_name="n",
+        config_dir=tmp_path / "config",
+        downloads_dir=tmp_path / "downloads",
+    )
+
+
+def test_container_runs_as_the_host_user_not_a_hardcoded_uid(
+    tmp_path: Path,
+) -> None:
+    """The linuxserver image chowns the bind-mounted `/config` and
+    `/downloads` to PUID/PGID at startup. Any value other than the
+    running user's takes those directories away from the process that
+    created them: seeding fails with EACCES, and so does teardown.
+
+    A hardcoded `1000` passes on a developer machine whose uid happens
+    to be 1000 and fails on a CI runner whose uid is not -- exactly the
+    kind of environment-dependent break a unit assertion catches first.
+    """
+    args = _run_args(tmp_path)
+
+    assert f"PUID={os.getuid()}" in args
+    assert f"PGID={os.getgid()}" in args
+    assert not any(
+        arg.startswith("PUID=") and arg != f"PUID={os.getuid()}" for arg in args
+    )
+
+
+def test_container_mounts_are_the_directories_the_harness_created(
+    tmp_path: Path,
+) -> None:
+    args = _run_args(tmp_path)
+
+    assert f"{tmp_path / 'config'}:/config/qBittorrent" in args
+    assert f"{tmp_path / 'downloads'}:/downloads" in args
+
+
+def test_container_is_published_on_the_loopback_host_only(
+    tmp_path: Path,
+) -> None:
+    """A matrix container must never be reachable off the test host."""
+    published = [arg for arg in _run_args(tmp_path) if arg.count(":") == 2]
+
+    assert published
+    assert all(arg.startswith("127.0.0.1:") for arg in published)
