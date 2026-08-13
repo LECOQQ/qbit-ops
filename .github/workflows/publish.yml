@@ -1,0 +1,91 @@
+name: Publish
+
+# Dispatched by release-please.yml once it has cut a release, and
+# runnable by hand as a recovery path.
+#
+# This workflow must stay NON-reusable, and the publish job must stay
+# defined here: PyPI's Trusted Publisher matches the `job_workflow_ref`
+# OIDC claim against the declared workflow filename, and reusable
+# workflows are explicitly unsupported -- calling this via
+# `workflow_call` fails with `invalid-publisher`.
+# https://docs.pypi.org/trusted-publishers/troubleshooting/
+#
+# Deliberately not `on: release` either: Release Please creates the
+# GitHub Release with the default GITHUB_TOKEN, and events raised by
+# that token do not start another workflow run. `workflow_dispatch` is
+# a documented exception to that rule, which is why it is the trigger.
+# https://docs.github.com/en/actions/concepts/security/github_token
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (vX.Y.Z) to build, verify and publish."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+
+    # The environment PyPI's Trusted Publisher is configured against.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/qbit-ops
+
+    permissions:
+      # Mints the short-lived OIDC token Trusted Publishing exchanges for
+      # an upload token. No PyPI API token is stored anywhere.
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Verify the declared version agrees with the release tag
+        # Reuses the repository's existing version-consistency check
+        # rather than introducing a second notion of "the version".
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            python3 scripts/check_version_sync.py --tag "${{ inputs.tag }}"
+          else
+            python3 scripts/check_version_sync.py
+          fi
+
+      - name: Build wheel and sdist
+        run: poetry build
+
+      - name: Validate the built artifacts
+        run: |
+          python3 -m pip install --upgrade twine
+          python3 -m twine check --strict dist/*
+
+      - name: Verify the entrypoint works from the built wheel
+        # Installs the real artifact into a throwaway virtualenv and runs
+        # the console script, so a broken entry point fails here rather
+        # than on a user's machine after `uv tool install`.
+        run: |
+          python3 -m venv /tmp/entrypoint-check
+          /tmp/entrypoint-check/bin/python -m pip install --quiet dist/*.whl
+          /tmp/entrypoint-check/bin/qbit-ops --version
+          /tmp/entrypoint-check/bin/qbit-ops --help > /dev/null
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

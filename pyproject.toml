@@ -1,13 +1,36 @@
 [tool.poetry]
+# Deliberately the legacy Poetry layout, with no PEP 621 `[project]`
+# table: Release Please's `python` release type updates
+# `[tool.poetry].version`, and `[project.optional-dependencies]` is
+# silently ignored by poetry-core while this file stays fully legacy
+# (see .agents/DECISIONS.md, 2026-07-25, TUI packaging).
 name = "qbit-ops"
 version = "0.3.0"
 description = "qBittorrent administration CLI for homelab operations."
-authors = []
+authors = ["LECOQQ <50244398+LECOQQ@users.noreply.github.com>"]
+license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/LECOQQ/qbit-ops"
+repository = "https://github.com/LECOQQ/qbit-ops"
+documentation = "https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md"
+keywords = ["qbittorrent", "torrent", "cli", "tui", "homelab", "seedbox"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: System :: Systems Administration",
+    "Typing :: Typed",
+]
 packages = [
     { include = "qbit_ops", from = "src" },
     { include = "qbit_core", from = "src" },
 ]
+
+[tool.poetry.urls]
+Changelog = "https://github.com/LECOQQ/qbit-ops/blob/main/CHANGELOG.md"
+Issues = "https://github.com/LECOQQ/qbit-ops/issues"
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -34,6 +57,7 @@ pyright = "*"
 commitizen = "*"
 pre-commit = "*"
 pytest-xdist = "^3.8.0"
+twine = "*"
 
 [build-system]
 requires = ["poetry-core"]
@@ -70,6 +94,7 @@ markers = [
     "tui: Textual TUI tests (the slowest block; excluded by `make check-fast`, run by `make test-tui` and `make check`).",
     "docker: tests that start a real, disposable Docker qBittorrent container (require QBIT_OPS_DOCKER_MATRIX=1; never run by `make check`/`make check-fast`).",
     "capture: tests that write to tests/compatibility/fixtures/captured-container/ (always also marked `docker`; only `make capture-qbit-fixtures` selects these).",
+    "network: tests that reach the network (resolve dependencies from PyPI); excluded from `make check`/`make check-fast`, run by `make check-dist`.",
 ]
 
 [tool.commitizen]

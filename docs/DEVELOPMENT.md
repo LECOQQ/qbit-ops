@@ -151,9 +151,66 @@ Before merging a deliberate release PR:
 
 ```bash
 make check-version                              # pyproject.toml <-> manifest agreement
+make check-dist                                  # build, validate and smoke the artifacts
 make test-qbit-matrix                            # confirm all matrix entries pass
 python3 scripts/check_qbit_matrix_freshness.py   # flag a STALE matrix (informational only)
 ```
+
+## Publishing to PyPI
+
+Users install from PyPI (`uv tool install qbit-ops`), so every release
+has to reach it. Publishing is automatic and hangs off the existing
+Release Please flow -- there is no second versioning or release system:
+
+```text
+Conventional Commits on main
+  -> Release Please opens a release PR
+  -> merging it bumps the version, tags vX.Y.Z, creates the GitHub Release
+  -> release-please.yml dispatches publish.yml with that tag
+  -> publish.yml builds, validates, and uploads to PyPI
+```
+
+Two constraints shape that wiring, and neither is optional:
+
+- **`publish.yml` must stay non-reusable**, with the publish job defined
+  in it. PyPI matches the `job_workflow_ref` OIDC claim against the
+  workflow filename declared in the Trusted Publisher, and [reusable
+  workflows are explicitly
+  unsupported](https://docs.pypi.org/trusted-publishers/troubleshooting/):
+  calling it through `workflow_call` fails with `invalid-publisher`.
+- **The trigger is `workflow_dispatch`, not `on: release`.** Release
+  Please creates the release with the default `GITHUB_TOKEN`, and
+  [events raised by that token do not start another workflow
+  run](https://docs.github.com/en/actions/concepts/security/github_token)
+  -- an `on: release` trigger would silently never fire.
+  `workflow_dispatch` is a documented exception to that rule, so
+  `gh workflow run` from the release job does start it (which is why
+  that job needs `actions: write`).
+
+Uploading uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+over OIDC: the job requests `id-token: write`, runs in the `pypi`
+GitHub Environment, and exchanges a short-lived token for upload
+credentials. **No PyPI API token is stored in the repository.**
+
+Before uploading, the workflow cross-checks the release tag against the
+declared version (`scripts/check_version_sync.py --tag`), runs
+`twine check --strict`, and installs the built wheel into a throwaway
+virtualenv to confirm the `qbit-ops` console script actually runs.
+
+To reproduce that locally:
+
+```bash
+make build        # wheel + sdist into dist/
+make check-dist   # twine check, then install the wheel and run the entrypoint
+```
+
+`make check-dist` needs network access to resolve dependencies, so its
+install smoke test is marked `network` and stays out of `make check`
+and `make check-fast`.
+
+Recovery path: `publish.yml` also accepts `workflow_dispatch`, so a
+release whose publish step failed can be retried without cutting a new
+version.
 
 Neither compatibility check auto-publishes or auto-merges -- both are
 advisory input to a human decision.
