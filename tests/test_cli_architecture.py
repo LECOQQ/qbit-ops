@@ -24,6 +24,7 @@ from qbit_ops.cli.commands import (
     torrents,
     trackers,
     tui,
+    version,
 )
 
 PACKAGE_DIR = Path(qbit_ops.__file__).parent
@@ -116,7 +117,7 @@ def test_every_root_level_command_is_registered_exactly_once() -> None:
         names.append(
             command.name or command.callback.__name__.replace("_", "-")
         )
-    for expected in ("status", "doctor", "tui"):
+    for expected in ("status", "doctor", "tui", "version"):
         assert names.count(expected) == 1, (expected, names)
 
 
@@ -125,6 +126,7 @@ def test_command_modules_expose_the_registration_pattern_advertised() -> None:
     assert callable(status.register)
     assert callable(doctor.register)
     assert callable(tui.register)
+    assert callable(version.register)
     assert isinstance(connection.connection_app, typer.Typer)
     assert isinstance(backup.backup_app, typer.Typer)
     assert isinstance(torrents.torrents_app, typer.Typer)

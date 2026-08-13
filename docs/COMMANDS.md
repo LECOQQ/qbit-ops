@@ -14,6 +14,7 @@ qbit-ops <group> <command> --help
 qbit-ops
 ├── status [--watch]
 ├── doctor
+├── version
 ├── tui
 ├── connection check
 ├── backup
@@ -49,6 +50,7 @@ qbit-ops
 ```bash
 qbit-ops status
 qbit-ops doctor
+qbit-ops version
 qbit-ops torrents list --state stalled
 qbit-ops torrents list --category sonarr --format json
 qbit-ops explain torrent --hash abc123
@@ -79,6 +81,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `status` | ✅ | ✅ | ✅ | ✅ |
 | `connection check` | ✅ | ✅ | ✅ | ✅ |
 | `doctor` | ✅ | ✅ | ✅ | ✅ |
+| `version` | ✅ | ✅ | ✅ | — |
 | `torrents list` | ✅ | ✅ | ✅ | ✅ |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ |
 | `torrents inspect` | ✅ | ✅ | ✅ | — |
@@ -92,6 +95,29 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `backup restore` | ✅ | ✅ | — | — |
 | `explain torrent` | ✅ | ✅ | ✅ | — |
 | `explain tracker` | ✅ | ✅ | ✅ | — |
+
+## 🏷️ Versions
+
+Two deliberately separate uses.
+
+```bash
+qbit-ops --version              # qbit-ops 1.2.0
+qbit-ops version                # the four useful versions
+qbit-ops version --format json
+```
+
+- 🔌 `--version` is purely local: no configuration is loaded, no
+  connection is made, and it never depends on qBittorrent.
+- 🧾 `version` adds the instance's versions -- Python, qBittorrent and
+  Web API -- at the cost of one call per remote version. Versions are
+  reported exactly as the instance returns them.
+- 📡 An unreachable instance (invalid configuration, connection or
+  authentication failure) is not an error here: local versions stay
+  reported, remote ones become `unavailable` (table) or `null`
+  (json/jsonl), stderr stays empty, and the exit code stays `0`. Use
+  `doctor` to diagnose the instance itself.
+- 💥 An unexpected error stays visible: it exits `70`, never disguised
+  as `unavailable`.
 
 ## 🎯 Selecting torrents
 

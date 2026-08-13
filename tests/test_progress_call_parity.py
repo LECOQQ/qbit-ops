@@ -59,6 +59,7 @@ READ_ONLY_ARGV: list[list[str]] = [
     ["status"],
     ["connection", "check"],
     ["doctor"],
+    ["version"],
     ["torrents", "list"],
     ["torrents", "list", "--category", "movies"],
     ["torrents", "list", "--state", "seeding"],

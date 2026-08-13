@@ -23,6 +23,9 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "status": frozenset(OutputFormat),
     "connection_check": frozenset(OutputFormat),
     "doctor": frozenset(OutputFormat),
+    "version": frozenset(
+        {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
+    ),
     "torrents_list": frozenset(OutputFormat),
     "torrents_categories": frozenset(OutputFormat),
     "torrents_inspect": frozenset(

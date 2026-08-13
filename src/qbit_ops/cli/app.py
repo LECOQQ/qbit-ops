@@ -1,10 +1,13 @@
 """The canonical root Typer application: the CLI composition root."""
 
+from typing import Annotated
+
 import typer
 
 from qbit_ops import __version__
 from qbit_ops.cli.commands import doctor as doctor_commands
 from qbit_ops.cli.commands import tui as tui_commands
+from qbit_ops.cli.commands import version as version_commands
 from qbit_ops.cli.commands.backup import backup_app
 from qbit_ops.cli.commands.connection import connection_app
 from qbit_ops.cli.commands.explain import explain_app
@@ -28,13 +31,45 @@ app.add_typer(explain_app, name="explain")
 register_status(app)
 doctor_commands.register(app)
 tui_commands.register(app)
+version_commands.register(app)
+
+
+def _project_identity() -> str:
+    """Build the single identity line `--version` and a bare invocation
+    both print, so the two can never drift apart."""
+    return f"{PROJECT_NAME} {__version__}"
+
+
+def _print_version(value: bool) -> None:
+    """Eager `--version` callback: print and exit before anything else.
+
+    Runs before any other parameter or subcommand is processed, so no
+    configuration is loaded, no client is created, and no network call
+    is ever made.
+    """
+    if not value:
+        return
+
+    typer.echo(_project_identity())
+    raise typer.Exit(code=ExitCode.SUCCESS)
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_print_version,
+            is_eager=True,
+            help="Show the installed qbit-ops version and exit.",
+        ),
+    ] = False,
+) -> None:
     """Print the project name and version when no command is provided."""
     if ctx.invoked_subcommand is None:
-        typer.echo(f"{PROJECT_NAME} {__version__}")
+        typer.echo(_project_identity())
         raise typer.Exit(code=ExitCode.SUCCESS)
 
 

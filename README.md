@@ -153,6 +153,8 @@ This is evidence for those exact versions, not a claim for the whole 4.6–5.2 r
 
 ```bash
 qbit-ops --help
+qbit-ops --version
+qbit-ops version
 qbit-ops torrents --help
 qbit-ops trackers --help
 ```
