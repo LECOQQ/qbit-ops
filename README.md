@@ -105,13 +105,15 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 
 ## 🧭 How is `qbit-ops` different?
 
-| | [qbit-ops](https://github.com/LECOQQ/qbit-ops) | [qbit_manage](https://github.com/StuffAnThings/qbit_manage) | [qbittools](https://gitlab.com/AlexKM/qbittools) |
-| --- | --- | --- | --- |
-| Model | Safe operational toolkit | Rules / background management | Task-oriented utilities |
-| Interface | CLI + TUI | Config + scheduler + Web UI | CLI |
-| Targeting | Composable selectors | Rule/workflow specific | Command specific |
-| Execution | SELECT -> INSPECT -> PLAN -> APPLY | Apply configured rules | Run specialized commands |
-| Best fit | Precise and quick ops, scripting | Continuous library management | Maintenance tasks |
+| | [qbit-ops](https://github.com/LECOQQ/qbit-ops) | [qbittorrent-cli](https://github.com/ludviglundgren/qbittorrent-cli) | [qbit_manage](https://github.com/StuffAnThings/qbit_manage) | [qbittools](https://gitlab.com/AlexKM/qbittools) |
+| --- | --- | --- | --- | --- |
+| Model | Safe operational toolkit | General-purpose qBittorrent CLI | Rules / background management | Task-oriented utilities |
+| Interface | CLI + TUI | CLI | Config + scheduler + Web UI | CLI |
+| Targeting | Composable selectors | Command / torrent specific | Rule / workflow specific | Command specific |
+| Execution | SELECT → INSPECT → PLAN → APPLY | Direct qBittorrent operations | Apply configured rules | Run specialized commands |
+| Safety | Dry-run-first, explicit apply | Command-dependent | Rule-driven automation | Command-dependent |
+| Automation | Structured JSON + stable exit behavior | CLI / scripting | Scheduled workflows | CLI / scripting |
+| Best fit | Safe bulk ops, inspection & scripting | General qBittorrent control from a terminal | Continuous library management | Specialized maintenance tasks |
 
 
 > `qbit-ops` is deliberately not a daemon or background rules engine: select precisely, inspect the scope, preview the plan, then apply it.
@@ -128,11 +130,11 @@ qbit-ops tui
 
 | Overview | Torrents |
 |---|---|
-| ![Overview workspace](docs/assets/overview.png) | ![Torrent table](docs/assets/torrents.png) |
+| ![Overview workspace](docs/assets/overview.webp) | ![Torrent table](docs/assets/torrents.webp) |
 
 | Search | Preview before Apply |
 |---|---|
-| ![Search results](docs/assets/torrent-details.png) | ![Frozen bulk-action preview](docs/assets/action-preview.png) |
+| ![Search results](docs/assets/torrent-details.webp) | ![Frozen bulk-action preview](docs/assets/action-preview.webp) |
 
 Press `?` inside the TUI to see the available controls.
 
