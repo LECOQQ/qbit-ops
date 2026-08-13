@@ -8,7 +8,8 @@
   <a href="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml"><img src="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/LECOQQ/qbit-ops/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://github.com/LECOQQ/qbit-ops/blob/main/pyproject.toml"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python"></a>
-  <a href="https://github.com/LECOQQ/qbit-ops/blob/main/CHANGELOG.md"><img src="https://img.shields.io/github/v/release/LECOQQ/qbit-ops?label=version&display_name=tag" alt="Version"></a>
+  <a href="https://pypi.org/project/qbit-ops/"><img src="https://img.shields.io/pypi/v/qbit-ops.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/qbit-ops/"><img src="https://img.shields.io/pypi/dm/qbit-ops.svg" alt="PyPI downloads"></a>
 </p>
 
 🧯 **A tiny qBittorrent CLI and TUI for people who don't want to nuke their
@@ -18,7 +19,9 @@ Inspect, diagnose and automate qBittorrent at scale - with composable filters, b
 
 > ✨ Featured in [Self-Host Weekly](https://selfh.st/weekly/2026-08-07/) by selfh.st.
 
-![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo.gif)
+[![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo-poster.webp)](https://github.com/LECOQQ/qbit-ops/blob/main/docs/assets/qbit-ops-demo.gif)
+
+<p align="center"><em>▶ Click for the animated demo.</em></p>
 
 ## 🚀 Get started
 

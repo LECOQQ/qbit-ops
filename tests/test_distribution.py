@@ -10,6 +10,7 @@ dependencies and is therefore marked `network`, excluded from
 from __future__ import annotations
 
 import configparser
+import re
 import shutil
 import subprocess
 import sys
@@ -218,6 +219,36 @@ def test_the_entrypoint_works_after_installing_the_built_wheel(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"qbit-ops {_declared_version()}"
+
+
+# PyPI proxies every long-description image through its camo service
+# (`img-src 'self' https://pypi-camo.freetls.fastly.net/ ...`). An asset
+# that is megabytes large is a bad bet through any proxy, and a bad
+# experience on a slow connection -- link to it instead of inlining it.
+MAX_INLINE_ASSET_BYTES = 5 * 1024 * 1024
+
+
+def test_readme_never_inlines_a_heavyweight_asset() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    inlined = re.findall(
+        r"!\[[^\]]*\]\("
+        r"https://raw\.githubusercontent\.com/LECOQQ/qbit-ops/main/([^)]+)\)",
+        readme,
+    )
+
+    assert inlined, "expected the README to inline at least one asset"
+
+    oversized = {
+        name: (REPO_ROOT / name).stat().st_size
+        for name in inlined
+        if (REPO_ROOT / name).exists()
+        and (REPO_ROOT / name).stat().st_size > MAX_INLINE_ASSET_BYTES
+    }
+
+    assert not oversized, (
+        f"inlined README assets above {MAX_INLINE_ASSET_BYTES} bytes: "
+        f"{oversized}. Link to them behind a lightweight poster instead."
+    )
 
 
 # --- Publishing configuration guardrails -------------------------------
