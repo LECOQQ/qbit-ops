@@ -67,7 +67,7 @@ testpaths = ["tests"]
 addopts = "-q --maxfail=1 --disable-warnings --strict-markers"
 asyncio_mode = "auto"
 markers = [
-    "tui: Textual TUI tests (slow: ~5 minutes; excluded by `make check-fast`, run by `make test-tui` and `make check`).",
+    "tui: Textual TUI tests (the slowest block; excluded by `make check-fast`, run by `make test-tui` and `make check`).",
     "docker: tests that start a real, disposable Docker qBittorrent container (require QBIT_OPS_DOCKER_MATRIX=1; never run by `make check`/`make check-fast`).",
     "capture: tests that write to tests/compatibility/fixtures/captured-container/ (always also marked `docker`; only `make capture-qbit-fixtures` selects these).",
 ]

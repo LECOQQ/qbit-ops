@@ -52,8 +52,8 @@ make test-tui
 
 The Pilot-based interface tests, mutation lifecycle, concurrency, and
 the security/layering guard. Never contacts qBittorrent or Docker.
-Slower (~5 min) -- covers concurrent-mutation and race-condition
-regressions `check-fast` skips for speed.
+The slowest block (~1 min) -- covers concurrent-mutation and
+race-condition regressions `check-fast` skips for speed.
 
 ### 4. `make check` -- the required push/PR gate
 
@@ -62,9 +62,14 @@ make check
 ```
 
 Formatting, lint, type-checking, version sync, every hermetic test,
-and the complete TUI suite. Never touches Docker. This is exactly what
-CI (`make ci`) runs on every push and pull request -- run it before
-you push.
+and the complete TUI suite. Never touches Docker, ~1m40. This is
+exactly what CI (`make ci`) runs on every push and pull request -- run
+it before you push.
+
+The hermetic suites run in parallel (`pytest -n auto`). The Docker
+targets below deliberately do not: they drive one shared disposable
+container, so concurrent workers would collide on its ports and
+mutate its state underneath each other.
 
 ### 5. Docker-based qBittorrent compatibility tests
 
