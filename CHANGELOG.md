@@ -3,6 +3,55 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.4.0](https://github.com/LECOQQ/qbit-ops/compare/v0.3.0...v0.4.0) (2026-08-13)
+
+
+### Features
+
+* **backup:** add additive category/tags/tracker restore from export ([0f4bf77](https://github.com/LECOQQ/qbit-ops/commit/0f4bf77d9c6110997764a84e9347db33532f1f2f))
+* **dist:** publish qbit-ops to PyPI via Trusted Publishing ([98d4ae4](https://github.com/LECOQQ/qbit-ops/commit/98d4ae4dd44bbff94d4631f78ed484ad795eadf4))
+* **qbit-core:** add pure parsers for operator-typed quantities ([0acc9c9](https://github.com/LECOQQ/qbit-ops/commit/0acc9c94cca3fd338efd09a44515d0b027c74669))
+* **qbit-core:** add the composable selection model and its validation ([e9627e1](https://github.com/LECOQQ/qbit-ops/commit/e9627e1ada45f828fcc2a35d5799889508d04774))
+* **qbit-core:** evaluate every cheap selection predicate ([77b4ffd](https://github.com/LECOQQ/qbit-ops/commit/77b4ffd4a23f118e3d911cce5b0a91e66ba88f20))
+* **qbit-core:** report field absence explicitly for bounded predicates ([4a30f38](https://github.com/LECOQQ/qbit-ops/commit/4a30f38db6e2edf05e56bc0d64062f505624d567))
+* **selection:** close the last filter gaps and drop the TUI refresh debt ([e8d3699](https://github.com/LECOQQ/qbit-ops/commit/e8d369926b2d5bb822fab195420784ad6119492f))
+* **selection:** filter by completion date, on the observed -1 sentinel ([ad6a7ef](https://github.com/LECOQQ/qbit-ops/commit/ad6a7ef87d9b80085b11c12131a4465091002ecd))
+* **selection:** filter by inactivity, on observed last_activity semantics ([78d4d18](https://github.com/LECOQQ/qbit-ops/commit/78d4d185b5e096ac135b7c991563f7ccddc6d389))
+* **tooling:** add worktree and documentation-consistency make targets ([7bae8af](https://github.com/LECOQQ/qbit-ops/commit/7bae8af45d2334055fb925c4dc32b870bf9245c5))
+* **torrents:** accept the composable filters on every bulk mutation ([dd06b67](https://github.com/LECOQQ/qbit-ops/commit/dd06b67601ad91f910ba95c5d64bf64c82e16ee5))
+* **torrents:** add .torrent import (file/dir/zip) via WebUI API ([1446ca3](https://github.com/LECOQQ/qbit-ops/commit/1446ca30902ef2daa9084ae503e8989a9c071eae))
+* **torrents:** add HIGH-risk destructive `torrents delete` ([701c549](https://github.com/LECOQQ/qbit-ops/commit/701c549b834a36c0178513f4373ae5457d543028))
+* **torrents:** expose the composable cheap filters on `torrents list` ([ef75be3](https://github.com/LECOQQ/qbit-ops/commit/ef75be3f76d5ff49112e20262484bea8cfe6c92e))
+* **torrents:** filter by tracker presence and excluded tracker hosts ([2e6d51d](https://github.com/LECOQQ/qbit-ops/commit/2e6d51d371ee1cf05185d6973555d2e60118ee3b))
+* **torrents:** serialize the composable filters and repeat --tracker ([91918c1](https://github.com/LECOQQ/qbit-ops/commit/91918c178fe1c858a23c657d4f047b86ac1063aa))
+* **trackers:** scope add-if-present with torrent filters ([62490ab](https://github.com/LECOQQ/qbit-ops/commit/62490ab1d298e0a7b8614c7a5632493245f0c143))
+* **trackers:** scope every tracker operation with the composable filters ([5701be1](https://github.com/LECOQQ/qbit-ops/commit/5701be1c6ba025211800c237f48201408cfcc8a9))
+* **tui:** add instance-wide lifetime stats to the Overview panel ([72a1599](https://github.com/LECOQQ/qbit-ops/commit/72a1599a0044c07496b7e374c615665d59e5f93f))
+* **version:** report qbit-ops, Python and qBittorrent versions ([8b3d0e1](https://github.com/LECOQQ/qbit-ops/commit/8b3d0e188d3584c1527f44b8128c172ea32a4692))
+
+
+### Bug Fixes
+
+* **qbit-core:** case-insensitive dedup and blank-hash validation in hash-based ops ([c5f2fe1](https://github.com/LECOQQ/qbit-ops/commit/c5f2fe1917da2d376b0a22cc0eed8fee627f8def))
+* **selection:** make tracker filters crash-proof and selection uniform ([17599df](https://github.com/LECOQQ/qbit-ops/commit/17599df8d562e0a74bdf7da9237fcf10f24d281e))
+* **test:** run matrix containers as the host user, not a hardcoded uid ([df68ea8](https://github.com/LECOQQ/qbit-ops/commit/df68ea828fef22b129e7695df4134a37fc51751d))
+* **trackers:** stop counting DHT/PeX/LSD as trackers ([cb2e059](https://github.com/LECOQQ/qbit-ops/commit/cb2e0598564b5b43455ac7ca2301a77843ce9384))
+* **version:** keep --version silent during shell completion ([a335330](https://github.com/LECOQQ/qbit-ops/commit/a3353308318ecc6e25dc3b4c47450e80a3ad6bb2))
+
+
+### Performance Improvements
+
+* **tests:** run the hermetic suites under pytest-xdist ([b71a687](https://github.com/LECOQQ/qbit-ops/commit/b71a68749385c54e807e7c48695cb93eac8b93e2))
+
+
+### Documentation
+
+* add philosophy ([817e7a8](https://github.com/LECOQQ/qbit-ops/commit/817e7a8bb5efc32cac602e9a7871d13efa28dbc9))
+* add public product roadmap ([0582b2d](https://github.com/LECOQQ/qbit-ops/commit/0582b2de756f6fdee7946fade94e315a4b457f5d))
+* **readme:** add a *how is qbit-ops different* section ([bd18a1f](https://github.com/LECOQQ/qbit-ops/commit/bd18a1febea578dbb5363dd3bdd5d6e5e82f73c9))
+* **readme:** add link to roadmap ([6539dd9](https://github.com/LECOQQ/qbit-ops/commit/6539dd9f7d23f433d76393119c50264fafe7a962))
+* **readme:** update assets, add qbittorrent-cli ([46ac3eb](https://github.com/LECOQQ/qbit-ops/commit/46ac3eb9248d3636cf8b172559899df388d5c583))
+
 ## [0.3.0](https://github.com/LECOQQ/qbit-ops/compare/v0.2.0...v0.3.0) (2026-08-02)
 
 
