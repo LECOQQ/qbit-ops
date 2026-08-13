@@ -45,8 +45,8 @@ def collect_version_report(
     qbittorrent: str | None = None
     web_api: str | None = None
     if client is not None:
-        qbittorrent = str(client.app_version())
-        web_api = str(client.app_web_api_version())
+        qbittorrent = _optional_version(client.app_version())
+        web_api = _optional_version(client.app_web_api_version())
 
     return VersionReport(
         qbit_ops=qbit_ops_version,
@@ -54,6 +54,12 @@ def collect_version_report(
         qbittorrent=qbittorrent,
         web_api=web_api,
     )
+
+
+def _optional_version(value: Any) -> str | None:
+    # Only a missing version is `None` ("unavailable"/`null`); any other
+    # value is reported as-is, never as the string "None".
+    return None if value is None else str(value)
 
 
 def version_report_to_json_dict(report: VersionReport) -> dict[str, Any]:

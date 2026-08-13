@@ -563,11 +563,18 @@ _VERSION_ROW_LABELS: tuple[tuple[str, str], ...] = (
 
 
 def version_summary_rows(report: VersionReport) -> dict[str, str]:
-    """Build the table rows, an unreachable instance reading
-    `unavailable` where json/jsonl carry `null`."""
+    """Build the table rows, `unavailable` standing for a `null` version.
+
+    Tests `is None`, not truthiness, so the table and json/jsonl always
+    agree on which versions are unavailable.
+    """
     payload = version_report_to_json_dict(report)
     return {
-        label: payload[key] or UNAVAILABLE_VERSION_LABEL
+        label: (
+            UNAVAILABLE_VERSION_LABEL
+            if payload[key] is None
+            else str(payload[key])
+        )
         for label, key in _VERSION_ROW_LABELS
     }
 

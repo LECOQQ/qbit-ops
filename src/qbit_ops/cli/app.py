@@ -35,19 +35,20 @@ version_commands.register(app)
 
 
 def _project_identity() -> str:
-    """Build the single identity line `--version` and a bare invocation
-    both print, so the two can never drift apart."""
     return f"{PROJECT_NAME} {__version__}"
 
 
-def _print_version(value: bool) -> None:
+def _print_version(ctx: typer.Context, value: bool) -> None:
     """Eager `--version` callback: print and exit before anything else.
 
     Runs before any other parameter or subcommand is processed, so no
     configuration is loaded, no client is created, and no network call
-    is ever made.
+    is ever made. Shell completion resolves the command line through a
+    `resilient_parsing` context that still runs parameter callbacks, so
+    it must return silently there -- printing would land in the middle
+    of the completion payload.
     """
-    if not value:
+    if not value or ctx.resilient_parsing:
         return
 
     typer.echo(_project_identity())
