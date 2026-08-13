@@ -5,13 +5,10 @@
 > [!NOTE]
 > This roadmap describes direction, not commitments. Features may move between releases as `qbit-ops` evolves.
 
-## 🚧 WIP - v0.4.0: 📚 Know Your Library
+## 🚧 WIP - v0.5.0: 📚 Know Your Library - Part 2
 
 > Find anything. Understand what is happening.
 
-- SELECT -> INSPECT -> PLAN -> APPLY pipeline
-- Reusable `qbit-core` module powering the CLI and TUI
-- Composable filters
 - Deterministic search
 - Shared filters and search across CLI and TUI
 - Trackers inventory
@@ -22,7 +19,7 @@
 
 ## 🔭 Later
 
-### v0.5.0 - 🏭 Operate at Scale
+### v0.6.0 - 🏭 Operate at Scale
 
 > Select precisely. Operate on thousands of torrents safely.
 
@@ -35,7 +32,7 @@
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
 
-### v0.6.0 - 🐉 Move Without Fear
+### v0.7.0 - 🐉 Move Without Fear
 
 > Move freely across disks, servers or qBittorrent instances without losing anything.
 
@@ -48,7 +45,7 @@
 - Storage-aware operations
 - Duplicate-content detection in `doctor`
 
-### v0.7.0 - 🛡️ Guardrails
+### v0.8.0 - 🛡️ Guardrails
 
 > Expliciting what must never happens.
 
@@ -64,7 +61,7 @@
 - Seed time
 - Absolute uploaded
 
-### v0.8.0 - ⚙️ Automation Toolkit
+### v0.9.0 - ⚙️ Automation Toolkit
 
 > Becoming a scriptable operational substrate.
 
@@ -78,3 +75,7 @@
 ### v1.0.0 - 🦖 Safe qBittorrent Operations
 
 > Stabilize. Harden. Evolve.
+
+## 🗃️ Shipped
+
+Completed milestones are archived in [docs/ROADMAP_ARCHIVE.md](docs/ROADMAP_ARCHIVE.md).
