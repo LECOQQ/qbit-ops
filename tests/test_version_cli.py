@@ -8,14 +8,22 @@ when the instance cannot be reached.
 
 import json
 import platform
+from typing import Any
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_core.features.version import (
+    VersionReport,
+    collect_version_report,
+    version_report_to_json_dict,
+)
 from qbit_ops import __version__
 from qbit_ops.cli.app import app
 from qbit_ops.cli.exit_codes import ExitCode
+from qbit_ops.cli.rendering import version_summary_rows
 from qbit_ops.config import ConfigError
 from tests.support import FakeQbitClient, make_torrent
 
@@ -46,6 +54,29 @@ class _RaisingVersionClient(FakeQbitClient):
         raise RuntimeError("boom")
 
 
+class _UnreachableVersionClient(FakeQbitClient):
+    """A client that connects, then loses the instance while reading the
+    versions -- a recoverable failure raised after client creation."""
+
+    def app_version(self) -> str:
+        raise QbitConnectionError("unreachable")
+
+
+class _DegenerateVersionClient:
+    """A client returning a version value the protocol says cannot
+    happen (`None`, an empty string), which `FakeQbitClient` -- typed on
+    that protocol -- cannot express."""
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def app_version(self) -> Any:
+        return self._value
+
+    def app_web_api_version(self) -> Any:
+        return self._value
+
+
 # --- `qbit-ops --version`: local, offline, deterministic --------------------
 
 
@@ -74,6 +105,33 @@ def test_version_option_never_creates_a_client(
 
     assert result.exit_code == ExitCode.SUCCESS
     assert calls == []
+
+
+def test_version_option_short_circuits_a_subcommand(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Being eager, `--version` wins over the subcommand that follows it."""
+    calls = configure_qbit_backend(client=_make_client())
+
+    result = runner.invoke(app, ["--version", "status"])
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert result.stdout == f"qbit-ops {__version__}\n"
+    assert calls == []
+
+
+def test_version_option_stays_silent_during_shell_completion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Shell completion resolves the command line with
+    `resilient_parsing=True`, which still runs parameter callbacks: an
+    identity line printed there corrupts the completion payload."""
+    command = typer.main.get_command(app)
+
+    command.make_context("qbit-ops", ["--version"], resilient_parsing=True)
+
+    assert capsys.readouterr().out == ""
 
 
 def test_version_option_never_loads_the_configuration(
@@ -214,6 +272,27 @@ def test_unreachable_instance_reports_null_remote_versions_in_json(
     assert result.stderr == ""
 
 
+def test_instance_lost_while_reading_the_versions_is_still_unavailable(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """The recoverable failure raised *after* the client was created,
+    the one client creation itself cannot exercise."""
+    configure_qbit_backend(client=_UnreachableVersionClient())
+
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == ExitCode.SUCCESS
+    assert result.stdout.count("unavailable") == 2
+    assert result.stderr == ""
+
+    configure_qbit_backend(client=_UnreachableVersionClient())
+
+    result = runner.invoke(app, ["version", "--format", "json"])
+    assert result.exit_code == ExitCode.SUCCESS
+    assert json.loads(result.stdout)["qbittorrent"] is None
+    assert result.stderr == ""
+
+
 def test_unexpected_client_error_is_an_internal_error_not_unavailable(
     runner: CliRunner,
     configure_qbit_backend,
@@ -240,3 +319,41 @@ def test_unexpected_collection_error_is_not_degraded_to_unavailable(
     assert result.exit_code == ExitCode.INTERNAL
     assert result.stdout.strip() == ""
     assert "Internal error" in result.stderr
+
+
+# --- Table and json/jsonl agree on what "unavailable" means -----------------
+
+
+def test_a_missing_remote_version_is_null_not_the_string_none() -> None:
+    report = collect_version_report(
+        qbit_ops_version="1.2.3", client=_DegenerateVersionClient(None)
+    )
+
+    assert report.qbittorrent is None
+    assert report.web_api is None
+    assert version_report_to_json_dict(report)["qbittorrent"] is None
+
+
+def test_an_empty_remote_version_is_reported_as_is() -> None:
+    report = collect_version_report(
+        qbit_ops_version="1.2.3", client=_DegenerateVersionClient("")
+    )
+
+    assert report.qbittorrent == ""
+    assert version_report_to_json_dict(report)["qbittorrent"] == ""
+
+
+@pytest.mark.parametrize(
+    "remote,expected",
+    [(None, "unavailable"), ("", ""), ("5.1.2", "5.1.2")],
+)
+def test_only_a_null_remote_version_reads_unavailable_in_the_table(
+    remote: str | None,
+    expected: str,
+) -> None:
+    """The table says `unavailable` for exactly the values json/jsonl
+    serialize as `null`, never for a merely falsy one."""
+    report = VersionReport("1.2.3", "3.12.8", remote, remote)
+
+    assert version_summary_rows(report)["qBittorrent"] == expected
+    assert version_summary_rows(report)["Web API"] == expected
