@@ -11,6 +11,15 @@ import os
 # here, before any other import, guarantees that.
 os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
 
+# Rich derives its render width from `COLUMNS`, falling back to whatever
+# the ambient terminal reports. Assertions that look for a full torrent
+# hash or a wide table cell therefore pass or fail on terminal geometry:
+# under `pytest -n`, xdist workers inherit a narrower default, Rich wraps
+# the cell, and the substring is split across two lines. Pinned (not
+# `setdefault`) so the rendered width is identical in a terminal, in CI,
+# and across xdist workers -- an ambient `COLUMNS` must not leak in.
+os.environ["COLUMNS"] = "200"
+
 from collections.abc import Callable
 from typing import Any
 

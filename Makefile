@@ -68,8 +68,12 @@ lint: ## Check Python style and types without modifying files
 	@$(PY) black --check src tests
 	@$(PY) pyright
 
+# Hermetic suites run under xdist; the Docker matrix targets below stay
+# serial on purpose -- they drive one shared disposable container.
+PYTEST_PARALLEL := -n auto
+
 test: ## Run Python tests
-	@$(PY) pytest
+	@$(PY) pytest $(PYTEST_PARALLEL)
 
 check-version: ## Verify pyproject.toml and the Release Please manifest agree
 	@python3 scripts/check_version_sync.py
@@ -81,10 +85,10 @@ check-fast: sync ## Fast local checkpoint: lint/types/version + hermetic non-TUI
 	@$(PY) black --check src tests
 	@$(PY) pyright
 	@python3 scripts/check_version_sync.py
-	@$(PY) pytest -m "not tui and not docker"
+	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker"
 
 test-tui: sync ## Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
-	@$(PY) pytest tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py tests/test_tui_table_performance.py
+	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py tests/test_tui_table_performance.py
 
 ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --extras tui --no-interaction --no-ansi
