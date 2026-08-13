@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -22,9 +22,9 @@ DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
 	@poetry install --sync --extras tui --no-interaction
 	@touch .sync-stamp
 
-sync: .sync-stamp ## Sync the virtualenv when pyproject.toml or poetry.lock changes
+sync: .sync-stamp ## dev: Sync the virtualenv when pyproject.toml or poetry.lock changes
 
-doctor: ## Check required local tools
+doctor: ## diag: Check required local tools
 	@missing=0; \
 	for command in git make python3 poetry; do \
 		if command -v "$$command" >/dev/null 2>&1; then \
@@ -36,7 +36,7 @@ doctor: ## Check required local tools
 	done; \
 	exit "$$missing"
 
-info: ## Show project and environment information
+info: ## diag: Show project and environment information
 	@printf 'Project: %s\n' "$(PROJECT_NAME)"
 	@printf 'Version: %s\n' "$$(poetry version -s 2>/dev/null || echo unknown)"
 	@printf 'Profile: %s\n' "$(PROFILE)"
@@ -44,61 +44,87 @@ info: ## Show project and environment information
 	@printf 'Python: %s\n' "$$(python3 --version 2>&1)"
 	@printf 'Branch: %s\n' "$$(git branch --show-current 2>/dev/null || true)"
 
-help: ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile \
-	| awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
+# One help section per category tag. Every documented target carries
+# exactly one of dev/qa/use/diag, enforced by tests/test_makefile_help.py
+# so a new target cannot silently vanish from `make help` by forgetting
+# its tag.
+define help_section
+@echo "$(1):"
+@grep -hE '^[a-zA-Z0-9_-]+:.*?## $(2): ' $(MAKEFILE_LIST) \
+	| sort -t: -k1,1 \
+	| awk 'BEGIN {FS = ":.*?## $(2): "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
+@echo ""
+endef
 
-install: doctor ## Install dependencies and configure Git hooks
+help: ## diag: Show this help
+	$(call help_section,Development,dev)
+	$(call help_section,Quality,qa)
+	$(call help_section,Local usage,use)
+	$(call help_section,Diagnostics,diag)
+
+install: doctor ## dev: Install dependencies and configure Git hooks
 	@poetry install --extras tui
 	@touch .sync-stamp
 	@$(PY) pre-commit install --hook-type commit-msg
 
-hooks-install: ## Reinstall the Conventional Commits hook
+hooks-install: ## dev: Reinstall the Conventional Commits hook
 	@$(PY) pre-commit install --hook-type commit-msg
 
-run: ## Run the application
+run: ## use: Run the application
 	@$(PY) python -m qbit_ops.cli.app
 
-format: ## Format and fix Python files
-	@$(PY) ruff check --fix src tests
-	@$(PY) black src tests
+format: ## qa: Format and fix Python files
+	@$(PY) ruff check --fix src tests scripts
+	@$(PY) black src tests scripts
 
-lint: ## Check Python style and types without modifying files
-	@$(PY) ruff check src tests
-	@$(PY) black --check src tests
+lint: ## qa: Check Python style and types without modifying files
+	@$(PY) ruff check src tests scripts
+	@$(PY) black --check src tests scripts
 	@$(PY) pyright
 
 # Hermetic suites run under xdist; the Docker matrix targets below stay
 # serial on purpose -- they drive one shared disposable container.
 PYTEST_PARALLEL := -n auto
 
-test: ## Run Python tests
+test: ## qa: Run Python tests
 	@$(PY) pytest $(PYTEST_PARALLEL)
 
-check-version: ## Verify pyproject.toml and the Release Please manifest agree
+check-version: ## qa: Verify pyproject.toml and the Release Please manifest agree
 	@python3 scripts/check_version_sync.py
 
-check: sync lint test check-version ## Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
+check-docs: ## qa: Verify every Markdown link and repo-anchored path reference resolves
+	@python3 scripts/check_doc_links.py
 
-check-fast: sync ## Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
-	@$(PY) ruff check src tests
-	@$(PY) black --check src tests
+check: sync lint test check-version check-docs ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
+
+check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
+	@$(PY) ruff check src tests scripts
+	@$(PY) black --check src tests scripts
 	@$(PY) pyright
 	@python3 scripts/check_version_sync.py
+	@python3 scripts/check_doc_links.py
 	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker"
 
-test-tui: sync ## Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
+test-tui: sync ## qa: Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
 	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py tests/test_tui_table_performance.py
 
-ci: ## Run CI checks (install, lint, tests, CLI entrypoint)
+ci: ## qa: Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --extras tui --no-interaction --no-ansi
 	@$(MAKE) check
 	@$(MAKE) ci-entrypoint
 
-ci-entrypoint: ## Verify the CLI entrypoint responds
+ci-entrypoint: ## qa: Verify the CLI entrypoint responds
 	@$(PY) qbit-ops --help
 
-clean: ## Remove locally generated, reproducible artifacts (safe, idempotent -- never touches .venv, .git, .env, or committed fixtures)
+worktree-new: ## dev: Create a branch, worktree and venv for a feature: make worktree-new FEATURE=<slug>
+	@test -n "$(FEATURE)" || { printf 'Usage: make worktree-new FEATURE=<slug>\n' >&2; exit 1; }
+	@python3 scripts/worktree_new.py "$(FEATURE)"
+
+worktree-clean: ## dev: Remove a feature worktree and its merged branch: make worktree-clean FEATURE=<slug>
+	@test -n "$(FEATURE)" || { printf 'Usage: make worktree-clean FEATURE=<slug>\n' >&2; exit 1; }
+	@python3 scripts/worktree_clean.py "$(FEATURE)"
+
+clean: ## dev: Remove locally generated, reproducible artifacts (safe, idempotent -- never touches .venv, .git, .env, or committed fixtures)
 	@find src tests scripts -type d -name "__pycache__" -exec rm -rf {} +
 	@find src tests scripts -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
 	@rm -rf .pytest_cache .ruff_cache .mypy_cache
@@ -111,7 +137,7 @@ clean: ## Remove locally generated, reproducible artifacts (safe, idempotent -- 
 		-not -path "./.venv/*" -not -path "./venv/*" -exec rm -rf {} +
 	@printf 'Cleaned local caches and build artifacts.\n'
 
-docker-matrix-doctor: ## Check Docker is available for the qBittorrent version matrix
+docker-matrix-doctor: ## diag: Check Docker is available for the qBittorrent version matrix
 	@if ! command -v docker >/dev/null 2>&1; then \
 		printf '[MISSING] docker CLI not found\n' >&2; exit 1; \
 	fi; \
@@ -120,7 +146,7 @@ docker-matrix-doctor: ## Check Docker is available for the qBittorrent version m
 	fi; \
 	printf '[OK] docker\n'
 
-demo-doctor: ## Check required local tools for the demo (docker, compose, poetry)
+demo-doctor: ## diag: Check required local tools for the demo (docker, compose, poetry)
 	@missing=0; \
 	for command in docker poetry; do \
 		if command -v "$$command" >/dev/null 2>&1; then \
@@ -136,20 +162,20 @@ demo-doctor: ## Check required local tools for the demo (docker, compose, poetry
 	fi; \
 	exit "$$missing"
 
-demo-up: demo-doctor sync ## Generate demo fixtures, start the disposable qBittorrent, and seed it
+demo-up: demo-doctor sync ## use: Generate demo fixtures, start the disposable qBittorrent, and seed it
 	@$(PY) python demo/generate_fixtures.py
 	@DEMO_UID=$$(id -u) DEMO_GID=$$(id -g) $(DEMO_COMPOSE) up -d
 	@$(PY) python demo/seed_instance.py
 	@printf '\nNext: make demo-tui | make demo-record | make demo-down\n'
 
-demo-tui: sync ## Launch the qbit-ops TUI against the demo instance only
+demo-tui: sync ## use: Launch the qbit-ops TUI against the demo instance only
 	@QBIT_OPS_ENV_FILE="$(DEMO_ENV_FILE)" $(PY) qbit-ops tui
 
-demo-reset: demo-down ## Destroy and recreate the demo instance from scratch
+demo-reset: demo-down ## use: Destroy and recreate the demo instance from scratch
 	@rm -rf demo/generated
 	@$(MAKE) demo-up
 
-demo-record: sync ## Record demo/tui.tape with VHS (requires VHS installed separately)
+demo-record: sync ## use: Record demo/tui.tape with VHS (requires VHS installed separately)
 	@if ! command -v vhs >/dev/null 2>&1; then \
 		printf '[MISSING] vhs not found -- install from https://github.com/charmbracelet/vhs\n' >&2; \
 		exit 1; \
@@ -157,11 +183,11 @@ demo-record: sync ## Record demo/tui.tape with VHS (requires VHS installed separ
 	@mkdir -p demo/output
 	@vhs demo/tui.tape
 
-demo-down: ## Stop and remove the demo containers, network, and all qBittorrent state
+demo-down: ## use: Stop and remove the demo containers, network, and all qBittorrent state
 	@$(DEMO_COMPOSE) down -v --remove-orphans
 	@rm -rf demo/generated/config demo/generated/downloads
 
-test-qbit-matrix: docker-matrix-doctor ## Run the full Docker qBittorrent version matrix (requires Docker, not part of `make check`; never writes captured fixtures -- see `capture-qbit-fixtures`)
+test-qbit-matrix: docker-matrix-doctor ## qa: Run the full Docker qBittorrent version matrix (requires Docker, not part of `make check`; never writes captured fixtures -- see `capture-qbit-fixtures`)
 	@printf 'Running the full qBittorrent Docker matrix against disposable containers on a dedicated Docker network.\n'
 	@printf 'No repository .env, no ~/.config/qbit-ops/.env, no real qBittorrent host is used.\n'
 	@QBIT_OPS_DOCKER_MATRIX=1 $(PY) pytest tests/integration -m "docker and not capture" -q; \
@@ -173,7 +199,7 @@ test-qbit-matrix: docker-matrix-doctor ## Run the full Docker qBittorrent versio
 	fi; \
 	exit $$status
 
-test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one entry: make test-qbit-version QBIT_MATRIX_ID=<id> (never writes captured fixtures)
+test-qbit-version: docker-matrix-doctor ## qa: Run the Docker matrix against one entry: make test-qbit-version QBIT_MATRIX_ID=<id> (never writes captured fixtures)
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make test-qbit-version QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
@@ -190,7 +216,7 @@ test-qbit-version: docker-matrix-doctor ## Run the Docker matrix against one ent
 	fi; \
 	exit $$status
 
-capture-qbit-fixtures: docker-matrix-doctor ## Capture authentic payload fixtures for one matrix entry: make capture-qbit-fixtures QBIT_MATRIX_ID=<id> (the only target that writes committed fixtures)
+capture-qbit-fixtures: docker-matrix-doctor ## qa: Capture authentic payload fixtures for one matrix entry: make capture-qbit-fixtures QBIT_MATRIX_ID=<id> (the only target that writes committed fixtures)
 	@if [ -z "$(QBIT_MATRIX_ID)" ]; then \
 		printf 'Usage: make capture-qbit-fixtures QBIT_MATRIX_ID=<id>\n' >&2; \
 		printf 'Known ids:\n' >&2; \
