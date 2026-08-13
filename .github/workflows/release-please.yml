@@ -5,18 +5,37 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   release-please:
     name: Prepare release
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+      pull-requests: write
+      # Lets this job dispatch publish.yml below.
+      actions: write
+
     steps:
       - name: Release Please
+        id: release
         uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Publish the release to PyPI
+        # A dispatch rather than a reusable-workflow call: PyPI's Trusted
+        # Publisher rejects reusable workflows, so the publish job has to
+        # stay defined in publish.yml itself. `workflow_dispatch` is also
+        # the documented exception to "events raised by GITHUB_TOKEN do
+        # not start another workflow run", so this fires where an
+        # `on: release` trigger would silently never have.
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f tag="${{ steps.release.outputs.tag_name }}"

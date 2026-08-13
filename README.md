@@ -1,14 +1,14 @@
 # 🧯 qbit-ops
 
 <p align="center">
-  <img src="docs/assets/qbit-ops-logo.png" alt="qbit-ops logo" width="200">
+  <img src="https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-logo.png" alt="qbit-ops logo" width="200">
 </p>
 
 <p align="center">
   <a href="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml"><img src="https://github.com/LECOQQ/qbit-ops/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/release/LECOQQ/qbit-ops?label=version&display_name=tag" alt="Version"></a>
+  <a href="https://github.com/LECOQQ/qbit-ops/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/LECOQQ/qbit-ops/blob/main/pyproject.toml"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python"></a>
+  <a href="https://github.com/LECOQQ/qbit-ops/blob/main/CHANGELOG.md"><img src="https://img.shields.io/github/v/release/LECOQQ/qbit-ops?label=version&display_name=tag" alt="Version"></a>
 </p>
 
 🧯 **A tiny qBittorrent CLI and TUI for people who don't want to nuke their
@@ -18,20 +18,36 @@ Inspect, diagnose and automate qBittorrent at scale - with composable filters, b
 
 > ✨ Featured in [Self-Host Weekly](https://selfh.st/weekly/2026-08-07/) by selfh.st.
 
-![qbit-ops TUI demo](docs/assets/qbit-ops-demo.gif)
+![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo.gif)
 
 ## 🚀 Get started
 
 Requires Python 3.12+ and a qBittorrent instance with the Web UI enabled.
 
+Recommended, with [uv](https://docs.astral.sh/uv/):
+
 ```bash
-pipx install "git+https://github.com/LECOQQ/qbit-ops.git@v0.3.0"  # x-release-please-version
+uv tool install qbit-ops
+```
+
+Or with pipx:
+
+```bash
+pipx install qbit-ops
 ```
 
 With the optional TUI:
 
 ```bash
-pipx install "git+https://github.com/LECOQQ/qbit-ops.git@v0.3.0#egg=qbit-ops[tui]"  # x-release-please-version
+uv tool install "qbit-ops[tui]"
+pipx install "qbit-ops[tui]"
+```
+
+To upgrade later:
+
+```bash
+uv tool upgrade qbit-ops
+pipx upgrade qbit-ops
 ```
 
 Create `~/.config/qbit-ops/.env`:
@@ -77,7 +93,7 @@ qbit-ops torrents list --ratio-min 2 --seeded-for 90d --exclude-tag keep
 
 Category, tag, save path, name, state, size, ratio, progress, age,
 tracker and more - the same selector everywhere, listing or mutating.
-Full grammar in [docs/COMMANDS.md](docs/COMMANDS.md).
+Full grammar in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 ## 🛠️ Make changes safely
 
@@ -118,7 +134,7 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 
 > `qbit-ops` is deliberately not a daemon or background rules engine: select precisely, inspect the scope, preview the plan, then apply it.
 
-See [PHILOSOPHY.md](PHILOSOPHY.md) for the reasoning behind that design.
+See [PHILOSOPHY.md](https://github.com/LECOQQ/qbit-ops/blob/main/PHILOSOPHY.md) for the reasoning behind that design.
 
 ## 🖥️ TUI
 
@@ -130,11 +146,11 @@ qbit-ops tui
 
 | Overview | Torrents |
 |---|---|
-| ![Overview workspace](docs/assets/overview.webp) | ![Torrent table](docs/assets/torrents.webp) |
+| ![Overview workspace](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/overview.webp) | ![Torrent table](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrents.webp) |
 
 | Search | Preview before Apply |
 |---|---|
-| ![Search results](docs/assets/torrent-details.webp) | ![Frozen bulk-action preview](docs/assets/action-preview.webp) |
+| ![Search results](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrent-details.webp) | ![Frozen bulk-action preview](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/action-preview.webp) |
 
 Press `?` inside the TUI to see the available controls.
 
@@ -161,11 +177,11 @@ qbit-ops torrents --help
 qbit-ops trackers --help
 ```
 
-A compact command overview is available in [docs/COMMANDS.md](docs/COMMANDS.md).
+A compact command overview is available in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 ## 🗺️ Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for where the project is heading.
+See [ROADMAP.md](https://github.com/LECOQQ/qbit-ops/blob/main/ROADMAP.md) for where the project is heading.
 
 ## 🧑‍💻 Development
 
@@ -177,8 +193,8 @@ make check-fast
 make check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/LECOQQ/qbit-ops/blob/main/CONTRIBUTING.md).
 
 ## 📄 License
 
-MIT - see [LICENSE](LICENSE).
+MIT - see [LICENSE](https://github.com/LECOQQ/qbit-ops/blob/main/LICENSE).
