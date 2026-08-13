@@ -655,7 +655,7 @@ class QbitOpsTuiApp(App[None]):
 
         Three costs are kept independent so a periodic refresh, a
         search keystroke, or a resize each pay only for what actually
-        changed (see `docs/PLAN.md`'s TUI performance phase):
+        changed (see `.agents/PLAN.md`'s TUI performance phase):
 
         - formatting (`_torrent_row_values`): only for a hash whose
           `_last_row_sources` entry (the small tuple of raw fields that

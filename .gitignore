@@ -7,11 +7,10 @@ AGENTS.md
 CLAUDE.md
 
 # Agent working memory: read by LLMs before intervening, never published
-docs/DECISIONS.md
-docs/MEMORY.md
-docs/PLAN.md
+.agents/
 docs/SELECTION.md
 docs/SEARCH.md
+.worktrees/
 
 # Operating system files
 .DS_Store

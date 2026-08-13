@@ -4513,7 +4513,7 @@ async def test_raw_qbittorrent_state_is_not_the_primary_table_label() -> None:
         assert "stalledUP" not in str(state_cell)
 
 
-# --- Category display contract (see docs/PIPELINE.md, C1) -------------------
+# --- Category display contract ----------------------------------------------
 #
 # Black-box counterpart to `tests/test_selection_output_contract.py`:
 # only rendered cells and panel text, never a domain object's field, so
