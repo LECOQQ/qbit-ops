@@ -87,6 +87,7 @@ class ExplainExitCode(IntEnum):
 EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "status": StatusExitCode,
     "doctor": DoctorExitCode,
+    "version": ExitCode,
     "tui": ExitCode,
     "connection check": ExitCode,
     "torrents list": ExitCode,

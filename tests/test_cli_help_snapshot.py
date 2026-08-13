@@ -25,6 +25,7 @@ runner = CliRunner()
 TOP_LEVEL_COMMAND_NAMES = {
     "status",
     "doctor",
+    "version",
     "tui",
     "connection",
     "backup",
@@ -67,6 +68,7 @@ GROUP_SUBCOMMAND_NAMES = {
 REPRESENTATIVE_COMMAND_OPTIONS: dict[str, set[str]] = {
     "status": {"--format", "--quiet", "--watch", "--interval"},
     "doctor": {"--format"},
+    "version": {"--format"},
     "tui": {"--interval"},
     "connection check": set(),
     "torrents list": {"--format", "--category", "--state"},
@@ -113,9 +115,9 @@ def _assert_clean_help(result) -> None:
     assert "Usage:" in result.output
 
 
-def test_exit_code_table_covers_exactly_twenty_six_commands() -> None:
+def test_exit_code_table_covers_exactly_twenty_seven_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
-    assert len(EXIT_CODE_TABLE) == 26
+    assert len(EXIT_CODE_TABLE) == 27
 
 
 def test_root_help_succeeds_without_traceback() -> None:
@@ -160,7 +162,7 @@ def test_command_group_help_lists_its_registered_subcommands(
 def test_every_registered_command_help_succeeds_without_traceback(
     command_id: str,
 ) -> None:
-    """Every one of the 26 commands in `EXIT_CODE_TABLE` must still register.
+    """Every one of the 27 commands in `EXIT_CODE_TABLE` must still register.
 
     This is the test that fails if a future migration accidentally
     drops or fails to register a command: an unregistered command makes

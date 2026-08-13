@@ -36,6 +36,7 @@ COMMAND_ARGV: dict[str, list[str]] = {
     "status": ["status"],
     "connection_check": ["connection", "check"],
     "doctor": ["doctor"],
+    "version": ["version"],
     "torrents_list": ["torrents", "list"],
     "torrents_categories": ["torrents", "categories"],
     "torrents_inspect": ["torrents", "inspect", "--hash", TORRENT_HASH[:8]],
@@ -54,6 +55,7 @@ COMMAND_PATH: dict[str, list[str]] = {
     "status": ["status"],
     "connection_check": ["connection", "check"],
     "doctor": ["doctor"],
+    "version": ["version"],
     "torrents_list": ["torrents", "list"],
     "torrents_categories": ["torrents", "categories"],
     "torrents_inspect": ["torrents", "inspect"],
@@ -283,7 +285,9 @@ def test_command_creates_client_exactly_once(
     assert calls == [{}]
 
 
-@pytest.mark.parametrize("command_id", sorted(set(COMMAND_ARGV) - {"doctor"}))
+@pytest.mark.parametrize(
+    "command_id", sorted(set(COMMAND_ARGV) - {"doctor", "version"})
+)
 def test_command_error_remains_visible_on_stderr(
     runner: CliRunner,
     configure_qbit_backend,
@@ -295,6 +299,11 @@ def test_command_error_remains_visible_on_stderr(
     payload itself (a `fail` check in the report), so stderr stays
     empty and the non-zero exit code plus the report body carry the
     outcome instead. See `tests/test_doctor_cli.py`.
+
+    `version` is excluded for the same reason, one step further: an
+    unreachable instance is expected there, so it reports `null`/
+    `unavailable` remote versions on stdout, keeps stderr empty, and
+    still exits 0. See `tests/test_version_cli.py`.
     """
     configure_qbit_backend(config_error=ConfigError("boom"))
 

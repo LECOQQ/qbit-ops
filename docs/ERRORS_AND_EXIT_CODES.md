@@ -29,4 +29,6 @@ On a fatal error:
 
 `doctor` is intentionally different: configuration and connection failures are part of its diagnostic report, so they are returned as structured checks on stdout.
 
+`version` follows the same derogation: an unreachable instance is expected there, so the remote versions are reported as `unavailable`/`null` on stdout, stderr stays empty, and the command still exits `0`.
+
 Tracker credentials and announce URLs are redacted from ordinary errors and reports.

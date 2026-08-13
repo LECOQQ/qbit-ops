@@ -72,6 +72,10 @@ from qbit_core.features.trackers import (
     redact_tracker_identity,
     sanitize_tracker_text,
 )
+from qbit_core.features.version import (
+    VersionReport,
+    version_report_to_json_dict,
+)
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import (
     ResolvedTorrent,
@@ -546,6 +550,46 @@ def render_doctor_report(
         ["section", "code", "status", "message", "detail", "remediation"],
         doctor_report_to_csv_rows(report),
     )
+
+
+UNAVAILABLE_VERSION_LABEL = "unavailable"
+
+_VERSION_ROW_LABELS: tuple[tuple[str, str], ...] = (
+    ("qbit-ops", "qbit_ops"),
+    ("Python", "python"),
+    ("qBittorrent", "qbittorrent"),
+    ("Web API", "web_api"),
+)
+
+
+def version_summary_rows(report: VersionReport) -> dict[str, str]:
+    """Build the table rows, an unreachable instance reading
+    `unavailable` where json/jsonl carry `null`."""
+    payload = version_report_to_json_dict(report)
+    return {
+        label: payload[key] or UNAVAILABLE_VERSION_LABEL
+        for label, key in _VERSION_ROW_LABELS
+    }
+
+
+def render_version_report(
+    report: VersionReport,
+    output_format: OutputFormat,
+) -> None:
+    """Render a version report in the requested format.
+
+    `csv` never reaches here: `validate_format_support("version", ...)`
+    rejects it first (see `qbit_ops.cli.validation.FORMAT_SUPPORT`).
+    """
+    if output_format == OutputFormat.json:
+        print_json_output(version_report_to_json_dict(report))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        print_jsonl_output(version_report_to_json_dict(report))
+        return
+
+    print_summary(version_summary_rows(report), title="Versions")
 
 
 _EXPLANATION_SEVERITY_STYLES: dict[ExplanationSeverity, str] = {
