@@ -5,7 +5,7 @@
 # silently ignored by poetry-core while this file stays fully legacy
 # (see .agents/DECISIONS.md, 2026-07-25, TUI packaging).
 name = "qbit-ops"
-version = "0.4.0"
+version = "0.5.0"
 description = "qBittorrent administration CLI for homelab operations."
 authors = ["LECOQQ <50244398+LECOQQ@users.noreply.github.com>"]
 license = "MIT"
@@ -99,5 +99,5 @@ markers = [
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.4.0"
+version = "0.5.0"
 tag_format = "v$version"
