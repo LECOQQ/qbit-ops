@@ -1,6 +1,6 @@
 """Lock the observable output contracts of torrent selection.
 
-Safety net for the SELECT/INSPECT consolidation (`docs/PIPELINE.md`):
+Safety net for the SELECT/INSPECT consolidation:
 these assertions must keep passing, unchanged, while `SelectedTorrent`
 is replaced by `TorrentSnapshot` and the tracker enrichment moves into
 a named INSPECT stage.

@@ -76,7 +76,7 @@ check-version: ## Verify pyproject.toml and the Release Please manifest agree
 
 check: sync lint test check-version ## Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
 
-check-fast: sync ## Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (see docs/TESTING.md; not a substitute for `make check`)
+check-fast: sync ## Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
 	@$(PY) ruff check src tests
 	@$(PY) black --check src tests
 	@$(PY) pyright
