@@ -7,7 +7,7 @@ AGENTS.md
 CLAUDE.md
 
 # Agent working memory: read by LLMs before intervening, never published
-.agents/
+.agents
 docs/SELECTION.md
 docs/SEARCH.md
 .worktrees/

@@ -40,9 +40,10 @@ homelab qBittorrent instance was once contacted this way.
 make check-fast
 ```
 
-Ruff, `black --check`, Pyright, version-sync, and every hermetic
-non-Docker, non-TUI test. No network access, ~30s. Use while iterating
--- **not a substitute for `make check`** before a push.
+Ruff, `black --check`, Pyright, version-sync, documentation-link
+consistency, and every hermetic non-Docker, non-TUI test. No network
+access, ~30s. Use while iterating -- **not a substitute for
+`make check`** before a push.
 
 ### 3. `make test-tui` -- complete TUI suite
 
@@ -61,8 +62,8 @@ race-condition regressions `check-fast` skips for speed.
 make check
 ```
 
-Formatting, lint, type-checking, version sync, every hermetic test,
-and the complete TUI suite. Never touches Docker, ~1m40. This is
+Formatting, lint, type-checking, version sync, documentation-link
+consistency, every hermetic test, and the complete TUI suite. Never touches Docker, ~1m40. This is
 exactly what CI (`make ci`) runs on every push and pull request -- run
 it before you push.
 
@@ -100,6 +101,42 @@ diff before committing.
 
 Removes locally generated, reproducible artifacts. Safe and idempotent
 -- never touches `.venv`, `.git`, `.env`, or committed fixtures.
+
+## Feature worktrees
+
+An isolated branch, worktree and virtualenv for one feature:
+
+```bash
+make worktree-new FEATURE=search-regex
+make worktree-clean FEATURE=search-regex
+```
+
+`worktree-new` symlinks the gitignored agent control-plane into the new
+worktree, but only after Git confirms each target is ignored -- a
+tracked file is never replaced by a symlink. The worktree gets its own
+`poetry install`: it must never share the main `.venv`, whose editable
+install points at the main checkout's `src/`.
+
+`worktree-clean` is deliberately conservative. It refuses when the
+worktree holds uncommitted or untracked work, when the branch is not
+fully merged, and when the directory is not a registered Git worktree.
+It never runs `git worktree remove --force` or `git branch -D`. Use
+`--keep-branch` (via `python3 scripts/worktree_clean.py`) to drop only
+the worktree.
+
+## Documentation consistency
+
+```bash
+make check-docs
+```
+
+Fails on a Markdown link whose local target does not resolve, and on a
+backtick-quoted path anchored at a repository root directory
+(`docs/...`, `src/...`, `tests/...`) that does not exist. Contextual
+shorthand like `shared/selection.py` is deliberately not checked: it
+names a real file without naming a path from the repository root. Mark
+a deliberate exception with `<!-- doc-links: ignore-next-line -->` on
+the preceding line.
 
 ## Release validation
 
