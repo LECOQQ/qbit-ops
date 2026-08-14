@@ -342,6 +342,16 @@ rule removes the possibility instead of documenting the trap.
   is negative, so counting it would take bytes *away* from a total.
 - 📀 Size is the same size `--size-min`/`--size-max` filter on, so
   `torrents stats` and `torrents list` always agree.
+- ⏱️ The two halves of **Seeding time** use different units on purpose.
+  The **median** stays in `d`/`h`/`m`/`s`, the vocabulary
+  `--seeded-for` accepts, so you can retype it straight into a filter.
+  The **total** is retyped by nobody -- `156764d` names no torrent --
+  so it reads in conventional units instead: `1y` is **365 days** and
+  `1mo` is **30 days**, fixed lengths chosen for display only. Those
+  units are deliberately *not* accepted by the filters, because a real
+  month has no fixed length. Machine output is unaffected:
+  `seeding_time_total_seconds` and `seeding_time_median_seconds` stay
+  in seconds.
 - 💸 Cost: one listing call, plus one all-time counters read when there
   is no selector, plus the tracker lookups a `--tracker` filter already
   implies. Selecting makes this command cheaper, never dearer.

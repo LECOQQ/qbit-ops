@@ -11,6 +11,9 @@ import typer
 from typer.core import TyperGroup
 from typer.testing import CliRunner
 
+from qbit_core.errors import InvalidInputError
+from qbit_core.shared.parsers import parse_duration
+from qbit_ops.cli import rendering
 from qbit_ops.cli.app import app
 from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import (
@@ -362,7 +365,10 @@ def test_the_table_renders_byte_counts_and_durations_not_raw_numbers(
 
     assert result.exit_code == ExitCode.SUCCESS
     assert "2.8GiB" in collapsed
-    assert "50d" in collapsed
+    # The total is cumulative, so it reads in conventional units; the
+    # median beside it stays in the vocabulary `--seeded-for` accepts.
+    assert "1mo20d" in collapsed
+    assert "25d" in collapsed
     assert "3000000000" not in collapsed
 
 
@@ -468,3 +474,27 @@ def test_stats_adds_only_the_two_selectors_that_stand_apart() -> None:
         "--hash",
         "--all",
     }
+
+
+def test_a_cumulative_total_uses_conventional_units_the_median_does_not() -> (
+    None
+):
+    # 429y 5mo at 365d/30d, the shape the real library produced.
+    assert rendering.format_cumulative_duration(13_544_444_400) == "429y 5mo"
+    # A retypable value keeps the vocabulary `parse_duration` accepts.
+    assert rendering.format_duration(4_060_800) == "47d"
+
+
+def test_a_cumulative_total_below_one_day_falls_back_to_retypable_units() -> (
+    None
+):
+    assert rendering.format_cumulative_duration(3_600) == "1h"
+    assert rendering.format_cumulative_duration(90) == "1m 30s"
+    assert rendering.format_cumulative_duration(0) == "0s"
+
+
+def test_the_conventional_units_never_reach_the_duration_parser() -> None:
+    rendered = rendering.format_cumulative_duration(13_544_444_400)
+
+    with pytest.raises(InvalidInputError):
+        parse_duration(rendered.split()[0])
