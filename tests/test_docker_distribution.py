@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import without_comments
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 DOCKERIGNORE = REPO_ROOT / ".dockerignore"
@@ -40,20 +42,6 @@ REQUIRED_LABELS = (
 )
 
 
-def _configuration_only(yaml_text: str) -> str:
-    """Strip comments before asserting on YAML.
-
-    These files *explain* the rules they enforce, so matching raw text
-    makes a check pass or fail on the wording rather than on the
-    configuration.
-    """
-    return "\n".join(
-        line
-        for line in yaml_text.splitlines()
-        if not line.strip().startswith("#")
-    )
-
-
 def _declared_version() -> str:
     pyproject = tomllib.loads(
         (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -63,12 +51,12 @@ def _declared_version() -> str:
 
 @pytest.fixture(scope="module")
 def dockerfile() -> str:
-    return DOCKERFILE.read_text(encoding="utf-8")
+    return without_comments(DOCKERFILE.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
 def workflow() -> str:
-    return WORKFLOW.read_text(encoding="utf-8")
+    return without_comments(WORKFLOW.read_text(encoding="utf-8"))
 
 
 # --- Dockerfile --------------------------------------------------------
@@ -186,7 +174,7 @@ def test_metadata_action_cannot_add_latest_by_itself(workflow: str) -> None:
 
 
 def test_no_floating_major_only_tag_is_published(workflow: str) -> None:
-    assert "{{major}}" not in _configuration_only(workflow)
+    assert "{{major}}" not in workflow
 
 
 def test_latest_is_unreachable_from_a_normal_push(workflow: str) -> None:
@@ -240,9 +228,11 @@ def test_labels_come_from_dockers_metadata_tooling(workflow: str) -> None:
 def test_release_please_dispatches_the_container_publish() -> None:
     """One release mechanism: the container hangs off Release Please's
     own output, exactly like the PyPI upload."""
-    release_workflow = (
-        REPO_ROOT / ".github" / "workflows" / "release-please.yml"
-    ).read_text(encoding="utf-8")
+    release_workflow = without_comments(
+        (REPO_ROOT / ".github" / "workflows" / "release-please.yml").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert "gh workflow run publish-container.yml" in release_workflow
     assert "release_created" in release_workflow
@@ -253,7 +243,7 @@ def test_release_please_dispatches_the_container_publish() -> None:
 
 @pytest.fixture(scope="module")
 def compose() -> str:
-    return COMPOSE.read_text(encoding="utf-8")
+    return without_comments(COMPOSE.read_text(encoding="utf-8"))
 
 
 def test_the_compose_example_uses_the_canonical_image(compose: str) -> None:
@@ -284,11 +274,9 @@ def test_the_compose_example_does_not_fake_a_daemon(compose: str) -> None:
     avoids, and matching prose instead of configuration would make the
     check pass or fail on the wording.
     """
-    configuration = _configuration_only(compose)
-
     for trick in ("sleep infinity", "tail -f /dev/null", "restart:"):
-        assert trick not in configuration
-    assert 'profiles: ["cli"]' in configuration
+        assert trick not in compose
+    assert 'profiles: ["cli"]' in compose
 
 
 # --- Real image build --------------------------------------------------

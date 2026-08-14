@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import without_comments
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
@@ -256,7 +258,9 @@ def test_readme_never_inlines_a_heavyweight_asset() -> None:
 
 @pytest.fixture(scope="module")
 def publish_workflow() -> str:
-    return (WORKFLOWS / "publish.yml").read_text(encoding="utf-8")
+    return without_comments(
+        (WORKFLOWS / "publish.yml").read_text(encoding="utf-8")
+    )
 
 
 def test_publishing_uses_oidc_and_never_a_stored_token(
@@ -305,7 +309,9 @@ def test_publish_workflow_is_never_reusable(publish_workflow: str) -> None:
 
 @pytest.fixture(scope="module")
 def release_workflow() -> str:
-    return (WORKFLOWS / "release-please.yml").read_text(encoding="utf-8")
+    return without_comments(
+        (WORKFLOWS / "release-please.yml").read_text(encoding="utf-8")
+    )
 
 
 def test_release_please_triggers_publishing_on_a_created_release(
