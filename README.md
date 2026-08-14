@@ -69,110 +69,53 @@ qbit-ops doctor
 qbit-ops tui
 ```
 
-## 🐳 Docker
+🐳 Prefer containers? `ghcr.io/lecoqq/qbit-ops:latest` runs the same CLI on
+amd64 and arm64 — see the
+[Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
+
+## 🎸 Greatest hits
+
+**Reclaim disk without touching what matters.**
 
 ```bash
-docker pull ghcr.io/lecoqq/qbit-ops:latest
-docker run --rm ghcr.io/lecoqq/qbit-ops:latest --version
+qbit-ops torrents delete --ratio-min 2 --seeded-for 90d --exclude-tag keep
 ```
 
-Published for **linux/amd64** and **linux/arm64** as a single manifest,
-so `docker pull` picks the right one for your machine.
-
-**Tags.** Only stable releases are published: `0.4.0` (exact), `0.4`
-(newest patch of that minor), and `latest` (newest release overall).
-Pushes to `main` never move them, and republishing an older release
-moves neither floating tag backwards. Pin the exact version for anything
-scripted.
-
-**Configuration** uses the same three variables as everywhere else --
-real environment variables always win:
-
-```bash
-docker run --rm --network host \
-  -e QBIT_HOST=http://localhost:8080 -e QBIT_USER=admin -e QBIT_PASSWORD=... \
-  ghcr.io/lecoqq/qbit-ops:latest status
+```text
+scanned   2418
+matched   407
+status    PREVIEW (dry-run)
 ```
 
-`--env-file ./qbit-ops.env` works too, as does mounting a file and
-pointing `QBIT_OPS_ENV_FILE` at it.
+Nothing is deleted: review it, add `--no-dry-run`, and *that exact
+selection* is what will run.
 
-> ⚠️ `localhost` inside a container is the *container*. Reach a
-> qBittorrent running on the Docker host with `--network host` (Linux)
-> or `QBIT_HOST=http://host.docker.internal:8080` (Docker Desktop); if
-> qBittorrent is itself a container, use its service name on a shared
-> network.
-
-**`/data` is the conventional mount** for files you hand to qbit-ops,
-and the image's working directory. Commands that write do so on stdout,
-so redirect on the host:
+**Find out which tracker is hurting you.**
 
 ```bash
-docker run --rm --env-file ./qbit-ops.env \
-  ghcr.io/lecoqq/qbit-ops:latest backup export --format json > backup.json
-
-docker run --rm --env-file ./qbit-ops.env -v ./qbit-data:/data \
-  ghcr.io/lecoqq/qbit-ops:latest backup restore /data/backup.json
-
-docker run --rm --env-file ./qbit-ops.env -v ./torrents:/input:ro \
-  ghcr.io/lecoqq/qbit-ops:latest torrents import /input
-```
-
-The container runs as UID/GID 1000; add `--user "$(id -u):$(id -g)"` if
-your host user differs. Add `-it` for `qbit-ops tui`.
-
-**Compose.** qbit-ops is an on-demand CLI, so the example service is
-driven with `run`, never `up` -- see
-[docs/examples/docker-compose.yml](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml):
-
-```bash
-docker compose run --rm qbit-ops --version
-docker compose run --rm qbit-ops torrents list --category sonarr
-docker compose run --rm qbit-ops backup restore /data/backup.json
-```
-
-## 🔍 Inspect your instance
-
-```bash
-qbit-ops torrents list --category sonarr --state stalled
 qbit-ops trackers status
-qbit-ops explain torrent --hash abc123
-qbit-ops status --watch
+qbit-ops explain tracker --tracker tracker.example
 ```
 
-Read commands support machine-friendly output where it makes sense:
+One line per tracker, health aggregated across every torrent that
+announces to it, and then the reasoning behind the verdict.
+
+**Unstick a queue that stopped moving.**
 
 ```bash
-qbit-ops torrents list --format json
-qbit-ops status --format jsonl
+qbit-ops torrents list --stalled
+qbit-ops torrents reannounce --stalled --no-dry-run
 ```
 
-## 🎯 Target exactly what you mean
-
-Filters compose - repeat one for **or**, mix different ones for **and**,
-exclude with `--exclude-*`:
+**Rotate a leaked passkey everywhere at once.**
 
 ```bash
-qbit-ops torrents list --ratio-min 2 --seeded-for 90d --exclude-tag keep
+qbit-ops trackers replace-passkey \
+  --tracker "https://tracker.example/announce/{passkey}" \
+  --new-passkey "$NEW_PASSKEY"
 ```
 
-Category, tag, save path, name, state, size, ratio, progress, age,
-tracker and more - the same selector everywhere, listing or mutating.
-Full grammar in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
-
-## 🛠️ Make changes safely
-
-Mutations are dry-run by default:
-
-```bash
-qbit-ops torrents pause --category sonarr
-```
-
-Review the plan, then apply it explicitly:
-
-```bash
-qbit-ops torrents pause --category sonarr --no-dry-run
-```
+`{passkey}` is a template: it never prints anything that can harm you.
 
 ## 🛡️ Safety by default
 
@@ -183,6 +126,32 @@ qbit-ops torrents pause --category sonarr --no-dry-run
 - ❔ **Unknown is never a match.** A value qBittorrent didn't report never widens a selection.
 - 🔒 **Secret-safe output.** Tracker passkeys and announce URLs stay redacted in normal output.
 - ✅ **Honest results.** qbit-ops reports what was submitted or observed, not what it cannot prove.
+
+## 🎯 Target exactly what you mean
+
+Filters compose - repeat one for **or**, mix different ones for **and**,
+exclude with `--exclude-*`. Category, tag, save path, name, state, size,
+ratio, progress, age, tracker and more: the same selector everywhere,
+listing or mutating.
+
+Full grammar in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
+
+## 🔍 Watch, explain, script
+
+```bash
+qbit-ops status --watch
+qbit-ops explain torrent --hash abc123
+```
+
+`explain` answers *why* a torrent or tracker is in the state it is, from
+observed evidence - never a guess.
+
+Read commands support machine-friendly output where it makes sense:
+
+```bash
+qbit-ops torrents list --format json
+qbit-ops status --format jsonl
+```
 
 ## 🧭 How is `qbit-ops` different?
 
