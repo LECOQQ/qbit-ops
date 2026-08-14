@@ -383,6 +383,46 @@ def format_duration(seconds: int) -> str:
     return " ".join(parts) if parts else "0s"
 
 
+# Conventional display lengths, fixed here so the rendering never
+# implies a calendar. A cumulative total spans no real months, so no
+# real month length applies to it.
+_YEAR_SECONDS = 365 * 86400
+_MONTH_SECONDS = 30 * 86400
+
+_CUMULATIVE_UNITS: tuple[tuple[str, int], ...] = (
+    ("y", _YEAR_SECONDS),
+    ("mo", _MONTH_SECONDS),
+    ("d", 86400),
+    ("h", 3600),
+)
+
+
+def format_cumulative_duration(seconds: int) -> str:
+    """Format a summed duration compactly, e.g. '429y 5mo'.
+
+    Reserved for totals, which no operator retypes: `156764d` names no
+    torrent and answers no question. Values a filter could accept keep
+    `format_duration` and its `d`/`h`/`m`/`s` vocabulary instead, so the
+    round-trip into `--seeded-for` is never broken.
+
+    `1y` is 365 days and `1mo` is 30 days by convention -- documented in
+    `docs/COMMANDS.md`, and deliberately not fed back into
+    `parse_duration`, which refuses calendar units precisely because
+    they have no fixed length.
+    """
+    remaining = max(seconds, 0)
+    parts: list[str] = []
+
+    for label, unit_seconds in _CUMULATIVE_UNITS:
+        amount, remaining = divmod(remaining, unit_seconds)
+        if amount:
+            parts.append(f"{amount}{label}")
+        if len(parts) == 2:
+            break
+
+    return " ".join(parts) if parts else format_duration(seconds)
+
+
 def _format_percentage(value: float) -> str:
     return f"{value * 100:.1f}%"
 
@@ -990,14 +1030,20 @@ def _format_optional_date(moment: datetime | None) -> str:
 
 
 def _format_seeding_time(library: LibraryStats) -> str:
-    """Render the seeded total and its median on one line."""
+    """Render the seeded total and its median on one line.
+
+    The two halves use different vocabularies on purpose: the median is
+    a value an operator retypes into `--seeded-for`, so it keeps the
+    parser-compatible units, while the total is retyped by nobody and
+    reads better in conventional ones.
+    """
     median_seconds = library.seeding_time_median_seconds
     median_label = (
         UNKNOWN_METRIC_LABEL
         if median_seconds is None
         else format_duration(median_seconds)
     )
-    total_label = format_duration(library.seeding_time_total_seconds)
+    total_label = format_cumulative_duration(library.seeding_time_total_seconds)
     return f"total {total_label} · median {median_label}"
 
 
