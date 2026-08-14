@@ -45,26 +45,31 @@ def register(app: typer.Typer) -> None:
         try:
             import textual  # noqa: F401
         except ModuleNotFoundError:
-            # Deliberately no literal URL here: `fail()` -> `print_error()`
-            # runs every message through `sanitize_tracker_text()`
-            # unconditionally, which redacts any URL-shaped text on
-            # sight, tracker or not -- a real
-            # `https://github.com/...` clone URL here was silently replaced
-            # with "<redacted-url>" in practice, defeating the remediation.
-            # Point at the README instead, which is never sanitized.
+            # Two constraints shape this message, both found the hard way:
+            #
+            # - No literal URL. `fail()` -> `print_error()` runs every
+            #   message through `sanitize_tracker_text()` unconditionally,
+            #   which redacts URL-shaped text on sight, tracker or not.
+            # - Square brackets are escaped (`\[`). Rich reads `[tui]` as
+            #   markup and swallows it.
+            #
+            # Every install route is listed rather than guessed at: the
+            # fix has a different *shape* per tool, and qbit-ops
+            # deliberately does not detect how it was installed (see
+            # .agents/features/version/SPEC.md, non-objectives).
             error_boundary.fail(
                 "The TUI requires the optional 'tui' extra, which is not "
                 "installed.\n\n"
-                'qbit-ops is not published on PyPI, so "pipx install '
-                'qbit-ops\\[tui]" alone will not work -- install from a '
-                "repository checkout instead (see README.md, section "
-                '"Install", for the clone URL):\n'
-                "  cd <your qbit-ops checkout>\n"
-                "  pipx uninstall qbit-ops  # only if already installed "
-                "without the extra\n"
-                r'  pipx install ".\[tui]"'
+                "Reinstall with the extra, using whichever tool you "
+                "installed qbit-ops with:\n"
+                r'  uv tool install "qbit-ops\[tui]"'
+                "\n"
+                r'  pipx install --force "qbit-ops\[tui]"'
                 "\n\n"
-                "or, for local development:\n"
+                "or add Textual to the existing installation:\n"
+                "  uv tool install --with textual qbit-ops\n"
+                "  pipx inject qbit-ops textual\n\n"
+                "From a repository checkout, for local development:\n"
                 "  poetry install --extras tui",
                 ErrorCategory.CONFIGURATION,
             )
