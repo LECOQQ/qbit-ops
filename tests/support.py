@@ -270,3 +270,19 @@ def make_torrent(**overrides: Any) -> dict[str, Any]:
     }
     defaults.update(overrides)
     return defaults
+
+
+def without_comments(text: str) -> str:
+    """Drop whole-line `#` comments from a Makefile, YAML or Dockerfile.
+
+    Tests must assert on what a file *does*, never on how it describes
+    itself (AGENTS.md, "Asserter le comportement, jamais la prose").
+    These files routinely document the very rule under test, so raw-text
+    assertions can pass on a comment, or fail because one was reworded.
+
+    Only fully-commented lines go: a trailing `## dev: ...` help tag in a
+    Makefile is effective content and is preserved.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
