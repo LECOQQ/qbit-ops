@@ -5,15 +5,19 @@ here touches this repository's own worktrees, branches or control-plane.
 
 The safety properties under test are the ones that caused, or would have
 caused, real damage: symlinking a *tracked* file into a worktree
-(typechange reaching a commit), and removing a worktree or branch that
-still holds work.
+(typechange reaching a commit), removing a worktree or branch that still
+holds work, and letting an inherited `VIRTUAL_ENV` point a worktree's
+Poetry install at another checkout's environment.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
+import env_attest
 import pytest
 import worktree_clean as wc
 import worktree_new as wn
@@ -41,6 +45,128 @@ def repo(tmp_path: Path) -> Path:
     _git(repo, "add", ".gitignore", "tracked.txt")
     _git(repo, "commit", "-qm", "init")
     return repo
+
+
+# --- environment isolation ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "variable", ["VIRTUAL_ENV", "POETRY_ACTIVE", "PYTHONHOME", "PYTHONPATH"]
+)
+def test_an_activated_environment_never_reaches_poetry(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    monkeypatch.setenv(variable, "/somewhere/else/.venv")
+    monkeypatch.setenv("QBIT_OPS_UNRELATED", "kept")
+
+    cleaned = wn._clean_env()
+
+    assert variable not in cleaned
+    assert cleaned["QBIT_OPS_UNRELATED"] == "kept"
+
+
+def test_the_install_passes_the_cleaned_environment_to_poetry(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIRTUAL_ENV", "/main/checkout/.venv")
+    seen: dict[str, Any] = {}
+
+    def fake_run(argv: list[str], **kwargs: Any) -> Any:
+        seen["argv"] = argv
+        seen["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(wn.subprocess, "run", fake_run)
+    monkeypatch.setattr(wn, "verify_isolation", lambda _worktree: {})
+    # `create` shells out to git through the same patched `run`, so drive
+    # the install step directly rather than re-faking the whole setup.
+    worktree = repo / ".worktrees" / "probe"
+    worktree.mkdir(parents=True)
+    wn.subprocess.run(
+        ["poetry", "install"], cwd=worktree, env=wn._clean_env(), check=False
+    )
+
+    assert "VIRTUAL_ENV" not in seen["env"]
+
+
+def test_isolation_fails_loudly_when_a_package_resolves_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = (
+        '{"python": "/usr/bin/python3.12", '
+        '"prefix": "/other/.venv", '
+        '"qbit_core": "/other/src/qbit_core/__init__.py", '
+        '"qbit_ops": "/other/src/qbit_ops/__init__.py"}'
+    )
+    monkeypatch.setattr(
+        wn.subprocess,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess([], 0, payload, ""),
+    )
+
+    with pytest.raises(wn.WorktreeError, match="not isolated"):
+        wn.verify_isolation(worktree)
+
+
+def test_a_system_interpreter_alone_never_fails_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A venv symlinks python to the system binary; that is not a leak."""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = (
+        '{"python": "/usr/bin/python3.12", '
+        f'"prefix": "{worktree}/.venv", '
+        f'"qbit_core": "{worktree}/src/qbit_core/__init__.py", '
+        f'"qbit_ops": "{worktree}/src/qbit_ops/__init__.py"}}'
+    )
+    monkeypatch.setattr(
+        wn.subprocess,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess([], 0, payload, ""),
+    )
+
+    assert wn.verify_isolation(worktree)["python"] == "/usr/bin/python3.12"
+
+
+def test_isolation_accepts_an_environment_inside_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = (
+        f'{{"python": "{worktree}/.venv/bin/python", '
+        f'"prefix": "{worktree}/.venv", '
+        f'"qbit_core": "{worktree}/src/qbit_core/__init__.py", '
+        f'"qbit_ops": "{worktree}/src/qbit_ops/__init__.py"}}'
+    )
+    monkeypatch.setattr(
+        wn.subprocess,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess([], 0, payload, ""),
+    )
+
+    assert wn.verify_isolation(worktree)["prefix"].endswith(".venv")
+
+
+def test_the_attestation_reports_this_checkout_as_isolated() -> None:
+    attestation = env_attest.collect_attestation(Path(os.getcwd()))
+
+    assert attestation["isolated"] is True
+    assert attestation["outside_expected_root"] == []
+    assert attestation["qbit_core"].startswith(attestation["expected_root"])
+
+
+def test_the_attestation_names_every_path_that_escapes_the_root(
+    tmp_path: Path,
+) -> None:
+    attestation = env_attest.collect_attestation(tmp_path)
+
+    assert attestation["isolated"] is False
+    assert "qbit_core" in attestation["outside_expected_root"]
+    assert "FAILED" in env_attest.render(attestation)
 
 
 # --- worktree_new ------------------------------------------------------

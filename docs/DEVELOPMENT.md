@@ -117,6 +117,41 @@ tracked file is never replaced by a symlink. The worktree gets its own
 `poetry install`: it must never share the main `.venv`, whose editable
 install points at the main checkout's `src/`.
 
+### Why the environment is verified, not assumed
+
+Poetry honours an inherited `VIRTUAL_ENV` **ahead of** its own
+`virtualenvs.in-project` setting. Run `poetry install` from a worktree
+with any environment activated and it reinstalls the project into *that*
+environment, pointed at the worktree's `src/` -- so both checkouts then
+exercise the wrong code, with no import error and no failing test.
+
+`worktree-new` strips those variables before calling Poetry and then
+proves the result, so the failure cannot reach you silently. Check any
+checkout at any time:
+
+```bash
+make env-attest
+```
+
+It reports the expected root, interpreter, virtualenv, the `qbit_core`
+and `qbit_ops` files actually imported, and the branch and SHA; it exits
+`1` when the virtualenv or either package resolves outside the expected
+root. The interpreter is reported but never judged -- a virtualenv
+symlinks its `python` to the system binary, so `sys.executable` points
+outside the checkout on a perfectly isolated environment.
+
+Running Poetry by hand from a worktree gets none of this. Prefix it:
+
+```bash
+env -u VIRTUAL_ENV poetry install --extras tui
+```
+
+Editors inherit the same variable. A language server started from a
+shell with the main `.venv` activated type-checks a worktree's files
+against the *main* checkout's modules and reports errors that do not
+exist -- point it at the worktree's own `.venv`, or ignore diagnostics
+under `.worktrees/`.
+
 `worktree-clean` is deliberately conservative. It refuses when the
 worktree holds uncommitted or untracked work, when the branch is not
 fully merged, and when the directory is not a registered Git worktree.

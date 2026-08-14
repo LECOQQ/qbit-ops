@@ -7,14 +7,23 @@ after Git confirms each target is ignored. Replacing a *tracked* file
 with a symlink produces a typechange that can reach a commit, which is
 exactly the accident this script exists to prevent.
 
-The worktree never shares the main `.venv`: the project is installed
-there in editable mode pointing at the main checkout's `src/`, so the
-tests would silently exercise the wrong code.
+The worktree never shares the main `.venv`. If it did, the project
+there is installed in editable mode pointing at the main checkout's
+`src/`, so both environments would silently exercise the wrong code --
+no import error, no failing test, nothing to notice.
+
+Poetry honours an inherited `VIRTUAL_ENV` ahead of its own
+`virtualenvs.in-project` setting, so that failure is one `poetry
+install` away whenever the caller's shell has a virtualenv active.
+`_clean_env()` removes it, and `verify_isolation()` proves afterwards
+that the worktree really resolves to its own tree.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
@@ -32,6 +41,87 @@ LINKED_ENTRIES = ("AGENTS.md", "CLAUDE.md", ".agents")
 
 class WorktreeError(Exception):
     """Raised for any actionable setup failure."""
+
+
+# Removed before handing an environment to Poetry. `VIRTUAL_ENV` is the
+# one that actually causes the damage; the others are dropped so an
+# activated environment cannot steer the resolution some other way.
+_ENV_VARS_THAT_STEER_POETRY = (
+    "VIRTUAL_ENV",
+    "POETRY_ACTIVE",
+    "PYTHONHOME",
+    "PYTHONPATH",
+)
+
+
+def _clean_env() -> dict[str, str]:
+    """Return the current environment minus anything that pins a venv.
+
+    Poetry honours an inherited `VIRTUAL_ENV` ahead of
+    `virtualenvs.in-project`, so a shell with an activated environment
+    makes `poetry install` target *that* environment no matter which
+    directory it runs in.
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _ENV_VARS_THAT_STEER_POETRY
+    }
+
+
+def verify_isolation(worktree: Path) -> dict[str, str]:
+    """Prove the worktree resolves `qbit_core` inside its own tree.
+
+    Raises `WorktreeError` when the interpreter, the virtualenv, or the
+    imported package belongs to another checkout -- the silent failure
+    this whole module exists to prevent. Returns the observed facts so a
+    caller can report them.
+    """
+    probe = (
+        "import json, sys, qbit_core, qbit_ops; "
+        "print(json.dumps({"
+        "'python': sys.executable, "
+        "'prefix': sys.prefix, "
+        "'qbit_core': qbit_core.__file__, "
+        "'qbit_ops': qbit_ops.__file__}))"
+    )
+    completed = subprocess.run(
+        ["poetry", "run", "python", "-c", probe],
+        cwd=worktree,
+        env=_clean_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise WorktreeError(
+            "Could not verify the worktree environment:\n"
+            f"{completed.stderr.strip()}"
+        )
+
+    try:
+        observed: dict[str, str] = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise WorktreeError(
+            f"Unreadable environment probe output: {completed.stdout!r}"
+        ) from exc
+
+    # `python` is reported by the probe but never judged: a virtualenv
+    # symlinks its interpreter to the system binary, so `sys.executable`
+    # resolves outside the worktree even when the environment is
+    # perfectly isolated.
+    root = worktree.resolve()
+    for key in ("prefix", "qbit_core", "qbit_ops"):
+        observed_path = Path(observed[key]).resolve()
+        if not observed_path.is_relative_to(root):
+            raise WorktreeError(
+                f"{worktree} is not isolated: {key} resolves to "
+                f"{observed_path}, outside the worktree. The environment "
+                "would exercise another checkout's code without failing "
+                "a single test. Remove the worktree and retry with no "
+                "virtualenv activated."
+            )
+    return observed
 
 
 def _git(
@@ -145,6 +235,7 @@ def create(
                 "branch were created; fix the environment there, or remove "
                 f"them with `make worktree-clean FEATURE={slug}`."
             )
+        verify_isolation(worktree)
 
     return worktree, branch, linked
 
@@ -180,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"    linked: {', '.join(linked) if linked else '(nothing)'}")
     if args.no_install:
         print("    no virtualenv installed (--no-install)")
+    else:
+        print("    isolation verified: qbit_core resolves inside the worktree")
     return 0
 
 
