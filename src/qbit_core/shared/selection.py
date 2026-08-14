@@ -15,7 +15,7 @@ is anything needing a per-torrent tracker lookup (the INSPECT stage).
 
 import re
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -236,6 +236,12 @@ class TorrentFilter:
     model. `added` holds *resolved* datetimes: a relative duration like
     `90d` is user intent, translated at the CLI boundary, so the filter
     itself stays comparable and serializable.
+
+    `tracker_health` holds plain health tokens rather than the
+    `TrackerHealth` enum: that enum belongs to
+    `qbit_core.features.trackers`, and this module stays free of any
+    dependency on `features/`. The vocabulary is validated where the
+    enum lives (`features.torrents.build_torrent_filter`).
     """
 
     # --- identity and organisation
@@ -271,6 +277,7 @@ class TorrentFilter:
     trackers: tuple[str, ...] = ()
     trackers_excluded: tuple[str, ...] = ()
     has_trackers: bool | None = None
+    tracker_health: tuple[str, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -291,10 +298,43 @@ class TorrentFilter:
         from the same bulk listing as everything else, so asking "does
         this torrent have any tracker at all" costs nothing.
         """
-        return bool(self.trackers or self.trackers_excluded)
+        return any(
+            getattr(self, name) for name in INSPECTION_ONLY_FILTER_FIELDS
+        )
+
+
+# The one enumeration of the fields the INSPECT stage resolves. Both
+# `requires_inspection` and `without_inspection_criteria` read it, so a
+# field added here can never make the predicate and the teardown
+# disagree -- and disagreement is not a cosmetic defect: it either
+# raises inside `select_torrents_from_items` or costs a second INSPECT
+# pass over the whole selection.
+INSPECTION_ONLY_FILTER_FIELDS: tuple[str, ...] = (
+    "trackers",
+    "trackers_excluded",
+    "tracker_health",
+)
 
 
 EMPTY_TORRENT_FILTER = TorrentFilter()
+
+
+def without_inspection_criteria(filters: TorrentFilter) -> TorrentFilter:
+    """Return the cheap counterpart of a filter: no INSPECT criterion left.
+
+    The single way to build the filter a `torrents_info()`-only pass may
+    receive. Every inspection-only field is reset to its own default, so
+    the result never requires inspection while every cheap criterion is
+    preserved untouched.
+    """
+    defaults = TorrentFilter()
+    return replace(
+        filters,
+        **{
+            name: getattr(defaults, name)
+            for name in INSPECTION_ONLY_FILTER_FIELDS
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -439,6 +479,12 @@ def validate_torrent_filter(filters: TorrentFilter) -> None:
             "with no tracker announces to none of them."
         )
 
+    if filters.has_trackers is False and filters.tracker_health:
+        raise InvalidInputError(
+            "--no-tracker cannot be combined with --tracker-health: a "
+            "torrent with no tracker has no tracker health."
+        )
+
     if filters.name_regex is not None:
         try:
             re.compile(filters.name_regex)
@@ -560,9 +606,9 @@ def _select_by_hash(
 def matches_cheap_filters(torrent: Any, filters: TorrentFilter) -> bool:
     """Return whether a torrent matches every `torrents_info()`-only filter.
 
-    Excludes `tracker`/`trackers_excluded`, which need a per-torrent
-    lookup -- callers that set them must narrow the result after the
-    INSPECT stage.
+    Ignores every `INSPECTION_ONLY_FILTER_FIELDS` criterion, each of
+    which needs a per-torrent lookup -- callers that set one must narrow
+    the result after the INSPECT stage.
     """
     return (
         _matches_organisation(torrent, filters)
@@ -876,6 +922,7 @@ def torrent_filter_to_dict(filters: TorrentFilter) -> dict[str, Any]:
         "trackers": list(filters.trackers),
         "trackers_excluded": list(filters.trackers_excluded),
         "has_trackers": filters.has_trackers,
+        "tracker_health": list(filters.tracker_health),
     }
 
 
@@ -942,6 +989,7 @@ def describe_torrent_filter(filters: TorrentFilter) -> str:
 
     _append_values(parts, "tracker", filters.trackers)
     _append_values(parts, "exclude-tracker", filters.trackers_excluded)
+    _append_values(parts, "tracker-health", filters.tracker_health)
     if filters.has_trackers is not None:
         parts.append("has-tracker" if filters.has_trackers else "no-tracker")
 

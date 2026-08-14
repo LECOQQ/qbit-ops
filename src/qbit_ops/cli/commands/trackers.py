@@ -6,7 +6,6 @@ from typing import Annotated
 import typer
 
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
-from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.features.tracker_status import (
     collect_tracker_status,
     tracker_status_exit_code,
@@ -34,8 +33,6 @@ from qbit_ops.cli.commands._shared import (
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
-    CATEGORY_FILTER_HELP,
-    STATE_FILTER_HELP,
     TRACKER_FILTER_HELP,
     ActiveOption,
     ActiveWithinOption,
@@ -61,6 +58,7 @@ from qbit_ops.cli.selector_options import (
     ProgressMinOption,
     RatioMaxOption,
     RatioMinOption,
+    ReportTrackerOption,
     SavePathOption,
     SeededForOption,
     SizeMaxOption,
@@ -69,6 +67,7 @@ from qbit_ops.cli.selector_options import (
     StateOption,
     TagAllOption,
     TagOption,
+    TrackerHealthOption,
     UploadedMaxOption,
     UploadedMinOption,
     build_filter_from_options,
@@ -262,6 +261,42 @@ def add_if_present(
 @trackers_app.command(name="list")
 @error_boundary.catch_internal_errors
 def list_trackers(
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: ReportTrackerOption = None,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -270,15 +305,65 @@ def list_trackers(
         ),
     ] = OutputFormat.table,
 ) -> None:
-    """List normalized tracker identities in use, with usage counts.
+    """List tracker identities in use, with their volume.
 
-    A lightweight inventory: tracker identity (`host[:port]`, never a
-    full announce URL), torrent count, and endpoint count. Always exits
-    `0` -- unlike `trackers status`, this has no health concept, so a
-    script checking "what trackers exist" is never broken by a degraded
-    tracker elsewhere. Use `trackers status` for health classification.
+    Tracker identity is always `host[:port]`, never a full announce URL.
+    Accepts the same filters as `trackers status`, with the same
+    semantics -- `--tracker` restricts the report after aggregation
+    rather than the selection.
+
+    A torrent announcing to several trackers counts *entirely* in each
+    aggregate, so summing a column over every tracker exceeds the
+    library total; `EXCL` counts the torrents this tracker is the only
+    identity of.
+
+    Always exits `0` on tracker health: this is an inventory, not a
+    diagnostic, so a script asking "what trackers exist" is never broken
+    by a tracker degraded elsewhere. Use `trackers status` for health.
     """
     validate_format_support("trackers_list", output_format)
+    try:
+        filters = build_filter_from_options(
+            category=category,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            state=state,
+            exclude_state=exclude_state,
+            tracker=[] if tracker is None else [tracker],
+            tracker_health=tracker_health,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+        )
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
     enabled = rendering.progress_enabled(
         output_format=output_format,
         interactive=rendering.is_interactive_terminal(),
@@ -289,118 +374,24 @@ def list_trackers(
             "Scanning torrent trackers...", enabled=enabled
         ) as advance:
             report = collect_tracker_status(
-                client, build_torrent_filter(), on_progress=advance
+                client, filters, on_progress=advance
             )
 
-    trackers = [
-        {
-            "identity": aggregate.identity,
-            "torrent_count": aggregate.torrent_count,
-            "endpoint_count": aggregate.endpoint_count,
-        }
-        for aggregate in report.trackers
-    ]
-    payload = {
-        "schema_version": report.schema_version,
-        "summary": {
-            "trackers": len(trackers),
-            "torrents_scanned": report.scanned_torrents,
-        },
-        "trackers": trackers,
-    }
-
-    if output_format == OutputFormat.json:
-        rendering.print_json_output(payload)
-        return
-
-    if output_format == OutputFormat.jsonl:
-        rendering.print_jsonl_output(payload)
-        return
-
-    if output_format == OutputFormat.csv:
-        rendering.print_csv_rows(
-            ["tracker", "torrents", "endpoints"],
-            [
-                (
-                    tracker["identity"],
-                    str(tracker["torrent_count"]),
-                    str(tracker["endpoint_count"]),
-                )
-                for tracker in trackers
-            ],
-        )
-        return
-
-    if not trackers:
-        typer.echo("No trackers found.")
-        return
-
-    rendering.print_table(
-        "Trackers",
-        ["Tracker", "Torrents", "Endpoints"],
-        [
-            [
-                tracker["identity"],
-                str(tracker["torrent_count"]),
-                str(tracker["endpoint_count"]),
-            ]
-            for tracker in trackers
-        ],
-        fold_columns={"Tracker"},
-    )
-    rendering.print_summary(payload["summary"])
+    rendering.render_tracker_inventory(report, output_format)
 
 
 @trackers_app.command(name="status")
 @error_boundary.catch_internal_errors
 def trackers_status_command(
-    category: Annotated[
-        list[str],
-        typer.Option("--category", help=CATEGORY_FILTER_HELP),
-    ] = [],  # noqa: B006 - Typer requires a literal default to detect list options
-    state: Annotated[
-        list[str],
-        typer.Option("--state", help=STATE_FILTER_HELP),
-    ] = [],  # noqa: B006
-    tracker: Annotated[
-        str | None,
-        typer.Option(
-            "--tracker",
-            help=(
-                "Restrict the report to one tracker, matched by "
-                "host[:port] (a full announce URL is also accepted; only "
-                "its host and port are used)."
-            ),
-        ),
-    ] = None,
-    completed: Annotated[
-        bool,
-        typer.Option("--completed", help="Restrict to completed torrents."),
-    ] = False,
-    incomplete: Annotated[
-        bool,
-        typer.Option("--incomplete", help="Restrict to incomplete torrents."),
-    ] = False,
-    active: Annotated[
-        bool,
-        typer.Option(
-            "--active", help="Restrict to torrents that are not stopped."
-        ),
-    ] = False,
-    inactive: Annotated[
-        bool,
-        typer.Option("--inactive", help="Restrict to stopped torrents."),
-    ] = False,
-    stalled: Annotated[
-        bool,
-        typer.Option("--stalled", help="Restrict to stalled torrents."),
-    ] = False,
-    errored: Annotated[
-        bool,
-        typer.Option(
-            "--errored", help="Restrict to torrents reporting an error."
-        ),
-    ] = False,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: ReportTrackerOption = None,
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
     exclude_category: ExcludeCategoryOption = [],  # noqa: B006
     tag: TagOption = [],  # noqa: B006
     tag_all: TagAllOption = [],  # noqa: B006

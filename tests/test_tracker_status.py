@@ -478,3 +478,236 @@ def test_at_most_one_lookup_per_surviving_torrent() -> None:
 
     assert client.torrents_info_calls == 1
     assert client.torrents_trackers_calls == 2
+
+
+# --- Per-tracker volume -----------------------------------------------------
+
+TRACKER_ONE = "https://one.example/announce"
+TRACKER_TWO = "https://two.example/announce"
+
+
+def _healthy(url: str) -> dict[str, object]:
+    return {"url": url, "status": 2}
+
+
+def test_an_unknown_measure_is_left_out_of_its_tracker_aggregate() -> None:
+    """`-1` is qBittorrent's "never set" marker, written literally here
+    rather than imported, so this assertion cannot drift along with the
+    code it checks. Read as a value it would take bytes *away* from the
+    total, which is why the marker must never reach the sum.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="T1",
+                downloaded=1_000,
+                uploaded=2_000,
+                seeding_time=3_600,
+            ),
+            make_torrent(
+                hash=HASH_B,
+                name="T2",
+                downloaded=-1,
+                uploaded=-1,
+                seeding_time=-1,
+            ),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE)],
+            HASH_B: [_healthy(TRACKER_ONE)],
+        },
+    )
+
+    aggregate = collect_tracker_status(client, build_torrent_filter()).trackers[
+        0
+    ]
+
+    assert aggregate.torrent_count == 2
+    assert aggregate.downloaded_bytes == 1_000
+    assert aggregate.uploaded_bytes == 2_000
+    assert aggregate.seeding_time_total_seconds == 3_600
+
+
+def test_tracker_ratio_is_the_ratio_of_the_totals() -> None:
+    """Never the mean of the per-torrent ratios: that would weigh a tiny
+    torrent like a huge one. Here the two answers are far apart -- the
+    mean is 1.0, the ratio of the totals is 0.2.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A, name="T1", downloaded=100, uploaded=200, ratio=2.0
+            ),
+            make_torrent(
+                hash=HASH_B, name="T2", downloaded=900, uploaded=0, ratio=0.0
+            ),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE)],
+            HASH_B: [_healthy(TRACKER_ONE)],
+        },
+    )
+
+    aggregate = collect_tracker_status(client, build_torrent_filter()).trackers[
+        0
+    ]
+
+    assert aggregate.downloaded_bytes == 1_000
+    assert aggregate.uploaded_bytes == 200
+    assert aggregate.aggregate_ratio == pytest.approx(0.2)
+
+
+def test_tracker_ratio_is_undefined_rather_than_zero_when_nothing_read() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="T1", downloaded=0, uploaded=5)
+        ],
+        trackers_by_hash={HASH_A: [_healthy(TRACKER_ONE)]},
+    )
+
+    aggregate = collect_tracker_status(client, build_torrent_filter()).trackers[
+        0
+    ]
+
+    assert aggregate.aggregate_ratio is None
+
+
+def test_excl_counts_the_torrents_a_tracker_is_the_only_identity_of() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="Shared"),
+            make_torrent(hash=HASH_B, name="Sole"),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE), _healthy(TRACKER_TWO)],
+            HASH_B: [_healthy(TRACKER_ONE)],
+        },
+    )
+
+    by_identity = {
+        aggregate.identity: aggregate
+        for aggregate in collect_tracker_status(
+            client, build_torrent_filter()
+        ).trackers
+    }
+
+    assert by_identity["one.example"].torrent_count == 2
+    assert by_identity["one.example"].exclusive_torrent_count == 1
+    assert by_identity["two.example"].torrent_count == 1
+    assert by_identity["two.example"].exclusive_torrent_count == 0
+
+
+def test_a_disabled_endpoint_still_counts_as_another_identity_for_excl() -> (
+    None
+):
+    """The operator disabled that tracker, they did not remove it, and
+    they can re-enable it -- so the torrent is not exclusive to the
+    other one.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=HASH_A, name="T1")],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE), {"url": TRACKER_TWO, "status": 0}]
+        },
+    )
+
+    aggregates = collect_tracker_status(client, build_torrent_filter()).trackers
+
+    assert {aggregate.identity for aggregate in aggregates} == {
+        "one.example",
+        "two.example",
+    }
+    assert all(
+        aggregate.exclusive_torrent_count == 0 for aggregate in aggregates
+    )
+
+
+def test_summing_a_column_over_trackers_can_exceed_the_library_total() -> None:
+    """A torrent announcing to two trackers counts entirely in both, so
+    the per-tracker columns do not partition the library. `EXCL` is what
+    distinguishes the double-counted torrents from the rest.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="Shared", size=1_000),
+            make_torrent(hash=HASH_B, name="Sole", size=500),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE), _healthy(TRACKER_TWO)],
+            HASH_B: [_healthy(TRACKER_ONE)],
+        },
+    )
+
+    aggregates = collect_tracker_status(client, build_torrent_filter()).trackers
+    library_total = 1_500
+
+    assert sum(a.total_size_bytes for a in aggregates) == 2_500
+    assert sum(a.total_size_bytes for a in aggregates) > library_total
+    assert sum(a.exclusive_torrent_count for a in aggregates) == 1
+
+
+def test_volume_costs_no_call_beyond_the_health_collection() -> None:
+    """The measures ride along with the pass `trackers status` already
+    made: one listing, one tracker lookup per surviving torrent.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="T1", downloaded=10, uploaded=20),
+            make_torrent(hash=HASH_B, name="T2", downloaded=30, uploaded=40),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy(TRACKER_ONE)],
+            HASH_B: [_healthy(TRACKER_ONE)],
+        },
+    )
+
+    aggregate = collect_tracker_status(client, build_torrent_filter()).trackers[
+        0
+    ]
+
+    assert aggregate.downloaded_bytes == 40
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 2
+
+
+def test_two_endpoints_of_one_host_count_the_torrent_and_its_bytes_once() -> (
+    None
+):
+    """Private trackers commonly list several announce endpoints for one
+    host. They merge into one identity, so the torrent must not be
+    counted twice, and neither must its bytes.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="T1",
+                size=1_000,
+                downloaded=100,
+                uploaded=200,
+                seeding_time=60,
+            )
+        ],
+        trackers_by_hash={
+            HASH_A: [
+                _healthy("https://one.example/announce"),
+                _healthy("https://one.example/announce2"),
+            ]
+        },
+    )
+
+    aggregates = collect_tracker_status(client, build_torrent_filter()).trackers
+
+    assert len(aggregates) == 1
+    aggregate = aggregates[0]
+    assert aggregate.identity == "one.example"
+    assert aggregate.endpoint_count == 2
+    assert aggregate.torrent_count == 1
+    assert aggregate.exclusive_torrent_count == 1
+    assert aggregate.total_size_bytes == 1_000
+    assert aggregate.downloaded_bytes == 100
+    assert aggregate.uploaded_bytes == 200
+    assert aggregate.seeding_time_total_seconds == 60

@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from qbit_core.features.stats import (
+    MeasureTotals,
     aggregate_library_stats,
+    aggregate_measure_totals,
     collect_torrent_stats,
     stats_report_to_csv_rows,
     stats_report_to_dict,
@@ -321,4 +323,74 @@ def test_an_undefined_aggregate_serializes_as_null_never_as_zero() -> None:
     assert payload["library"]["oldest_added_at"] is None
     assert ("library", "aggregate_ratio", "") in stats_report_to_csv_rows(
         report
+    )
+
+
+# --- the shared measure arithmetic ------------------------------------------
+
+
+def test_measure_totals_sum_only_the_measures_qbittorrent_reported() -> None:
+    """`-1` is qBittorrent's "never set" marker, written literally rather
+    than imported. Summed as a value it would take bytes *away* from the
+    total, which is why it must never reach the sum.
+    """
+    totals = aggregate_measure_totals(
+        [
+            _snapshot(
+                size=1_000, downloaded=100, uploaded=200, seeding_time=60
+            ),
+            _snapshot(size=500, downloaded=-1, uploaded=-1, seeding_time=-1),
+        ]
+    )
+
+    assert totals == MeasureTotals(
+        total_size_bytes=1_500,
+        downloaded_bytes=100,
+        uploaded_bytes=200,
+        aggregate_ratio=2.0,
+        seeding_time_total_seconds=60,
+    )
+
+
+def test_measure_totals_ratio_is_the_ratio_of_the_totals() -> None:
+    """The mean of these two ratios is 1.0; the ratio of the totals is
+    0.2. Weighing a tiny torrent like a huge one is the whole reason the
+    two commands must share this arithmetic.
+    """
+    totals = aggregate_measure_totals(
+        [
+            _snapshot(downloaded=100, uploaded=200, ratio=2.0),
+            _snapshot(downloaded=900, uploaded=0, ratio=0.0),
+        ]
+    )
+
+    assert totals.aggregate_ratio == 0.2
+
+
+def test_measure_totals_leave_the_ratio_undefined_rather_than_zero() -> None:
+    assert aggregate_measure_totals([]).aggregate_ratio is None
+    assert (
+        aggregate_measure_totals(
+            [_snapshot(downloaded=0, uploaded=5)]
+        ).aggregate_ratio
+        is None
+    )
+
+
+def test_library_stats_read_their_shared_measures_from_one_place() -> None:
+    """`torrents stats` and the per-tracker breakdown must never sum the
+    same bytes differently."""
+    snapshots = [
+        _snapshot(size=1_000, downloaded=100, uploaded=200, seeding_time=60),
+        _snapshot(size=500, downloaded=-1, uploaded=900, seeding_time=30),
+    ]
+    library = _aggregate(*snapshots)
+    totals = aggregate_measure_totals(snapshots)
+
+    assert library.total_size_bytes == totals.total_size_bytes
+    assert library.downloaded_bytes == totals.downloaded_bytes
+    assert library.uploaded_bytes == totals.uploaded_bytes
+    assert library.aggregate_ratio == totals.aggregate_ratio
+    assert (
+        library.seeding_time_total_seconds == totals.seeding_time_total_seconds
     )

@@ -18,6 +18,7 @@ from typing import Any
 
 from qbit_core.features.torrents import (
     build_torrent_filter,
+    compute_torrent_tracker_health,
     get_safe_tracker_details,
 )
 from qbit_core.features.tracker_status import (
@@ -25,10 +26,7 @@ from qbit_core.features.tracker_status import (
     TrackerStatusReport,
     collect_tracker_status,
 )
-from qbit_core.features.trackers import (
-    TrackerHealth,
-    compute_tracker_aggregate_health,
-)
+from qbit_core.features.trackers import TrackerHealth
 from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
@@ -235,19 +233,6 @@ def build_torrent_explanation(
     )
 
 
-def _tally_endpoint_health(
-    endpoints: list[dict[str, Any]],
-) -> dict[TrackerHealth, int]:
-    """Count a torrent's own endpoints by health, dispatching on `health`
-    alone (never on `enabled`, which is `None` for unclassifiable
-    statuses and would otherwise miscount an unknown endpoint as
-    disabled)."""
-    counts: dict[TrackerHealth, int] = {health: 0 for health in TrackerHealth}
-    for endpoint in endpoints:
-        counts[TrackerHealth(endpoint["health"])] += 1
-    return counts
-
-
 def _summarize_torrent_tracker_health(
     endpoints: list[dict[str, Any]],
     *,
@@ -255,24 +240,19 @@ def _summarize_torrent_tracker_health(
 ) -> tuple[TrackerHealth | None, str | None]:
     """Summarize a torrent's own tracker endpoints into one health value.
 
-    Returns `(None, limitation)` when no usable observation exists at
-    all (collection failed, or the torrent reported no trackers) --
-    `explain torrent` must never guess a health value it cannot support.
+    The verdict itself comes from `compute_torrent_tracker_health`, the
+    one path the `--tracker-health` filter also uses -- what this report
+    states and what that filter selects can therefore never diverge.
+    Only the limitation wording is decided here: it distinguishes
+    "collection failed" from "no endpoint reported", two facts the
+    verdict alone (`None` for both) cannot tell apart.
     """
     if tracker_collection_failed:
         return None, "Tracker data could not be collected for this torrent."
     if not endpoints:
         return None, "No tracker endpoints were reported for this torrent."
 
-    counts = _tally_endpoint_health(endpoints)
-    health = compute_tracker_aggregate_health(
-        healthy=counts[TrackerHealth.HEALTHY],
-        warning=counts[TrackerHealth.WARNING],
-        critical=counts[TrackerHealth.CRITICAL],
-        disabled=counts[TrackerHealth.DISABLED],
-        unknown=counts[TrackerHealth.UNKNOWN],
-    )
-    return health, None
+    return compute_torrent_tracker_health(endpoints), None
 
 
 def _pick_representative_message(

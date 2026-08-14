@@ -11,12 +11,14 @@ parseable host.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from qbit_core.errors import InvalidInputError
+from qbit_core.features.stats import aggregate_measure_totals
 from qbit_core.features.torrents import (
+    matches_tracker_health,
     select_torrents,
 )
 from qbit_core.features.trackers import (
@@ -31,7 +33,9 @@ from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.selection import (
     TorrentFilter,
     torrent_filter_to_dict,
+    without_inspection_criteria,
 )
+from qbit_core.shared.torrent_states import TorrentSnapshot
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -65,11 +69,24 @@ class TrackerEndpointObservation:
 
 @dataclass(frozen=True)
 class TrackerAggregate:
-    """The aggregated health of one tracker identity across torrents."""
+    """One tracker identity's health and volume across the selected torrents.
+
+    A torrent announcing to three trackers counts *entirely* in each of
+    the three aggregates, so summing a column over every identity
+    exceeds the library total. `exclusive_torrent_count` is the honest
+    answer to "what would I lose by leaving this tracker": the torrents
+    carrying this identity and no other, a disabled endpoint counting as
+    another identity since it was disabled, not removed.
+
+    The measures come from `aggregate_measure_totals`, the same
+    arithmetic `torrents stats` uses, so the two reports can never sum
+    the same bytes differently.
+    """
 
     identity: str
     health: TrackerHealth
     torrent_count: int
+    exclusive_torrent_count: int
     endpoint_count: int
     healthy_count: int
     warning_count: int
@@ -77,6 +94,11 @@ class TrackerAggregate:
     disabled_count: int
     unknown_count: int
     representative_message: str | None
+    total_size_bytes: int
+    downloaded_bytes: int
+    uploaded_bytes: int
+    aggregate_ratio: float | None
+    seeding_time_total_seconds: int
 
 
 @dataclass(frozen=True)
@@ -140,6 +162,8 @@ class _AggregateBuilder:
 
     identity: str
     torrent_hashes: set[str] = field(default_factory=set)
+    torrents: list[TorrentSnapshot] = field(default_factory=list)
+    exclusive_torrents: int = 0
     healthy: int = 0
     warning: int = 0
     critical: int = 0
@@ -189,11 +213,13 @@ class _AggregateBuilder:
             + self.disabled
             + self.unknown
         )
+        totals = aggregate_measure_totals(self.torrents)
 
         return TrackerAggregate(
             identity=self.identity,
             health=health,
             torrent_count=len(self.torrent_hashes),
+            exclusive_torrent_count=self.exclusive_torrents,
             endpoint_count=endpoint_count,
             healthy_count=self.healthy,
             warning_count=self.warning,
@@ -201,6 +227,11 @@ class _AggregateBuilder:
             disabled_count=self.disabled,
             unknown_count=self.unknown,
             representative_message=representative,
+            total_size_bytes=totals.total_size_bytes,
+            downloaded_bytes=totals.downloaded_bytes,
+            uploaded_bytes=totals.uploaded_bytes,
+            aggregate_ratio=totals.aggregate_ratio,
+            seeding_time_total_seconds=totals.seeding_time_total_seconds,
         )
 
 
@@ -248,6 +279,10 @@ def collect_tracker_status(
     set, every surviving torrent is still scanned and the aggregates are
     filtered afterward -- `--tracker` restricts the report, not the
     API-call volume. Several values combine with OR.
+
+    `filters.tracker_health` narrows the torrents the report covers, and
+    costs nothing extra: the verdict is read off the tracker data this
+    single pass already collected.
     """
     if filters.trackers_excluded:
         raise InvalidInputError(
@@ -261,7 +296,7 @@ def collect_tracker_status(
     # `--tracker` is supported, but as a *report* restriction applied to
     # the aggregates below, not as a selection criterion -- so it is
     # removed from the cheap pass on purpose, not silently dropped.
-    cheap_filters = replace(filters, trackers=(), trackers_excluded=())
+    cheap_filters = without_inspection_criteria(filters)
     selection, _ = select_torrents(client, cheap_filters)
     inspection = inspect_trackers(
         client,
@@ -272,8 +307,17 @@ def collect_tracker_status(
 
     aggregates: dict[str, _AggregateBuilder] = {}
     collection_errors = inspection.lookup_failures
+    retained = [
+        inspected
+        for inspected in inspection.torrents
+        if matches_tracker_health(
+            filters,
+            inspected.raw_trackers,
+            lookup_failed=inspected.lookup_failed,
+        )
+    ]
 
-    for inspected in inspection.torrents:
+    for inspected in retained:
         if inspected.lookup_failed:
             continue
 
@@ -307,8 +351,16 @@ def collect_tracker_status(
             builder.record(observation)
             identities_for_torrent.add(identity)
 
+        # A torrent counts in full in each identity it announces to.
+        # `identities_for_torrent` is built from every endpoint, disabled
+        # ones included, so a torrent on an active X and a disabled Y is
+        # exclusive to neither.
         for identity in identities_for_torrent:
-            aggregates[identity].torrent_hashes.add(torrent.hash)
+            builder = aggregates[identity]
+            builder.torrent_hashes.add(torrent.hash)
+            builder.torrents.append(torrent)
+            if len(identities_for_torrent) == 1:
+                builder.exclusive_torrents += 1
 
     if filters.trackers:
         aggregates = {
@@ -324,6 +376,11 @@ def collect_tracker_status(
         )
     )
 
+    # Computed over the inspected population, not the health-retained
+    # one: `collection_errors` counts every failure the collection hit,
+    # so comparing it against a subset could read a partial failure as a
+    # total one. `--tracker-health` is only reachable from `trackers
+    # list`, which has no health-driven exit code.
     overall_health = _compute_overall_health(
         trackers,
         matched_torrents=len(selection.matched),
@@ -335,7 +392,7 @@ def collect_tracker_status(
         generated_at=datetime.now(UTC),
         filters=filters,
         scanned_torrents=selection.scanned,
-        matched_torrents=len(selection.matched),
+        matched_torrents=len(retained),
         trackers=trackers,
         collection_errors=collection_errors,
         overall_health=overall_health,
