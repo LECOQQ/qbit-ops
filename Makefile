@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -35,6 +35,9 @@ doctor: ## diag: Check required local tools
 		fi; \
 	done; \
 	exit "$$missing"
+
+env-attest: ## diag: Prove this checkout's commands exercise its own src/, not another worktree's
+	@$(PY) python scripts/env_attest.py --root .
 
 info: ## diag: Show project and environment information
 	@printf 'Project: %s\n' "$(PROJECT_NAME)"
