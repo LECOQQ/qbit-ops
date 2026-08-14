@@ -21,6 +21,8 @@ from typing import Any
 
 from qbit_core.errors import InvalidInputError, QbitCoreError
 from qbit_core.qbit.fields import (
+    UNSET_NUMERIC,
+    UNSET_TIMESTAMP,
     get_field_as_string,
     get_field_as_tag_list,
     get_optional_bool,
@@ -48,20 +50,6 @@ UNCATEGORIZED_FILTER_TOKEN = "uncategorized"
 STATE_FILTER_VALUES: frozenset[TorrentStateGroup] = frozenset(
     {"downloading", "seeding", "checking", "stalled", "errored", "unknown"}
 )
-
-# qBittorrent encodes "unset" as a negative value across its numeric
-# fields (`-1` uncomputed, `-2` "use the global setting"). None of the
-# V1 filter sources was ever observed carrying one, so this is a guard
-# rather than a correction: a real size, ratio or byte count is never
-# negative, so nothing legitimate is lost by refusing to compare them.
-_UNSET_NUMERIC = (-1, -2)
-
-# Timestamp fields additionally treat `0` as unknown. No torrent is
-# really added -- or last active -- at the Unix epoch, so a zero means
-# "not recorded", and reading it as 1970 would make `--older-than` or
-# `--inactive-for` match it: the dangerous direction on a destructive
-# command.
-_UNSET_TIMESTAMP = (0, -1, -2)
 
 
 @dataclass(frozen=True)
@@ -328,6 +316,22 @@ class SelectionRequest:
         """Return whether resolving this request needs an INSPECT pass."""
         return self.filters.requires_inspection
 
+    @property
+    def has_selector(self) -> bool:
+        """Return whether the operator narrowed the request at all.
+
+        `--all` counts as a selector: it names the whole library, but it
+        is an explicit request about the torrents *present*. The single
+        definition of "narrowed", so a reader (`torrents stats`) never
+        recomputes it -- one value decides both what a report covers and
+        which instance-wide call is worth making.
+        """
+        return (
+            self.torrent_hash is not None
+            or self.select_all
+            or not self.filters.is_empty
+        )
+
 
 @dataclass(frozen=True)
 class Selection:
@@ -473,8 +477,10 @@ def validate_selection_request(request: SelectionRequest) -> None:
     `--hash` never combines with `--all` or a filter; `--all` (an
     explicit acknowledgement of whole-instance scope) never combines
     with a filter either. Otherwise one or more filters may define the
-    selection, but at least one of `--hash`, `--all`, or a filter is
-    always required -- no selector can silently mean the whole seedbox.
+    selection, but `SelectionRequest.has_selector` must hold -- no
+    selector can silently mean the whole seedbox. That property is read
+    from the request, never re-derived here: two spellings of "the
+    operator narrowed nothing" would eventually disagree.
     """
     if request.torrent_hash is not None:
         if request.select_all or not request.filters.is_empty:
@@ -488,7 +494,7 @@ def validate_selection_request(request: SelectionRequest) -> None:
             raise ValueError("Use --all alone, without any other filter.")
         return
 
-    if request.filters.is_empty:
+    if not request.has_selector:
         raise ValueError(
             "Provide --hash, --all, or at least one filter (--category, "
             "--state, --tracker, --completed, --incomplete, --active, "
@@ -702,33 +708,33 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
     bound (decision M1).
     """
     if not filters.ratio.contains(
-        get_optional_float(torrent, "ratio", sentinels=_UNSET_NUMERIC)
+        get_optional_float(torrent, "ratio", sentinels=UNSET_NUMERIC)
     ):
         return False
 
     if not filters.size.contains(
-        get_optional_int(torrent, "size", sentinels=_UNSET_NUMERIC)
+        get_optional_int(torrent, "size", sentinels=UNSET_NUMERIC)
     ):
         return False
 
     if not filters.progress.contains(
-        get_optional_float(torrent, "progress", sentinels=_UNSET_NUMERIC)
+        get_optional_float(torrent, "progress", sentinels=UNSET_NUMERIC)
     ):
         return False
 
     if not filters.uploaded.contains(
-        get_optional_int(torrent, "uploaded", sentinels=_UNSET_NUMERIC)
+        get_optional_int(torrent, "uploaded", sentinels=UNSET_NUMERIC)
     ):
         return False
 
     if not filters.seeding_time.contains(
-        get_optional_int(torrent, "seeding_time", sentinels=_UNSET_NUMERIC)
+        get_optional_int(torrent, "seeding_time", sentinels=UNSET_NUMERIC)
     ):
         return False
 
     if not filters.added.is_unset:
         added_on = get_optional_int(
-            torrent, "added_on", sentinels=_UNSET_TIMESTAMP
+            torrent, "added_on", sentinels=UNSET_TIMESTAMP
         )
         added_at = (
             None
@@ -744,7 +750,7 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
         # here and matches no completion bound, rather than pretending
         # to have finished at the epoch.
         completed_on = get_optional_int(
-            torrent, "completion_on", sentinels=_UNSET_TIMESTAMP
+            torrent, "completion_on", sentinels=UNSET_TIMESTAMP
         )
         finished_at = (
             None
@@ -756,7 +762,7 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 
     if not filters.last_activity.is_unset:
         last_activity = get_optional_int(
-            torrent, "last_activity", sentinels=_UNSET_TIMESTAMP
+            torrent, "last_activity", sentinels=UNSET_TIMESTAMP
         )
         moment = (
             None
@@ -768,7 +774,7 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 
     if filters.has_trackers is not None:
         count = get_optional_int(
-            torrent, "trackers_count", sentinels=_UNSET_NUMERIC
+            torrent, "trackers_count", sentinels=UNSET_NUMERIC
         )
         if count is None or (count > 0) != filters.has_trackers:
             return False

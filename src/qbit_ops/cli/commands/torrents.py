@@ -5,6 +5,10 @@ from typing import Annotated
 
 import typer
 
+from qbit_core.features.stats import (
+    collect_torrent_stats,
+    validate_stats_request,
+)
 from qbit_core.features.torrent_import import (
     TorrentImportError,
     TorrentImportResult,
@@ -80,6 +84,8 @@ from qbit_ops.cli.selector_options import (
     StartCompletedOption,
     StartHashOption,
     StateOption,
+    StatsAllOption,
+    StatsHashOption,
     TagAllOption,
     TagOption,
     TrackerOption,
@@ -383,6 +389,143 @@ def list_qbit_torrents(
     )
     if not filters.is_empty:
         exit_if_no_targeted_matches(len(selection.matched))
+
+
+@torrents_app.command(name="stats")
+@error_boundary.catch_internal_errors
+def show_torrent_stats(
+    torrent_hash: StatsHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: StatsAllOption = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format.",
+        ),
+    ] = OutputFormat.table,
+) -> None:
+    """Report volume, transfer and time aggregates over a torrent selection.
+
+    Read-only, and accepts every filter `torrents list` does, with the
+    same semantics. Without any selector -- no filter, no `--hash`, no
+    `--all` -- the report also carries qBittorrent's own all-time
+    counters, which include torrents since deleted and cannot be
+    filtered. Any selector drops that block rather than inviting a
+    comparison between a filtered total and a global one. An empty
+    selection is an answer, not an error: it exits 0.
+    """
+    validate_format_support("torrents_stats", output_format)
+    request = _build_selection_request(
+        torrent_hash=torrent_hash,
+        category=category,
+        state=state,
+        tracker=tracker,
+        completed=completed,
+        incomplete=incomplete,
+        active=active,
+        inactive=inactive,
+        stalled=stalled,
+        errored=errored,
+        exclude_category=exclude_category,
+        tag=tag,
+        tag_all=tag_all,
+        exclude_tag=exclude_tag,
+        save_path=save_path,
+        exclude_save_path=exclude_save_path,
+        name_contains=name_contains,
+        exclude_name=exclude_name,
+        name_regex=name_regex,
+        exclude_state=exclude_state,
+        exclude_tracker=exclude_tracker,
+        no_tracker=no_tracker,
+        private=private,
+        ratio_min=ratio_min,
+        ratio_max=ratio_max,
+        size_min=size_min,
+        size_max=size_max,
+        progress_min=progress_min,
+        progress_max=progress_max,
+        uploaded_min=uploaded_min,
+        uploaded_max=uploaded_max,
+        seeded_for=seeded_for,
+        older_than=older_than,
+        newer_than=newer_than,
+        completed_before=completed_before,
+        completed_within=completed_within,
+        inactive_for=inactive_for,
+        active_within=active_within,
+        select_all=select_all,
+    )
+
+    # Validated here, outside the boundary below, so a `ValueError` from
+    # a defect can never be reported as bad operator input -- the same
+    # split the bulk mutations use.
+    try:
+        validate_stats_request(request)
+    except ValueError as error:
+        error_boundary.fail(str(error))
+
+    enabled = rendering.progress_enabled(
+        output_format=output_format,
+        interactive=rendering.is_interactive_terminal(),
+    )
+    if request.requires_inspection:
+        progress_cm = rendering.transient_progress(
+            "Scanning torrent trackers...", enabled=enabled
+        )
+    else:
+        progress_cm = rendering.transient_spinner(
+            "Loading torrents...", enabled=enabled
+        )
+
+    try:
+        with error_boundary.qbit_error_boundary():
+            client = error_boundary.create_qbit_client()
+            with progress_cm as advance:
+                report = collect_torrent_stats(
+                    client, request, on_progress=advance
+                )
+    except AmbiguousTorrentHashError as error:
+        error_boundary.fail_ambiguous_hash(error)
+
+    rendering.render_torrent_stats(report, output_format)
 
 
 @torrents_app.command(name="categories")

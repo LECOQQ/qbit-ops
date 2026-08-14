@@ -111,7 +111,7 @@ def _format_bytes(byte_count: int) -> str:
     """Format a byte count using binary units, e.g. '12.4 MiB'.
 
     A deliberate small duplicate of
-    `qbit_ops.cli.rendering.format_byte_rate`: TUI modules must never
+    `qbit_ops.cli.rendering.format_bytes`: TUI modules must never
     import from `qbit_ops.cli` (see the security boundary in
     `qbit_ops.tui.app`), and it's too small to justify a shared module.
     """

@@ -17,6 +17,7 @@ from qbit_core.shared.selection import (
     TorrentFilter,
     matches_cheap_filters,
 )
+from qbit_core.shared.torrent_states import build_torrent_snapshot
 
 
 def _torrent(**overrides: Any) -> dict[str, Any]:
@@ -579,3 +580,101 @@ def test_a_root_only_prefix_is_refused_rather_than_matching_everything() -> (
     single stray character select the whole instance."""
     assert not _matches(TorrentFilter(save_path_prefixes=("/",)))
     assert not _matches(TorrentFilter(save_path_prefixes=("",)))
+
+
+# --- both layers agree on what is known -------------------------------------
+
+_FAR_FUTURE = datetime(2100, 1, 1, tzinfo=UTC)
+
+# Every measure the filters bound *and* the central model carries -- no
+# exception, which is the point: one row per pair of readings that must
+# never disagree. Each row is the raw field qBittorrent sends, a filter
+# bounding it, the model attribute reading it, and every marker meaning
+# "never reported" for that field. `0` is a marker for a timestamp
+# (nothing happens at the epoch) but a real value for a byte count or a
+# duration, which is why the marker sets differ.
+_SHARED_MEASURES: tuple[
+    tuple[str, TorrentFilter, str, tuple[Any, ...]], ...
+] = (
+    (
+        "uploaded",
+        TorrentFilter(uploaded=Range(max=10**12)),
+        "uploaded",
+        (None, -1, -2),
+    ),
+    (
+        "seeding_time",
+        TorrentFilter(seeding_time=Range(max=10**9)),
+        "seeding_time",
+        (None, -1, -2),
+    ),
+    (
+        "added_on",
+        TorrentFilter(added=Range(max=_FAR_FUTURE)),
+        "added_at",
+        (None, 0, -1, -2),
+    ),
+    (
+        "completion_on",
+        TorrentFilter(completed_at=Range(max=_FAR_FUTURE)),
+        "completed_at",
+        (None, 0, -1, -2),
+    ),
+    (
+        "last_activity",
+        TorrentFilter(last_activity=Range(max=_FAR_FUTURE)),
+        "last_activity_at",
+        (None, 0, -1, -2),
+    ),
+)
+
+_EVERY_MEASURE_KNOWN: dict[str, Any] = {
+    "uploaded": 9_400_000_000,
+    "seeding_time": 86_400 * 30,
+    "added_on": 1_700_000_000,
+    "completion_on": 1_700_000_100,
+    "last_activity": 1_700_000_200,
+}
+
+
+@pytest.mark.parametrize(
+    ("filters", "model_field"),
+    [(row[1], row[2]) for row in _SHARED_MEASURES],
+)
+def test_a_bound_that_matches_means_the_model_carries_the_measure(
+    filters: TorrentFilter, model_field: str
+) -> None:
+    torrent = _torrent(**_EVERY_MEASURE_KNOWN)
+
+    assert matches_cheap_filters(torrent, filters)
+    assert getattr(build_torrent_snapshot(torrent), model_field) is not None
+
+
+@pytest.mark.parametrize(
+    ("raw_field", "filters", "model_field", "unknown_markers"),
+    _SHARED_MEASURES,
+)
+def test_an_unknown_measure_is_unknown_to_the_filter_and_to_the_model(
+    raw_field: str,
+    filters: TorrentFilter,
+    model_field: str,
+    unknown_markers: tuple[Any, ...],
+) -> None:
+    """The invariant that makes one canonical representation real: for
+    the same raw object, a value the filtering layer treats as never
+    reported is also absent from the central model. Were the model to
+    read it with a coercing accessor, a policy could fire on a `0` that
+    `--seeded-for` would never have matched."""
+    absent = _torrent(**_EVERY_MEASURE_KNOWN)
+    del absent[raw_field]
+
+    candidates = [absent] + [
+        _torrent(**{**_EVERY_MEASURE_KNOWN, raw_field: marker})
+        for marker in unknown_markers
+    ]
+
+    for torrent in candidates:
+        reported = torrent.get(raw_field, "absent")
+        assert not matches_cheap_filters(torrent, filters), reported
+        snapshot = build_torrent_snapshot(torrent)
+        assert getattr(snapshot, model_field) is None, reported

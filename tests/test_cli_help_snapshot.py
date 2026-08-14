@@ -39,6 +39,7 @@ GROUP_SUBCOMMAND_NAMES = {
     "backup": {"export", "diff", "restore"},
     "torrents": {
         "list",
+        "stats",
         "categories",
         "inspect",
         "pause",
@@ -115,9 +116,9 @@ def _assert_clean_help(result) -> None:
     assert "Usage:" in result.output
 
 
-def test_exit_code_table_covers_exactly_twenty_seven_commands() -> None:
+def test_exit_code_table_covers_exactly_twenty_eight_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
-    assert len(EXIT_CODE_TABLE) == 27
+    assert len(EXIT_CODE_TABLE) == 28
 
 
 def test_root_help_succeeds_without_traceback() -> None:

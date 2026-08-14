@@ -100,6 +100,18 @@ qbit-ops explain tracker --tracker tracker.example
 One line per tracker, health aggregated across every torrent that
 announces to it, and then the reasoning behind the verdict.
 
+**Know what your library actually weighs.**
+
+```bash
+qbit-ops torrents stats
+qbit-ops torrents stats --category sonarr
+```
+
+Size, transfer and seeding time over exactly the torrents you filter
+for. Without a filter it also shows qBittorrent's all-time counters -
+with one, it doesn't, so a filtered total is never sat next to a global
+one.
+
 **Unstick a queue that stopped moving.**
 
 ```bash
@@ -150,6 +162,7 @@ Read commands support machine-friendly output where it makes sense:
 
 ```bash
 qbit-ops torrents list --format json
+qbit-ops torrents stats --format json
 qbit-ops status --format jsonl
 ```
 

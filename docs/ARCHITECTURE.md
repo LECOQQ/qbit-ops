@@ -47,6 +47,21 @@ These boundaries are checked by architecture tests
 (`tests/test_layering.py`, `tests/test_package_layout.py`,
 `tests/test_qbit_architecture.py`, `tests/test_qbit_boundary.py`).
 
+## 🧱 One representation per measure
+
+`shared/torrent_states.py`'s `TorrentSnapshot` is the single
+representation of a torrent's individual measures -- size, ratio,
+transferred bytes, seeding time, added/completed/last-activity dates.
+Readers aggregate it (`features/stats.py`) instead of re-reading raw API
+objects, so two commands can never disagree about the same torrent.
+
+The "value unknown" markers qBittorrent uses (`-1`, `-2`, and `0` on a
+timestamp) are defined once, in `qbit/fields.py`, and imported by both
+the filtering layer and the model. A measure a bounded filter treats as
+never reported is therefore also absent from the model -- never `0`,
+never 1970. `tests/test_selection_predicates.py` asserts that agreement
+on the same raw payload.
+
 ## 🛡️ Safety-critical flows
 
 ### ✍️ Mutations

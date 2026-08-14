@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from qbit_core.shared.torrent_states import (
@@ -26,6 +27,12 @@ def test_build_torrent_snapshot_reads_every_field() -> None:
         size=4_700_372_992,
         dlspeed=1_024,
         upspeed=512,
+        downloaded=3_000_000_000,
+        uploaded=4_500_000_000,
+        seeding_time=86_400,
+        added_on=1_700_000_000,
+        completion_on=1_700_086_400,
+        last_activity=1_700_090_000,
     )
 
     snapshot = build_torrent_snapshot(torrent)
@@ -41,7 +48,67 @@ def test_build_torrent_snapshot_reads_every_field() -> None:
         ratio=1.5,
         download_rate=1_024,
         upload_rate=512,
+        downloaded=3_000_000_000,
+        uploaded=4_500_000_000,
+        seeding_time=86_400,
+        added_at=datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC),
+        completed_at=datetime(2023, 11, 15, 22, 13, 20, tzinfo=UTC),
+        last_activity_at=datetime(2023, 11, 15, 23, 13, 20, tzinfo=UTC),
     )
+
+
+def test_an_unset_measure_reads_as_absent_never_as_zero_or_the_epoch() -> None:
+    """The normalization a policy engine depends on: a marker value must
+    not become a real measure a rule could fire on -- and a negative
+    marker summed into a byte total would subtract from it."""
+    snapshot = build_torrent_snapshot(
+        make_torrent(
+            downloaded=-1,
+            uploaded=-2,
+            seeding_time=-1,
+            added_on=0,
+            completion_on=-1,
+            last_activity=0,
+        )
+    )
+
+    assert snapshot.downloaded is None
+    assert snapshot.uploaded is None
+    assert snapshot.seeding_time is None
+    assert snapshot.added_at is None
+    assert snapshot.completed_at is None
+    assert snapshot.last_activity_at is None
+
+
+def test_measures_qbittorrent_never_sent_read_as_absent() -> None:
+    snapshot = build_torrent_snapshot(make_torrent())
+
+    assert snapshot.downloaded is None
+    assert snapshot.uploaded is None
+    assert snapshot.seeding_time is None
+    assert snapshot.added_at is None
+    assert snapshot.completed_at is None
+    assert snapshot.last_activity_at is None
+
+
+def test_zero_bytes_and_zero_seconds_are_measures_not_unknowns() -> None:
+    snapshot = build_torrent_snapshot(
+        make_torrent(downloaded=0, uploaded=0, seeding_time=0)
+    )
+
+    assert snapshot.downloaded == 0
+    assert snapshot.uploaded == 0
+    assert snapshot.seeding_time == 0
+
+
+def test_the_per_torrent_ratio_is_qbittorrents_own_value() -> None:
+    """Never derived from the byte counters: a policy and the `--ratio`
+    filter must designate exactly the same torrents."""
+    snapshot = build_torrent_snapshot(
+        make_torrent(ratio=0.25, downloaded=1_000, uploaded=8_000)
+    )
+
+    assert snapshot.ratio == 0.25
 
 
 def test_torrent_snapshot_category_is_raw_not_display_formatted() -> None:

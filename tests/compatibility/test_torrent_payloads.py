@@ -8,6 +8,8 @@ payloads -- never a separate fixture-only parsing path.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
@@ -261,3 +263,41 @@ def test_snapshot_ignores_an_extra_future_field() -> None:
 
     assert snapshot.hash != ""
     assert snapshot.is_downloading is True
+
+
+# --- individual measures: the six fields the model consumes ---------------
+
+
+def test_the_measures_of_a_seeding_torrent_reach_the_central_model() -> None:
+    fixture = load_fixture("torrents", "ordinary_seeding")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.downloaded == 4700372992
+    assert snapshot.uploaded == 11750932480
+    assert snapshot.seeding_time == 2592000
+    assert snapshot.added_at == datetime(2023, 11, 3, 8, 26, 40, tzinfo=UTC)
+    assert snapshot.completed_at == datetime(2023, 11, 3, 9, 26, 40, tzinfo=UTC)
+    assert snapshot.last_activity_at == datetime(
+        2023, 11, 26, 12, 0, tzinfo=UTC
+    )
+
+
+def test_missing_measures_reach_the_model_as_unknown_not_as_zero() -> None:
+    """The same fixture the coercing accessors read as `0` above: the
+    model must report absence, or an aggregate would count a torrent
+    qBittorrent said nothing about."""
+    fixture = load_fixture("torrents", "missing_optional_fields")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.seeding_time is None
+    assert snapshot.added_at is None
+    assert snapshot.completed_at is None
+    assert snapshot.last_activity_at is None
+
+
+def test_explicitly_null_measures_are_unknown_to_the_model_too() -> None:
+    fixture = load_fixture("torrents", "explicit_none_fields")
+    snapshot = build_torrent_snapshot(fixture.payload)
+
+    assert snapshot.seeding_time is None
+    assert snapshot.added_at is None

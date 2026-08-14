@@ -91,6 +91,7 @@ EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "tui": ExitCode,
     "connection check": ExitCode,
     "torrents list": ExitCode,
+    "torrents stats": ExitCode,
     "torrents categories": ExitCode,
     "torrents inspect": ExitCode,
     "torrents pause": ExitCode,
