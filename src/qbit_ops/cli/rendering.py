@@ -15,6 +15,7 @@ import sys
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -44,6 +45,12 @@ from qbit_core.features.explain import (
     ExplanationReport,
     ExplanationSeverity,
     explanation_report_to_dict,
+)
+from qbit_core.features.stats import (
+    LibraryStats,
+    TorrentStatsReport,
+    stats_report_to_csv_rows,
+    stats_report_to_dict,
 )
 from qbit_core.features.status import (
     Health,
@@ -325,9 +332,9 @@ def print_table(
     console.print(table)
 
 
-def format_byte_rate(bytes_per_second: int) -> str:
-    """Format a byte rate using binary units, e.g. '12.4 MiB/s'."""
-    value = float(max(bytes_per_second, 0))
+def format_bytes(byte_count: int) -> str:
+    """Format a byte count using binary units, e.g. '12.4 MiB'."""
+    value = float(max(byte_count, 0))
     units = ("B", "KiB", "MiB", "GiB", "TiB")
     unit_index = 0
     while value >= 1024 and unit_index < len(units) - 1:
@@ -336,9 +343,44 @@ def format_byte_rate(bytes_per_second: int) -> str:
 
     unit = units[unit_index]
     if unit == "B":
-        return f"{int(value)} {unit}/s"
+        return f"{int(value)} {unit}"
 
-    return f"{value:.1f} {unit}/s"
+    return f"{value:.1f} {unit}"
+
+
+def format_byte_rate(bytes_per_second: int) -> str:
+    """Format a byte rate using binary units, e.g. '12.4 MiB/s'."""
+    return f"{format_bytes(bytes_per_second)}/s"
+
+
+_DURATION_UNITS: tuple[tuple[str, int], ...] = (
+    ("d", 86400),
+    ("h", 3600),
+    ("m", 60),
+    ("s", 1),
+)
+
+
+def format_duration(seconds: int) -> str:
+    """Format a duration with the two most significant units, e.g. '47d 6h'.
+
+    Deliberately limited to the `d`/`h`/`m`/`s` vocabulary
+    `qbit_core.shared.parsers.parse_duration` accepts: a rendered `47d`
+    can be typed straight back as `--seeded-for 47d`, while a calendar
+    unit could not -- months and years have no fixed length, which is
+    why the parser refuses them.
+    """
+    remaining = max(seconds, 0)
+    parts: list[str] = []
+
+    for label, unit_seconds in _DURATION_UNITS:
+        amount, remaining = divmod(remaining, unit_seconds)
+        if amount:
+            parts.append(f"{amount}{label}")
+        if len(parts) == 2:
+            break
+
+    return " ".join(parts) if parts else "0s"
 
 
 def _format_percentage(value: float) -> str:
@@ -917,6 +959,144 @@ def print_torrent_selection(
     print_summary(
         {"scanned": selection.scanned, "matched": len(selection.matched)}
     )
+
+
+UNKNOWN_METRIC_LABEL = "unknown"
+
+
+def _format_optional_bytes(byte_count: int | None) -> str:
+    return (
+        UNKNOWN_METRIC_LABEL if byte_count is None else format_bytes(byte_count)
+    )
+
+
+def _format_optional_ratio(ratio: float | None) -> str:
+    return UNKNOWN_METRIC_LABEL if ratio is None else f"{ratio:.2f}"
+
+
+def _format_optional_date(moment: datetime | None) -> str:
+    """Render one aggregate date as a labelled UTC calendar day.
+
+    Day precision on purpose: `oldest_added_at` answers "how far back
+    does this library go", a question no hour of the day refines. The
+    `UTC` label is not decoration -- east of UTC+12 the bare day is off
+    by one, and nothing else on the line would say so.
+    """
+    return (
+        UNKNOWN_METRIC_LABEL
+        if moment is None
+        else moment.strftime("%Y-%m-%d UTC")
+    )
+
+
+def _format_seeding_time(library: LibraryStats) -> str:
+    """Render the seeded total and its median on one line."""
+    median_seconds = library.seeding_time_median_seconds
+    median_label = (
+        UNKNOWN_METRIC_LABEL
+        if median_seconds is None
+        else format_duration(median_seconds)
+    )
+    total_label = format_duration(library.seeding_time_total_seconds)
+    return f"total {total_label} · median {median_label}"
+
+
+def build_torrent_stats_renderable(
+    report: TorrentStatsReport,
+) -> RenderableType:
+    """Build the `torrents stats` view as a single Rich renderable.
+
+    The two ratios are always labelled apart -- `Selection ratio`
+    describes the torrents present and retained, `Instance ratio` the
+    whole instance since always, deleted torrents included. Rendering
+    both as "Ratio" would rebuild exactly the confusion the two-block
+    split exists to remove.
+    """
+    library = report.library
+    groups: list[RenderableType] = [
+        _build_summary_table(
+            {
+                "Torrents": library.torrents,
+                "Scanned": library.scanned,
+                "Total size": format_bytes(library.total_size_bytes),
+                "Average size": _format_optional_bytes(
+                    library.average_size_bytes
+                ),
+                "Largest": _format_optional_bytes(library.largest_size_bytes),
+            },
+            title="Library",
+        ),
+        _build_summary_table(
+            {
+                "Downloaded": format_bytes(library.downloaded_bytes),
+                "Uploaded": format_bytes(library.uploaded_bytes),
+                "Selection ratio": _format_optional_ratio(
+                    library.aggregate_ratio
+                ),
+            },
+            title="Transfer",
+        ),
+        _build_summary_table(
+            {
+                "Seeding time": _format_seeding_time(library),
+                "Oldest added": _format_optional_date(library.oldest_added_at),
+                "Newest added": _format_optional_date(library.newest_added_at),
+            },
+            title="Time",
+        ),
+    ]
+
+    if report.instance is not None:
+        groups.append(
+            _build_summary_table(
+                {
+                    "Downloaded": format_bytes(
+                        report.instance.all_time_downloaded_bytes
+                    ),
+                    "Uploaded": format_bytes(
+                        report.instance.all_time_uploaded_bytes
+                    ),
+                    "Instance ratio": _format_optional_ratio(
+                        report.instance.all_time_ratio
+                    ),
+                },
+                title="Instance (all time)",
+            )
+        )
+
+    parts: list[RenderableType] = []
+    for index, group in enumerate(groups):
+        if index > 0:
+            parts.append("")
+        parts.append(group)
+
+    return Group(*parts)
+
+
+def render_torrent_stats(
+    report: TorrentStatsReport,
+    output_format: OutputFormat,
+) -> None:
+    """Render a `torrents stats` report in the requested format."""
+    if output_format == OutputFormat.json:
+        print_json_output(stats_report_to_dict(report))
+        return
+
+    if output_format == OutputFormat.jsonl:
+        print_jsonl_output(stats_report_to_dict(report))
+        return
+
+    if output_format == OutputFormat.csv:
+        print_csv_rows(
+            ["section", "key", "value"], stats_report_to_csv_rows(report)
+        )
+        return
+
+    filters = report.request.filters
+    if not filters.is_empty:
+        typer.echo(f"Filter: {describe_torrent_filter(filters)}")
+
+    console.print(build_torrent_stats_renderable(report))
 
 
 def render_tracker_status(

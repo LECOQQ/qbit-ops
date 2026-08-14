@@ -8,12 +8,16 @@ cycle between the two.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from qbit_core.qbit.fields import (
+    UNSET_NUMERIC,
+    UNSET_TIMESTAMP,
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_optional_int,
 )
 
 TorrentStateGroup = Literal[
@@ -116,6 +120,21 @@ class TorrentSnapshot:
     `category` is the raw value (`""` when uncategorized); the
     `(uncategorized)` display label is applied at render time by
     `qbit_core.shared.selection.format_category_label`, never stored here.
+
+    The canonical representation of a torrent's individual measures: any
+    consumer -- an aggregate report, tomorrow a policy engine -- reads
+    them here rather than off a raw API object, so two callers can never
+    disagree about the same torrent. `ratio` is qBittorrent's own value,
+    never derived from `downloaded`/`uploaded`, so a rule built on it
+    always designates the same torrents as the `--ratio` filter.
+
+    An optional measure is `None` when qBittorrent reported nothing
+    usable -- absent, null, or one of its "unset" markers (see
+    `qbit_core.qbit.fields.UNSET_NUMERIC`/`UNSET_TIMESTAMP`). Never `0`
+    and never the epoch: `0` is a legitimate byte count or duration, so
+    the unknown needs a value of its own -- and a marker read as a
+    number would not merely inflate an aggregate, it would *subtract*
+    from one.
     """
 
     hash: str
@@ -128,6 +147,12 @@ class TorrentSnapshot:
     ratio: float
     download_rate: int
     upload_rate: int
+    downloaded: int | None
+    uploaded: int | None
+    seeding_time: int | None
+    added_at: datetime | None
+    completed_at: datetime | None
+    last_activity_at: datetime | None
 
     @property
     def is_paused(self) -> bool:
@@ -168,4 +193,24 @@ def build_torrent_snapshot(torrent: Any) -> TorrentSnapshot:
         ratio=get_field_as_float(torrent, "ratio"),
         download_rate=get_field_as_int(torrent, "dlspeed"),
         upload_rate=get_field_as_int(torrent, "upspeed"),
+        downloaded=get_optional_int(
+            torrent, "downloaded", sentinels=UNSET_NUMERIC
+        ),
+        uploaded=get_optional_int(torrent, "uploaded", sentinels=UNSET_NUMERIC),
+        seeding_time=get_optional_int(
+            torrent, "seeding_time", sentinels=UNSET_NUMERIC
+        ),
+        added_at=_timestamp_field(torrent, "added_on"),
+        completed_at=_timestamp_field(torrent, "completion_on"),
+        last_activity_at=_timestamp_field(torrent, "last_activity"),
     )
+
+
+def _timestamp_field(torrent: Any, field_name: str) -> datetime | None:
+    """Read one epoch-second field as an aware UTC instant, or `None`.
+
+    Same sentinel set the filtering layer compares against, so a moment
+    the model reports is exactly a moment a bounded filter can match.
+    """
+    seconds = get_optional_int(torrent, field_name, sentinels=UNSET_TIMESTAMP)
+    return None if seconds is None else datetime.fromtimestamp(seconds, tz=UTC)

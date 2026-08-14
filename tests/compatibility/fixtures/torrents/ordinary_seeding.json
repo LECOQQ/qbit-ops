@@ -20,6 +20,11 @@
     "dlspeed": 0,
     "upspeed": 524288,
     "save_path": "/downloads/linux",
-    "added_on": 1699000000
+    "added_on": 1699000000,
+    "downloaded": 4700372992,
+    "uploaded": 11750932480,
+    "seeding_time": 2592000,
+    "completion_on": 1699003600,
+    "last_activity": 1701000000
   }
 }

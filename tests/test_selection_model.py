@@ -14,6 +14,7 @@ import pytest
 from qbit_core.errors import InvalidInputError
 from qbit_core.shared.selection import (
     Range,
+    SelectionRequest,
     TagCriterion,
     TorrentFilter,
     validate_torrent_filter,
@@ -251,6 +252,31 @@ def test_no_tracker_is_cheap_because_trackers_count_is_in_the_listing() -> None:
     version, so asking "does it have any tracker" costs no extra call."""
     assert not TorrentFilter(has_trackers=False).requires_inspection
     assert not TorrentFilter(has_trackers=True).requires_inspection
+
+
+# --- has_selector -----------------------------------------------------------
+
+
+def test_a_bare_request_narrows_nothing() -> None:
+    assert not SelectionRequest().has_selector
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        SelectionRequest(torrent_hash="abc123"),
+        SelectionRequest(select_all=True),
+        SelectionRequest(filters=TorrentFilter(categories=("movies",))),
+        SelectionRequest(filters=TorrentFilter(ratio=Range(min=1.0))),
+    ],
+)
+def test_hash_all_and_any_filter_all_count_as_selectors(
+    request_: SelectionRequest,
+) -> None:
+    """`--all` included: it names the whole library, but it is an
+    explicit request about the torrents *present*, so a reader must be
+    able to treat it as a narrowing."""
+    assert request_.has_selector
 
 
 # --- validation (docs/SELECTION.md section E) -------------------------------

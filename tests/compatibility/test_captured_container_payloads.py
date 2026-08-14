@@ -21,7 +21,10 @@ from qbit_core.qbit.fields import (
     is_disabled_tracker,
     pseudo_tracker_label,
 )
-from qbit_core.shared.torrent_states import classify_torrent_state
+from qbit_core.shared.torrent_states import (
+    build_torrent_snapshot,
+    classify_torrent_state,
+)
 from tests.compatibility._captured_loader import (
     discover_matrix_ids,
     load_all_captured_fixtures,
@@ -228,3 +231,61 @@ def test_private_reads_unknown_on_captures_that_do_not_expose_it() -> None:
 
     assert seen_absent, "no capture without `private` -- 4.6.7 evidence lost"
     assert seen_present, "no capture with `private` -- 5.x evidence lost"
+
+
+_INDIVIDUAL_MEASURE_FIELDS = (
+    "downloaded",
+    "uploaded",
+    "seeding_time",
+    "added_on",
+    "completion_on",
+    "last_activity",
+)
+
+
+@pytest.mark.parametrize("matrix_id", discover_matrix_ids())
+def test_every_captured_version_reports_the_individual_measures(
+    matrix_id: str,
+) -> None:
+    """The six measures the central model carries are present, and
+    integer-shaped, on every captured qBittorrent version -- so reading
+    them rests on no version assumption.
+
+    `seeding_time`/`added_on`/`completion_on`/`last_activity` are
+    normalized to `0` at capture time (see each fixture's
+    `fields_normalized`), which is evidence of their shape, never of
+    real elapsed time -- hence no assertion on their magnitude here.
+    """
+    found_any = False
+
+    for fixture in load_captured_fixtures(matrix_id):
+        if fixture.name != "torrent_complete":
+            continue
+        found_any = True
+        for field_name in _INDIVIDUAL_MEASURE_FIELDS:
+            assert field_name in fixture.payload, (fixture.path, field_name)
+            assert isinstance(fixture.payload[field_name], int), (
+                fixture.path,
+                field_name,
+            )
+
+    assert found_any, f"no torrent_complete capture for {matrix_id}"
+
+
+@pytest.mark.parametrize("matrix_id", discover_matrix_ids())
+def test_a_captured_torrent_builds_a_complete_central_model(
+    matrix_id: str,
+) -> None:
+    for fixture in load_captured_fixtures(matrix_id):
+        if fixture.name != "torrent_complete":
+            continue
+        snapshot = build_torrent_snapshot(fixture.payload)
+
+        assert snapshot.downloaded == fixture.payload["downloaded"]
+        assert snapshot.uploaded == fixture.payload["uploaded"]
+        # Normalized to 0 at capture: a timestamp of 0 is qBittorrent's
+        # "not recorded", so the model must report absence rather than
+        # 1970 -- the exact reading a bounded filter also performs.
+        assert snapshot.added_at is None
+        assert snapshot.completed_at is None
+        assert snapshot.last_activity_at is None

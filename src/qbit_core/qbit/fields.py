@@ -16,6 +16,13 @@ Two deliberately different reading policies coexist here:
 
 Never swap one family for the other to "simplify": the difference is
 the safety property, not a style choice.
+
+The `UNSET_*` sets below are the single "value unknown" vocabulary,
+imported by both the filtering layer and the central torrent model so
+the two can never disagree on what qBittorrent actually reported. They
+live here, in the field-access module, because it imports nothing but
+the standard library -- the filtering layer already depends on the
+model, so hosting them there would create an import cycle.
 """
 
 import re
@@ -25,6 +32,19 @@ from typing import Any
 # Distinguishes "field absent" from "field present and set to None",
 # which `get_field`'s caller-supplied default cannot express.
 _MISSING = object()
+
+# qBittorrent encodes "unset" as a negative value across its numeric
+# fields (`-1` uncomputed, `-2` "use the global setting"). A real size,
+# ratio, byte count or duration is never negative, so nothing legitimate
+# is lost by refusing to read them as values.
+UNSET_NUMERIC: tuple[int, ...] = (-1, -2)
+
+# Timestamp fields additionally treat `0` as unknown. No torrent is
+# really added -- or last active -- at the Unix epoch, so a zero means
+# "not recorded", and reading it as 1970 would make `--older-than` or
+# `--inactive-for` match it: the dangerous direction on a destructive
+# command.
+UNSET_TIMESTAMP: tuple[int, ...] = (0, -1, -2)
 
 
 def get_field(item: Any, field_name: str, default: Any) -> Any:

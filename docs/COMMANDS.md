@@ -23,6 +23,7 @@ qbit-ops
 │   └── restore
 ├── torrents
 │   ├── list
+│   ├── stats
 │   ├── categories
 │   ├── inspect
 │   ├── pause
@@ -53,6 +54,8 @@ qbit-ops doctor
 qbit-ops version
 qbit-ops torrents list --state stalled
 qbit-ops torrents list --category sonarr --format json
+qbit-ops torrents stats
+qbit-ops torrents stats --category sonarr --format json
 qbit-ops explain torrent --hash abc123
 qbit-ops trackers status
 qbit-ops trackers add-if-present --source old.example --target new.example --category sonarr
@@ -83,6 +86,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `doctor` | ✅ | ✅ | ✅ | ✅ |
 | `version` | ✅ | ✅ | ✅ | — |
 | `torrents list` | ✅ | ✅ | ✅ | ✅ |
+| `torrents stats` | ✅ | ✅ | ✅ | ✅ |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ |
 | `torrents inspect` | ✅ | ✅ | ✅ | — |
 | `torrents import` | ✅ | ✅ | — | — |
@@ -247,8 +251,8 @@ proportional to your selection instead of your whole instance.
 ### Where the filters work
 
 Everywhere a command acts on a set of torrents: `torrents list`,
-`torrents inspect`, `trackers status`, the five bulk mutations
-(`pause`, `resume`, `start`, `reannounce`, `delete`), and the four
+`torrents stats`, `torrents inspect`, `trackers status`, the five bulk
+mutations (`pause`, `resume`, `start`, `reannounce`, `delete`), and the four
 tracker operations (`add-if-present`, `remove`, `replace`,
 `replace-passkey`).
 
@@ -288,6 +292,63 @@ They are still reported, separately: `torrents inspect` and
 `backup export` carry a `peer_discovery` field listing each mechanism
 and whether it is enabled, and the TUI details pane shows them on their
 own line.
+
+## 📊 Library statistics
+
+`torrents stats` answers, in one command, *what does my library weigh,
+what has it transferred, and for how long?* -- over exactly the torrents
+you describe. It is read-only and never changes anything.
+
+```bash
+qbit-ops torrents stats
+qbit-ops torrents stats --category sonarr
+qbit-ops torrents stats --state stalled --ratio-max 1.0
+qbit-ops torrents stats --tracker tracker.example --format json
+```
+
+It accepts every filter listed above, with the same semantics, plus
+`--hash` and `--all`. A selection that matches nothing is an answer, not
+a failure: counters read `0`, undefined aggregates read `null`, and the
+command still exits `0`.
+
+### Two blocks that must not be confused
+
+| Block | What it measures |
+| --- | --- |
+| `library` | The torrents **currently present** and kept by your selection: count, total/average/largest size, downloaded and uploaded bytes, selection ratio, seeding time total and median, oldest and newest added date. |
+| `instance` | qBittorrent's own **all-time** counters, the ones in the WebUI *Statistics* dialog: total downloaded, total uploaded, global share ratio. They include torrents you have since deleted, and qBittorrent exposes them for the whole instance only. |
+
+> The `instance` block appears **if and only if** the invocation carries
+> no selector -- no filter, no `--hash`, no `--all`.
+
+`--all` counts as a selector: it does name the whole library, but it
+asks about torrents that are *present*, not about counters that include
+deleted ones. With any selector the block becomes `null` in JSON, its
+lines disappear from the table, and its rows are absent from the CSV.
+
+Showing a global total next to a filtered one would invite a comparison
+between two things that do not measure the same population -- so the
+rule removes the possibility instead of documenting the trap.
+
+### Reading the numbers
+
+- 🧮 The **selection ratio** is total uploaded ÷ total downloaded, not
+  the average of the per-torrent ratios: a 50 MB torrent must not weigh
+  as much as an 80 GB one. It is `null` when nothing was downloaded.
+- 🏷️ The two ratios are always labelled apart -- `Selection ratio` and
+  `Instance ratio` -- because they answer different questions.
+- ❔ A measure qBittorrent never reported is left **out** of its
+  aggregate, never counted as `0` or as a 1970 date. Its "unset" marker
+  is negative, so counting it would take bytes *away* from a total.
+- 📀 Size is the same size `--size-min`/`--size-max` filter on, so
+  `torrents stats` and `torrents list` always agree.
+- 💸 Cost: one listing call, plus one all-time counters read when there
+  is no selector, plus the tracker lookups a `--tracker` filter already
+  implies. Selecting makes this command cheaper, never dearer.
+
+`csv` uses the long `section,key,value` shape `status` already uses, so
+an absent `instance` block is simply absent instead of leaving empty
+columns; `jsonl` emits exactly one compact document.
 
 ## ⚠️ Mutation rules
 

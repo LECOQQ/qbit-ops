@@ -140,6 +140,9 @@ ReannounceHashOption = Annotated[
 DeleteHashOption = Annotated[
     str | None, typer.Option("--hash", help=_hash_help("Delete"))
 ]
+StatsHashOption = Annotated[
+    str | None, typer.Option("--hash", help=_hash_help("Report on"))
+]
 
 PauseAllOption = Annotated[
     bool, typer.Option("--all", help="Pause all torrents.")
@@ -155,6 +158,16 @@ ReannounceAllOption = Annotated[
 ]
 DeleteAllOption = Annotated[
     bool, typer.Option("--all", help="Delete all torrents.")
+]
+StatsAllOption = Annotated[
+    bool,
+    typer.Option(
+        "--all",
+        help=(
+            "Report on every torrent present. An explicit selection, so "
+            "the instance-wide all-time block is omitted."
+        ),
+    ),
 ]
 
 
