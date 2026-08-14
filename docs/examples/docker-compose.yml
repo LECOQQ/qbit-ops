@@ -1,0 +1,63 @@
+# qbit-ops is an on-demand CLI, not a service.
+#
+# This service is therefore never meant to stay up: it is declared under
+# a profile so `docker compose up` ignores it, and it is driven with
+# `docker compose run`. There is deliberately no `sleep infinity` trick
+# to make a CLI look like a daemon.
+#
+#   docker compose run --rm qbit-ops --version
+#   docker compose run --rm qbit-ops status
+#   docker compose run --rm qbit-ops torrents list --category sonarr
+#
+# Credentials are never written here. Put them in a `.env` file next to
+# this one -- Compose loads it automatically for interpolation:
+#
+#   QBIT_HOST=http://qbittorrent:8080
+#   QBIT_USER=admin
+#   QBIT_PASSWORD=change-me
+#
+# `localhost` inside a container is the container itself. The host above
+# assumes qBittorrent is a container reachable by service name on a
+# shared network (see `networks:` at the bottom). For a qBittorrent
+# running on the Docker host, use `network_mode: host` instead, or
+# `http://host.docker.internal:8080` on Docker Desktop.
+
+services:
+  qbit-ops:
+    image: ghcr.io/lecoqq/qbit-ops:latest
+    profiles: ["cli"]
+
+    # The same three variables the Python package reads. Real environment
+    # variables always win over any `.env` qbit-ops itself might find, so
+    # this is the most predictable way to configure the container.
+    # `:?` fails fast with a clear message instead of a confusing
+    # "Missing required environment variable(s)" from inside.
+    environment:
+      QBIT_HOST: ${QBIT_HOST:?set QBIT_HOST in a .env file next to this compose file}
+      QBIT_USER: ${QBIT_USER:?set QBIT_USER in a .env file next to this compose file}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:?set QBIT_PASSWORD in a .env file next to this compose file}
+
+    volumes:
+      # Persistent, user-owned data. `/data` is the image's working
+      # directory, so relative paths in commands resolve here.
+      #   docker compose run --rm qbit-ops backup restore /data/backup.json
+      - ./qbit-data:/data
+
+      # Read-only inputs: nothing qbit-ops does to .torrent files needs
+      # write access to the source.
+      #   docker compose run --rm qbit-ops torrents import /input
+      - ./torrents:/input:ro
+
+    # The image runs as UID/GID 1000. Uncomment and adjust if your host
+    # user differs, otherwise files written to ./qbit-data land with the
+    # wrong owner:
+    # user: "${UID:-1000}:${GID:-1000}"
+
+    # Uncomment to reach a qBittorrent container managed by another
+    # Compose project, so `QBIT_HOST` can use its service name.
+    # networks: [qbittorrent]
+
+# networks:
+#   qbittorrent:
+#     external: true
+#     name: <the network your qBittorrent container is on>
