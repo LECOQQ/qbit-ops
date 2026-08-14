@@ -181,7 +181,31 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | Filter | Meaning |
 | --- | --- |
 | `--tracker HOST` | Repeatable. Announces to one of these trackers, matched on `host[:port]`. |
+| `--tracker-health VERDICT` | Repeatable. This torrent's **own** endpoints aggregate to that verdict: `healthy`, `warning`, `critical`, `disabled` or `unknown`. |
 | `--no-tracker` | Has **no configured tracker** — read from the bulk listing's tracker count, so DHT/PeX/LSD never count as one. |
+
+`--tracker-health` asks about *this torrent's* trackers, not about a
+tracker in general. A torrent on three trackers of which one is dead is
+`warning`, not `critical` — it still seeds. `unavailable` is refused:
+it describes a whole `trackers status` report whose collection failed,
+never a single torrent.
+
+A torrent qbit-ops knows nothing about — no endpoint reported, or a
+tracker lookup that failed — matches **no** health value at all. Not
+even `unknown`, which means "qBittorrent reported a status we do not
+recognize", a different fact. A non-answer must never be enough to
+pause something.
+
+The verdict comes from the same computation `explain torrent` reports,
+over the same endpoints, so the two can never disagree:
+
+```bash
+qbit-ops torrents list --tracker-health critical
+qbit-ops explain torrent --hash <one of them>   # same verdict, with evidence
+```
+
+`--no-tracker` and `--tracker-health` together are refused before any
+API call: a torrent with no tracker has no tracker health.
 
 **Exclusions** — every family has one: `--exclude-category`,
 `--exclude-tag`, `--exclude-state`, `--exclude-save-path`,
@@ -243,18 +267,29 @@ Neither combines with a filter, or with each other:
 ### Cost
 
 One listing call, then the cheap filters, and only then — if you asked
-for `--tracker` or `--exclude-tracker` — one tracker lookup per
-surviving torrent. Filtering first is what keeps that count
+for `--tracker`, `--exclude-tracker` or `--tracker-health` — one tracker
+lookup per surviving torrent. Filtering first is what keeps that count
 proportional to your selection instead of your whole instance.
 `--no-tracker` needs no lookup at all.
+
+Combining them costs nothing extra: `--tracker` and `--tracker-health`
+are both answered from that single pass, never from two.
 
 ### Where the filters work
 
 Everywhere a command acts on a set of torrents: `torrents list`,
-`torrents stats`, `torrents inspect`, `trackers status`, the five bulk
-mutations (`pause`, `resume`, `start`, `reannounce`, `delete`), and the four
-tracker operations (`add-if-present`, `remove`, `replace`,
-`replace-passkey`).
+`torrents stats`, `torrents inspect`, `trackers list`,
+`trackers status`, the five bulk mutations (`pause`, `resume`, `start`,
+`reannounce`, `delete`), and the four tracker operations
+(`add-if-present`, `remove`, `replace`, `replace-passkey`).
+
+`--tracker-health` is the one exception to "everywhere": it is offered
+on `torrents list`, `torrents stats`, `trackers list` and the five bulk
+mutations. The four tracker operations do not take it — selecting
+torrents by the health of their trackers in order to act on those same
+trackers would be circular. `torrents inspect` does not offer it either:
+the filter is honoured if something sets it, but no flag exposes it
+there yet.
 
 The same filters always select the same torrents, whichever command
 consumes them — listing, inspecting or mutating.
@@ -274,11 +309,12 @@ Their summaries read left to right: `scanned` is the whole instance,
 `matched` what the filters kept, and `matched_tracker` /
 `matched_source` what actually uses the tracker.
 
-`trackers status` is one more exception: it inspects every selected
-torrent to aggregate their trackers, so `--tracker` restricts the
-*report* rather than the selection, and `--exclude-tracker` is not
-offered at all. A filter that cannot be honoured is refused, never
-silently dropped.
+`trackers list` and `trackers status` are one more exception: they
+inspect every selected torrent to aggregate their trackers, so
+`--tracker` restricts the *report* rather than the selection, takes a
+single value, and `--exclude-tracker` is not offered at all. A filter
+that cannot be honoured is refused, never silently dropped. The two
+commands accept exactly the same filters, with the same meanings.
 
 ### What counts as a tracker
 
@@ -292,6 +328,81 @@ They are still reported, separately: `torrents inspect` and
 `backup export` carry a `peer_discovery` field listing each mechanism
 and whether it is enabled, and the TUI details pane shows them on their
 own line.
+
+## 🛰️ What each tracker weighs
+
+`trackers list` answers *which trackers am I on, and what do they carry?*
+It is read-only, and accepts exactly the filters `trackers status` does,
+with the same meanings.
+
+```bash
+qbit-ops trackers list
+qbit-ops trackers list --category sonarr
+qbit-ops trackers list --state seeding --format json
+qbit-ops trackers list --tracker-health critical
+```
+
+| Column | Meaning |
+| --- | --- |
+| `Tracker` | Normalized identity, `host[:port]` — never an announce URL |
+| `Torrents` | Retained torrents announcing to this tracker |
+| `Excl` | Among them, those carrying **no other** tracker identity |
+| `Endpoints` | Endpoints observed for this identity |
+| `Size` | Sum of their sizes |
+| `Downloaded` | Sum of the known downloaded bytes |
+| `Uploaded` | Sum of the known uploaded bytes |
+| `Ratio` | Total uploaded ÷ total downloaded |
+| `Seed Time` | Sum of the known seeding times |
+
+Nine columns is a dense table that assumes a wide terminal; `json`,
+`jsonl` and `csv` stay the way to read it on a narrow one or from a
+script.
+
+### The columns do not add up, on purpose
+
+> A torrent announcing to three trackers counts **entirely** in each of
+> the three aggregates.
+
+So **summing a column over every tracker exceeds your library total**,
+sometimes by a lot. That is documented rather than corrected: splitting
+bytes between trackers would need an invented sharing key, and qbit-ops
+does not invent values.
+
+`Excl` is the honest answer to the question behind the numbers — *what
+would I lose by leaving this tracker?* A torrent counts there when this
+identity is the **only** one it carries.
+
+An identity carried by a **disabled** endpoint still counts as another
+identity: you disabled it, you did not remove it, and you can turn it
+back on. A torrent on an active X and a disabled Y is therefore
+exclusive to neither.
+
+### Reading the numbers
+
+The measures are summed exactly the way `torrents stats` sums them,
+from the same code — two commands adding up the same bytes must not
+answer differently:
+
+- 🧮 The ratio is total uploaded ÷ total downloaded, never the average
+  of the per-torrent ratios. `null` when nothing was downloaded.
+- ❔ A measure qBittorrent never reported is left **out** of its
+  aggregate, never counted as `0`.
+- ⏱️ `Seed Time` is a cumulative total nobody retypes, so it reads in
+  the conventional units `torrents stats` uses for its own total (`1y`
+  is 365 days, `1mo` is 30 days) rather than the filter vocabulary.
+  Machine output stays in seconds.
+- 🚦 Tracker health **never** drives this command's exit code. It is an
+  inventory, not a diagnostic: a script asking "what trackers exist"
+  must not break because one tracker is degraded. Ordinary errors — an
+  invalid filter, an unreachable instance — still exit non-zero. Use
+  `trackers status` when you want health to decide the exit code.
+- 🈳 An empty selection is an answer, not a failure: no rows, exit `0`.
+- 🛑 The summary carries `collection_errors`, so zero rows because the
+  instance has no tracker never looks like zero rows because nothing
+  could be read. It does not change the exit code.
+- 💸 Cost: one listing call plus one tracker lookup per surviving
+  torrent — exactly what this command already spent before it reported
+  any volume.
 
 ## 📊 Library statistics
 

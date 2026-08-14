@@ -7,7 +7,9 @@ an unknown value must never satisfy a bound, and a filter must never be
 mistaken for "no filter".
 """
 
+from dataclasses import fields
 from datetime import datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -18,6 +20,7 @@ from qbit_core.shared.selection import (
     TagCriterion,
     TorrentFilter,
     validate_torrent_filter,
+    without_inspection_criteria,
 )
 
 # --- Range ------------------------------------------------------------------
@@ -186,6 +189,7 @@ def test_default_filter_is_empty() -> None:
         TorrentFilter(trackers=("tracker.example",)),
         TorrentFilter(trackers_excluded=("tracker.example",)),
         TorrentFilter(has_trackers=False),
+        TorrentFilter(tracker_health=("critical",)),
     ],
 )
 def test_every_single_field_makes_a_filter_non_empty(
@@ -231,6 +235,7 @@ def test_is_empty_covers_every_declared_field() -> None:
         "trackers",
         "trackers_excluded",
         "has_trackers",
+        "tracker_health",
     }
 
     assert {f.name for f in fields(TorrentFilter)} == covered
@@ -239,12 +244,13 @@ def test_is_empty_covers_every_declared_field() -> None:
 # --- requires_inspection ----------------------------------------------------
 
 
-def test_only_tracker_host_filters_require_inspection() -> None:
+def test_only_tracker_derived_filters_require_inspection() -> None:
     assert not TorrentFilter().requires_inspection
     assert TorrentFilter(trackers=("tracker.example",)).requires_inspection
     assert TorrentFilter(
         trackers_excluded=("tracker.example",)
     ).requires_inspection
+    assert TorrentFilter(tracker_health=("critical",)).requires_inspection
 
 
 def test_no_tracker_is_cheap_because_trackers_count_is_in_the_listing() -> None:
@@ -252,6 +258,82 @@ def test_no_tracker_is_cheap_because_trackers_count_is_in_the_listing() -> None:
     version, so asking "does it have any tracker" costs no extra call."""
     assert not TorrentFilter(has_trackers=False).requires_inspection
     assert not TorrentFilter(has_trackers=True).requires_inspection
+
+
+# --- the cheap-filter teardown ----------------------------------------------
+
+# One non-default value per declared field, so the teardown can be
+# exercised field by field instead of on a hand-picked subset.
+_NON_DEFAULT_VALUE_BY_FIELD: dict[str, Any] = {
+    "categories": ("movies",),
+    "categories_excluded": ("movies",),
+    "tags": TagCriterion(any_of=("keep",)),
+    "save_path_prefixes": ("/downloads",),
+    "save_paths_excluded": ("/downloads",),
+    "name_contains": ("debian",),
+    "name_excluded": ("debian",),
+    "name_regex": "^deb",
+    "states": ("seeding",),
+    "states_excluded": ("seeding",),
+    "completed": True,
+    "active": False,
+    "stalled": True,
+    "errored": True,
+    "private": True,
+    "ratio": Range(min=1.0),
+    "size": Range(max=1024),
+    "progress": Range(min=0.99),
+    "uploaded": Range(min=1024),
+    "seeding_time": Range(min=60),
+    "added": Range(max=datetime(2026, 1, 1)),
+    "completed_at": Range(max=datetime(2026, 1, 1)),
+    "last_activity": Range(max=datetime(2026, 1, 1)),
+    "trackers": ("tracker.example",),
+    "trackers_excluded": ("tracker.example",),
+    "has_trackers": False,
+    "tracker_health": ("critical",),
+}
+
+
+def test_every_declared_field_has_a_non_default_sample() -> None:
+    """Guard the guard: a field added without a sample here would make
+    the teardown tests below silently stop covering it."""
+    defaults = TorrentFilter()
+
+    assert set(_NON_DEFAULT_VALUE_BY_FIELD) == {
+        declared.name for declared in fields(TorrentFilter)
+    }
+    for name, value in _NON_DEFAULT_VALUE_BY_FIELD.items():
+        assert value != getattr(defaults, name)
+
+
+@pytest.mark.parametrize("field_name", sorted(_NON_DEFAULT_VALUE_BY_FIELD))
+def test_the_cheap_filter_never_requires_inspection(field_name: str) -> None:
+    """Whichever field carries a value, the cheap counterpart must be
+    resolvable from `torrents_info()` alone.
+
+    A field the predicate calls expensive but the teardown forgets to
+    clear is not a cosmetic mismatch: `select_torrents_from_items`
+    raises on it, and `collect_tracker_status` pays a second INSPECT
+    pass over the whole selection.
+    """
+    filters = TorrentFilter(
+        **{field_name: _NON_DEFAULT_VALUE_BY_FIELD[field_name]}
+    )
+
+    assert not without_inspection_criteria(filters).requires_inspection
+
+
+def test_the_cheap_filter_preserves_every_criterion_it_can_resolve() -> None:
+    """The teardown drops the expensive criteria and nothing else."""
+    filters = TorrentFilter(**_NON_DEFAULT_VALUE_BY_FIELD)
+    cheap = without_inspection_criteria(filters)
+
+    assert not cheap.requires_inspection
+    for name, value in _NON_DEFAULT_VALUE_BY_FIELD.items():
+        if TorrentFilter(**{name: value}).requires_inspection:
+            continue
+        assert getattr(cheap, name) == value
 
 
 # --- has_selector -----------------------------------------------------------

@@ -88,6 +88,7 @@ from qbit_ops.cli.selector_options import (
     StatsHashOption,
     TagAllOption,
     TagOption,
+    TrackerHealthOption,
     TrackerOption,
     UploadedMaxOption,
     UploadedMinOption,
@@ -126,6 +127,7 @@ def _build_selection_request(
     exclude_state: list[str],
     exclude_tracker: list[str],
     no_tracker: bool,
+    tracker_health: list[str],
     private: bool | None,
     ratio_min: str | None,
     ratio_max: str | None,
@@ -174,6 +176,7 @@ def _build_selection_request(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -289,6 +292,7 @@ def list_qbit_torrents(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -337,6 +341,7 @@ def list_qbit_torrents(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             tracker=tracker,
             completed=completed,
             incomplete=incomplete,
@@ -416,6 +421,7 @@ def show_torrent_stats(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -475,6 +481,7 @@ def show_torrent_stats(
         exclude_state=exclude_state,
         exclude_tracker=exclude_tracker,
         no_tracker=no_tracker,
+        tracker_health=tracker_health,
         private=private,
         ratio_min=ratio_min,
         ratio_max=ratio_max,
@@ -818,6 +825,7 @@ def pause(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -865,6 +873,7 @@ def pause(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -913,6 +922,7 @@ def resume(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -960,6 +970,7 @@ def resume(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -1008,6 +1019,7 @@ def start(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -1055,6 +1067,7 @@ def start(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -1103,6 +1116,7 @@ def reannounce(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -1150,6 +1164,7 @@ def reannounce(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,
@@ -1198,6 +1213,7 @@ def delete(
     exclude_state: ExcludeStateOption = [],  # noqa: B006
     exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
     no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
     private: PrivateOption = None,
     ratio_min: RatioMinOption = None,
     ratio_max: RatioMaxOption = None,
@@ -1266,6 +1282,7 @@ def delete(
             exclude_state=exclude_state,
             exclude_tracker=exclude_tracker,
             no_tracker=no_tracker,
+            tracker_health=tracker_health,
             private=private,
             ratio_min=ratio_min,
             ratio_max=ratio_max,

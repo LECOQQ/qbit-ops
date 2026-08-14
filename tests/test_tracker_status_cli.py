@@ -11,6 +11,8 @@ import csv
 import io
 import json
 
+import typer
+from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 from qbit_ops.cli.app import app
@@ -387,3 +389,301 @@ def test_status_never_renders_a_full_tracker_url_or_passkey(
         result = runner.invoke(app, ["trackers", "status", "--format", fmt])
         assert "SUPER-SECRET-PASSKEY" not in result.stdout
         assert "SUPER-SECRET-PASSKEY" not in result.stderr
+
+
+# --- `trackers list`: the inventory -----------------------------------------
+
+
+def _client_with_volume() -> FakeQbitClient:
+    """One shared torrent, one exclusive one, on a passkey-bearing URL."""
+    return FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=TORRENT_A,
+                name="Shared",
+                category="movies",
+                size=1_000,
+                downloaded=100,
+                uploaded=200,
+                seeding_time=3_600,
+            ),
+            make_torrent(
+                hash=TORRENT_B,
+                name="Sole",
+                category="series",
+                size=500,
+                downloaded=900,
+                uploaded=0,
+                seeding_time=60,
+            ),
+        ],
+        trackers_by_hash={
+            TORRENT_A: [
+                {"url": PASSKEY_TRACKER_URL, "status": 2},
+                {"url": "https://other.example/announce", "status": 2},
+            ],
+            TORRENT_B: [{"url": PASSKEY_TRACKER_URL, "status": 2}],
+        },
+    )
+
+
+def test_list_table_renders_the_nine_documented_columns(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list"])
+
+    assert result.exit_code == 0
+    header = " ".join(result.stdout.split())
+    for column in (
+        "Tracker",
+        "Torrents",
+        "Excl",
+        "Endpoints",
+        "Size",
+        "Downloaded",
+        "Uploaded",
+        "Ratio",
+        "Seed Time",
+    ):
+        assert column in header
+
+
+def test_list_json_and_csv_carry_the_same_measures(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """One tracker, two readings: the machine formats must not disagree."""
+    configure_qbit_backend(client=_client_with_volume())
+    payload = json.loads(
+        runner.invoke(app, ["trackers", "list", "--format", "json"]).stdout
+    )
+
+    configure_qbit_backend(client=_client_with_volume())
+    rows = list(
+        csv.reader(
+            io.StringIO(
+                runner.invoke(
+                    app, ["trackers", "list", "--format", "csv"]
+                ).stdout
+            )
+        )
+    )
+
+    assert rows[0] == [
+        "tracker",
+        "torrents",
+        "exclusive_torrents",
+        "endpoints",
+        "size_bytes",
+        "downloaded_bytes",
+        "uploaded_bytes",
+        "ratio",
+        "seeding_time_seconds",
+    ]
+    by_identity = {t["identity"]: t for t in payload["trackers"]}
+    tracker = by_identity["tracker.example"]
+    assert tracker["torrent_count"] == 2
+    assert tracker["exclusive_torrent_count"] == 1
+    assert tracker["total_size_bytes"] == 1_500
+    assert tracker["downloaded_bytes"] == 1_000
+    assert tracker["uploaded_bytes"] == 200
+
+    row = next(row for row in rows[1:] if row[0] == "tracker.example")
+    assert row[1:] == [
+        str(tracker["torrent_count"]),
+        str(tracker["exclusive_torrent_count"]),
+        str(tracker["endpoint_count"]),
+        str(tracker["total_size_bytes"]),
+        str(tracker["downloaded_bytes"]),
+        str(tracker["uploaded_bytes"]),
+        str(tracker["aggregate_ratio"]),
+        str(tracker["seeding_time_total_seconds"]),
+    ]
+
+
+def test_list_never_leaks_an_announce_url_in_any_format(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    for output_format in ("table", "json", "jsonl", "csv"):
+        configure_qbit_backend(client=_client_with_volume())
+
+        result = runner.invoke(
+            app, ["trackers", "list", "--format", output_format]
+        )
+
+        assert "SUPER-SECRET-PASSKEY" not in result.stdout
+        assert "/announce" not in result.stdout
+
+
+def test_list_exits_zero_even_when_every_tracker_is_failing(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """An inventory is not a diagnostic: "which trackers exist" must not
+    break because one of them is down."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=TORRENT_A, name="A")],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {"url": "https://tracker.example/announce", "status": 4}
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(app, ["trackers", "list"])
+
+    assert result.exit_code == 0
+    assert result.exit_code != TrackerStatusExitCode.CRITICAL
+
+
+def test_list_still_exits_non_zero_on_an_invalid_filter(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(
+        app, ["trackers", "list", "--ratio-min", "5", "--ratio-max", "1"]
+    )
+
+    assert result.exit_code != 0
+
+
+def test_list_empty_selection_is_an_answer_not_an_error(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(
+        app, ["trackers", "list", "--category", "absent-category"]
+    )
+
+    assert result.exit_code == 0
+
+
+def test_list_accepts_the_tracker_health_filter(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_mixed_health())
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "list",
+            "--tracker-health",
+            "critical",
+            "--format",
+            "json",
+        ],
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 0
+    assert [t["identity"] for t in payload["trackers"]] == ["other.example"]
+
+
+def test_list_tracker_restricts_the_report_not_the_scan(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client_with_mixed_health()
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["trackers", "list", "--tracker", "other.example", "--format", "json"],
+    )
+
+    payload = json.loads(result.stdout)
+    assert [t["identity"] for t in payload["trackers"]] == ["other.example"]
+    assert client.torrents_trackers_calls == 2
+
+
+# --- Filter parity between the two `trackers` reports -----------------------
+
+
+def _trackers_command_options(command_name: str) -> set[str]:
+    """Every option flag one `trackers` subcommand accepts.
+
+    Read from the registered command tree rather than from `--help`
+    text: this compares what the CLI accepts, not how it words it.
+    """
+    root = typer.main.get_command(app)
+    assert isinstance(root, TyperGroup)
+    trackers_group = root.commands["trackers"]
+    assert isinstance(trackers_group, TyperGroup)
+
+    return {
+        flag
+        for parameter in trackers_group.commands[command_name].params
+        for flag in parameter.opts
+    }
+
+
+def test_list_accepts_every_filter_status_does() -> None:
+    """`trackers list` inherits `trackers status`'s filters exactly, so
+    an operator learns one vocabulary for the two report commands.
+
+    Asserted against the registered commands: the two option lists are
+    written out separately, so only a test can keep them from drifting
+    apart when a filter is added to one of them.
+    """
+    assert _trackers_command_options("status") - _trackers_command_options(
+        "list"
+    ) == {"--verbose"}
+
+
+def test_list_adds_only_the_tracker_health_filter() -> None:
+    """The one deliberate addition. `--verbose` above is the one
+    deliberate omission -- it renders each tracker's message, which this
+    inventory does not carry, so it is a rendering option and not a
+    filter.
+    """
+    assert _trackers_command_options("list") - _trackers_command_options(
+        "status"
+    ) == {"--tracker-health"}
+
+
+def test_neither_report_command_offers_exclude_tracker() -> None:
+    """Both aggregate every tracker of the selected torrents, so a
+    tracker exclusion cannot be applied to the selection. Refused
+    identically rather than silently dropped by one of them."""
+    for command_name in ("list", "status"):
+        assert "--exclude-tracker" not in _trackers_command_options(
+            command_name
+        )
+
+
+def test_list_distinguishes_an_empty_instance_from_an_unreadable_one(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Both render zero rows. Without the error count, "no trackers" and
+    "nothing could be read" would look identical."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=TORRENT_A, name="A"),
+                make_torrent(hash=TORRENT_B, name="B"),
+            ],
+            trackers_by_hash={},
+            tracker_error_hashes={TORRENT_A, TORRENT_B},
+        )
+    )
+
+    result = runner.invoke(app, ["trackers", "list", "--format", "json"])
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert payload["trackers"] == []
+    assert payload["summary"]["collection_errors"] == 2
+
+
+def test_list_reports_no_collection_error_when_every_lookup_succeeded(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list", "--format", "json"])
+
+    assert json.loads(result.stdout)["summary"]["collection_errors"] == 0

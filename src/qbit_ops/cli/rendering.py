@@ -1145,6 +1145,142 @@ def render_torrent_stats(
     console.print(build_torrent_stats_renderable(report))
 
 
+TRACKER_INVENTORY_CSV_FIELDNAMES = [
+    "tracker",
+    "torrents",
+    "exclusive_torrents",
+    "endpoints",
+    "size_bytes",
+    "downloaded_bytes",
+    "uploaded_bytes",
+    "ratio",
+    "seeding_time_seconds",
+]
+
+
+def _tracker_inventory_payload(report: TrackerStatusReport) -> dict[str, Any]:
+    """Build the `trackers list` payload every machine format renders.
+
+    Deliberately not `tracker_aggregate_to_dict`: that one is the
+    `trackers status` contract, a health report. This one is an
+    inventory, and carries volume instead of endpoint health counts.
+    """
+    return {
+        "schema_version": report.schema_version,
+        "summary": {
+            "trackers": len(report.trackers),
+            "torrents_scanned": report.scanned_torrents,
+            "torrents_matched": report.matched_torrents,
+            # Without this, an inventory that read nothing is
+            # indistinguishable from an instance with no tracker: both
+            # render zero rows. It never changes the exit code.
+            "collection_errors": report.collection_errors,
+        },
+        "trackers": [
+            {
+                "identity": aggregate.identity,
+                "torrent_count": aggregate.torrent_count,
+                "exclusive_torrent_count": aggregate.exclusive_torrent_count,
+                "endpoint_count": aggregate.endpoint_count,
+                "total_size_bytes": aggregate.total_size_bytes,
+                "downloaded_bytes": aggregate.downloaded_bytes,
+                "uploaded_bytes": aggregate.uploaded_bytes,
+                "aggregate_ratio": aggregate.aggregate_ratio,
+                "seeding_time_total_seconds": (
+                    aggregate.seeding_time_total_seconds
+                ),
+            }
+            for aggregate in report.trackers
+        ],
+    }
+
+
+def render_tracker_inventory(
+    report: TrackerStatusReport,
+    output_format: OutputFormat,
+) -> None:
+    """Render the `trackers list` inventory in the requested format.
+
+    Never reads `report.overall_health`: tracker health does not drive
+    this command's exit code.
+    """
+    payload = _tracker_inventory_payload(report)
+
+    if output_format == OutputFormat.json:
+        print_json_output(payload)
+        return
+
+    if output_format == OutputFormat.jsonl:
+        print_jsonl_output(payload)
+        return
+
+    if output_format == OutputFormat.csv:
+        print_csv_rows(
+            TRACKER_INVENTORY_CSV_FIELDNAMES,
+            [
+                (
+                    aggregate.identity,
+                    str(aggregate.torrent_count),
+                    str(aggregate.exclusive_torrent_count),
+                    str(aggregate.endpoint_count),
+                    str(aggregate.total_size_bytes),
+                    str(aggregate.downloaded_bytes),
+                    str(aggregate.uploaded_bytes),
+                    (
+                        ""
+                        if aggregate.aggregate_ratio is None
+                        else str(aggregate.aggregate_ratio)
+                    ),
+                    str(aggregate.seeding_time_total_seconds),
+                )
+                for aggregate in report.trackers
+            ],
+        )
+        return
+
+    if not report.filters.is_empty:
+        typer.echo(f"Filter: {describe_torrent_filter(report.filters)}")
+
+    if not report.trackers:
+        typer.echo("No trackers found.")
+    else:
+        print_table(
+            "Trackers",
+            [
+                "Tracker",
+                "Torrents",
+                "Excl",
+                "Endpoints",
+                "Size",
+                "Downloaded",
+                "Uploaded",
+                "Ratio",
+                "Seed Time",
+            ],
+            [
+                [
+                    aggregate.identity,
+                    str(aggregate.torrent_count),
+                    str(aggregate.exclusive_torrent_count),
+                    str(aggregate.endpoint_count),
+                    format_bytes(aggregate.total_size_bytes),
+                    format_bytes(aggregate.downloaded_bytes),
+                    format_bytes(aggregate.uploaded_bytes),
+                    _format_optional_ratio(aggregate.aggregate_ratio),
+                    # A cumulative total nobody retypes, so it reads in
+                    # conventional units rather than the filter's.
+                    format_cumulative_duration(
+                        aggregate.seeding_time_total_seconds
+                    ),
+                ]
+                for aggregate in report.trackers
+            ],
+            fold_columns={"Tracker"},
+        )
+
+    print_summary(payload["summary"])
+
+
 def render_tracker_status(
     report: TrackerStatusReport,
     output_format: OutputFormat,

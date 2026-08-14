@@ -100,6 +100,32 @@ qbit-ops explain tracker --tracker tracker.example
 One line per tracker, health aggregated across every torrent that
 announces to it, and then the reasoning behind the verdict.
 
+**Act on every torrent stuck behind a dead tracker.**
+
+```bash
+qbit-ops torrents list --tracker-health critical
+qbit-ops torrents pause --tracker-health critical --no-dry-run
+```
+
+Selects on *each torrent's own* trackers, and gives the same verdict
+`explain torrent` does - it is the same computation. A torrent on three
+trackers of which one is dead comes out `warning`, not `critical`: it
+still seeds. A torrent qbit-ops knows nothing about matches nothing, so
+a non-answer can never pause anything.
+
+**See what each tracker is actually carrying.**
+
+```bash
+qbit-ops trackers list
+qbit-ops trackers list --category sonarr
+```
+
+Torrents, size, transferred bytes, ratio and seeding time per tracker,
+plus `EXCL` - the torrents that tracker is the *only* home of, which is
+the real answer to "what would I lose by leaving?". A torrent on three
+trackers counts in all three, so the columns deliberately add up to more
+than your library.
+
 **Know what your library actually weighs.**
 
 ```bash
@@ -143,8 +169,8 @@ qbit-ops trackers replace-passkey \
 
 Filters compose - repeat one for **or**, mix different ones for **and**,
 exclude with `--exclude-*`. Category, tag, save path, name, state, size,
-ratio, progress, age, tracker and more: the same selector everywhere,
-listing or mutating.
+ratio, progress, age, tracker, tracker health and more: the same
+selector everywhere, listing or mutating.
 
 Full grammar in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 

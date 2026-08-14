@@ -10,14 +10,16 @@ without pulling in presentation concerns.
 """
 
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Literal
 
 from qbit_core.features.trackers import (
+    TrackerHealth,
     classify_raw_tracker_status,
+    compute_tracker_aggregate_health,
     describe_tracker_url,
     has_tracker_host,
     normalize_tracker_host,
@@ -37,6 +39,7 @@ from qbit_core.qbit.fields import (
 from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.selection import (
     EMPTY_TORRENT_FILTER,
+    INSPECTION_ONLY_FILTER_FIELDS,
     STATE_FILTER_VALUES,
     InvalidTorrentSelectorError,
     Range,
@@ -52,6 +55,7 @@ from qbit_core.shared.selection import (
     torrent_filter_to_dict,
     validate_selection_request,
     validate_torrent_filter,
+    without_inspection_criteria,
 )
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
@@ -61,6 +65,15 @@ from qbit_core.shared.torrent_states import (
 )
 
 TorrentBulkAction = Literal["pause", "resume", "start", "reannounce", "delete"]
+
+# The public `--tracker-health` vocabulary: exactly the verdicts
+# `compute_torrent_tracker_health` can produce for one torrent.
+# UNAVAILABLE is excluded because it is not one of them -- it only ever
+# describes a whole `trackers status` report whose collection failed,
+# never a single torrent.
+TRACKER_HEALTH_FILTER_VALUES: frozenset[TrackerHealth] = frozenset(
+    TrackerHealth
+) - {TrackerHealth.UNAVAILABLE}
 
 # Shared unbounded defaults. `Range` is frozen, so one instance per type
 # is safe to share -- and it keeps a constructor call out of the
@@ -87,6 +100,7 @@ def build_torrent_filter(
     trackers: Sequence[str] = (),
     trackers_excluded: Sequence[str] = (),
     has_trackers: bool | None = None,
+    tracker_health: Sequence[str] = (),
     completed: bool = False,
     incomplete: bool = False,
     active: bool = False,
@@ -152,6 +166,7 @@ def build_torrent_filter(
             )
         ),
         has_trackers=has_trackers,
+        tracker_health=_normalize_tracker_health(tracker_health),
         completed=True if completed else (False if incomplete else None),
         active=True if active else (False if inactive else None),
         stalled=True if stalled else None,
@@ -192,6 +207,27 @@ def _normalize_states(
             )
         if candidate not in normalized:
             normalized.append(candidate)  # type: ignore[arg-type]
+    return tuple(normalized)
+
+
+def _normalize_tracker_health(values: Sequence[str]) -> tuple[str, ...]:
+    """Validate health tokens against the one per-torrent vocabulary.
+
+    Rejects `unavailable` like any other unsupported value, and before
+    any qBittorrent call: it names a whole report whose collection
+    failed, so no torrent can ever carry it.
+    """
+    supported = {health.value for health in TRACKER_HEALTH_FILTER_VALUES}
+    normalized: list[str] = []
+    for value in values:
+        candidate = value.strip().lower()
+        if candidate not in supported:
+            raise ValueError(
+                f"Unknown --tracker-health value '{value}'. Supported "
+                f"values: {', '.join(sorted(supported))}."
+            )
+        if candidate not in normalized:
+            normalized.append(candidate)
     return tuple(normalized)
 
 
@@ -236,7 +272,7 @@ def select_torrents(
     # SELECT on the cheap criteria first, INSPECT only the survivors:
     # this ordering is what bounds the `torrents_trackers()` call count.
     candidates = select_torrents_from_items(
-        all_torrents, replace(filters, trackers=(), trackers_excluded=())
+        all_torrents, without_inspection_criteria(filters)
     )
     inspection = inspect_trackers(client, candidates, on_progress=on_progress)
 
@@ -244,6 +280,11 @@ def select_torrents(
         torrent
         for torrent in inspection.torrents
         if _matches_tracker_hosts(list(torrent.active_tracker_urls), filters)
+        and matches_tracker_health(
+            filters,
+            torrent.raw_trackers,
+            lookup_failed=torrent.lookup_failed,
+        )
     ]
 
     return (
@@ -277,6 +318,64 @@ def _matches_tracker_hosts(
     )
 
 
+def compute_torrent_tracker_health(
+    endpoints: Sequence[dict[str, Any]] | None,
+) -> TrackerHealth | None:
+    """Aggregate one torrent's own endpoints into a single verdict.
+
+    `endpoints` is the structural view `get_safe_tracker_details`
+    returns -- disabled endpoints included, since the operator disabled
+    one rather than removing it. `None` means tracker data could not be
+    collected; an empty sequence means it was, and the torrent reported
+    no endpoint. Both yield `None`: with no usable observation there is
+    no verdict, and a non-answer must never select a torrent.
+
+    The single verdict path. `explain torrent` and the
+    `--tracker-health` filter both call this, over the same endpoint
+    set, so what an operator filters on and what `explain` reports can
+    never disagree.
+    """
+    if not endpoints:
+        return None
+
+    counts: dict[TrackerHealth, int] = {health: 0 for health in TrackerHealth}
+    for endpoint in endpoints:
+        # Dispatch on `health` alone, never on `enabled`, which is
+        # `None` for an unclassifiable status and would miscount an
+        # unknown endpoint as disabled.
+        counts[TrackerHealth(endpoint["health"])] += 1
+
+    return compute_tracker_aggregate_health(
+        healthy=counts[TrackerHealth.HEALTHY],
+        warning=counts[TrackerHealth.WARNING],
+        critical=counts[TrackerHealth.CRITICAL],
+        disabled=counts[TrackerHealth.DISABLED],
+        unknown=counts[TrackerHealth.UNKNOWN],
+    )
+
+
+def matches_tracker_health(
+    filters: TorrentFilter,
+    raw_trackers: Any,
+    *,
+    lookup_failed: bool = False,
+) -> bool:
+    """Apply the `--tracker-health` criterion to one inspected torrent.
+
+    Runs after INSPECT, in memory. A torrent with no verdict -- lookup
+    failed, or no endpoint reported -- matches no health value at all:
+    knowing nothing about a torrent must never be enough to pause it.
+    """
+    if not filters.tracker_health:
+        return True
+
+    endpoints = (
+        None if lookup_failed else get_safe_tracker_details(raw_trackers)
+    )
+    health = compute_torrent_tracker_health(endpoints)
+    return health is not None and health.value in filters.tracker_health
+
+
 def select_torrents_from_items(
     torrents: Sequence[Any],
     filters: TorrentFilter,
@@ -284,15 +383,17 @@ def select_torrents_from_items(
     """Apply only the cheap, `torrents_info()`-shaped filters in memory.
 
     Never calls the qBittorrent API -- for callers re-applying filters to
-    an already-fetched snapshot. Cannot resolve a `--tracker` filter
-    (needs a per-torrent `torrents_trackers()` lookup); pass
-    `tracker=None` here and use `select_torrents` instead when a tracker
-    filter is required.
+    an already-fetched snapshot. Cannot resolve any
+    `INSPECTION_ONLY_FILTER_FIELDS` criterion (each needs a per-torrent
+    `torrents_trackers()` lookup); clear them with
+    `without_inspection_criteria` and use `select_torrents` instead when
+    one is required.
     """
     if filters.requires_inspection:
         raise ValueError(
-            "select_torrents_from_items cannot resolve a --tracker filter "
-            "without a qBittorrent client; use select_torrents instead."
+            "select_torrents_from_items cannot resolve a tracker-derived "
+            f"filter ({', '.join(INSPECTION_ONLY_FILTER_FIELDS)}) without a "
+            "qBittorrent client; use select_torrents instead."
         )
 
     return select_from_items(torrents, SelectionRequest(filters=filters))
@@ -946,11 +1047,12 @@ def inspect_filtered_torrents(
     secret-free per-torrent shape -- `get_safe_tracker_details`, never
     the raw announce URLs `backup export` legitimately carries.
 
-    Selection is delegated to exactly the same two steps `torrents list`
+    Selection is delegated to exactly the same steps `torrents list`
     and every mutation use: `matches_cheap_filters`, then
-    `_matches_tracker_hosts` over the inspected trackers. Reproducing
-    either of them here would let the same selector target different
-    torrents depending on the command consuming it.
+    `_matches_tracker_hosts` and `matches_tracker_health` over the
+    inspected trackers. Reproducing any of them here would let the same
+    selector target different torrents depending on the command
+    consuming it.
 
     Costs one `torrents_info()` plus one `torrents_trackers()` per
     torrent surviving the cheap filters. Results are ordered by
@@ -976,6 +1078,9 @@ def inspect_filtered_torrents(
         if not _matches_tracker_hosts(
             get_active_tracker_urls(raw_trackers), filters
         ):
+            continue
+
+        if not matches_tracker_health(filters, raw_trackers):
             continue
 
         reports.append(

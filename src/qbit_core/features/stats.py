@@ -62,6 +62,52 @@ class LibraryStats:
 
 
 @dataclass(frozen=True)
+class MeasureTotals:
+    """The measures any aggregate over torrents sums the same way.
+
+    Deliberately smaller than `LibraryStats`: only the measures a
+    second aggregation (today the per-tracker breakdown) also needs,
+    so both come out of one arithmetic instead of two.
+    """
+
+    total_size_bytes: int
+    downloaded_bytes: int
+    uploaded_bytes: int
+    aggregate_ratio: float | None
+    seeding_time_total_seconds: int
+
+
+def aggregate_measure_totals(
+    snapshots: Sequence[TorrentSnapshot],
+) -> MeasureTotals:
+    """Sum the central model's measures over any set of torrents.
+
+    `aggregate_ratio` is the ratio of the totals, never the mean of the
+    per-torrent ratios -- that would weigh a 50 MB torrent like an 80 GB
+    one. An unknown measure is left out of its aggregate rather than
+    counted as zero: qBittorrent's "unset" marker is negative, so
+    summing it would take bytes *away* from a total.
+
+    The single place these five measures are summed. `torrents stats`
+    and the per-tracker breakdown answer the same question over
+    different populations; they must never answer it with different
+    arithmetic.
+    """
+    downloaded = sum(_known(snapshot.downloaded for snapshot in snapshots))
+    uploaded = sum(_known(snapshot.uploaded for snapshot in snapshots))
+
+    return MeasureTotals(
+        total_size_bytes=sum(snapshot.size for snapshot in snapshots),
+        downloaded_bytes=downloaded,
+        uploaded_bytes=uploaded,
+        aggregate_ratio=(uploaded / downloaded) if downloaded > 0 else None,
+        seeding_time_total_seconds=sum(
+            _known(snapshot.seeding_time for snapshot in snapshots)
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class TorrentStatsReport:
     """One `torrents stats` report: the selection, then the two blocks.
 
@@ -87,28 +133,25 @@ def aggregate_library_stats(
     `scanned` is how many torrents were read before filtering, which
     only the caller's selection knows.
 
-    `aggregate_ratio` is the ratio of the totals, never the mean of the
-    per-torrent ratios -- that would weigh a 50 MB torrent like an 80 GB
-    one. An unknown measure is left out of its aggregate rather than
-    counted as zero: qBittorrent's "unset" marker is negative, so
-    summing it would take bytes *away* from a total.
+    The five shared measures come from `aggregate_measure_totals`; only
+    the distribution-shaped ones (average, largest, median, oldest and
+    newest) are computed here, because only this report carries them.
     """
+    totals = aggregate_measure_totals(snapshots)
     sizes = [snapshot.size for snapshot in snapshots]
-    downloaded = sum(_known(snapshot.downloaded for snapshot in snapshots))
-    uploaded = sum(_known(snapshot.uploaded for snapshot in snapshots))
     seeding_times = _known(snapshot.seeding_time for snapshot in snapshots)
     added_moments = _known(snapshot.added_at for snapshot in snapshots)
 
     return LibraryStats(
         torrents=len(snapshots),
         scanned=scanned,
-        total_size_bytes=sum(sizes),
+        total_size_bytes=totals.total_size_bytes,
         average_size_bytes=round(sum(sizes) / len(sizes)) if sizes else None,
         largest_size_bytes=max(sizes) if sizes else None,
-        downloaded_bytes=downloaded,
-        uploaded_bytes=uploaded,
-        aggregate_ratio=(uploaded / downloaded) if downloaded > 0 else None,
-        seeding_time_total_seconds=sum(seeding_times),
+        downloaded_bytes=totals.downloaded_bytes,
+        uploaded_bytes=totals.uploaded_bytes,
+        aggregate_ratio=totals.aggregate_ratio,
+        seeding_time_total_seconds=totals.seeding_time_total_seconds,
         seeding_time_median_seconds=(
             round(median(seeding_times)) if seeding_times else None
         ),

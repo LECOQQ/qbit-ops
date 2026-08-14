@@ -26,7 +26,10 @@ from typing import Annotated
 
 import typer
 
-from qbit_core.features.torrents import build_torrent_filter
+from qbit_core.features.torrents import (
+    TRACKER_HEALTH_FILTER_VALUES,
+    build_torrent_filter,
+)
 from qbit_core.shared.parsers import (
     parse_duration,
     parse_percentage,
@@ -47,6 +50,15 @@ TRACKER_FILTER_HELP = (
     "Restrict to torrents using a tracker, matched by host[:port] (repeatable; "
     "combines with OR). A full announce URL is also accepted; only its host "
     "and port are used."
+)
+_TRACKER_HEALTH_VALUES = ", ".join(
+    sorted(health.value for health in TRACKER_HEALTH_FILTER_VALUES)
+)
+TRACKER_HEALTH_FILTER_HELP = (
+    "Restrict to torrents whose own tracker endpoints aggregate to a health "
+    f"verdict (repeatable; combines with OR). Supported: "
+    f"{_TRACKER_HEALTH_VALUES}. A torrent with no usable observation matches "
+    "none of them. Requires a per-torrent tracker lookup."
 )
 
 
@@ -75,6 +87,17 @@ StateOption = Annotated[
 ]
 TrackerOption = Annotated[
     list[str], typer.Option("--tracker", help=TRACKER_FILTER_HELP)
+]
+# The `trackers` report commands take a single `--tracker` and apply it
+# *after* aggregation, restricting the report rather than the selection.
+# One declaration, so `trackers list` inherits `trackers status`'s
+# arity and wording instead of imitating them.
+REPORT_TRACKER_FILTER_HELP = (
+    "Restrict the report to one tracker, matched by host[:port] (a full "
+    "announce URL is also accepted; only its host and port are used)."
+)
+ReportTrackerOption = Annotated[
+    str | None, typer.Option("--tracker", help=REPORT_TRACKER_FILTER_HELP)
 ]
 CompletedOption = Annotated[
     bool, typer.Option("--completed", help="Restrict to completed torrents.")
@@ -283,6 +306,10 @@ NoTrackerOption = Annotated[
         ),
     ),
 ]
+TrackerHealthOption = Annotated[
+    list[str],
+    typer.Option("--tracker-health", help=TRACKER_HEALTH_FILTER_HELP),
+]
 
 # --- privacy ----------------------------------------------------------------
 
@@ -431,6 +458,7 @@ def build_filter_from_options(
     tracker: list[str] = [],  # noqa: B006
     exclude_tracker: list[str] = [],  # noqa: B006
     no_tracker: bool = False,
+    tracker_health: list[str] = [],  # noqa: B006
     completed: bool = False,
     incomplete: bool = False,
     active: bool = False,
@@ -481,6 +509,7 @@ def build_filter_from_options(
         trackers=tracker,
         trackers_excluded=exclude_tracker,
         has_trackers=False if no_tracker else None,
+        tracker_health=tracker_health,
         completed=completed,
         incomplete=incomplete,
         active=active,
