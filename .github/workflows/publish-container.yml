@@ -1,0 +1,105 @@
+name: Publish container
+
+# Dispatched by release-please.yml once it has cut a release, and
+# runnable by hand as a recovery path.
+#
+# There is deliberately no `push` trigger: a normal push to main must
+# never move `latest` or any release tag. The only way in is a
+# dispatch carrying an already-cut stable release tag, which the guard
+# below re-validates rather than trusting.
+#
+# Same rationale as publish.yml for not using `on: release`: Release
+# Please creates the GitHub Release with the default GITHUB_TOKEN, and
+# events raised by that token do not start another workflow run.
+# https://docs.github.com/en/actions/concepts/security/github_token
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Stable release tag (vX.Y.Z) to build and publish."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-container:
+    name: Build and publish to GHCR
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # Pushing to GHCR with the built-in GITHUB_TOKEN; no PAT involved.
+      packages: write
+
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Plan the Docker tags
+        id: plan
+        # Validates the tag *and* ranks it against the repository's Git
+        # tags, which are the only source of truth here -- no registry is
+        # queried. Refuses a prerelease outright, and reports whether
+        # this release may move `latest` and `X.Y`, so republishing an
+        # older tag can never drag a floating tag backwards.
+        run: |
+          python3 scripts/docker_tags.py --tag "${{ inputs.tag }}" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Verify the declared version agrees with the release tag
+        # Reuses the repository's existing version-consistency check, so
+        # the version inside the image cannot drift from the Git tag the
+        # Docker tags are derived from.
+        run: python3 scripts/check_version_sync.py --tag "${{ inputs.tag }}"
+
+      - name: Resolve the image name
+        id: image
+        # GHCR rejects uppercase; the owner is `LECOQQ`.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and OCI labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          # `latest=false` disables metadata-action's implicit rule: it
+          # would look only at the tag being built, never at whether a
+          # newer release already exists. Both floating tags are gated on
+          # the ranking computed above instead. No floating `{{major}}`
+          # tag for now.
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.plan.outputs.version }}
+            type=raw,value=${{ steps.plan.outputs.minor }},enable=${{ steps.plan.outputs.is_newest_in_minor }}
+            type=raw,value=latest,enable=${{ steps.plan.outputs.is_newest }}
+
+      - name: Build and push the multi-platform image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.plan.outputs.version }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

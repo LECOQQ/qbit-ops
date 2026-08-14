@@ -69,6 +69,68 @@ qbit-ops doctor
 qbit-ops tui
 ```
 
+## 🐳 Docker
+
+```bash
+docker pull ghcr.io/lecoqq/qbit-ops:latest
+docker run --rm ghcr.io/lecoqq/qbit-ops:latest --version
+```
+
+Published for **linux/amd64** and **linux/arm64** as a single manifest,
+so `docker pull` picks the right one for your machine.
+
+**Tags.** Only stable releases are published: `0.4.0` (exact), `0.4`
+(newest patch of that minor), and `latest` (newest release overall).
+Pushes to `main` never move them, and republishing an older release
+moves neither floating tag backwards. Pin the exact version for anything
+scripted.
+
+**Configuration** uses the same three variables as everywhere else --
+real environment variables always win:
+
+```bash
+docker run --rm --network host \
+  -e QBIT_HOST=http://localhost:8080 -e QBIT_USER=admin -e QBIT_PASSWORD=... \
+  ghcr.io/lecoqq/qbit-ops:latest status
+```
+
+`--env-file ./qbit-ops.env` works too, as does mounting a file and
+pointing `QBIT_OPS_ENV_FILE` at it.
+
+> ⚠️ `localhost` inside a container is the *container*. Reach a
+> qBittorrent running on the Docker host with `--network host` (Linux)
+> or `QBIT_HOST=http://host.docker.internal:8080` (Docker Desktop); if
+> qBittorrent is itself a container, use its service name on a shared
+> network.
+
+**`/data` is the conventional mount** for files you hand to qbit-ops,
+and the image's working directory. Commands that write do so on stdout,
+so redirect on the host:
+
+```bash
+docker run --rm --env-file ./qbit-ops.env \
+  ghcr.io/lecoqq/qbit-ops:latest backup export --format json > backup.json
+
+docker run --rm --env-file ./qbit-ops.env -v ./qbit-data:/data \
+  ghcr.io/lecoqq/qbit-ops:latest backup restore /data/backup.json
+
+docker run --rm --env-file ./qbit-ops.env -v ./torrents:/input:ro \
+  ghcr.io/lecoqq/qbit-ops:latest torrents import /input
+```
+
+The container runs as UID/GID 1000; add `--user "$(id -u):$(id -g)"` if
+your host user differs. Add `-it` for `qbit-ops tui`.
+
+**Compose.** qbit-ops is an on-demand CLI, so the example service is
+driven with `run`, never `up` -- see
+[docs/examples/docker-compose.yml](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml):
+
+```bash
+docker compose run --rm qbit-ops --version
+docker compose run --rm qbit-ops torrents list --category sonarr
+docker compose run --rm qbit-ops backup restore /data/backup.json
+```
+
 ## 🔍 Inspect your instance
 
 ```bash

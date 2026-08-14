@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: doctor info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -87,7 +87,7 @@ lint: ## qa: Check Python style and types without modifying files
 PYTEST_PARALLEL := -n auto
 
 test: ## qa: Run Python tests
-	@$(PY) pytest $(PYTEST_PARALLEL) -m "not network"
+	@$(PY) pytest $(PYTEST_PARALLEL) -m "not network and not image"
 
 check-version: ## qa: Verify pyproject.toml and the Release Please manifest agree
 	@python3 scripts/check_version_sync.py
@@ -103,6 +103,9 @@ check-dist: build ## qa: Validate the built artifacts and smoke-test the install
 	@$(PY) twine check --strict dist/*
 	@$(PY) pytest tests/test_distribution.py
 
+check-image: sync ## qa: Build the container image locally and verify its entrypoint and OCI labels (needs Docker)
+	@$(PY) pytest -m image tests/test_docker_distribution.py
+
 check: sync lint test check-version check-docs ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
 
 check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
@@ -111,7 +114,7 @@ check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non
 	@$(PY) pyright
 	@python3 scripts/check_version_sync.py
 	@python3 scripts/check_doc_links.py
-	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker and not network"
+	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker and not network and not image"
 
 test-tui: sync ## qa: Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
 	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py tests/test_tui_table_performance.py

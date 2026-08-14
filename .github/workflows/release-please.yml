@@ -39,3 +39,16 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref "$GITHUB_REF_NAME" \
             -f tag="${{ steps.release.outputs.tag_name }}"
+
+      - name: Publish the release container to GHCR
+        # Dispatched separately from publish.yml on purpose: a failed
+        # PyPI upload must not prevent the container from shipping, and
+        # neither must be retried through the other.
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish-container.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f tag="${{ steps.release.outputs.tag_name }}"

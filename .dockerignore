@@ -1,0 +1,60 @@
+# Only pyproject.toml, poetry.lock, README.md, LICENSE and src/ are needed
+# to build the wheel. Everything below either bloats the build context,
+# leaks local state into it, or would end up in the image by accident.
+
+# Secrets and local configuration -- must never reach the build context.
+.env
+.env.*
+!.env.example
+.vscode
+.claude
+
+# Agent control-plane: local working memory, never published.
+AGENTS.md
+CLAUDE.md
+.agents
+.worktrees
+
+# Version control and CI
+.git
+.gitignore
+.github
+.pre-commit-config.yaml
+
+# Python environments, caches and build artifacts
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.pyright
+.coverage
+.coverage.*
+htmlcov
+dist
+build
+*.egg-info
+.sync-stamp
+
+# Tests, tooling and demo material: not part of the runtime image.
+tests
+scripts
+demo
+Makefile
+
+# Documentation and assets (README.md is kept: it is the wheel's
+# long description and poetry-core fails the build without it).
+docs
+CHANGELOG.md
+CONTRIBUTING.md
+PHILOSOPHY.md
+ROADMAP.md
+release-please-config.json
+.release-please-manifest.json
+.editorconfig
+
+# Docker's own files
+Dockerfile
+.dockerignore
