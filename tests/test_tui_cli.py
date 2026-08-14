@@ -59,18 +59,38 @@ def test_tui_missing_extra_fails_before_creating_a_client(
     assert result.exit_code == ExitCode.ERROR
     assert client_created["called"] is False
     assert "Traceback" not in result.stderr
-    # The remediation must not suggest a bare "pipx install qbit-ops[tui]"
-    # as something to actually run -- qbit-ops is not on PyPI, and that
-    # exact command was reported to fail in practice.
-    assert "not published on PyPI" in result.stderr
-    assert 'pipx install ".[tui]"' in result.stderr
+    assert "'tui' extra" in result.stderr
+
+    # Assert on what the remediation must *do*, never on its wording: an
+    # earlier version of this test pinned the literal claim "not
+    # published on PyPI", which kept enforcing it long after qbit-ops
+    # was on PyPI.
+    #
+    # The fix has a different shape per install tool, so every route a
+    # user can arrive by must be offered.
+    for command in ("uv tool install", "pipx", "poetry install --extras tui"):
+        assert command in result.stderr, command
+
+    # Every extras-bearing command must survive Rich, which reads square
+    # brackets as markup and silently swallows an unescaped `[tui]`.
+    # Asserted per command on purpose: a single "[tui] appears somewhere"
+    # check stays green while one of them loses its brackets.
+    for command in (
+        'uv tool install "qbit-ops[tui]"',
+        'pipx install --force "qbit-ops[tui]"',
+    ):
+        assert command in result.stderr, command
+
     # Deliberately no literal URL in the message: `print_error()` runs
     # every message through `sanitize_tracker_text()` unconditionally,
     # which redacts any URL-shaped text on sight -- a real clone URL
     # here would silently become "<redacted-url>", defeating the
     # remediation (found via packaging verification).
     assert "redacted" not in result.stderr.lower()
-    assert "README.md" in result.stderr
+
+    # Nothing may claim qbit-ops is unavailable from an index: it is
+    # published, and `uv tool install qbit-ops` is the documented path.
+    assert "not published" not in result.stderr.lower()
 
 
 def test_tui_rejects_non_positive_interval(runner: CliRunner) -> None:
