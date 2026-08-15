@@ -1198,8 +1198,16 @@ def _tracker_inventory_payload(report: TrackerStatusReport) -> dict[str, Any]:
 def render_tracker_inventory(
     report: TrackerStatusReport,
     output_format: OutputFormat,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Render the `trackers list` inventory in the requested format.
+
+    Table output uses a fixed five-column set -- Tracker, Torrents,
+    Size, Uploaded, Ratio -- regardless of the detected terminal width;
+    it never adapts to `COLUMNS`. `--verbose` swaps in the full nine
+    columns instead. Machine formats (`json`, `jsonl`, `csv`) always
+    carry every measure and never depend on `verbose`.
 
     Never reads `report.overall_health`: tracker health does not drive
     this command's exit code.
@@ -1243,7 +1251,7 @@ def render_tracker_inventory(
 
     if not report.trackers:
         typer.echo("No trackers found.")
-    else:
+    elif verbose:
         print_table(
             "Trackers",
             [
@@ -1272,6 +1280,22 @@ def render_tracker_inventory(
                     format_cumulative_duration(
                         aggregate.seeding_time_total_seconds
                     ),
+                ]
+                for aggregate in report.trackers
+            ],
+            fold_columns={"Tracker"},
+        )
+    else:
+        print_table(
+            "Trackers",
+            ["Tracker", "Torrents", "Size", "Uploaded", "Ratio"],
+            [
+                [
+                    aggregate.identity,
+                    str(aggregate.torrent_count),
+                    format_bytes(aggregate.total_size_bytes),
+                    format_bytes(aggregate.uploaded_bytes),
+                    _format_optional_ratio(aggregate.aggregate_ratio),
                 ]
                 for aggregate in report.trackers
             ],

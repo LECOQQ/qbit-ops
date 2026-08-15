@@ -340,23 +340,32 @@ qbit-ops trackers list
 qbit-ops trackers list --category sonarr
 qbit-ops trackers list --state seeding --format json
 qbit-ops trackers list --tracker-health critical
+qbit-ops trackers list --verbose
 ```
+
+The table is a fixed, five-column set by default -- it never adapts to
+the detected terminal width, so the same command renders the same
+columns whether the terminal is narrow or wide:
 
 | Column | Meaning |
 | --- | --- |
 | `Tracker` | Normalized identity, `host[:port]` -- never an announce URL |
 | `Torrents` | Retained torrents announcing to this tracker |
-| `Excl` | Among them, those carrying **no other** tracker identity |
-| `Endpoints` | Endpoints observed for this identity |
 | `Size` | Sum of their sizes |
-| `Downloaded` | Sum of the known downloaded bytes |
 | `Uploaded` | Sum of the known uploaded bytes |
 | `Ratio` | Total uploaded ÷ total downloaded |
+
+`--verbose` renders all nine columns instead, adding:
+
+| Column | Meaning |
+| --- | --- |
+| `Excl` | Among the tracker's torrents, those carrying **no other** tracker identity |
+| `Endpoints` | Endpoints observed for this identity |
+| `Downloaded` | Sum of the known downloaded bytes |
 | `Seed Time` | Sum of the known seeding times |
 
-Nine columns is a dense table that assumes a wide terminal; `json`,
-`jsonl` and `csv` stay the way to read it on a narrow one or from a
-script.
+`json`, `jsonl` and `csv` always carry all nine measures, regardless of
+`--verbose` -- they are the way to read the full detail from a script.
 
 ### The columns do not add up, on purpose
 

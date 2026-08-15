@@ -11,12 +11,18 @@ import csv
 import io
 import json
 
+import pytest
 import typer
+from rich.console import Console
 from typer.core import TyperGroup
 from typer.testing import CliRunner
 
+from qbit_core.features.torrents import build_torrent_filter
+from qbit_core.features.tracker_status import collect_tracker_status
+from qbit_ops.cli import rendering
 from qbit_ops.cli.app import app
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
+from qbit_ops.cli.rendering import OutputFormat
 from tests.support import FakeQbitClient, make_torrent
 
 TORRENT_A = "a" * 40
@@ -427,12 +433,27 @@ def _client_with_volume() -> FakeQbitClient:
     )
 
 
-def test_list_table_renders_the_nine_documented_columns(
+def test_list_table_renders_the_five_column_default(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
     configure_qbit_backend(client=_client_with_volume())
 
     result = runner.invoke(app, ["trackers", "list"])
+
+    assert result.exit_code == 0
+    header = " ".join(result.stdout.split())
+    for column in ("Tracker", "Torrents", "Size", "Uploaded", "Ratio"):
+        assert column in header
+    for column in ("Excl", "Endpoints", "Downloaded", "Seed Time"):
+        assert column not in header
+
+
+def test_list_verbose_renders_the_nine_documented_columns(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list", "--verbose"])
 
     assert result.exit_code == 0
     header = " ".join(result.stdout.split())
@@ -448,6 +469,44 @@ def test_list_table_renders_the_nine_documented_columns(
         "Seed Time",
     ):
         assert column in header
+
+
+def test_list_table_default_does_not_depend_on_terminal_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default table is a fixed column set: it must render the same
+    content whether the terminal is narrow or wide, unlike a table that
+    adapts its columns to the detected width.
+
+    Renders directly against a fixed-width `Console` rather than through
+    the CLI: `rendering.console` is a module-level singleton that bakes
+    in `COLUMNS` the first time it is constructed (see
+    `tests/conftest.py`'s process-wide pin), so a per-invocation `env=`
+    override on `CliRunner` cannot change its width afterwards.
+    """
+    report = collect_tracker_status(
+        _client_with_volume(), build_torrent_filter()
+    )
+
+    narrow_buffer = io.StringIO()
+    monkeypatch.setattr(
+        rendering,
+        "console",
+        Console(file=narrow_buffer, force_terminal=True, width=80),
+    )
+    rendering.render_tracker_inventory(report, OutputFormat.table)
+
+    wide_buffer = io.StringIO()
+    monkeypatch.setattr(
+        rendering,
+        "console",
+        Console(file=wide_buffer, force_terminal=True, width=200),
+    )
+    rendering.render_tracker_inventory(report, OutputFormat.table)
+
+    assert " ".join(narrow_buffer.getvalue().split()) == " ".join(
+        wide_buffer.getvalue().split()
+    )
 
 
 def test_list_json_and_csv_carry_the_same_measures(
@@ -500,6 +559,29 @@ def test_list_json_and_csv_carry_the_same_measures(
         str(tracker["aggregate_ratio"]),
         str(tracker["seeding_time_total_seconds"]),
     ]
+
+
+def test_list_machine_formats_are_unaffected_by_verbose(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--verbose` only changes table rendering. `json`, `jsonl` and
+    `csv` stay byte-identical with or without it, so an existing script
+    parsing one of them never sees a column appear, disappear, or move.
+    """
+    for output_format in ("json", "jsonl", "csv"):
+        configure_qbit_backend(client=_client_with_volume())
+        plain = runner.invoke(
+            app, ["trackers", "list", "--format", output_format]
+        )
+
+        configure_qbit_backend(client=_client_with_volume())
+        verbose = runner.invoke(
+            app, ["trackers", "list", "--format", output_format, "--verbose"]
+        )
+
+        assert plain.exit_code == 0
+        assert verbose.exit_code == 0
+        assert plain.stdout == verbose.stdout
 
 
 def test_list_never_leaks_an_announce_url_in_any_format(
@@ -629,16 +711,17 @@ def test_list_accepts_every_filter_status_does() -> None:
     written out separately, so only a test can keep them from drifting
     apart when a filter is added to one of them.
     """
-    assert _trackers_command_options("status") - _trackers_command_options(
-        "list"
-    ) == {"--verbose"}
+    assert (
+        _trackers_command_options("status") - _trackers_command_options("list")
+        == set()
+    )
 
 
 def test_list_adds_only_the_tracker_health_filter() -> None:
-    """The one deliberate addition. `--verbose` above is the one
-    deliberate omission -- it renders each tracker's message, which this
-    inventory does not carry, so it is a rendering option and not a
-    filter.
+    """The one deliberate addition. Both commands accept `--verbose`,
+    but it means something different per command: `status` uses it to
+    print each tracker's representative message, `list` uses it to
+    render all nine columns instead of the five-column default.
     """
     assert _trackers_command_options("list") - _trackers_command_options(
         "status"
