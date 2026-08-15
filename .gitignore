@@ -8,7 +8,9 @@ CLAUDE.md
 
 # Agent working memory: read by LLMs before intervening, never published
 .agents
-docs/SELECTION.md
+# Launcher wiring: symlinks into `.agents/`, so tracking them would
+# publish references that resolve to nothing in a clone.
+.claude
 docs/SEARCH.md
 .worktrees/
 
