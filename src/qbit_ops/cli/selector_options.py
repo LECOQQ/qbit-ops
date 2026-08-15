@@ -555,11 +555,8 @@ def _resolve_relative_window(
 ) -> Range[datetime]:
     """Turn a pair of relative durations into an absolute window.
 
-    "at least N ago" bounds the window's *upper* end (the timestamp must
-    be older than that instant); "within N" bounds its lower end. The
-    filter stores the resolved instants, keeping the relative form as
-    user intent at this boundary -- which is what a saved selector will
-    later need to re-resolve rather than freeze.
+    "at least N ago" bounds the window's *upper* end (must be older
+    than that instant); "within N" bounds its lower end.
     """
     return Range(
         min=(

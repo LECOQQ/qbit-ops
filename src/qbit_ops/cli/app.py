@@ -41,12 +41,8 @@ def _project_identity() -> str:
 def _print_version(ctx: typer.Context, value: bool) -> None:
     """Eager `--version` callback: print and exit before anything else.
 
-    Runs before any other parameter or subcommand is processed, so no
-    configuration is loaded, no client is created, and no network call
-    is ever made. Shell completion resolves the command line through a
-    `resilient_parsing` context that still runs parameter callbacks, so
-    it must return silently there -- printing would land in the middle
-    of the completion payload.
+    Must return silently when `ctx.resilient_parsing` is set, or the
+    version string leaks into a shell-completion payload mid-parse.
     """
     if not value or ctx.resilient_parsing:
         return

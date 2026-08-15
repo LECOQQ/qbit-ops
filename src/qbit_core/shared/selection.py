@@ -687,18 +687,15 @@ def _matches_name(torrent: Any, filters: TorrentFilter) -> bool:
 def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
     """State group, its exclusions, and the derived state aliases.
 
-    `--active` keeps its long-standing meaning of "not stopped" rather
-    than "is transferring" -- that is a documented contract, unchanged.
+    Enforces the unknown-never-matches rule: a torrent whose `state` or
+    `progress` qBittorrent did not report satisfies no criterion built
+    on it -- coercing an absent `progress` to `0` once made
+    `--incomplete` match it, and an absent `state` made `--active` match
+    it, both widening a destructive selection with a value nobody
+    reported.
 
-    What *is* enforced here is the unknown-never-matches rule: a torrent
-    whose `state` or `progress` qBittorrent did not report satisfies no
-    criterion built on it. Coercing an absent `progress` to `0` made
-    `--incomplete` match such a torrent, and an absent `state` made
-    `--active` match it -- both widening a destructive selection with a
-    value nobody ever reported.
-
-    Exclusions stay "the criterion did not match, so nothing is
-    excluded": an unknown state is not proof of the state being refused.
+    Exclusions stay "no match, nothing excluded": an unknown state is
+    not proof of being refused.
     """
     state = _known_state(torrent)
     group = None if state is None else classify_torrent_state(state)
@@ -831,15 +828,11 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 def _is_under_path(save_path: str, prefix: str) -> bool:
     """Return whether `save_path` is `prefix` or lives beneath it.
 
-    Case-sensitive, and the only normalization is a trailing separator
-    on either side: `/data` and `/data/` name the same directory, and an
-    operator should not have to guess which form qBittorrent stores.
-    Nothing else is rewritten -- these are real POSIX paths, and
-    resolving or case-folding them would make the filter disagree with
-    what qBittorrent reports.
-
-    The separator check is what stops `/downloads` from matching
-    `/downloads-old`.
+    Case-sensitive; only a trailing separator is normalized (`/data` and
+    `/data/` are the same directory). Nothing else is rewritten -- these
+    are real POSIX paths, and resolving or case-folding them would
+    disagree with what qBittorrent reports. The separator check is what
+    stops `/downloads` from matching `/downloads-old`.
     """
     boundary = prefix.rstrip("/")
     if boundary == "":

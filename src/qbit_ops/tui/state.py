@@ -263,9 +263,6 @@ class TuiState:
 class TuiController:
     """Own `TuiState` and every state-mutating operation the TUI needs.
 
-    Not a generic state-management framework: one class, direct method
-    calls, no event bus, no reducers.
-
     Thread-safety: `_remote_lock` serializes the three blocking entry
     points (`collect_refresh`, `collect_tracker_details`,
     `apply_bulk_plan`) since `qbittorrentapi`'s `requests.Session` is
@@ -590,12 +587,10 @@ class TuiController:
     ) -> MutationStatus:
         """Classify a plan before Apply -- pure.
 
-        `NO_MATCH` -- nothing actionable found. `NO_CHANGES` -- targets
-        found, already satisfied. `PREVIEW` -- at least one real
-        change. Refines the CLI's mapping for a TUI-only case: a
-        selection that entirely *disappeared* before the plan was
-        built (`matched > 0`, only `not_found` skips) is `NO_MATCH`,
-        not the misleading "already satisfied".
+        Refines the CLI's mapping for a TUI-only case: a selection that
+        entirely *disappeared* before the plan was built (`matched > 0`,
+        only `not_found` skips) is `NO_MATCH`, not the misleading
+        "already satisfied" (`NO_CHANGES`).
         """
         if plan.matched == 0:
             return MutationStatus.NO_MATCH

@@ -21,8 +21,7 @@ if TYPE_CHECKING:
 
 class DetailsScreen(ModalScreen[None]):
     """A wide modal Details view, opened by `enter` at every terminal
-    width -- the sole way to see a focused torrent's full detail, now
-    that the permanent side panel is gone.
+    width -- the sole way to see a focused torrent's full detail.
 
     Rebinds `c`/`e`/`r` here, delegating to `QbitOpsTuiApp`: a
     non-priority App binding is unreachable while a `ModalScreen` is on

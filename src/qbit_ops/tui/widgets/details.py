@@ -17,9 +17,7 @@ from qbit_ops.tui.state import TuiState
 
 
 class DetailsPanel(VerticalScroll):
-    """Safe details for the focused torrent: a centered identity/
-    progress header, a centered metric grid, a Trackers section, and a
-    contextual-actions footer.
+    """Safe details for the focused torrent.
 
     Only ever renders `TorrentSnapshot` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker

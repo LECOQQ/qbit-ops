@@ -400,15 +400,9 @@ _CUMULATIVE_UNITS: tuple[tuple[str, int], ...] = (
 def format_cumulative_duration(seconds: int) -> str:
     """Format a summed duration compactly, e.g. '429y 5mo'.
 
-    Reserved for totals, which no operator retypes: `156764d` names no
-    torrent and answers no question. Values a filter could accept keep
-    `format_duration` and its `d`/`h`/`m`/`s` vocabulary instead, so the
-    round-trip into `--seeded-for` is never broken.
-
-    `1y` is 365 days and `1mo` is 30 days by convention -- documented in
-    `docs/COMMANDS.md`, and deliberately not fed back into
-    `parse_duration`, which refuses calendar units precisely because
-    they have no fixed length.
+    Reserved for totals: a value nobody retypes, so it can use `y`/`mo`
+    units `format_duration` doesn't -- `1y` = 365 days, `1mo` = 30 days
+    by convention (see `docs/COMMANDS.md`).
     """
     remaining = max(seconds, 0)
     parts: list[str] = []
@@ -901,11 +895,9 @@ def torrent_snapshot_to_dict(
 ) -> dict[str, Any]:
     """Convert a `TorrentSnapshot` into a JSON/CSV/table-ready dict.
 
-    Applies the `(uncategorized)` display label -- the domain model
-    carries the raw category. `tracker_count` is `None` when no tracker
-    inspection ran, which is distinct from `0` (inspected, no active
-    tracker). `download_rate`/`upload_rate` (bytes/second) are
-    deliberately not added to the `table`/`csv` renderers -- only to
+    `tracker_count=None` means no tracker inspection ran, distinct from
+    `0` (inspected, no active tracker). `download_rate`/`upload_rate`
+    are dropped before the `table`/`csv` renderers, kept only in
     `json`/`jsonl`.
     """
     return {
@@ -932,12 +924,9 @@ def print_torrent_selection(
 
     JSON/JSONL always include a normalized `filters` representation
     (`qbit_core.shared.selection.torrent_filter_to_dict`) alongside the
-    usual `summary`/`torrents`.
-
-    `tracker_counts` being `None` means no tracker inspection ran: every
-    `tracker_count` renders as `null` and the `Trackers` column is
-    omitted entirely, because "not collected" is a property of the whole
-    listing rather than of any single row.
+    usual `summary`/`torrents`. `tracker_counts=None` means no tracker
+    inspection ran: every `tracker_count` renders as `null` and the
+    `Trackers` column is omitted entirely.
     """
     inspected = tracker_counts is not None
     torrents = [
@@ -1032,10 +1021,9 @@ def _format_optional_date(moment: datetime | None) -> str:
 def _format_seeding_time(library: LibraryStats) -> str:
     """Render the seeded total and its median on one line.
 
-    The two halves use different vocabularies on purpose: the median is
-    a value an operator retypes into `--seeded-for`, so it keeps the
-    parser-compatible units, while the total is retyped by nobody and
-    reads better in conventional ones.
+    The median uses `format_duration` (parser-compatible units, since
+    it's retyped into `--seeded-for`); the total uses
+    `format_cumulative_duration` (nobody retypes it).
     """
     median_seconds = library.seeding_time_median_seconds
     median_label = (
@@ -1203,11 +1191,9 @@ def render_tracker_inventory(
 ) -> None:
     """Render the `trackers list` inventory in the requested format.
 
-    Table output uses a fixed five-column set -- Tracker, Torrents,
-    Size, Uploaded, Ratio -- regardless of the detected terminal width;
-    it never adapts to `COLUMNS`. `--verbose` swaps in the full nine
-    columns instead. Machine formats (`json`, `jsonl`, `csv`) always
-    carry every measure and never depend on `verbose`.
+    Table output is fixed five/nine columns (nine with `--verbose`),
+    never adapting to terminal width; machine formats always carry
+    every measure.
 
     Never reads `report.overall_health`: tracker health does not drive
     this command's exit code.

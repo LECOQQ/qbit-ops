@@ -243,11 +243,9 @@ def _compute_overall_health(
 ) -> TrackerHealth:
     """Compute the report-level overall health.
 
-    UNAVAILABLE only when there were torrents to inspect and tracker
-    collection failed for every single one of them -- a total collection
-    failure, distinct from a partial one (which degrades to WARNING, see
-    below) or an empty selection (which is HEALTHY: there is nothing
-    wrong with an intentionally narrow filter that matches nothing).
+    UNAVAILABLE only when every matched torrent's tracker lookup failed
+    -- distinct from a partial failure (WARNING) or an empty selection
+    (HEALTHY: a narrow filter matching nothing is not itself a problem).
     """
     if matched_torrents > 0 and collection_errors == matched_torrents:
         return TrackerHealth.UNAVAILABLE

@@ -653,33 +653,13 @@ class QbitOpsTuiApp(App[None]):
     def _render_table(self) -> None:
         """Apply `state.visible` to the `#torrents` `DataTable`.
 
-        Three costs are kept independent so a periodic refresh, a
-        search keystroke, or a resize each pay only for what actually
-        changed:
-
-        - formatting (`_torrent_row_values`): only for a hash whose
-          `_last_row_sources` entry (the small tuple of raw fields that
-          actually feed formatting -- name/state/progress/rates/ratio/
-          category, focused, selected, and the shared bar/name-width/
-          search context) differs from last render. Reformatting is the
-          dominant cost of a refresh, so an unwatched torrent must never
-          be reformatted just because a handful of others changed.
-          Re-measure with `scripts/profile_tui_table.py`.
-        - column rebuild (`clear(columns=True)` + `add_column` x N):
-          only when `_last_table_signature` (columns, Name/Progress
-          widths, active sort) differs from last render -- covers
-          resize *within* the same responsive class doing nothing.
-        - row rebuild (`clear()` + `add_row` x N, columns preserved):
-          only when the ordered list of visible hashes differs from
-          last render -- covers filter/search/sort/snapshot membership
-          changes, never a mere refresh with the same visible set.
-        - cell diff (`update_cell` for changed cells only): the common
-          periodic-refresh case, same visible set in the same order --
-          only the (already known-changed) hashes' cells are compared
-          against `_last_row_values` and written if they actually
-          differ. Touching every cell unconditionally (measured in
-          `scripts/profile_tui_table.py`) costs *more* than a full row
-          rebuild, so an unchanged cell must never be re-written.
+        Formatting (`_last_row_sources`), column rebuild
+        (`_last_table_signature`), row rebuild (visible-hash order), and
+        per-cell diff (`_last_row_values`) are each gated
+        independently, so a resize or a search keystroke only pays for
+        what actually changed -- an unwatched torrent is never
+        reformatted, and an unchanged cell is never re-written.
+        Re-measure with `scripts/profile_tui_table.py`.
         """
         table = self.query_one("#torrents", DataTable)
         state = self.controller.state
@@ -810,15 +790,12 @@ class QbitOpsTuiApp(App[None]):
         """Update only the cells of rows whose source data actually
         changed, and only the cells whose formatted value differs.
 
-        `changed_hashes` already excludes every row whose
-        `_last_row_sources` entry matched -- a periodic refresh where
-        nothing changed calls this with an empty set, doing no work at
-        all. `_last_row_values` may be missing or stale for a hash
-        touched only by `_refresh_indicator_cell` (a bare focus/
-        selection move writes the cell directly, without updating this
-        cache) -- that self-heals here: the comparison below still
-        detects the (already-applied) difference and re-issues the
-        same value, a harmless no-op write, never a correctness issue.
+        `_last_row_values` may be missing or stale for a hash touched
+        only by `_refresh_indicator_cell`, which writes the cell
+        directly without updating this cache -- that self-heals here:
+        the comparison still detects the already-applied difference and
+        re-issues the same value, a harmless no-op, never a correctness
+        issue.
         """
         for torrent_hash in changed_hashes:
             values = new_values[torrent_hash]
@@ -837,11 +814,9 @@ class QbitOpsTuiApp(App[None]):
     def _refresh_indicator_cell(self, torrent_hash: str | None) -> None:
         """Update one row's focus/selection glyphs in place.
 
-        Used instead of a full `_render_table()` rebuild for a mere
-        cursor move or single-row selection toggle -- rebuilding every
-        cell for one changed row would not stay comfortable at ~1,100
-        torrents. A no-op if the row isn't currently in the table (e.g.
-        focus cleared, or the row was already filtered out).
+        Cheaper than a full `_render_table()` rebuild for a cursor move
+        or selection toggle. A no-op if the row isn't currently in the
+        table (e.g. focus cleared, or filtered out).
         """
         if torrent_hash is None:
             return
@@ -999,12 +974,11 @@ class QbitOpsTuiApp(App[None]):
     def _focus_torrent(self, torrent_hash: str) -> None:
         """Focus a torrent -- zero qBittorrent calls.
 
-        Tracker details are no longer fetched here: `begin_focus_change`
-        still bumps the detail-request generation (invalidating any
-        in-flight fetch for the previously focused torrent) and clears
-        the cached tracker details, but the fetch itself is only
-        dispatched when the Details modal opens or is explicitly
-        refreshed -- see `DetailsScreen.on_mount`/`action_refresh_details`.
+        `begin_focus_change` bumps the detail-request generation
+        (invalidating any in-flight fetch for the previous torrent) and
+        clears the cached tracker details; the fetch itself is
+        dispatched only when the Details modal opens or is refreshed --
+        see `DetailsScreen.on_mount`/`action_refresh_details`.
         """
         previous_hash = self.controller.state.focused_hash
         self.controller.begin_focus_change(torrent_hash)
@@ -1107,11 +1081,10 @@ class QbitOpsTuiApp(App[None]):
         """Apply search text live, as it's typed -- no I/O or debounce
         needed since `set_search` is pure in-memory filtering.
 
-        Unlike Filters' Apply/Clear/Cancel, the hidden-selection count
-        `set_search` returns is not surfaced as a notification: search
-        reconciles on every keystroke, and a toast per character would
-        be noise. The filter summary (re-rendered below) still
-        reflects it immediately.
+        The hidden-selection count `set_search` returns isn't surfaced
+        as a notification: search reconciles on every keystroke, and a
+        toast per character would be noise. The filter summary
+        (re-rendered below) still reflects it immediately.
         """
         self.controller.set_search(text)
         self._render_filter_summary()

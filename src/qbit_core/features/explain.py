@@ -240,12 +240,10 @@ def _summarize_torrent_tracker_health(
 ) -> tuple[TrackerHealth | None, str | None]:
     """Summarize a torrent's own tracker endpoints into one health value.
 
-    The verdict itself comes from `compute_torrent_tracker_health`, the
-    one path the `--tracker-health` filter also uses -- what this report
-    states and what that filter selects can therefore never diverge.
-    Only the limitation wording is decided here: it distinguishes
-    "collection failed" from "no endpoint reported", two facts the
-    verdict alone (`None` for both) cannot tell apart.
+    The verdict comes from `compute_torrent_tracker_health`, the same
+    path `--tracker-health` uses, so report and filter can never
+    diverge. Only the limitation wording -- "collection failed" vs "no
+    endpoint reported" -- is decided here.
     """
     if tracker_collection_failed:
         return None, "Tracker data could not be collected for this torrent."

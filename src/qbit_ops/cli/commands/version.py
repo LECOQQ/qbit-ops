@@ -16,13 +16,10 @@ from qbit_ops.config import ConfigError
 def _collect_version_report() -> VersionReport:
     """Collect the four versions, degrading remote ones to `None`.
 
-    Invalid configuration, connection and authentication failures are
-    expected unavailability here: they leave the local versions intact
-    and are reported as `null`/`unavailable` in the report itself, never
-    on stderr (same derogation as `doctor`, see
-    docs/ERRORS_AND_EXIT_CODES.md). Any other exception is an unexpected
-    programming error and propagates to `catch_internal_errors` rather
-    than being relabelled "unavailable".
+    Invalid configuration, connection and authentication failures
+    degrade silently (no stderr) to `null`/`unavailable` in the report
+    itself -- same derogation as `doctor`. Any other exception is an
+    unexpected error and propagates to `catch_internal_errors`.
     """
     try:
         client = error_boundary.create_qbit_client()

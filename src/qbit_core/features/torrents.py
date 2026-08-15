@@ -768,11 +768,10 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
 class HashActionStatus(StrEnum):
     """Per-torrent outcome of a hash-targeted bulk action.
 
-    `CHANGED`: needed the action, and the (unconfirmed -- no
-    per-torrent API feedback) call succeeded. `UNCHANGED`: already in
-    the requested state, no call made. `NOT_FOUND`: hash absent from
-    the snapshot. Never treat `UNCHANGED` as `CHANGED` -- both are
-    "successful" but only `CHANGED` means state actually moved.
+    `CHANGED` means the call succeeded but is unconfirmed -- no
+    per-torrent API feedback. Never treat `UNCHANGED` as `CHANGED`:
+    both are "successful", but only `CHANGED` means state actually
+    moved.
     """
 
     CHANGED = "changed"
@@ -964,8 +963,7 @@ def _call_bulk_torrent_action(
     Calls `torrents_start` directly for "resume"/"start": the installed
     qbittorrent-api aliases `torrents_resume = torrents_start`, so the
     method is never absent on a real client (verified in
-    `tests/test_qbit_library_http_boundary.py`). `delete_files` is only
-    read for `action="delete"`.
+    `tests/test_qbit_library_http_boundary.py`).
     """
     if action == "pause":
         client.torrents_pause(torrent_hashes)
@@ -1009,13 +1007,12 @@ def _build_torrent_details(
     """Build a detailed torrent report from already-fetched trackers.
 
     Takes the raw tracker payload rather than a client so one
-    `torrents_trackers()` call can serve both the tracker selection
-    decision and the report -- and so the two can never disagree.
+    `torrents_trackers()` call serves both the selection decision and
+    the report -- the two can never disagree.
 
     Uses `get_safe_tracker_details`, not `_get_tracker_details`: this
     feeds `torrents inspect`, an ordinary read command, so trackers must
-    be secret-free. Raw announce URLs are only ever returned by
-    `list_torrents_with_trackers`, for the sensitive `backup export`.
+    be secret-free.
     """
     trackers = get_safe_tracker_details(raw_trackers)
     active_tracker_count = sum(1 for tracker in trackers if tracker["enabled"])
@@ -1047,11 +1044,9 @@ def inspect_filtered_torrents(
     secret-free per-torrent shape -- `get_safe_tracker_details`, never
     the raw announce URLs `backup export` legitimately carries.
 
-    Selection is delegated to exactly the same steps `torrents list`
-    and every mutation use: `matches_cheap_filters`, then
-    `_matches_tracker_hosts` and `matches_tracker_health` over the
-    inspected trackers. Reproducing any of them here would let the same
-    selector target different torrents depending on the command
+    Selection reuses exactly the same steps `torrents list` and every
+    mutation use, never reimplemented here -- otherwise the same
+    selector could target different torrents depending on the command
     consuming it.
 
     Costs one `torrents_info()` plus one `torrents_trackers()` per
@@ -1121,10 +1116,6 @@ def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
     `list_torrents_with_trackers` (the `backup export` artifact), never
     for an ordinary command's rendered output. Use
     `get_safe_tracker_details` for anything user-facing.
-
-    Pseudo-trackers are excluded, like everywhere else: they are
-    peer-discovery mechanisms, cannot be restored, and are reported
-    separately under `peer_discovery`.
     """
     tracker_details: list[dict[str, Any]] = []
 

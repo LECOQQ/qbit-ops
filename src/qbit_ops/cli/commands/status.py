@@ -93,9 +93,7 @@ def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
     Local invalid configuration is checked once, before the loop
     starts, and terminates immediately; temporary remote failures
     discovered *during* the loop instead produce an `unavailable`
-    snapshot each time and the loop keeps retrying. A clean `Ctrl+C`
-    exits `0`; an unexpected fatal error exits `ExitCode.ERROR` with a
-    clear message instead of a raw traceback.
+    snapshot each time and the loop keeps retrying.
     """
     try:
         config = error_boundary.load_qbit_config()

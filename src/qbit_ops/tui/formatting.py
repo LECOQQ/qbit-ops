@@ -1,10 +1,8 @@
 """Pure, presentation-only helpers shared by `qbit_ops.tui` widgets/modals.
 
-Every function here takes already-safe structured domain data
-(`TuiState`, `TorrentSnapshot`, `BulkTorrentActionPlan`,
-`MutationUiResult`, `ExplanationReport`/`Evidence`) and renders it as a
-string/`Text` -- never a qBittorrent call, never a widget mount, never
-a mutation.
+Every function here takes already-safe structured domain data and
+renders it as a string/`Text` -- never a qBittorrent call, never a
+widget mount, never a mutation.
 """
 
 from __future__ import annotations
@@ -138,12 +136,10 @@ def _format_global_rate(download_rate: int, upload_rate: int) -> Text:
     """Render the top-right global transfer-rate indicator.
 
     Per-direction colour, not one shared style: an active direction
-    (rate > 0) is the brand accent, an inactive one the restrained
-    blue also used for the inactive workspace tab -- both orange when
-    both directions are active falls directly out of that rule, no
-    special-cased "both" branch needed. Reuses `TuiState.status.rates`,
-    the same data the Overview rail already displays -- never a second
-    qBittorrent call.
+    (rate > 0) gets the brand accent, an inactive one the restrained
+    blue -- both orange when both are active falls directly out of that
+    rule, no special-cased "both" branch needed. Reuses
+    `TuiState.status.rates`, never a second qBittorrent call.
     """
     text = Text()
     down_color = _BRAND_ACCENT if download_rate > 0 else _INACTIVE_TAB_ACCENT
@@ -403,12 +399,10 @@ def _name_column_width(
     *DataTable's own* content width (`app_width` minus the outer
     AppFrame border, minus the table's own titled-region border) after
     every other visible column's own rendered width (declared width
-    plus `DataTable`'s padding on both sides). The table is the sole
-    occupant of the Torrents workspace's body now that the permanent
-    Details side panel is gone.
+    plus `DataTable`'s padding on both sides).
 
-    "No horizontal scrolling, ever" (see module-level design notes)
-    outranks the ~24-30 target minimum: at the Wide tier's own lower
+    "No horizontal scrolling, ever" outranks the ~24-30 target
+    minimum: at the Wide tier's own lower
     edge, every fixed column plus a comfortable `Name` can very
     narrowly exceed the available width, so `_NAME_MIN_WIDTH` is only
     a *target* -- honoured whenever the budget allows it, never forced
@@ -643,9 +637,8 @@ _TRACKER_LINE_GAP = "   "
 
 def _format_details_tracker_line(endpoint: dict[str, Any]) -> str:
     """Render one safe, structural tracker endpoint as one line, its
-    identity and health kept close together (a fixed gap, not padded
-    out to a shared column width across every row) -- an optional
-    sanitized message follows on its own indented line, only if useful.
+    identity and health kept close together -- an optional sanitized
+    message follows on its own indented line, only if useful.
 
     Never a raw URL, path, query value, userinfo, or passkey.
     `DISABLED` mechanisms (DHT/PeX/LSD) render muted, not as an error.
