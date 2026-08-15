@@ -361,7 +361,7 @@ def test_hash_all_and_any_filter_all_count_as_selectors(
     assert request_.has_selector
 
 
-# --- validation (docs/SELECTION.md section E) -------------------------------
+# --- validation -----------------------------------------------------------
 
 
 @pytest.mark.parametrize(

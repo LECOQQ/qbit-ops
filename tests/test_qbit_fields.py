@@ -272,7 +272,7 @@ def test_get_active_tracker_urls_excludes_working_pseudo_trackers() -> None:
 # The coercing family (`get_field_as_*`) and this one answer different
 # questions on purpose. A bounded predicate that read a missing `size`
 # as `0` would silently satisfy `--size-max` and widen a destructive
-# selection -- see docs/SELECTION.md, decision M1.
+# selection.
 
 
 @pytest.mark.parametrize(
