@@ -176,3 +176,54 @@ def test_a_missing_root_is_a_setup_error_not_a_finding(
 ) -> None:
     assert cdl.main(["--root", str(tmp_path / "absent")]) == 2
     assert "ERROR" in capsys.readouterr().err
+
+
+# --- Python prose ---------------------------------------------------------
+
+
+def test_a_dead_reference_in_a_docstring_is_caught(repo: Path) -> None:
+    """The defect this extension exists for: a documentation pass renames
+    a file, and the code still cites the old name."""
+    _write(repo, "src/mod.py", '"""See docs/GONE.md for the rules."""\n')
+
+    findings = cdl.check(repo)
+
+    assert [f.target for f in findings] == ["docs/GONE.md"]
+
+
+def test_a_dead_reference_in_a_comment_is_caught(repo: Path) -> None:
+    _write(repo, "src/mod.py", "# see `docs/GONE.md`\nx = 1\n")
+
+    assert [f.target for f in cdl.check(repo)] == ["docs/GONE.md"]
+
+
+def test_a_resolving_reference_in_prose_passes(repo: Path) -> None:
+    _write(repo, "src/mod.py", '"""See docs/REAL.md and `src/module.py`."""\n')
+
+    assert cdl.check(repo) == []
+
+
+def test_code_is_not_prose(repo: Path) -> None:
+    """A path inside a string literal is data, not a claim about the
+    repository -- judging it would break any module that builds paths."""
+    _write(repo, "src/mod.py", 'TARGET = "docs/GONE.md"\n')
+
+    assert cdl.check(repo) == []
+
+
+def test_the_python_directive_exempts_the_next_line(repo: Path) -> None:
+    _write(
+        repo,
+        "src/mod.py",
+        "# doc-links: ignore-next-line\n# see docs/GONE.md\nx = 1\n",
+    )
+
+    assert cdl.check(repo) == []
+
+
+def test_a_file_that_does_not_parse_is_skipped_rather_than_crashing(
+    repo: Path,
+) -> None:
+    _write(repo, "src/broken.py", "def (\n")
+
+    cdl.check(repo)
