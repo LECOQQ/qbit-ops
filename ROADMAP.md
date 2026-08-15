@@ -9,11 +9,11 @@
 
 > Find anything. Understand what is happening.
 
-- Deterministic search
-- Shared filters and search across CLI and TUI
-- Trackers inventory
-- Library statistics
-- Per-tracker statistics
+- Deterministic search ✅
+- Shared filters and search across CLI and TUI ✅
+- Trackers inventory ✅
+- Library statistics ✅
+- Per-tracker statistics ✅
 - Detection of tracker errors and torrents that are no longer seeding
 - Enriched `doctor` and `explain`
 
