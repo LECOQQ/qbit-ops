@@ -88,18 +88,25 @@ def test_the_install_passes_the_cleaned_environment_to_poetry(
     def fake_run(argv: list[str], **kwargs: Any) -> Any:
         seen["argv"] = argv
         seen["env"] = kwargs.get("env")
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        # `rev-parse` probes whether the branch already exists and
+        # `ls-files` whether an entry is tracked: both must answer "no"
+        # for `create` to reach the install step at all.
+        absent = argv[1] in {"rev-parse", "ls-files"}
+        if argv[0] == "git" and argv[1] == "worktree":
+            (repo / ".worktrees" / "probe").mkdir(parents=True)
+        return subprocess.CompletedProcess(argv, 1 if absent else 0, "", "")
 
     monkeypatch.setattr(wn.subprocess, "run", fake_run)
     monkeypatch.setattr(wn, "verify_isolation", lambda _worktree: {})
-    # `create` shells out to git through the same patched `run`, so drive
-    # the install step directly rather than re-faking the whole setup.
-    worktree = repo / ".worktrees" / "probe"
-    worktree.mkdir(parents=True)
-    wn.subprocess.run(
-        ["poetry", "install"], cwd=worktree, env=wn._clean_env(), check=False
-    )
 
+    wn.create(repo, "probe", base="main", install=True)
+
+    assert seen["argv"][:2] == ["poetry", "install"]
+    assert seen["env"] is not None, (
+        "`poetry install` ran with the inherited environment. It then "
+        "installs the worktree's `src/` into the main checkout's venv and "
+        "reports success."
+    )
     assert "VIRTUAL_ENV" not in seen["env"]
 
 

@@ -245,6 +245,11 @@ def create(
         installed = subprocess.run(
             ["poetry", "install", "--extras", "tui", "--no-interaction"],
             cwd=worktree,
+            # Without `_clean_env()` this call inherits `VIRTUAL_ENV` and
+            # installs the worktree's `src/` into the *main* checkout's
+            # venv, reporting success. This is the one site where the
+            # cleaned environment is load-bearing.
+            env=_clean_env(),
             check=False,
         )
         if installed.returncode != 0:
