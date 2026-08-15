@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import check_commit_provenance as provenance
 import env_attest
 import pytest
 import worktree_clean as wc
@@ -293,7 +294,7 @@ def test_an_unmerged_branch_is_refused_and_nothing_is_removed(
     _git(worktree, "add", "new.txt")
     _git(worktree, "commit", "-qm", "work")
 
-    with pytest.raises(wc.WorktreeError, match="not fully merged"):
+    with pytest.raises(wc.WorktreeError, match="neither an ancestor"):
         wc.clean(repo, "version", base="main", keep_branch=False)
 
     assert worktree.is_dir()
@@ -389,3 +390,115 @@ def test_verification_refuses_to_provision_a_missing_virtualenv(
 
     with pytest.raises(wn.WorktreeError, match="installed the project"):
         wn.verify_isolation(worktree)
+
+
+# --- integration proofs -------------------------------------------------
+
+
+def _commit(repo: Path, name: str, content: str, message: str) -> None:
+    (repo / name).write_text(content, encoding="utf-8")
+    _git(repo, "add", name)
+    _git(repo, "commit", "-qm", message)
+
+
+def test_a_squashed_branch_is_proven_by_content_not_by_ancestry(
+    repo: Path,
+) -> None:
+    """After a squash the branch is deliberately not an ancestor."""
+    _git(repo, "checkout", "-qb", "feat/x")
+    _commit(repo, "a.txt", "a\n", "feat: a")
+    _commit(repo, "b.txt", "b\n", "feat: b")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--squash", "-q", "feat/x")
+    _git(repo, "commit", "-qm", "feat: delivered")
+
+    assert not wc._is_merged(repo, "feat/x", "main")
+
+    equivalent, branch_tree, base_tree = wc.squash_equivalence(
+        repo, "feat/x", "main"
+    )
+    assert equivalent
+    assert branch_tree == base_tree
+
+
+def test_a_foreign_change_breaks_the_equivalence_proof(repo: Path) -> None:
+    _git(repo, "checkout", "-qb", "feat/x")
+    _commit(repo, "a.txt", "a\n", "feat: a")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--squash", "-q", "feat/x")
+    _git(repo, "commit", "-qm", "feat: delivered")
+    _commit(repo, "stray.txt", "stray\n", "chore: stray")
+
+    equivalent, branch_tree, base_tree = wc.squash_equivalence(
+        repo, "feat/x", "main"
+    )
+    assert not equivalent
+    assert branch_tree != base_tree
+
+
+def test_a_lost_change_breaks_the_equivalence_proof(repo: Path) -> None:
+    """A squash that drops an approved change must not pass."""
+    _git(repo, "checkout", "-qb", "feat/x")
+    _commit(repo, "a.txt", "a\n", "feat: a")
+    _commit(repo, "b.txt", "b\n", "feat: b")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "--squash", "-q", "feat/x")
+    (repo / "b.txt").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "feat: delivered without b")
+
+    equivalent, _, _ = wc.squash_equivalence(repo, "feat/x", "main")
+    assert not equivalent
+
+
+def test_an_unintegrated_branch_is_refused_by_both_proofs(repo: Path) -> None:
+    _git(repo, "checkout", "-qb", "feat/x")
+    _commit(repo, "a.txt", "a\n", "feat: a")
+    _git(repo, "checkout", "-q", "main")
+
+    assert not wc._is_merged(repo, "feat/x", "main")
+    assert not wc.squash_equivalence(repo, "feat/x", "main")[0]
+
+
+# --- commit provenance --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "trailer",
+    [
+        "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+        "co-authored-by: claude <x@y.z>",
+        "  Co-Authored-By: Anthropic <a@b.c>",
+        "Co-Authored-By: GitHub Copilot <c@d.e>",
+    ],
+)
+def test_an_agent_co_author_is_refused(trailer: str) -> None:
+    message = f"feat(x): do something\n\nbody here\n\n{trailer}\n"
+
+    assert provenance.offending_lines(message) == [trailer.strip()]
+
+
+def test_a_human_co_author_stays_legitimate() -> None:
+    message = (
+        "feat(x): do something\n\nCo-Authored-By: Quentin <q@example.test>\n"
+    )
+
+    assert provenance.offending_lines(message) == []
+
+
+def test_a_clean_message_passes() -> None:
+    assert provenance.offending_lines("fix(y): repair the thing\n") == []
+
+
+def test_the_commit_msg_hook_refuses_and_names_the_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text(
+        "feat(x): thing\n\nCo-Authored-By: Claude <n@a.c>\n", encoding="utf-8"
+    )
+
+    exit_code = provenance.main(["--commit-msg-file", str(message)])
+
+    assert exit_code == 1
+    assert "Co-Authored-By: Claude" in capsys.readouterr().err
