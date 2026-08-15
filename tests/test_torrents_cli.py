@@ -597,25 +597,33 @@ def test_delete_does_not_expose_yes_low_risk_style_help() -> None:
     assert "--with-data" in result.stdout
 
 
-def test_inspect_name_search_remains_functional(
+def test_inspect_rejects_the_removed_name_option(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    configure_qbit_backend(
-        client=FakeQbitClient(
-            torrents=[make_torrent(hash=UNIQUE_HASH, name="Debian ISO")],
-        ),
-    )
+    """`--name` is gone (S8, `.agents/specs/search.md`'s breaking-change
+    table): the fuzzy search now lives at `torrents search`, a
+    read-only, ranked cul-de-sac, never a selector for `inspect`."""
+    configure_qbit_backend(client=FakeQbitClient(torrents=[]))
+
+    result = runner.invoke(app, ["torrents", "inspect", "--name", "debian"])
+
+    assert result.exit_code != ExitCode.SUCCESS
+    assert "no such option" in result.stdout.lower() + result.stderr.lower()
+
+
+def test_inspect_rejects_the_removed_limit_option(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    configure_qbit_backend(client=FakeQbitClient(torrents=[]))
 
     result = runner.invoke(
-        app,
-        ["torrents", "inspect", "--name", "debian"],
-        env={"COLUMNS": "200"},
+        app, ["torrents", "inspect", "--hash", "abc123", "--limit", "5"]
     )
 
-    assert result.exit_code == ExitCode.SUCCESS
-    assert "Debian ISO" in result.stdout
-    assert UNIQUE_HASH in _collapse_whitespace(result.stdout)
+    assert result.exit_code != ExitCode.SUCCESS
+    assert "no such option" in result.stdout.lower() + result.stderr.lower()
 
 
 def test_inspect_separates_peer_discovery_from_trackers(

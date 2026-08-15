@@ -84,6 +84,7 @@ from qbit_core.features.version import (
     version_report_to_json_dict,
 )
 from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.search import SearchHit, SearchMode, SearchResults
 from qbit_core.shared.selection import (
     ResolvedTorrent,
     Selection,
@@ -1443,52 +1444,135 @@ def print_filtered_torrent_inspection(
     print_summary(report["summary"])
 
 
-def print_torrent_name_search(
-    report: dict[str, Any],
-    output_format: OutputFormat,
-) -> None:
-    """Print torrent name search results.
+SEARCH_CSV_FIELDNAMES = [
+    "hash",
+    "name",
+    "match",
+    "state",
+    "category",
+    "size",
+    "progress",
+    "ratio",
+]
 
-    `--format csv` is intentionally not offered here: this helper also
-    renders `torrents inspect --hash`'s single-torrent result elsewhere
-    (nested tracker details, no stable tabular shape), and `torrents
-    inspect` uses one format-support rule for both modes -- see
-    `qbit_ops.cli.validation.FORMAT_SUPPORT["torrents_inspect"]`.
-    `validate_format_support` already rejected `csv` before any API
-    call was made.
+
+def _search_match_to_dict(hit: SearchHit) -> dict[str, Any]:
+    """Build one `torrents search` `matches[]` entry.
+
+    Deliberately not `torrent_snapshot_to_dict`: that one also emits
+    `tracker_count`/`download_rate`/`upload_rate`, none of which are
+    part of this contract (see `.agents/specs/search.md`). `match` is
+    the ladder tier name; no numeric score is ever exposed here --
+    `similarity` only reaches the table, and only under `--verbose`.
     """
+    torrent = hit.torrent
+    return {
+        "hash": torrent.hash,
+        "name": torrent.name,
+        "match": hit.tier,
+        "state": torrent.state,
+        "category": format_category_label(torrent.category),
+        "size": torrent.size,
+        "progress": torrent.progress,
+        "ratio": torrent.ratio,
+    }
+
+
+def print_search_results(
+    results: SearchResults,
+    output_format: OutputFormat,
+    *,
+    mode: SearchMode,
+    limit: int,
+    verbose: bool,
+) -> None:
+    """Print `torrents search` results -- a ranked list, never a selector.
+
+    `summary` (`matched`/`returned`/`truncated`) only exists in
+    `json`/`jsonl` and the table's footer, never in `csv`, which carries
+    only `matches[]` rows like every other `csv` in the repo. The
+    per-hit similarity score is table-only, and only under `--verbose`
+    -- `match` (the tier name) is the one stable public signal, in
+    every format.
+    """
+    matches = [_search_match_to_dict(hit) for hit in results.hits]
+    summary = {
+        "scanned": results.scanned,
+        "matched": results.matched,
+        "returned": len(results.hits),
+        "limit": limit,
+        "truncated": results.truncated,
+    }
+    payload = {
+        "query": results.query,
+        "normalized_query": results.normalized_query,
+        "mode": mode,
+        "summary": summary,
+        "matches": matches,
+    }
+
     if output_format == OutputFormat.json:
-        print_json_output(report)
+        print_json_output(payload)
         return
 
     if output_format == OutputFormat.jsonl:
-        print_jsonl_output(report)
+        print_jsonl_output(payload)
         return
 
-    summary = report["summary"]
-    typer.echo(f"Name search: {report['query']!r}")
-    print_summary({"matched": summary["matched"], "limit": summary["limit"]})
-
-    if not report["matches"]:
-        typer.echo("No matching torrents found.")
-        return
-
-    print_table(
-        "Matches",
-        ["Name", "Hash", "Score", "State", "Progress", "Ratio"],
-        [
+    if output_format == OutputFormat.csv:
+        print_csv_rows(
+            SEARCH_CSV_FIELDNAMES,
             [
+                (
+                    match["hash"],
+                    match["name"],
+                    match["match"],
+                    match["state"],
+                    match["category"],
+                    str(match["size"]),
+                    str(match["progress"]),
+                    str(match["ratio"]),
+                )
+                for match in matches
+            ],
+        )
+        return
+
+    if not matches:
+        typer.echo("No matching torrents found.")
+    else:
+        columns = [
+            "Name",
+            "Hash",
+            "Match",
+            "State",
+            "Category",
+            "Progress",
+            "Ratio",
+        ]
+        if verbose:
+            columns.append("Similarity")
+
+        rows: list[list[str]] = []
+        for hit, match in zip(results.hits, matches, strict=True):
+            row = [
                 match["name"],
                 match["hash"],
-                f"{match['match_score']:.2f}",
+                match["match"],
                 match["state"],
+                match["category"],
                 _format_percentage(match["progress"]),
                 f"{match['ratio']:.2f}",
             ]
-            for match in report["matches"]
-        ],
-        fold_columns={"Hash"},
-    )
+            if verbose:
+                row.append(
+                    "" if hit.similarity is None else f"{hit.similarity:.2f}"
+                )
+            rows.append(row)
+
+        print_table("Matches", columns, rows, fold_columns={"Hash"})
+
+    print_summary(summary)
 
 
 def print_backup_diff(report: dict[str, Any]) -> None:

@@ -26,6 +26,7 @@ qbit-ops
 │   ├── stats
 │   ├── categories
 │   ├── inspect
+│   ├── search
 │   ├── pause
 │   ├── resume
 │   ├── start
@@ -89,6 +90,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `torrents stats` | ✅ | ✅ | ✅ | ✅ |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ |
 | `torrents inspect` | ✅ | ✅ | ✅ | -- |
+| `torrents search` | ✅ | ✅ | ✅ | ✅ |
 | `torrents import` | ✅ | ✅ | -- | -- |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ |
 | `trackers status` | ✅ | ✅ | ✅ | ✅ |
@@ -278,10 +280,10 @@ are both answered from that single pass, never from two.
 ### Where the filters work
 
 Everywhere a command acts on a set of torrents: `torrents list`,
-`torrents stats`, `torrents inspect`, `trackers list`,
-`trackers status`, the five bulk mutations (`pause`, `resume`, `start`,
-`reannounce`, `delete`), and the four tracker operations
-(`add-if-present`, `remove`, `replace`, `replace-passkey`).
+`torrents stats`, `torrents inspect`, `torrents search`,
+`trackers list`, `trackers status`, the five bulk mutations (`pause`,
+`resume`, `start`, `reannounce`, `delete`), and the four tracker
+operations (`add-if-present`, `remove`, `replace`, `replace-passkey`).
 
 `--tracker-health` is the one exception to "everywhere": it is offered
 on `torrents list`, `torrents stats`, `trackers list` and the five bulk
@@ -289,7 +291,11 @@ mutations. The four tracker operations do not take it -- selecting
 torrents by the health of their trackers in order to act on those same
 trackers would be circular. `torrents inspect` does not offer it either:
 the filter is honoured if something sets it, but no flag exposes it
-there yet.
+there yet. `torrents search` is a third, different case: `--tracker`,
+`--exclude-tracker` and `--tracker-health` are all three declared
+options there, but every one of them is **refused** before any
+qBittorrent call rather than applied -- see "Finding a torrent by
+name" above.
 
 The same filters always select the same torrents, whichever command
 consumes them -- listing, inspecting or mutating.
@@ -328,6 +334,105 @@ They are still reported, separately: `torrents inspect` and
 `backup export` carry a `peer_discovery` field listing each mechanism
 and whether it is enabled, and the TUI details pane shows them on their
 own line.
+
+## 🔎 Finding a torrent by name
+
+**A filter is an option; `torrents search` is a command.** `--name-contains`
+and `--name-regex` are deterministic substring/regex predicates -- exact,
+composable, safe to feed a mutation. `torrents search` is the opposite:
+tolerant of case, accents, punctuation, word order and (in the default
+mode) typos, and **never** a selector. It returns a ranked list and stops
+there -- there is no `--search` option anywhere, and no way to turn a
+search result into a target. Copy the hash you want and pass it to the
+command that acts on it:
+
+```bash
+qbit-ops torrents search "amour est dnas le pre"   # discover -> a hash
+qbit-ops torrents pause --hash 3f2a1b               # target -> mutate
+```
+
+That hand-off is a deliberate human checkpoint, not friction to remove.
+
+```bash
+qbit-ops torrents search ubuntu
+qbit-ops torrents search "amour est dnas le pre"          # typo-tolerant
+qbit-ops torrents search debian --mode contains --limit 5
+qbit-ops torrents search sonarr --category tv --format json
+qbit-ops torrents search dead --verbose                    # show similarity
+```
+
+### Modes
+
+One ordinal dial, each step a superset of the last -- raising the mode
+only ever **adds** results, it never removes or reorders one:
+
+| `--mode` | Adds | Use it for |
+| --- | --- | --- |
+| `exact` | the literal name (punctuation-insensitive) | you know the exact title |
+| `contains` | + substring | the tolerant equivalent of `--name-contains` |
+| `tokens` | + words in any order, partial words | most searches |
+| `fuzzy` (default) | + typo tolerance | "I know roughly how it's spelled" |
+
+Every match reports which tier found it (`hash`, `exact`, `prefix`,
+`substring`, `all_tokens`, `token_prefix`, `fuzzy`) in `json`/`jsonl`/`csv`
+as `match` -- a stable name, never a numeric score. The one numeric
+signal, `similarity` (`fuzzy` matches only), is table-only and only
+under `--verbose`: a `0.83` invites a hard-coded threshold downstream,
+a tier name doesn't.
+
+### Filters narrow the corpus; they never widen it
+
+`torrents search` accepts the same composable filters as `torrents list`
+(see "Selecting torrents" above), applied *before* ranking -- searching
+a smaller corpus, never re-ranking a smaller one. `--tracker`,
+`--exclude-tracker` and `--tracker-health` are the one exception: they
+need a per-torrent tracker lookup, and `search` is bounded to exactly
+one `torrents_info()` call regardless of library size, so they are
+refused with a message pointing at `torrents list`.
+
+### What "tolerant" does not mean
+
+Some structure is deliberately **not** understood, so an unexpected match
+never surprises you silently:
+
+- `S01E02` is one token, not a season/episode pair -- `1x02` does not match it.
+- Years, resolutions (`1080p`) and release-group tags are ordinary tokens
+  with no special weight.
+- Roman numerals never match arabic digits: `Part II` != `Part 2`.
+- No stemming, lemmatization, synonyms, or stop words: `Movies` != `Movie`.
+- No transliteration beyond Unicode NFKD decomposition: `Война` != `Voyna`,
+  though accents and diacritics (`café` == `cafe`) are folded.
+- No language or release-group table: `VF` != `FRENCH`.
+
+### A hash prefix needs 8 characters here
+
+A query that looks like a hex hash prefix only triggers a hash match at 8
+characters or more in the CLI (an anti-noise floor -- `1080` must never
+match torrents by hash). The TUI's live `/` search uses a 1-character
+floor instead, since it never turns a match into a mutation target.
+
+### Machine output
+
+```json
+{
+  "query": "amour est dnas le pre",
+  "normalized_query": "amour est dnas le pre",
+  "mode": "fuzzy",
+  "summary": {"scanned": 1105, "matched": 3, "returned": 3,
+              "limit": 20, "truncated": false},
+  "matches": [
+    {"hash": "3f2a1b...", "name": "...", "match": "fuzzy",
+     "state": "stalledUP", "category": "sonarr", "size": 2254857830,
+     "progress": 1.0, "ratio": 3.42}
+  ]
+}
+```
+
+`matched` counts every match **before** `--limit` truncates the list;
+`returned` is how many are actually in `matches`; `truncated` is
+`matched > returned`. `csv` carries only the `matches` rows, like every
+other `csv` in the repo -- `summary` exists in `json`/`jsonl` and in the
+table's footer.
 
 ## 🛰️ What each tracker weighs
 

@@ -40,6 +40,7 @@ from qbit_core.features.torrents import (
 from qbit_core.features.trackers import sanitize_tracker_text
 from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.execution import MutationStatus
+from qbit_core.shared.search import search_snapshots
 from qbit_core.shared.selection import (
     Selection,
     TorrentFilter,
@@ -495,14 +496,18 @@ class TuiController:
         self._reconcile_focus()
 
     def set_search(self, text: str) -> int:
-        """Apply read-only search text against name and hash.
+        """Apply the shared search engine's `tokens` ladder (tiers 0-5).
 
-        Matches a case-insensitive name substring OR a hash prefix.
+        `hash_min_length=1`, `limit=0` -- see `.agents/specs/search.md`.
         Zero API calls; a no-longer-matching focus is cleared. Returns
         the number of selected hashes hidden and dropped. Unlike
         `set_filters()`, reconciles the selection live on every
-        keystroke: a substring match only ever narrows while typing
-        forward, so `set_filters()`'s transient-wipe risk doesn't apply.
+        keystroke: the invariant holds because *every* active tier is
+        monotonic under a forward-typed prefix -- tier 0 (hash) included,
+        at threshold 1 -- so `set_filters()`'s transient-wipe risk
+        doesn't apply. An empty search skips the engine entirely (see
+        `_recompute_visible`): it must show the whole corpus, not the
+        empty result the engine itself would return for a blank query.
         """
         self.state.search = text
         self._recompute_visible()
@@ -848,16 +853,25 @@ class TuiController:
             self._raw_torrents, self.state.filters
         )
         if self.state.search:
-            needle = self.state.search.casefold()
-            matched = tuple(
-                torrent
-                for torrent in filtered.matched
-                if needle in torrent.name.casefold()
-                or torrent.hash.casefold().startswith(needle)
+            # The moment a query normalizes to blank, the engine itself
+            # returns zero hits (correct in the CLI, where that case is
+            # refused before any API call) -- so this branch is gated on
+            # the raw text, not called unconditionally and trusted to
+            # degrade gracefully. See `set_search`'s docstring.
+            results = search_snapshots(
+                filtered.matched,
+                self.state.search,
+                mode="tokens",
+                hash_min_length=1,
+                limit=0,
             )
+            matched = tuple(hit.torrent for hit in results.hits)
         else:
             matched = filtered.matched
 
+        # The search engine's own ranking never reaches the table: the
+        # operator's chosen sort always wins, applied here regardless of
+        # where `matched` came from.
         matched = _sort_torrents(matched, self.state.sort)
         self.state.visible = replace(filtered, matched=matched)
 

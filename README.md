@@ -136,6 +136,17 @@ Size, transfer and seeding time over exactly the torrents you filter
 for. How qBittorrent's all-time counters are handled is in
 [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
+**Find a torrent without remembering its exact name.**
+
+```bash
+qbit-ops torrents search "amour est dnas le pre"   # typos, accents, word order
+qbit-ops torrents pause --hash 3f2a1b               # copy the hash, then act
+```
+
+Ranked, tolerant, and read-only by construction: a search result is
+never a mutation target. `--name-contains`/`--name-regex` stay the
+exact, deterministic option for that.
+
 **Unstick a queue that stopped moving.**
 
 ```bash

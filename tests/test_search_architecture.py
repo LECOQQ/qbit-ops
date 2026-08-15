@@ -225,20 +225,19 @@ def test_mutating_torrents_command_discovery_is_non_vacuous() -> None:
 def test_search_torrents_actually_calls_a_search_function() -> None:
     """Non-vacuity companion (b): proves the `search_*`-call detection
     the test above relies on actually fires on real code, not only on
-    a name that happens never to occur. The contract's own prose points
-    this companion at the CLI `search` command (`torrents search`,
-    S6) -- out of scope for this run (see `.agents/specs/search.md`'s
-    `S1 -> S5` boundary). `features.torrents.search_torrents` (S5) is
-    the closest real anchor available: it is the one production
-    function whose body actually contains a `search_*` call
-    (`search_snapshots`), so it is what this run uses to demonstrate
-    the pattern is not vacuous. Re-anchor on the CLI command once S6
-    lands.
+    a name that happens never to occur.
+
+    Re-anchored on the CLI `search` command (`torrents search`, S6) now
+    that it exists -- the contract's own prose asked for this once S6
+    landed. `test_mutating_torrents_commands_never_call_a_search_function`
+    scans exactly this file for the mutating commands; this proves the
+    same `_search_call_names` detector actually fires on a real command
+    in it, not only on a name that happens never to occur there.
     """
-    tree = ast.parse(FEATURES_TORRENTS_FILE.read_text(encoding="utf-8"))
+    tree = ast.parse(TORRENTS_COMMANDS_FILE.read_text(encoding="utf-8"))
     functions = _function_defs_by_name(tree)
-    calls = _search_call_names(functions["search_torrents"])
-    assert "search_snapshots" in calls
+    calls = _search_call_names(functions["search_qbit_torrents"])
+    assert "search_torrents" in calls
 
 
 def _called_function_names(func: ast.FunctionDef) -> set[str]:

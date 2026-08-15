@@ -70,7 +70,7 @@ READ_ONLY_ARGV: list[list[str]] = [
     ["torrents", "stats", "--tracker", TRACKER_URL],
     ["torrents", "categories"],
     ["torrents", "inspect", "--hash", "abc123"],
-    ["torrents", "inspect", "--name", "T1"],
+    ["torrents", "search", "T1"],
     ["trackers", "list"],
     ["trackers", "status"],
     ["trackers", "status", "--category", "movies"],
