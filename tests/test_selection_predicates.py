@@ -426,7 +426,7 @@ def test_an_empty_filter_matches_everything() -> None:
 # --- inactivity -------------------------------------------------------------
 #
 # `last_activity` semantics were observed on real containers (qBittorrent
-# 4.6.7 and 5.2.3, see docs/SELECTION.md): it is the timestamp of the
+# 4.6.7 and 5.2.3): it is the timestamp of the
 # last byte transferred, it equals `added_on` while nothing has ever
 # transferred, and it does not move on announce, on a state change, or
 # with the passage of time.
@@ -486,7 +486,7 @@ def test_an_unknown_last_activity_never_matches_an_inactivity_bound() -> None:
 # --- completion date --------------------------------------------------------
 #
 # `completion_on` is `-1` for a torrent that never finished downloading,
-# observed on qBittorrent 4.6.7 and 5.2.3 (see docs/SELECTION.md). That
+# observed on qBittorrent 4.6.7 and 5.2.3. That
 # sentinel is what makes this filter safe to expose.
 
 
