@@ -393,6 +393,92 @@ def test_search_matches_leading_hash_prefix_only() -> None:
     assert controller.state.visible.matched == ()
 
 
+def test_search_is_tolerant_of_accents_punctuation_and_word_order() -> None:
+    """The shared engine's `tokens` ladder (S7) replaces the old raw
+    substring match -- accents, punctuation, and word order are now
+    handled, unlike before."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(name="L'amour est dans le pre")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search("est amour")
+
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == [
+        "L'amour est dans le pre"
+    ]
+
+
+def test_clearing_search_restores_the_full_corpus() -> None:
+    """Piège 2: the engine itself returns zero hits for a blank query
+    (correct in the CLI). The `/` must keep its current guard -- an
+    empty search skips the engine entirely -- or clearing the search box
+    would empty the table instead of showing everything."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search("debian")
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == ["Debian ISO"]
+
+    controller.set_search("")
+
+    assert controller.state.visible is not None
+    assert sorted(t.name for t in controller.state.visible.matched) == [
+        "Debian ISO",
+        "Ubuntu ISO",
+    ]
+
+
+def test_search_narrows_the_corpus_but_operator_sort_still_wins() -> None:
+    """The engine's own ranking (here: prefix tier before substring
+    tier, so "Iso Zulu" would rank ahead of "Alpha Iso") must never
+    reach the table -- the operator's chosen sort always does."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Iso Zulu"),
+            make_torrent(hash="b" * 40, name="Alpha Iso"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search("iso")
+
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == [
+        "Alpha Iso",
+        "Iso Zulu",
+    ]
+
+
+def test_search_hash_prefix_needs_only_one_character() -> None:
+    """`hash_min_length=1` in the TUI (8 in the CLI, see
+    `.agents/specs/search.md`): a single hex character is enough to
+    trigger tier 0, unlike the CLI's anti-noise threshold."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="d" + "0" * 39, name="Zeta"),
+            make_torrent(hash="e" + "1" * 39, name="Omega"),
+        ]
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    controller.set_search("d")
+
+    assert controller.state.visible is not None
+    assert [t.name for t in controller.state.visible.matched] == ["Zeta"]
+
+
 def test_focus_hidden_by_search_is_cleared() -> None:
     torrent_hash = "a" * 40
     client = FakeQbitClient(

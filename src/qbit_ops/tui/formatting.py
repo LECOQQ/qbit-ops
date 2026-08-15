@@ -425,14 +425,17 @@ def _name_column_width(
 
 
 def _highlighted_name_cell(name: str, search: str, width: int) -> Text:
-    """Render the `Name` cell, orange-highlighting the first live match.
+    """Render the `Name` cell, orange-highlighting the first literal match.
 
-    A presentation-only echo of `TuiController.set_search`'s own
-    matching (case-insensitive substring) -- never a second matching
-    implementation, and never changes which rows are shown, only how
-    the already-matched ones look. A no-op (plain truncated text) once
-    `search` is empty or its match falls outside the truncated/visible
-    portion of a long name.
+    Never changes which rows are shown, only how an already-matched one
+    looks. This only marks a literal, case-insensitive substring
+    occurrence of `search` -- it does not track `TuiController.
+    set_search`'s own six-tier engine (word reordering, folded accents,
+    partial tokens, hash matches). A row shown with **no** highlight is
+    therefore expected, not a bug: the engine matched it on a tier this
+    literal scan cannot see. A no-op (plain truncated text) once
+    `search` is empty, has no literal occurrence, or that occurrence
+    falls outside the truncated/visible portion of a long name.
     """
     truncated = _truncate(name, width)
     text = Text(truncated)

@@ -12,7 +12,6 @@ without pulling in presentation concerns.
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -535,51 +534,6 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
             )
 
     return None  # pragma: no cover - resolved hash always exists
-
-
-def search_torrents_by_name(
-    client: Any,
-    query: str,
-    *,
-    limit: int = 20,
-    min_score: float = 0.5,
-) -> dict[str, Any]:
-    """Search torrents by name and rank matches by relevance."""
-    normalized_query = query.strip()
-    matches: list[dict[str, Any]] = []
-
-    for torrent in client.torrents_info():
-        torrent_name = get_field_as_string(torrent, "name")
-        match_score = _score_name_match(torrent_name, normalized_query)
-        if match_score < min_score:
-            continue
-
-        torrent_hash = get_field_as_string(torrent, "hash")
-        matches.append(
-            {
-                "hash": torrent_hash,
-                "name": torrent_name,
-                "state": get_field_as_string(torrent, "state"),
-                "progress": get_field_as_float(torrent, "progress"),
-                "ratio": get_field_as_float(torrent, "ratio"),
-                "match_score": round(match_score, 4),
-            }
-        )
-
-    matches.sort(
-        key=lambda item: (-item["match_score"], item["name"].casefold()),
-    )
-    if limit > 0:
-        matches = matches[:limit]
-
-    return {
-        "query": normalized_query,
-        "summary": {
-            "matched": len(matches),
-            "limit": limit,
-        },
-        "matches": matches,
-    }
 
 
 @dataclass(frozen=True)
@@ -1133,26 +1087,6 @@ def inspect_filtered_torrents(
         "summary": {"scanned": len(all_torrents), "matched": len(reports)},
         "torrents": reports,
     }
-
-
-def _score_name_match(name: str, query: str) -> float:
-    """Score how closely a torrent name matches a search query."""
-    normalized_name = name.casefold()
-    normalized_query = query.casefold().strip()
-    if normalized_query == "":
-        return 0.0
-    if normalized_name == normalized_query:
-        return 1.0
-    if normalized_name.startswith(normalized_query):
-        return 0.95
-    if normalized_query in normalized_name:
-        return 0.85
-
-    return SequenceMatcher(
-        None,
-        normalized_name,
-        normalized_query,
-    ).ratio()
 
 
 def _get_tracker_details(trackers: Any) -> list[dict[str, Any]]:
