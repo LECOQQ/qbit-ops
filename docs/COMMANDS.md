@@ -84,21 +84,21 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `status` | ✅ | ✅ | ✅ | ✅ |
 | `connection check` | ✅ | ✅ | ✅ | ✅ |
 | `doctor` | ✅ | ✅ | ✅ | ✅ |
-| `version` | ✅ | ✅ | ✅ | — |
+| `version` | ✅ | ✅ | ✅ | -- |
 | `torrents list` | ✅ | ✅ | ✅ | ✅ |
 | `torrents stats` | ✅ | ✅ | ✅ | ✅ |
 | `torrents categories` | ✅ | ✅ | ✅ | ✅ |
-| `torrents inspect` | ✅ | ✅ | ✅ | — |
-| `torrents import` | ✅ | ✅ | — | — |
+| `torrents inspect` | ✅ | ✅ | ✅ | -- |
+| `torrents import` | ✅ | ✅ | -- | -- |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ |
 | `trackers status` | ✅ | ✅ | ✅ | ✅ |
 | `trackers inspect` | ✅ | ✅ | ✅ | ✅ |
-| `trackers export` | ✅ | ✅ | ✅ | — |
-| `backup export` | ✅ | ✅ | ✅ | — |
-| `backup diff` | ✅ | ✅ | ✅ | — |
-| `backup restore` | ✅ | ✅ | — | — |
-| `explain torrent` | ✅ | ✅ | ✅ | — |
-| `explain tracker` | ✅ | ✅ | ✅ | — |
+| `trackers export` | ✅ | ✅ | ✅ | -- |
+| `backup export` | ✅ | ✅ | ✅ | -- |
+| `backup diff` | ✅ | ✅ | ✅ | -- |
+| `backup restore` | ✅ | ✅ | -- | -- |
+| `explain torrent` | ✅ | ✅ | ✅ | -- |
+| `explain tracker` | ✅ | ✅ | ✅ | -- |
 
 ## 🏷️ Versions
 
@@ -151,7 +151,7 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | `--tag-all NAME` | Repeatable. Has **every** one of these tags. |
 | `--save-path PATH` | Repeatable. Saved at this path or below it. Case-sensitive. |
 | `--name-contains TEXT` | Repeatable. Name contains this text. Ignores case. |
-| `--name-regex PATTERN` | Name matches this regular expression (searched, not anchored; case-sensitive — use `(?i)`). |
+| `--name-regex PATTERN` | Name matches this regular expression (searched, not anchored; case-sensitive -- use `(?i)`). |
 
 **State**
 
@@ -159,11 +159,11 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | --- | --- |
 | `--state GROUP` | Repeatable. `downloading`, `seeding`, `checking`, `stalled`, `errored`, `unknown`. |
 | `--completed` / `--incomplete` | Download finished or not. |
-| `--active` / `--inactive` | **Not stopped** / stopped. Note: `--active` is about run state, not traffic — a stalled seed at 0 B/s is active. |
+| `--active` / `--inactive` | **Not stopped** / stopped. Note: `--active` is about run state, not traffic -- a stalled seed at 0 B/s is active. |
 | `--stalled`, `--errored` | Shorthands for the matching state group. |
 | `--private` / `--public` | Private or public torrent. Needs qBittorrent 5.0+; on older versions nothing matches. |
 
-**Measures** — each pair is an inclusive range.
+**Measures** -- each pair is an inclusive range.
 
 | Filter | Value |
 | --- | --- |
@@ -171,10 +171,10 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | `--ratio-min` / `--ratio-max` | `1`, `2.5` |
 | `--progress-min` / `--progress-max` | `95%` or a `0`–`1` fraction like `0.95` |
 | `--uploaded-min` / `--uploaded-max` | same size syntax |
-| `--seeded-for` | `30d` — seeded for **at least** this long |
-| `--older-than` / `--newer-than` | `90d`, `12h` — based on when the torrent was added |
-| `--inactive-for` / `--active-within` | `90d`, `24h` — based on the last byte transferred |
-| `--completed-before` / `--completed-within` | `90d`, `7d` — based on when the download finished |
+| `--seeded-for` | `30d` -- seeded for **at least** this long |
+| `--older-than` / `--newer-than` | `90d`, `12h` -- based on when the torrent was added |
+| `--inactive-for` / `--active-within` | `90d`, `24h` -- based on the last byte transferred |
+| `--completed-before` / `--completed-within` | `90d`, `7d` -- based on when the download finished |
 
 **Trackers**
 
@@ -182,16 +182,16 @@ SELECT ──► INSPECT ──► PLAN ──► APPLY
 | --- | --- |
 | `--tracker HOST` | Repeatable. Announces to one of these trackers, matched on `host[:port]`. |
 | `--tracker-health VERDICT` | Repeatable. This torrent's **own** endpoints aggregate to that verdict: `healthy`, `warning`, `critical`, `disabled` or `unknown`. |
-| `--no-tracker` | Has **no configured tracker** — read from the bulk listing's tracker count, so DHT/PeX/LSD never count as one. |
+| `--no-tracker` | Has **no configured tracker** -- read from the bulk listing's tracker count, so DHT/PeX/LSD never count as one. |
 
 `--tracker-health` asks about *this torrent's* trackers, not about a
 tracker in general. A torrent on three trackers of which one is dead is
-`warning`, not `critical` — it still seeds. `unavailable` is refused:
+`warning`, not `critical` -- it still seeds. `unavailable` is refused:
 it describes a whole `trackers status` report whose collection failed,
 never a single torrent.
 
-A torrent qbit-ops knows nothing about — no endpoint reported, or a
-tracker lookup that failed — matches **no** health value at all. Not
+A torrent qbit-ops knows nothing about -- no endpoint reported, or a
+tracker lookup that failed -- matches **no** health value at all. Not
 even `unknown`, which means "qBittorrent reported a status we do not
 recognize", a different fact. A non-answer must never be enough to
 pause something.
@@ -207,7 +207,7 @@ qbit-ops explain torrent --hash <one of them>   # same verdict, with evidence
 `--no-tracker` and `--tracker-health` together are refused before any
 API call: a torrent with no tracker has no tracker health.
 
-**Exclusions** — every family has one: `--exclude-category`,
+**Exclusions** -- every family has one: `--exclude-category`,
 `--exclude-tag`, `--exclude-state`, `--exclude-save-path`,
 `--exclude-name`, `--exclude-tracker`. All repeatable.
 
@@ -234,7 +234,7 @@ qbit-ops torrents list --incomplete --progress-min 99%
 ### Units, without ambiguity
 
 - **Sizes**: the suffix decides. `KiB/MiB/GiB/TiB` are 1024-based,
-  `KB/MB/GB/TB` are 1000-based. `500M` is refused — it belongs to
+  `KB/MB/GB/TB` are 1000-based. `500M` is refused -- it belongs to
   neither.
 - **Durations**: `s`, `m`, `h`, `d`, `w`. One unit per value (`1d12h` is
   refused). No months or years: they have no fixed length, so write
@@ -244,9 +244,9 @@ qbit-ops torrents list --incomplete --progress-min 99%
 
 ### Three different clocks
 
-- `--older-than` — how long ago the torrent was **added**.
-- `--inactive-for` — how long since it last **moved data**.
-- `--completed-before` — how long ago the **download finished**.
+- `--older-than` -- how long ago the torrent was **added**.
+- `--inactive-for` -- how long since it last **moved data**.
+- `--completed-before` -- how long ago the **download finished**.
 
 They disagree often, which is why all three exist: a torrent added two
 years ago and still seeding is old but neither inactive nor recently
@@ -266,8 +266,8 @@ Neither combines with a filter, or with each other:
 
 ### Cost
 
-One listing call, then the cheap filters, and only then — if you asked
-for `--tracker`, `--exclude-tracker` or `--tracker-health` — one tracker
+One listing call, then the cheap filters, and only then -- if you asked
+for `--tracker`, `--exclude-tracker` or `--tracker-health` -- one tracker
 lookup per surviving torrent. Filtering first is what keeps that count
 proportional to your selection instead of your whole instance.
 `--no-tracker` needs no lookup at all.
@@ -285,14 +285,14 @@ Everywhere a command acts on a set of torrents: `torrents list`,
 
 `--tracker-health` is the one exception to "everywhere": it is offered
 on `torrents list`, `torrents stats`, `trackers list` and the five bulk
-mutations. The four tracker operations do not take it — selecting
+mutations. The four tracker operations do not take it -- selecting
 torrents by the health of their trackers in order to act on those same
 trackers would be circular. `torrents inspect` does not offer it either:
 the filter is honoured if something sets it, but no flag exposes it
 there yet.
 
 The same filters always select the same torrents, whichever command
-consumes them — listing, inspecting or mutating.
+consumes them -- listing, inspecting or mutating.
 
 The tracker operations accept every filter **except** the tracker
 family (`--tracker`, `--exclude-tracker`, `--no-tracker`). On those
@@ -320,7 +320,7 @@ commands accept exactly the same filters, with the same meanings.
 
 qBittorrent lists DHT, PeX and LSD next to real trackers, as `** [DHT]
 **` markers. They are peer-discovery mechanisms, not announce
-endpoints — so qbit-ops never counts them as trackers and never matches
+endpoints -- so qbit-ops never counts them as trackers and never matches
 them with `--tracker`. A torrent whose only entries are DHT/PeX/LSD has
 zero trackers, and `--no-tracker` finds it.
 
@@ -344,7 +344,7 @@ qbit-ops trackers list --tracker-health critical
 
 | Column | Meaning |
 | --- | --- |
-| `Tracker` | Normalized identity, `host[:port]` — never an announce URL |
+| `Tracker` | Normalized identity, `host[:port]` -- never an announce URL |
 | `Torrents` | Retained torrents announcing to this tracker |
 | `Excl` | Among them, those carrying **no other** tracker identity |
 | `Endpoints` | Endpoints observed for this identity |
@@ -368,7 +368,7 @@ sometimes by a lot. That is documented rather than corrected: splitting
 bytes between trackers would need an invented sharing key, and qbit-ops
 does not invent values.
 
-`Excl` is the honest answer to the question behind the numbers — *what
+`Excl` is the honest answer to the question behind the numbers -- *what
 would I lose by leaving this tracker?* A torrent counts there when this
 identity is the **only** one it carries.
 
@@ -380,7 +380,7 @@ exclusive to neither.
 ### Reading the numbers
 
 The measures are summed exactly the way `torrents stats` sums them,
-from the same code — two commands adding up the same bytes must not
+from the same code -- two commands adding up the same bytes must not
 answer differently:
 
 - 🧮 The ratio is total uploaded ÷ total downloaded, never the average
@@ -393,15 +393,15 @@ answer differently:
   Machine output stays in seconds.
 - 🚦 Tracker health **never** drives this command's exit code. It is an
   inventory, not a diagnostic: a script asking "what trackers exist"
-  must not break because one tracker is degraded. Ordinary errors — an
-  invalid filter, an unreachable instance — still exit non-zero. Use
+  must not break because one tracker is degraded. Ordinary errors -- an
+  invalid filter, an unreachable instance -- still exit non-zero. Use
   `trackers status` when you want health to decide the exit code.
 - 🈳 An empty selection is an answer, not a failure: no rows, exit `0`.
 - 🛑 The summary carries `collection_errors`, so zero rows because the
   instance has no tracker never looks like zero rows because nothing
   could be read. It does not change the exit code.
 - 💸 Cost: one listing call plus one tracker lookup per surviving
-  torrent — exactly what this command already spent before it reported
+  torrent -- exactly what this command already spent before it reported
   any volume.
 
 ## 📊 Library statistics

@@ -327,12 +327,15 @@ def _progress_column_width(*, bar: bool) -> int:
     return _PROGRESS_BAR_WIDTH + 5 if bar else 4
 
 
-_RATE_INACTIVE_CELL = "—"
+# The glyph the TUI renders, not prose: a style pass must not change
+# what a user sees.
+_RATE_INACTIVE_CELL = "—"  # ai-hygiene: allow-em-dash
 _RATE_COLUMN_GAP = "  "
 
 
 def _format_rate_cell(download_rate: int, upload_rate: int) -> str:
-    """Render one compact Rate cell: `↓ down`, `↑ up`, both, or `—`.
+    """Render one compact Rate cell: `↓ down`, `↑ up`, both, or the
+    inactive glyph.
 
     Never a colour cue here (unlike the top-right global rate display)
     -- one small table cell has no room for it, and the arrow plus
@@ -868,7 +871,9 @@ def _format_preview_text(
             "[bold yellow]Snapshot stale[/bold yellow] -- qBittorrent is "
             "currently unreachable; this preview uses last-known data."
         )
-        lines.append("Apply disabled — rebuild the preview after reconnection.")
+        lines.append(
+            "Apply disabled -- rebuild the preview after reconnection."
+        )
     lines.append("")
 
     lines.append("[bold]Affected torrents[/bold]")

@@ -102,7 +102,7 @@ def fail(
     """Build an `AppError`, print its message, and exit with a failure code.
 
     `code` defaults to `category.value` when omitted. `target` is a
-    safe identity (a hash prefix, a normalized tracker host) — never a
+    safe identity (a hash prefix, a normalized tracker host) -- never a
     raw tracker URL or credential.
     """
     record_app_error(

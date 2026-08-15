@@ -1477,7 +1477,7 @@ class QbitOpsTuiApp(App[None]):
         preview_screen = self.screen
         if not preview_screen.can_apply:
             self.notify(
-                "Snapshot stale — rebuild the preview after reconnection.",
+                "Snapshot stale -- rebuild the preview after reconnection.",
                 severity="warning",
             )
             return

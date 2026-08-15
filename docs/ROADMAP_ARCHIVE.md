@@ -4,7 +4,7 @@ Completed `qbit-ops` milestones.
 
 ---
 
-## v0.4.0 — 📚 Know Your Library — Part 1
+## v0.4.0 -- 📚 Know Your Library -- Part 1
 
 Released: 2026-08-13
 

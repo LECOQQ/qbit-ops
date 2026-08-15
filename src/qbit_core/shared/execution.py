@@ -103,7 +103,7 @@ class ExecutionPolicy:
     def decide(self) -> ExecutionDecision:
         """Decide what to do, assuming the plan has at least one real change.
 
-        Callers must check for an empty/no-match/invalid plan themselves —
+        Callers must check for an empty/no-match/invalid plan themselves --
         those never reach a decision (and never prompt) regardless of policy.
         """
         if self.dry_run:

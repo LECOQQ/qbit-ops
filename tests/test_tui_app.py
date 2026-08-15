@@ -4626,7 +4626,7 @@ def test_rate_cell_covers_download_upload_both_and_idle() -> None:
     up_only = _format_rate_cell(0, 2 * 1024 * 1024)
     both = _format_rate_cell(18 * 1024 * 1024, 2 * 1024 * 1024)
 
-    assert idle == "—"
+    assert idle == "—"  # ai-hygiene: allow-em-dash
     assert down_only == "↓ 18.0 MiB/s"
     assert "↑" not in down_only
     assert up_only == "↑ 2.0 MiB/s"
@@ -4682,7 +4682,7 @@ async def test_rate_column_renders_representative_torrents() -> None:
         assert "↓" in down_cell and "↑" not in down_cell
         assert "↑" in up_cell and "↓" not in up_cell
         assert "↓" in both_cell and "↑" in both_cell
-        assert idle_cell == "—"
+        assert idle_cell == "—"  # ai-hygiene: allow-em-dash
 
 
 async def test_dht_pex_lsd_show_disabled_exactly_once_each() -> None:
