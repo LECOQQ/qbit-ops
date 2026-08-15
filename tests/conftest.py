@@ -20,7 +20,10 @@ os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
 # and across xdist workers -- an ambient `COLUMNS` must not leak in.
 os.environ["COLUMNS"] = "200"
 
+import shutil
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -28,10 +31,61 @@ from typer.testing import CliRunner
 
 import qbit_ops.app_services
 import qbit_ops.cli.error_boundary
-from qbit_ops.config import QbitConfig
+from qbit_ops.config import APP_ENV_FILE_VARIABLE, QbitConfig
 from tests.support import make_config
 
 ConfigureQbitBackend = Callable[..., list[dict[str, Any]]]
+
+# The fake instance every test resolves to. Unroutable on purpose: if
+# isolation ever breaks and something really dials out, it fails fast
+# instead of reaching a live qBittorrent.
+ISOLATED_QBIT_HOST = "http://qbit-ops-isolated.invalid:1"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_qbit_configuration() -> Any:
+    """Cut every path `qbit_ops.config` can take to a real instance.
+
+    `_get_default_env_files()` resolves `cwd()/.env` and
+    `$XDG_CONFIG_HOME|~/.config/qbit-ops/.env`, and a developer machine
+    has both. Nothing in the suite is required to opt into isolation, so
+    a single test that builds a client without `configure_qbit_backend`
+    would reach the operator's own qBittorrent -- which is exactly how a
+    review agent once read a real library.
+
+    Session-scoped and `autouse`, so isolation is the default rather
+    than something each test remembers. Four seams, because any one of
+    them alone leaves a way through:
+
+    - `QBIT_OPS_ENV_FILE` short-circuits file resolution entirely
+      (`config._load_env_files` returns right after loading it), so
+      pointing it at a path that cannot exist neutralizes both default
+      locations at once;
+    - `HOME` and `XDG_CONFIG_HOME` are redirected anyway, so anything
+      resolving a user path outside that short-circuit lands nowhere;
+    - `QBIT_HOST`/`QBIT_USER`/`QBIT_PASSWORD` are set to fakes, and
+      `load_dotenv(override=False)` means a real `.env` can never
+      overwrite them.
+
+    Enforced by `tests/test_config_isolation.py`, which exercises the
+    real resolution rather than asserting on these variables.
+
+    This covers `pytest`. It cannot cover an arbitrary Python or shell
+    command run outside it -- see `.agents/WORKFLOW.md`.
+    """
+    monkeypatch = pytest.MonkeyPatch()
+    isolated_home = Path(tempfile.mkdtemp(prefix="qbit-ops-isolated-home-"))
+    monkeypatch.setenv("HOME", str(isolated_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_home / ".config"))
+    monkeypatch.setenv(
+        APP_ENV_FILE_VARIABLE, str(isolated_home / "absent" / ".env")
+    )
+    monkeypatch.setenv("QBIT_HOST", ISOLATED_QBIT_HOST)
+    monkeypatch.setenv("QBIT_USER", "isolated-user")
+    monkeypatch.setenv("QBIT_PASSWORD", "isolated-password")
+    yield
+    monkeypatch.undo()
+    shutil.rmtree(isolated_home, ignore_errors=True)
 
 
 @pytest.fixture
