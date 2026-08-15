@@ -47,22 +47,35 @@ def repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _fake_venv(worktree: Path) -> None:
+    """Create the interpreter `verify_isolation` refuses to provision."""
+    interpreter = worktree / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
+
+
 # --- environment isolation ---------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "variable", ["VIRTUAL_ENV", "POETRY_ACTIVE", "PYTHONHOME", "PYTHONPATH"]
-)
 def test_an_activated_environment_never_reaches_poetry(
-    monkeypatch: pytest.MonkeyPatch, variable: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(variable, "/somewhere/else/.venv")
+    monkeypatch.setenv("VIRTUAL_ENV", "/somewhere/else/.venv")
     monkeypatch.setenv("QBIT_OPS_UNRELATED", "kept")
 
     cleaned = wn._clean_env()
 
-    assert variable not in cleaned
+    assert "VIRTUAL_ENV" not in cleaned
     assert cleaned["QBIT_OPS_UNRELATED"] == "kept"
+
+
+def test_the_venv_location_is_stated_never_inferred(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Poetry's own inference proved unstable across invocation contexts."""
+    monkeypatch.delenv("POETRY_VIRTUALENVS_IN_PROJECT", raising=False)
+
+    assert wn._clean_env()["POETRY_VIRTUALENVS_IN_PROJECT"] == "true"
 
 
 def test_the_install_passes_the_cleaned_environment_to_poetry(
@@ -94,6 +107,7 @@ def test_isolation_fails_loudly_when_a_package_resolves_elsewhere(
 ) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
+    _fake_venv(worktree)
     payload = (
         '{"python": "/usr/bin/python3.12", '
         '"prefix": "/other/.venv", '
@@ -116,6 +130,7 @@ def test_a_system_interpreter_alone_never_fails_isolation(
     """A venv symlinks python to the system binary; that is not a leak."""
     worktree = tmp_path / "worktree"
     worktree.mkdir()
+    _fake_venv(worktree)
     payload = (
         '{"python": "/usr/bin/python3.12", '
         f'"prefix": "{worktree}/.venv", '
@@ -136,6 +151,7 @@ def test_isolation_accepts_an_environment_inside_the_worktree(
 ) -> None:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
+    _fake_venv(worktree)
     payload = (
         f'{{"python": "{worktree}/.venv/bin/python", '
         f'"prefix": "{worktree}/.venv", '
@@ -337,3 +353,39 @@ def test_removing_the_worktree_never_follows_the_control_plane_symlinks(
 
     assert (repo / ".agents" / "STATE.md").read_text() == "idle\n"
     assert (repo / "AGENTS.md").read_text() == "rules\n"
+
+
+def test_a_worktree_path_is_not_treated_as_part_of_the_main_checkout() -> None:
+    """Worktrees nest under the main root, so `is_relative_to` is not enough."""
+    root = Path("/repo")
+
+    assert env_attest.belongs_to(Path("/repo/src/qbit_core/__init__.py"), root)
+    assert not env_attest.belongs_to(
+        Path("/repo/.worktrees/feat/src/qbit_core/__init__.py"), root
+    )
+    assert not env_attest.belongs_to(Path("/elsewhere/src"), root)
+
+
+def test_a_main_environment_pointing_at_a_worktree_is_not_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    leaked = root / ".worktrees" / "feat" / "src" / "qbit_core" / "__init__.py"
+    leaked.parent.mkdir(parents=True)
+    leaked.touch()
+    monkeypatch.setattr(env_attest.qbit_core, "__file__", str(leaked))
+
+    attestation = env_attest.collect_attestation(root)
+
+    assert attestation["isolated"] is False
+    assert "qbit_core" in attestation["outside_expected_root"]
+
+
+def test_verification_refuses_to_provision_a_missing_virtualenv(
+    tmp_path: Path,
+) -> None:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    with pytest.raises(wn.WorktreeError, match="installed the project"):
+        wn.verify_isolation(worktree)

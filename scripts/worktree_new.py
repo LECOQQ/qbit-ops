@@ -43,30 +43,33 @@ class WorktreeError(Exception):
     """Raised for any actionable setup failure."""
 
 
-# Removed before handing an environment to Poetry. `VIRTUAL_ENV` is the
-# one that actually causes the damage; the others are dropped so an
-# activated environment cannot steer the resolution some other way.
-_ENV_VARS_THAT_STEER_POETRY = (
-    "VIRTUAL_ENV",
-    "POETRY_ACTIVE",
-    "PYTHONHOME",
-    "PYTHONPATH",
-)
+# Poetry decides where a project's virtualenv lives by inference, and
+# that inference is not stable across invocation contexts: the same call
+# provisioned the worktree correctly from a shell and silently reused an
+# inherited environment when run under `make`. Two settings remove the
+# guesswork.
+#
+# `VIRTUAL_ENV` is honoured ahead of `virtualenvs.in-project`, so an
+# activated shell makes `poetry install` target *that* environment no
+# matter which directory it runs in -- it has to go. Nothing else is
+# removed: also stripping `PATH`, `PYTHONPATH`, `PYTHONHOME` and
+# `POETRY_ACTIVE` was tried as a precaution and made things worse.
+#
+# `POETRY_VIRTUALENVS_IN_PROJECT` then states the requirement instead of
+# relying on the machine's global Poetry config, which a contributor may
+# not share.
+_ENV_VAR_THAT_STEERS_POETRY = "VIRTUAL_ENV"
 
 
 def _clean_env() -> dict[str, str]:
-    """Return the current environment minus anything that pins a venv.
-
-    Poetry honours an inherited `VIRTUAL_ENV` ahead of
-    `virtualenvs.in-project`, so a shell with an activated environment
-    makes `poetry install` target *that* environment no matter which
-    directory it runs in.
-    """
-    return {
+    """Return an environment that pins Poetry to the worktree's own venv."""
+    cleaned = {
         key: value
         for key, value in os.environ.items()
-        if key not in _ENV_VARS_THAT_STEER_POETRY
+        if key != _ENV_VAR_THAT_STEERS_POETRY
     }
+    cleaned["POETRY_VIRTUALENVS_IN_PROJECT"] = "true"
+    return cleaned
 
 
 def verify_isolation(worktree: Path) -> dict[str, str]:
@@ -85,8 +88,23 @@ def verify_isolation(worktree: Path) -> dict[str, str]:
         "'qbit_core': qbit_core.__file__, "
         "'qbit_ops': qbit_ops.__file__}))"
     )
+    # Run the worktree's own interpreter rather than `poetry run`: the
+    # check must observe the environment, never create one. `poetry run`
+    # provisions a virtualenv when it finds none, which turns a failed
+    # verification into a second, empty environment and hides what
+    # actually went wrong.
+    interpreter = worktree / ".venv" / "bin" / "python"
+    if not interpreter.exists():
+        raise WorktreeError(
+            f"{worktree} has no virtualenv at {interpreter}. `poetry "
+            "install` reported success, so it installed the project "
+            "somewhere else -- most likely an environment inherited from "
+            "the calling shell. Remove the worktree and retry with no "
+            "virtualenv activated."
+        )
+
     completed = subprocess.run(
-        ["poetry", "run", "python", "-c", probe],
+        [str(interpreter), "-c", probe],
         cwd=worktree,
         env=_clean_env(),
         capture_output=True,

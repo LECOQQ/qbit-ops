@@ -39,6 +39,20 @@ def _git(root: Path, *args: str) -> str | None:
     return completed.stdout.strip() or None
 
 
+def belongs_to(path: Path, root: Path) -> bool:
+    """Report whether `path` belongs to `root` and not to a worktree of it.
+
+    `Path.is_relative_to` alone is not enough: worktrees live at
+    `<root>/.worktrees/<slug>`, so every worktree path is "relative to"
+    the main checkout. A main environment repointed at a worktree's
+    `src/` would pass that test while exercising the wrong code --
+    observed, not hypothetical.
+    """
+    if not path.is_relative_to(root):
+        return False
+    return ".worktrees" not in path.relative_to(root).parts
+
+
 def collect_attestation(expected_root: Path) -> dict[str, Any]:
     """Describe the running environment relative to `expected_root`.
 
@@ -59,7 +73,7 @@ def collect_attestation(expected_root: Path) -> dict[str, Any]:
         "qbit_ops": Path(qbit_ops.__file__).resolve(),
     }
     outside = sorted(
-        name for name, path in paths.items() if not path.is_relative_to(root)
+        name for name, path in paths.items() if not belongs_to(path, root)
     )
 
     return {
