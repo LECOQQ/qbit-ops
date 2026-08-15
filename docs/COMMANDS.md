@@ -105,7 +105,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 Two deliberately separate uses.
 
 ```bash
-qbit-ops --version              # qbit-ops 1.2.0
+qbit-ops --version              # qbit-ops 0.4.0
 qbit-ops version                # the four useful versions
 qbit-ops version --format json
 ```

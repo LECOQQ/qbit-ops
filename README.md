@@ -108,10 +108,9 @@ qbit-ops torrents pause --tracker-health critical --no-dry-run
 ```
 
 Selects on *each torrent's own* trackers, and gives the same verdict
-`explain torrent` does - it is the same computation. A torrent on three
-trackers of which one is dead comes out `warning`, not `critical`: it
-still seeds. A torrent qbit-ops knows nothing about matches nothing, so
-a non-answer can never pause anything.
+`explain torrent` does - it is the same computation. How a torrent with
+mixed tracker health is scored, and why a non-answer never matches, is
+in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 **See what each tracker is actually carrying.**
 
@@ -122,9 +121,9 @@ qbit-ops trackers list --category sonarr
 
 Torrents, size, transferred bytes, ratio and seeding time per tracker,
 plus `EXCL` - the torrents that tracker is the *only* home of, which is
-the real answer to "what would I lose by leaving?". A torrent on three
-trackers counts in all three, so the columns deliberately add up to more
-than your library.
+the real answer to "what would I lose by leaving?". The columns
+deliberately do not sum to your library total; the reason is in
+[docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 **Know what your library actually weighs.**
 
@@ -134,9 +133,8 @@ qbit-ops torrents stats --category sonarr
 ```
 
 Size, transfer and seeding time over exactly the torrents you filter
-for. Without a filter it also shows qBittorrent's all-time counters -
-with one, it doesn't, so a filtered total is never sat next to a global
-one.
+for. How qBittorrent's all-time counters are handled is in
+[docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 **Unstick a queue that stopped moving.**
 
@@ -229,16 +227,13 @@ Press `?` inside the TUI to see the available controls.
 
 ## 🧩 Compatibility
 
-Container integration is tested against these exact qBittorrent releases:
+Container integration is tested against a fixed set of exact
+qBittorrent releases -- evidence for those versions, never a claim for a
+range. The matrix is in
+[docs/COMPATIBILITY.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMPATIBILITY.md).
 
-| qBittorrent | Web API |
-|---|---:|
-| 4.6.7 | 2.9.3 |
-| 5.0.0 | 2.11.2 |
-| 5.1.4 | 2.11.4 |
-| 5.2.3 | 2.15.1 |
-
-This is evidence for those exact versions, not a claim for the whole 4.6–5.2 range. Run `qbit-ops doctor` to compare your instance with the packaged evidence.
+Run `qbit-ops doctor` to compare your instance with the packaged
+evidence.
 
 ## 🧰 Commands
 

@@ -2,7 +2,7 @@
 
 Read via `importlib.resources` (not a `Path(__file__)`-relative lookup)
 so it works from an installed wheel with no repository checkout. See
-docs/COMPATIBILITY.md §10. Importing this module never reads or parses
+docs/COMPATIBILITY.md. Importing this module never reads or parses
 the manifest; parsing only happens when `load_compatibility_evidence()`
 is called.
 """
@@ -103,7 +103,7 @@ class CompatibilityEvidence:
 
         A literal string match (leading `v` stripped), not a
         `packaging.version.Version` equality: a patch release is never
-        evidence for its whole line (docs/COMPATIBILITY.md §10 rule 3).
+        evidence for its whole line (docs/COMPATIBILITY.md).
         """
         normalized = version.removeprefix("v")
         for entry in self.entries:

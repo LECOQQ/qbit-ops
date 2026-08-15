@@ -5,7 +5,7 @@ Blocking qBittorrent calls are split into `collect_*()` (blocking) /
 the Textual event loop; a monotonic `_detail_request_id` guards
 against a stale background result overwriting a newer one.
 
-Security boundary (see `docs/ARCHITECTURE.md`): only imports safe,
+Security boundary -- only imports safe,
 structured domain outputs and the two frozen-plan LOW-risk mutation
 functions (Pause/Resume/Reannounce) -- never a rescanning or
 unbounded-selector function, any deletion function, or `qbit_ops.cli`.

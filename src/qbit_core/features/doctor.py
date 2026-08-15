@@ -36,11 +36,11 @@ _URL_USERINFO_PATTERN = re.compile(r"://[^/@\s]+:[^/@\s]+@")
 # Web API floors already declared by `qbittorrent-api` itself
 # (`version_introduced`) for the two mutation capabilities qbit-ops
 # actually issues that carry a declared floor -- see
-# docs/COMPATIBILITY.md §3. `torrents/addTrackers` and every read
+# docs/COMPATIBILITY.md. `torrents/addTrackers` and every read
 # endpoint qbit-ops calls have no declared floor, so they are not
 # listed here. The pause/resume vs. stop/start Web API 2.11.0
 # threshold is deliberately excluded: `qbittorrent-api` itself selects
-# the endpoint internally (docs/COMPATIBILITY.md §2), so it is never a
+# the endpoint internally (docs/COMPATIBILITY.md), so it is never a
 # capability that can be "missing" from qbit-ops's point of view.
 _REQUIRED_WEB_API_CAPABILITIES: tuple[tuple[str, str], ...] = (
     ("torrent reannounce (torrents/reannounce)", "2.0.2"),
@@ -554,7 +554,7 @@ def _compatibility_evidence_check(
 
     Compares the exact observed version against the manifest's exact
     container-integration-tested entries and reports one of five
-    truthful classifications (see docs/COMPATIBILITY.md §10) -- never
+    truthful classifications (see docs/COMPATIBILITY.md) -- never
     "supported"/"unsupported"/"incompatible", only what the manifest
     actually backs; every other case is reported as an absence of
     evidence, never an absence of compatibility.
@@ -718,7 +718,7 @@ def _capability_check(web_api_version: str | None) -> DoctorCheck:
     Separate from `COMPAT002` (compatibility evidence): this is a
     property of the Web API version alone, backed by `qbittorrent-api`'s
     own declared floors, not the Docker matrix. Never invents a floor
-    beyond the two documented in docs/COMPATIBILITY.md §3.
+    beyond the two documented in docs/COMPATIBILITY.md.
     """
     if web_api_version is None:
         return DoctorCheck(
@@ -760,7 +760,7 @@ def _capability_check(web_api_version: str | None) -> DoctorCheck:
             ),
             remediation=(
                 "The corresponding qbit-ops command(s) would fail against "
-                "this instance -- see docs/COMPATIBILITY.md §3."
+                "this instance -- see docs/COMPATIBILITY.md."
             ),
         )
 

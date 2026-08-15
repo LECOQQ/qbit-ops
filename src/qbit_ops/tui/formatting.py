@@ -357,7 +357,7 @@ def _format_rate_cell(download_rate: int, upload_rate: int) -> str:
 # to size `Name` so the *total* rendered row width still fits the
 # terminal, not just the sum of declared column widths.
 _CELL_PADDING = 1
-# Target minimum from the design brief ("~24-30 cols") -- honoured
+# Target minimum ("~24-30 cols") -- honoured
 # whenever the terminal has room for it, but never at the cost of
 # horizontal overflow (see `_name_column_width`). `_ABSOLUTE_MIN_WIDTH`
 # is the true hard floor, just enough to stay legible.

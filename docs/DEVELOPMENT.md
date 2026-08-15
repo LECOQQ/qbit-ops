@@ -31,8 +31,7 @@ able to discover a real `.env` or `~/.config/qbit-ops/.env` (resolved
 by `qbit_ops.config._get_default_env_files()`). Run with a temporary
 `HOME`/`XDG_CONFIG_HOME` and an isolated working directory, or set fake
 `QBIT_HOST`/`QBIT_USER`/`QBIT_PASSWORD` values first -- never assume an
-absent `.env` in the cwd is enough. This isn't theoretical: a real
-homelab qBittorrent instance was once contacted this way.
+absent `.env` in the cwd is enough.
 
 ### 2. `make check-fast` -- fast local checkpoint
 
@@ -41,8 +40,8 @@ make check-fast
 ```
 
 Ruff, `black --check`, Pyright, version-sync, documentation-link
-consistency, and every hermetic non-Docker, non-TUI test. No network
-access, ~30s. Use while iterating -- **not a substitute for
+consistency, AI-hygiene rules, and every hermetic non-Docker, non-TUI
+test. No network access. Use while iterating -- **not a substitute for
 `make check`** before a push.
 
 ### 3. `make test-tui` -- complete TUI suite
@@ -53,7 +52,7 @@ make test-tui
 
 The Pilot-based interface tests, mutation lifecycle, concurrency, and
 the security/layering guard. Never contacts qBittorrent or Docker.
-The slowest block (~1 min) -- covers concurrent-mutation and
+The slowest block -- covers concurrent-mutation and
 race-condition regressions `check-fast` skips for speed.
 
 ### 4. `make check` -- the required push/PR gate
@@ -63,9 +62,9 @@ make check
 ```
 
 Formatting, lint, type-checking, version sync, documentation-link
-consistency, every hermetic test, and the complete TUI suite. Never touches Docker, ~1m40. This is
-exactly what CI (`make ci`) runs on every push and pull request -- run
-it before you push.
+consistency, AI-hygiene rules, every hermetic test, and the complete TUI
+suite. Never touches Docker. This is exactly what CI (`make ci`) runs on
+every push and pull request -- run it before you push.
 
 The hermetic suites run in parallel (`pytest -n auto`). The Docker
 targets below deliberately do not: they drive one shared disposable
@@ -111,9 +110,9 @@ make worktree-new FEATURE=search-regex
 make worktree-clean FEATURE=search-regex
 ```
 
-`worktree-new` symlinks the gitignored agent control-plane into the new
-worktree, but only after Git confirms each target is ignored -- a
-tracked file is never replaced by a symlink. The worktree gets its own
+`worktree-new` symlinks any locally present, gitignored configuration
+into the new worktree, but only after Git confirms each target is
+ignored -- a tracked file is never replaced by a symlink. The worktree gets its own
 `poetry install`: it must never share the main `.venv`, whose editable
 install points at the main checkout's `src/`.
 
@@ -264,7 +263,7 @@ advisory input to a human decision.
 
 | Marker | Meaning |
 |---|---|
-| `tui` | Slow (Pilot-based) TUI tests -- `test_tui_app.py`, `test_tui_bulk_mutation_audit.py` |
+| `tui` | Slow (Pilot-based) TUI tests -- `test_tui_app.py`, `test_tui_architecture.py`, `test_tui_bulk_mutation_audit.py`, `test_tui_table_performance.py` |
 | `docker` | Requires a real Docker daemon + `QBIT_OPS_DOCKER_MATRIX=1` -- every test under `tests/integration/` |
 | `capture` | Writes committed fixtures -- `test_matrix_capture.py` only (always also `docker`) |
 

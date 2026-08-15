@@ -232,7 +232,7 @@ class TrackerAdditionChange:
 
 @dataclass(frozen=True)
 class TrackerAdditionPlan:
-    """Plan for `add_tracker_if_source_present`.
+    """Plan for `plan_tracker_addition`.
 
     `scanned` counts every torrent in the instance, `matched` those the
     torrent filters kept, and `matched_source` those among them actually
@@ -260,7 +260,7 @@ class TrackerRemovalChange:
 
 @dataclass(frozen=True)
 class TrackerRemovalPlan:
-    """Plan for `remove_tracker_from_all`."""
+    """Plan for `plan_tracker_removal`."""
 
     tracker: str
     match: TrackerMatchMode
@@ -288,7 +288,7 @@ class TrackerReplacementChange:
 
 @dataclass(frozen=True)
 class TrackerReplacementPlan:
-    """Plan for `replace_tracker_in_all`."""
+    """Plan for `plan_tracker_replacement`."""
 
     source_tracker: str
     target_tracker: str
@@ -328,7 +328,7 @@ class PasskeyReplacementChange:
 
 @dataclass(frozen=True)
 class PasskeyReplacementPlan:
-    """Plan for `replace_tracker_passkey`.
+    """Plan for `plan_tracker_passkey_replacement`.
 
     Never carries the raw new passkey or new URLs outside of each
     change's `stale_urls` (see `PasskeyReplacementChange`).

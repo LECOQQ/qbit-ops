@@ -12,7 +12,7 @@ TUI (Textual) ──────┘
 
 `qbit_core` never imports Typer, Rich, Textual, or `qbit_ops`; never
 prints, prompts, or calls `sys.exit`. A future non-CLI Python consumer
-(e.g. Waitarr) can depend on `qbit_core` alone. See the module
+can depend on `qbit_core` alone. See the module
 docstring of `qbit_core/__init__.py` for a minimal usage example.
 
 ## 📦 Package layout
