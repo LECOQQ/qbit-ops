@@ -20,9 +20,12 @@ shorthand for the reader".
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import re
 import subprocess
 import sys
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,7 +79,13 @@ MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 MARKDOWN_REF_DEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s+(\S+)", re.MULTILINE)
 BACKTICK_TOKEN = re.compile(r"`([^`\n]+)`")
 
+# An unquoted repository path in prose. The file extension is what keeps
+# this from matching an ordinary phrase containing a slash.
+BARE_PATH = re.compile(r"(?<![\w`/.-])([a-z_]+(?:/[\w.-]+)+\.[a-zA-Z]{2,4})")
+
 IGNORE_DIRECTIVE = "<!-- doc-links: ignore-next-line -->"
+# The same escape hatch, spelled for a language without HTML comments.
+IGNORE_DIRECTIVE_PY = "# doc-links: ignore-next-line"
 
 
 class DocLinkError(Exception):
@@ -126,6 +135,91 @@ def _markdown_files(root: Path) -> list[Path]:
     )
 
 
+def _python_files(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in root.rglob("*.py")
+        if not SKIPPED_DIRS.intersection(path.relative_to(root).parts)
+    )
+
+
+def _python_prose(text: str) -> str:
+    """Blank out everything in `text` that is not a comment or docstring.
+
+    Line numbers are preserved so a finding still points at the right
+    line. Code is blanked because a path inside a string literal is data
+    the checker has no business judging -- only prose makes a claim.
+    """
+    kept: list[str] = [""] * (len(text.splitlines()) + 1)
+
+    def keep(start_line: int, block: str) -> None:
+        for offset, line in enumerate(block.splitlines()):
+            index = start_line + offset
+            if index < len(kept):
+                kept[index] = line
+
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for token in tokens:
+            if token.type == tokenize.COMMENT:
+                keep(token.start[0] - 1, token.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return text
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return "\n".join(kept)
+
+    carriers = (
+        ast.Module,
+        ast.ClassDef,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+    )
+    for node in ast.walk(tree):
+        if not isinstance(node, carriers):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if not isinstance(first, ast.Expr):
+            continue
+        value = first.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            segment = ast.get_source_segment(text, first) or ""
+            keep(first.lineno - 1, segment)
+
+    return "\n".join(kept)
+
+
+def _check_bare_references(
+    text: str, source: Path, root: Path, root_dirs: frozenset[str]
+) -> list[Finding]:
+    """Flag an unquoted repository path that does not resolve.
+
+    Markdown states its paths in backticks; code comments often do not
+    (`see docs/COMPATIBILITY.md` reads naturally in prose). Requiring a
+    file extension keeps this from firing on ordinary words.
+    """
+    findings: list[Finding] = []
+    skipped = _ignored_lines(text)
+
+    for match in BARE_PATH.finditer(text):
+        token = match.group(1)
+        if token.split("/")[0] not in root_dirs:
+            continue
+        line = _line_of(text, match.start())
+        if line in skipped:
+            continue
+        candidate = root / _strip_locator(token)
+        if _resolves(candidate) or _is_git_ignored(candidate, root):
+            continue
+        findings.append(Finding(source, line, "dead reference", token))
+    return findings
+
+
 def _root_directories(root: Path) -> frozenset[str]:
     return frozenset(
         entry.name
@@ -137,6 +231,10 @@ def _root_directories(root: Path) -> frozenset[str]:
 def _strip_locator(token: str) -> str:
     """Drop a pytest node id or a line-number locator from a reference.
 
+    The two forms below are invented for the example, so this check
+    would flag its own docstring without the directive:
+
+    # doc-links: ignore-next-line
     `tests/support.py::FakeQbitClient` and `tests/test_x.py:109` both
     name a real file; only the part before the locator is a path.
     """
@@ -159,7 +257,7 @@ def _ignored_lines(text: str) -> frozenset[int]:
     return frozenset(
         number + 2
         for number, line in enumerate(text.splitlines())
-        if line.strip() == IGNORE_DIRECTIVE
+        if line.strip() in (IGNORE_DIRECTIVE, IGNORE_DIRECTIVE_PY)
     )
 
 
@@ -240,7 +338,13 @@ def _check_references(
 
 
 def check(root: Path) -> list[Finding]:
-    """Scan every Markdown file under `root` and return all findings."""
+    """Scan Markdown prose and Python prose under `root`.
+
+    Python files are scanned because a reference inside a comment or a
+    docstring rots exactly like one in Markdown, and was covered by
+    nothing: a documentation pass that renames a section leaves the code
+    citing a heading that no longer exists.
+    """
     if not root.is_dir():
         raise DocLinkError(f"{root} is not a directory.")
 
@@ -250,6 +354,13 @@ def check(root: Path) -> list[Finding]:
         text = source.read_text(encoding="utf-8", errors="replace")
         findings.extend(_check_links(text, source, root))
         findings.extend(_check_references(text, source, root, root_dirs))
+
+    for source in _python_files(root):
+        prose = _python_prose(
+            source.read_text(encoding="utf-8", errors="replace")
+        )
+        findings.extend(_check_references(prose, source, root, root_dirs))
+        findings.extend(_check_bare_references(prose, source, root, root_dirs))
     return findings
 
 
