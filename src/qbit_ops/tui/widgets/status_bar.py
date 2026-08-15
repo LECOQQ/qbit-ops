@@ -53,33 +53,17 @@ class CommandBar(Static):
     """A compact, contextual replacement for Textual's default `Footer`.
 
     Renders `[key→Description]` tokens straight from
-    `Screen.active_bindings` -- the same source `Footer` itself reads
-    -- so the bar can never drift from real key availability. Refreshes
-    itself on `Screen.bindings_updated_signal`, exactly like `Footer`.
+    `Screen.active_bindings` -- the same source `Footer` reads -- so the
+    bar can never drift from real key availability, refreshing on
+    `Screen.bindings_updated_signal` exactly like `Footer`.
 
-    While a live search is active (`set_search_state`), the `[/→Search]`
-    token is replaced in place by a `|search: xxx|` token -- pipe-
-    delimited, not bracketed, to distinguish this live/focused-input
-    token from the static `[key→Description]` key hints beside it (see
-    `FooterTotal` for the right-aligned `|Total: y|` sibling this bar
-    no longer renders itself).
-
-    "Active" is judged from real focus (`#search-input` currently
-    having it), re-checked on every render, not from a sticky flag:
-    `Screen.bindings_updated_signal` already fires on every focus
-    change, so this self-heals the moment focus leaves the search
-    input -- whether that happens via Escape (which also removes the
-    widget), Enter (`QbitOpsTuiApp.action_activate` merely moves focus
-    to the table, leaving the input mounted but idle), or Tab. It would
-    otherwise be possible to strand the footer showing `search: xxx`
-    with every other binding hidden, even though those bindings work
-    again the instant focus leaves the input. While the input *is*
-    focused, `Screen.active_bindings` itself already drops every other
-    single-key binding it would consume as typed text (Textual's own
-    `check_consume_key` filtering) -- so `entries` naturally shrinks to
-    just Search while typing, which is correct: those other keys
-    genuinely type into the search box right now instead of firing
-    their actions.
+    A live search replaces the `[/→Search]` token with a pipe-delimited
+    `|search: xxx|` one. "Active" is real focus on `#search-input`,
+    re-checked every render rather than a sticky flag, so it self-heals
+    the instant focus leaves the input -- which also lets
+    `Screen.active_bindings` drop every other single-key binding via
+    Textual's `check_consume_key` while the input is focused, so
+    `entries` naturally shrinks to just Search while typing.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

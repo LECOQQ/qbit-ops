@@ -552,12 +552,9 @@ def _compatibility_evidence_check(
     """Classify the observed qBittorrent version against the packaged
     compatibility evidence manifest.
 
-    Compares the exact observed version against the manifest's exact
-    container-integration-tested entries and reports one of five
-    truthful classifications (see docs/COMPATIBILITY.md) -- never
-    "supported"/"unsupported"/"incompatible", only what the manifest
-    actually backs; every other case is reported as an absence of
-    evidence, never an absence of compatibility.
+    Never reports "supported"/"unsupported"/"incompatible" -- only what
+    the manifest backs (see docs/COMPATIBILITY.md); anything else is an
+    absence of evidence, not an absence of compatibility.
     """
     if parsed_version is None:
         return DoctorCheck(
@@ -715,10 +712,9 @@ def _capability_check(web_api_version: str | None) -> DoctorCheck:
     """Report whether the Web API version exposes the capabilities
     qbit-ops's mutation commands actually rely on.
 
-    Separate from `COMPAT002` (compatibility evidence): this is a
-    property of the Web API version alone, backed by `qbittorrent-api`'s
-    own declared floors, not the Docker matrix. Never invents a floor
-    beyond the two documented in docs/COMPATIBILITY.md.
+    Separate from `COMPAT002`: backed by `qbittorrent-api`'s declared
+    floors, not the Docker matrix. Never invents a floor beyond the two
+    in docs/COMPATIBILITY.md.
     """
     if web_api_version is None:
         return DoctorCheck(
@@ -895,11 +891,8 @@ def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
 def _redact(error: Exception | None, config: QbitConfig | None) -> str | None:
     """Strip known secrets and embedded URL credentials from error text.
 
-    The single funnel every check must use before putting exception text
-    into a `detail` field -- error messages may embed the configured
-    host (which can carry userinfo credentials) or arbitrary
-    `qbittorrentapi` exception text. Never expose passwords, cookies, or
-    authorization headers.
+    The single funnel every check must use before a `detail` field.
+    Never exposes passwords, cookies, or authorization headers.
     """
     if error is None:
         return None

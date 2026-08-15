@@ -4,11 +4,9 @@ Sources: a single `.torrent` file, a directory of `.torrent` files, or a
 `.zip` archive of `.torrent` files. Never touches qBittorrent's own
 filesystem -- discovery and validation happen locally, then candidates
 are added through the client exactly like `trackers.py`'s plan/apply
-mutations. A `.zip` failing any structural safety check (path traversal,
-symlink/special entry, encryption, entry count, decompressed size,
-compression ratio, path depth) is rejected whole, never partially
-processed; an individual malformed `.torrent` inside an otherwise safe
-source only invalidates that one entry.
+mutations. A `.zip` failing any structural safety check is rejected
+whole, never partially processed; an individual malformed `.torrent`
+inside an otherwise safe source only invalidates that one entry.
 """
 
 import re

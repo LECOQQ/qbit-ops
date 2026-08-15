@@ -165,11 +165,10 @@ def _render_variant(variant: HeaderVariant) -> Group:
 class BrandHeader(Static):
     """Passive branded header for the Overview workspace.
 
-    Static logo + installed `qbit_ops.__version__` + one tagline + one
-    help hint -- no qBittorrent call, no worker, no mutable application
-    state. Picks its `full`/`compact`/`text-only` variant from its own
-    width via Textual's `Resize` event (delivered on first layout, not
-    only later changes), so `QbitOpsTuiApp` needs no branding-specific
+    No qBittorrent call, no worker, no mutable application state. Picks
+    its `full`/`compact`/`text-only` variant from its own width via
+    Textual's `Resize` event (delivered on first layout, not only later
+    changes), so `QbitOpsTuiApp` needs no branding-specific
     orchestration to keep it responsive.
     """
 
@@ -235,20 +234,14 @@ class OverviewPanel(VerticalScroll):
     entirely from the same `TuiState` the periodic refresh already
     populates. No qBittorrent call of its own.
 
-    Four visual levels, in mount order: `BrandHeader` (branding);
-    `#overview-rail` (compact connection + transfer status); the
-    `#overview-cards` section (Torrents/Health primary/secondary pair,
-    then a full-width Instance card); and the Browse-torrents nav hint.
-    The header and nav hint are mounted once and never torn down;
-    `render_state()` only updates the rail's text and replaces the
-    three cards.
+    `BrandHeader` and the Browse-torrents nav hint are mounted once and
+    never torn down; `render_state()` only updates the rail's text and
+    replaces the three `#overview-cards` cards.
 
-    Torrents and Health each fold two formerly-separate cards
-    (Activity+Completion, Attention+Health) into one section without
-    implying their sub-counts partition the total -- a torrent can
-    count toward more than one at once (e.g. seeding *and* completed
-    *and* stalled). Instance is lifetime totals (`TuiState.instance_stats`),
-    never derived from the torrent list.
+    Torrents and Health sub-counts don't partition their card's total
+    -- a torrent can count toward more than one at once (e.g. seeding
+    *and* completed *and* stalled). Instance is lifetime totals
+    (`TuiState.instance_stats`), never derived from the torrent list.
     """
 
     def compose(self) -> ComposeResult:
