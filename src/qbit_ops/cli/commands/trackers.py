@@ -297,6 +297,13 @@ def list_trackers(
     completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Show all nine columns instead of the five-column default.",
+        ),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -314,8 +321,14 @@ def list_trackers(
 
     A torrent announcing to several trackers counts *entirely* in each
     aggregate, so summing a column over every tracker exceeds the
-    library total; `EXCL` counts the torrents this tracker is the only
-    identity of.
+    library total; `--verbose`'s `Excl` column counts the torrents this
+    tracker is the only identity of.
+
+    Table output is a fixed five-column set (Tracker, Torrents, Size,
+    Uploaded, Ratio) that never adapts to the detected terminal width;
+    `--verbose` renders all nine columns instead. `--format json`,
+    `jsonl` and `csv` always carry every measure regardless of
+    `--verbose`.
 
     Always exits `0` on tracker health: this is an inventory, not a
     diagnostic, so a script asking "what trackers exist" is never broken
@@ -377,7 +390,7 @@ def list_trackers(
                 client, filters, on_progress=advance
             )
 
-    rendering.render_tracker_inventory(report, output_format)
+    rendering.render_tracker_inventory(report, output_format, verbose=verbose)
 
 
 @trackers_app.command(name="status")
