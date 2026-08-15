@@ -36,3 +36,6 @@ build/
 # Demo: generated fixtures/state and recordings are disposable
 demo/generated/
 demo/output/
+
+# Personas du control-plane : lien vers .agents/personas, gardé local
+.claude/agents

@@ -6,3 +6,8 @@ repos:
         entry: poetry run cz check --commit-msg-file
         language: system
         stages: [commit-msg]
+      - id: commit-provenance
+        name: Refuse a forbidden provenance trailer
+        entry: python3 scripts/check_commit_provenance.py --commit-msg-file
+        language: system
+        stages: [commit-msg]

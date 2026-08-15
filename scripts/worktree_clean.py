@@ -3,9 +3,22 @@
 
 Deliberately conservative: it would rather stop and explain than delete
 something a human still needs. It refuses when the worktree holds any
-change Git would not already have, and when the branch is not fully
-merged. It never runs `git worktree remove --force`, and never
-`git branch -D`.
+change Git would not already have, and when the branch is not proven
+integrated. It never runs `git worktree remove --force`.
+
+Two integration proofs, because two integration strategies exist:
+
+- **ancestry** -- after `git merge --no-ff`, the branch is an ancestor
+  of the base. `git branch -d` enforces this itself.
+- **content equivalence** -- after `git merge --squash`, the branch is
+  deliberately *not* an ancestor, so ancestry proves nothing and
+  `git branch -d` always refuses. What holds instead is that the
+  delivered tree equals the approved tree. Comparing tree hashes proves
+  in one step that nothing approved was lost and nothing foreign was
+  taken in.
+
+`git branch -D` is reachable only through the second proof, never as a
+way around the first.
 
 The control-plane symlinks are unlinked explicitly before Git removes
 the directory, so no directory walk can ever follow them back into the
@@ -72,9 +85,29 @@ def _dirty_entries(worktree: Path) -> list[str]:
 
 
 def _is_merged(root: Path, branch: str, base: str) -> bool:
+    """Ancestry proof: the branch is contained in `base`'s history."""
     return (
         _git(root, "merge-base", "--is-ancestor", branch, base).returncode == 0
     )
+
+
+def _tree_of(root: Path, commitish: str) -> str:
+    return _git(root, "rev-parse", f"{commitish}^{{tree}}").stdout.strip()
+
+
+def squash_equivalence(
+    root: Path, branch: str, base: str
+) -> tuple[bool, str, str]:
+    """Content-equivalence proof for a squashed integration.
+
+    Returns whether the trees match plus both hashes, so a caller can
+    record the evidence rather than merely assert it. Equal trees mean
+    the delivered content *is* the approved content: no approved change
+    was dropped by the squash, and no foreign change rode along.
+    """
+    branch_tree = _tree_of(root, branch)
+    base_tree = _tree_of(root, base)
+    return branch_tree == base_tree, branch_tree, base_tree
 
 
 def clean(
@@ -99,11 +132,26 @@ def clean(
             "delete a directory this script did not create."
         )
 
+    squashed = False
     if not keep_branch and not _is_merged(root, branch, base):
-        raise WorktreeError(
-            f"Branch {branch!r} is not fully merged into {base!r}. Nothing "
-            "was removed. Integrate it first, or re-run with "
-            "--keep-branch to drop only the worktree."
+        equivalent, branch_tree, base_tree = squash_equivalence(
+            root, branch, base
+        )
+        if not equivalent:
+            raise WorktreeError(
+                f"Branch {branch!r} is neither an ancestor of {base!r} nor "
+                "content-equivalent to it. Nothing was removed.\n"
+                f"  {branch} tree {branch_tree}\n"
+                f"  {base} tree {base_tree}\n"
+                "Either the branch is not integrated, or the squash lost "
+                "an approved change or took in a foreign one. Integrate "
+                "it first, or re-run with --keep-branch to drop only the "
+                "worktree."
+            )
+        squashed = True
+        print(
+            f"Squash integration proven: {branch} and {base} share tree "
+            f"{branch_tree}."
         )
 
     removed_links = _unlink_control_plane(worktree)
@@ -132,12 +180,18 @@ def clean(
     if keep_branch:
         return branch, False
 
-    # `-d` only: it refuses an unmerged branch, and that refusal is a
-    # signal to surface, never something to force past with `-D`.
-    deleted = _git(root, "branch", "-d", branch)
+    # `-d` is the default: it re-checks ancestry itself, so its refusal
+    # is a signal to surface rather than something to force past.
+    #
+    # `-D` is reachable only when `squash_equivalence` already proved the
+    # delivered tree identical to the approved one -- the proof `-d`
+    # structurally cannot make after a squash. It is never a fallback
+    # for a `-d` that refused.
+    flag = "-D" if squashed else "-d"
+    deleted = _git(root, "branch", flag, branch)
     if deleted.returncode != 0:
         raise WorktreeError(
-            f"Worktree removed, but `git branch -d {branch}` refused:\n"
+            f"Worktree removed, but `git branch {flag} {branch}` refused:\n"
             f"{deleted.stderr.strip()}\n"
             "The branch was kept. Delete it yourself if you are sure."
         )
