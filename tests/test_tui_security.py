@@ -3,7 +3,7 @@
 Mirrors `tests/test_errors.py`'s AST-based approach: a compile-time
 guarantee, not just a runtime test, that TUI modules never import a
 raw-secret-producing helper, an out-of-scope mutation function, or the
-CLI module -- see docs/ARCHITECTURE.md §4.
+CLI module. The boundary is stated in `qbit_ops.tui.app`'s module docstring.
 
 TUI 2 narrowed, not removed, this boundary: the TUI may now import
 exactly `qbit_core.features.torrents.apply_bulk_torrent_action`/
@@ -99,7 +99,7 @@ def test_tui_modules_never_import_the_cli_package() -> None:
         assert not leaked, (
             f"{path} must never import the CLI package ({leaked}) -- a TUI "
             "must not depend on the CLI layer "
-            "(docs/ARCHITECTURE.md §4)."
+            "(see `qbit_ops.tui.app`'s module docstring)."
         )
 
 

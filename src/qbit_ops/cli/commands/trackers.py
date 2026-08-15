@@ -982,7 +982,7 @@ def export_trackers(
     Safe by default: identities are always `host[:port]`, never a full
     announce URL or passkey. For a restorable backup that legitimately
     needs raw tracker URLs, use `backup export` instead (see
-    docs/COMMANDS.md, "Backup").
+    docs/COMMANDS.md, "Restoring from a `backup export`").
     """
     validate_format_support("trackers_export", output_format)
     enabled = rendering.progress_enabled(

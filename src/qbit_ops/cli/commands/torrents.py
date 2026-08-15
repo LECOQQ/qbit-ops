@@ -321,7 +321,7 @@ def list_qbit_torrents(
 
     Different filter types combine with AND; repeated `--category`/
     `--state` values combine with OR. No filter means every torrent, as
-    before. See docs/COMMANDS.md ("Torrent Filters") for the full
+    before. See docs/COMMANDS.md ("Filters") for the full
     vocabulary and combination rules.
     """
     validate_format_support("torrents_list", output_format)

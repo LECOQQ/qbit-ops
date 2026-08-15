@@ -1,6 +1,6 @@
 """Textual application for `qbit-ops tui` (read-only, LOW-risk bulk actions).
 
-Security boundary (see docs/ARCHITECTURE.md): only imports the
+Security boundary -- only imports the
 LOW-risk, frozen-plan Pause/Resume/Reannounce functions -- never a
 rescanning or deletion function, or `qbit_ops.cli`. Enforced by
 `tests/test_tui_security.py`.
@@ -168,7 +168,7 @@ class QbitOpsTuiApp(App[None]):
     MainScreen.narrow {
         border: none;
     }
-    /* No fill here (see point 1 of the visual-polish brief): this
+    /* No fill here: this
        strip used to carry a `$panel` background + bottom border that
        read as an empty grey seam. The active/inactive tab colours
        (see `WorkspaceTabs`) now carry all of this row's meaning. */
@@ -655,16 +655,16 @@ class QbitOpsTuiApp(App[None]):
 
         Three costs are kept independent so a periodic refresh, a
         search keystroke, or a resize each pay only for what actually
-        changed (see `.agents/PLAN.md`'s TUI performance phase):
+        changed:
 
         - formatting (`_torrent_row_values`): only for a hash whose
           `_last_row_sources` entry (the small tuple of raw fields that
           actually feed formatting -- name/state/progress/rates/ratio/
           category, focused, selected, and the shared bar/name-width/
-          search context) differs from last render. Benchmarked as
-          roughly half the cost of a full periodic-refresh render at
-          1,100 torrents, so an unwatched torrent must never be
-          reformatted just because a handful of others changed.
+          search context) differs from last render. Reformatting is the
+          dominant cost of a refresh, so an unwatched torrent must never
+          be reformatted just because a handful of others changed.
+          Re-measure with `scripts/profile_tui_table.py`.
         - column rebuild (`clear(columns=True)` + `add_column` x N):
           only when `_last_table_signature` (columns, Name/Progress
           widths, active sort) differs from last render -- covers
@@ -1172,12 +1172,9 @@ class QbitOpsTuiApp(App[None]):
         # separate row above the footer. Zero-width/borderless (see the
         # module CSS): it renders nothing itself, it only captures
         # keystrokes, while `CommandBar.set_search_state` renders the
-        # visible `search: xxx`/`Total: y` tokens in its place. Awaited
-        # (unlike a bare unwrapped `Input` mount, which used to work
-        # focused synchronously): focusing a widget immediately after
-        # an unawaited `mount()` can silently lose the focus request
-        # under real key-dispatch timing -- reproduced empirically, not
-        # merely suspected.
+        # visible `search: xxx`/`Total: y` tokens in its place. Awaited:
+        # focusing a widget immediately after an unawaited `mount()` can
+        # silently lose the focus request under real key-dispatch timing.
         await self.query_one("#footer-row", Horizontal).mount(search)
         self._push_search_state(self.controller.state.search)
         search.focus()

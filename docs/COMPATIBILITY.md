@@ -9,7 +9,7 @@ qbit-ops is container-integration tested against these exact versions:
 | 5.1.4 | 2.11.4 | amd64 |
 | 5.2.3 | 2.15.1 | amd64 |
 
-This does **not** mean “all qBittorrent versions from 4.6 to 5.2 are supported”. Compatibility claims must always cite exact tested versions -- never a version range -- and that rule is tracked here, not only in the gitignored `AGENTS.md`.
+This does **not** mean “all qBittorrent versions from 4.6 to 5.2 are supported”. Compatibility claims must always cite exact tested versions -- never a version range.
 
 ## 🩺 What `doctor` reports
 

@@ -36,7 +36,7 @@ The CLI is the primary automation interface. The TUI is an interactive interface
 
 ## 🧯 Power users should not need footguns
 
-The intended user is comfortable w/ terminals, scripting, homelabs, seedboxes and large torrent libraries.
+The intended user is comfortable with terminals, scripting, homelabs, seedboxes and large torrent libraries.
 
 That does not mean unsafe defaults are acceptable. Quite the opposite:
 > The larger the blast radius, the more explicit and predictable the operation should become.
