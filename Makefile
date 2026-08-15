@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -101,6 +101,10 @@ check-docs: ## qa: Verify every Markdown link and repo-anchored path reference r
 check-ai: ## qa: Enforce AI hygiene -- provenance, generated artefacts, house style
 	@python3 scripts/check_ai_hygiene.py
 
+check-agents: ## qa: Run the agent control-plane's own invariants (no-op without .agents/)
+	@if [ -d .agents ]; then $(MAKE) --no-print-directory -C .agents check; \
+	else printf 'SKIP: no .agents/ in this checkout.\n'; fi
+
 build: sync ## dev: Build the wheel and sdist into dist/
 	@rm -rf dist
 	@poetry build
@@ -112,7 +116,7 @@ check-dist: build ## qa: Validate the built artifacts and smoke-test the install
 check-image: sync ## qa: Build the container image locally and verify its entrypoint and OCI labels (needs Docker)
 	@$(PY) pytest -m image tests/test_docker_distribution.py
 
-check: sync lint test check-version check-docs check-ai ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
+check: sync lint test check-version check-docs check-ai check-agents ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
 
 check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
 	@$(PY) ruff check src tests scripts

@@ -241,11 +241,21 @@ def test_search_torrents_actually_calls_a_search_function() -> None:
 
 
 def _called_function_names(func: ast.FunctionDef) -> set[str]:
-    return {
-        node.func.id
-        for node in ast.walk(func)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
+    """Every callee name in `func`, bare or qualified.
+
+    `ast.Attribute` is included so a qualified call
+    (`torrents.select_torrents(...)`) cannot slip past a check written
+    against the bare name.
+    """
+    called: set[str] = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            called.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            called.add(node.func.attr)
+    return called
 
 
 def test_search_torrents_uses_the_client_free_selection_helper() -> None:
@@ -266,3 +276,82 @@ def test_search_torrents_uses_the_client_free_selection_helper() -> None:
 
     assert "select_torrents_from_items" in called
     assert "select_torrents" not in called
+
+
+# --- Test 4: mutating surfaces derived from the client protocols ----------
+#
+# Tests 1 and 3 identify mutating surfaces by name convention
+# (`plan_*`/`apply_*`) and by the CLI registry. Neither reaches a domain
+# function that mutates without carrying the prefix --
+# `pause_torrents_by_hash` and `_apply_bulk_action_to_hashes` both do.
+#
+# `qbit_core.qbit.protocols` is the business source of truth for what
+# mutation *is*: three Protocols declare every client method that
+# changes qBittorrent state. A function calling one of them mutates, by
+# definition rather than by naming.
+#
+# What this proves: no production function that calls a mutating client
+# method also references the search engine.
+#
+# What it does NOT prove: that a search result cannot reach a mutation
+# through an intermediate variable, a helper, or a second function --
+# that is data-flow analysis, deliberately out of scope. This is a
+# reference-level guard, not a taint tracker.
+
+
+def _mutating_client_methods() -> set[str]:
+    """Every client method declared by a mutator Protocol."""
+    from qbit_core.qbit import protocols
+
+    methods: set[str] = set()
+    for name in dir(protocols):
+        if not name.endswith("Mutator"):
+            continue
+        protocol = getattr(protocols, name)
+        methods.update(
+            attribute
+            for attribute in vars(protocol)
+            if attribute.startswith("torrents_")
+        )
+    return methods
+
+
+def test_the_mutator_protocols_are_a_usable_source_of_truth() -> None:
+    """Non-vacuity: if the Protocols were renamed or emptied, the guard
+    below would scan for nothing and stay green."""
+    methods = _mutating_client_methods()
+
+    assert "torrents_pause" in methods
+    assert "torrents_delete" in methods
+    assert len(methods) >= 5
+
+
+def test_no_function_that_mutates_references_the_search_engine() -> None:
+    mutating_methods = _mutating_client_methods()
+    offenders: dict[str, set[str]] = {}
+    scanned = 0
+
+    files = _production_python_files(CORE_DIR) + _production_python_files(
+        PACKAGE_DIR
+    )
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        forbidden = (
+            _names_imported_from(tree, "qbit_core.shared.search")
+            | _FORBIDDEN_SEARCH_REFERENCES
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not _called_function_names(node) & mutating_methods:
+                continue
+            scanned += 1
+            leaked = _referenced_names(node) & forbidden
+            if leaked:
+                offenders[f"{path.name}::{node.name}"] = leaked
+
+    assert scanned, "no mutating function found -- the scan is vacuous"
+    assert not offenders, (
+        f"functions calling a mutating client method and referencing the "
+        f"search engine: {offenders}"
+    )
