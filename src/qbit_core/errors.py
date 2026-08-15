@@ -29,7 +29,7 @@ class AppError:
 
     `code` is a short stable machine identifier, distinct from the
     process exit code. `target` is a safe identity (a hash prefix, a
-    normalized tracker host) — never a raw tracker URL or credential.
+    normalized tracker host) -- never a raw tracker URL or credential.
     """
 
     category: ErrorCategory

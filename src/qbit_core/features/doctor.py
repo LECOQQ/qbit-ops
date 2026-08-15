@@ -65,7 +65,7 @@ class ConnectionOutcome(StrEnum):
 
     Kept independent from `qbit_core.errors.QbitConnectionError`/
     `QbitAuthenticationError` so this module never imports
-    `qbit_ops.cli.commands.doctor` (which imports this module) — the
+    `qbit_ops.cli.commands.doctor` (which imports this module) -- the
     caller classifies its own exceptions into this enum before calling
     `collect_doctor_report()`.
     """

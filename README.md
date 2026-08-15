@@ -70,7 +70,7 @@ qbit-ops tui
 ```
 
 🐳 Prefer containers? `ghcr.io/lecoqq/qbit-ops:latest` runs the same CLI on
-amd64 and arm64 — see the
+amd64 and arm64 -- see the
 [Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
 
 ## 🎸 Greatest hits

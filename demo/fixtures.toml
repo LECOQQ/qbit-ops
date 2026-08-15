@@ -34,21 +34,21 @@ payload_size = 1_200_000
 desired_state = "completed-paused"
 
 [[fixture]]
-name = "Documentary S01E01 — The First Signal"
+name = "Documentary S01E01 -- The First Signal"
 category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
 desired_state = "seeding"
 
 [[fixture]]
-name = "Documentary S01E02 — Into the Unknown"
+name = "Documentary S01E02 -- Into the Unknown"
 category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
 desired_state = "seeding"
 
 [[fixture]]
-name = "Documentary S01E03 — The Long Return"
+name = "Documentary S01E03 -- The Long Return"
 category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
@@ -83,7 +83,7 @@ payload_size = 700_000
 desired_state = "completed-paused"
 
 [[fixture]]
-name = "Family Photos Archive — Synthetic Demo"
+name = "Family Photos Archive -- Synthetic Demo"
 category = "archive"
 extension = "zip"
 payload_size = 1_100_000

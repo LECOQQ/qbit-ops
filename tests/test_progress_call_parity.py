@@ -4,7 +4,7 @@ For every command wired up in the transient-progress phase, run it once
 with progress disabled (non-interactive) and once with progress enabled
 (interactive), against two structurally identical `FakeQbitClient`
 instances, and assert the two clients recorded the exact same ordered
-sequence of API calls (`FakeQbitClient.calls`) — same methods, same
+sequence of API calls (`FakeQbitClient.calls`) -- same methods, same
 arguments, same count, same order. Progress is purely presentational: it
 must not add, remove, reorder, or duplicate a single call.
 """

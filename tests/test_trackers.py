@@ -770,7 +770,7 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
 # a plan can match targets with nothing left to change (NO_CHANGES), or
 # match nothing at all (NO_MATCH). Callers (qbit_ops/main.py::_run_mutation)
 # use `matched == 0` to report NO_MATCH and `not plan.changes` (with
-# matched > 0) to report NO_CHANGES — never APPLIED for either.
+# matched > 0) to report NO_CHANGES -- never APPLIED for either.
 
 
 def test_plan_tracker_addition_matches_nothing() -> None:

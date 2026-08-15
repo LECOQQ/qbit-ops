@@ -1442,7 +1442,7 @@ def print_torrent_name_search(
     `--format csv` is intentionally not offered here: this helper also
     renders `torrents inspect --hash`'s single-torrent result elsewhere
     (nested tracker details, no stable tabular shape), and `torrents
-    inspect` uses one format-support rule for both modes — see
+    inspect` uses one format-support rule for both modes -- see
     `qbit_ops.cli.validation.FORMAT_SUPPORT["torrents_inspect"]`.
     `validate_format_support` already rejected `csv` before any API
     call was made.
@@ -1791,7 +1791,7 @@ def print_passkey_details(
     """Print verbose passkey replacement details, if any.
 
     Only ever prints `change.hash` / `change.name` / `change.stale_url_count`
-    — never `change.stale_urls`, which carries the new passkey.
+    -- never `change.stale_urls`, which carries the new passkey.
     """
     if not plan.changes:
         return

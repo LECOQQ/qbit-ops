@@ -5,9 +5,9 @@ light regression check that one-shot `status` is unaffected. The pure
 `watch_status()` loop itself (ordering, timing, drift, overlap,
 recovery) is tested independently of Typer/Rich in `tests/test_status.py`.
 
-Uses injected fakes throughout — a fake `time.sleep` that raises
+Uses injected fakes throughout -- a fake `time.sleep` that raises
 `KeyboardInterrupt` after N calls to end a watch loop deterministically,
-and a fake qBittorrent client — never a real wait or a real terminal.
+and a fake qBittorrent client -- never a real wait or a real terminal.
 """
 
 import json
@@ -271,7 +271,7 @@ def test_table_watch_interruption_during_collection_closes_cleanly(
 
     client = _InterruptingClient(torrents=[make_torrent(hash="a" * 40)])
     _install_backend(monkeypatch, client)
-    # The interrupt happens during collect(), not sleep() — but the first
+    # The interrupt happens during collect(), not sleep() -- but the first
     # iteration still completes and sleeps once before the second collect
     # raises, so sleep must be faked too, or this test would really wait
     # out the default 5s interval.
