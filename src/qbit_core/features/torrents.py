@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Literal
 
+from qbit_core.errors import InvalidInputError
 from qbit_core.features.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
@@ -37,6 +38,12 @@ from qbit_core.qbit.fields import (
     pseudo_tracker_label,
 )
 from qbit_core.shared.inspection import inspect_trackers
+from qbit_core.shared.search import (
+    SearchMode,
+    SearchResults,
+    search_snapshots,
+    validate_search_query,
+)
 from qbit_core.shared.selection import (
     EMPTY_TORRENT_FILTER,
     INSPECTION_ONLY_FILTER_FIELDS,
@@ -397,6 +404,45 @@ def select_torrents_from_items(
         )
 
     return select_from_items(torrents, SelectionRequest(filters=filters))
+
+
+def search_torrents(
+    client: Any,
+    query: str,
+    *,
+    mode: SearchMode = "fuzzy",
+    hash_min_length: int = 8,
+    limit: int = 20,
+    filters: TorrentFilter = EMPTY_TORRENT_FILTER,
+) -> SearchResults:
+    """Search torrents by name, ranked -- a cul-de-sac, never a selector.
+
+    Rejects a query that is blank or normalizes to blank, and any
+    `INSPECTION_ONLY_FILTER_FIELDS` filter, before any qBittorrent call
+    (see `.agents/specs/search.md`). Costs exactly one `torrents_info()`:
+    filters are applied via `select_torrents_from_items`, never
+    `select_torrents`, whose conditional `torrents_trackers()` INSPECT
+    pass this command must never pay for.
+    """
+    validate_search_query(query)
+    if filters.requires_inspection:
+        raise InvalidInputError(
+            "torrents search does not support tracker-derived filters "
+            f"({', '.join(INSPECTION_ONLY_FILTER_FIELDS)}); use "
+            "`torrents list` for those criteria instead."
+        )
+
+    all_torrents = list(client.torrents_info())
+    selection = select_torrents_from_items(all_torrents, filters)
+
+    return search_snapshots(
+        selection.matched,
+        query,
+        mode=mode,
+        hash_min_length=hash_min_length,
+        limit=limit,
+        scanned=selection.scanned,
+    )
 
 
 def list_torrent_snapshots(client: Any) -> tuple[TorrentSnapshot, ...]:

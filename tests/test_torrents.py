@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from qbit_core.errors import InvalidInputError
 from qbit_core.features.torrents import (
     HashActionStatus,
     TorrentBulkAction,
@@ -15,6 +16,7 @@ from qbit_core.features.torrents import (
     pause_torrents_by_hash,
     plan_bulk_torrent_action,
     resume_torrents_by_hash,
+    search_torrents,
     search_torrents_by_name,
     select_torrents,
     validate_torrent_selector,
@@ -22,6 +24,7 @@ from qbit_core.features.torrents import (
 from qbit_core.features.tracker_status import collect_tracker_status
 from qbit_core.shared.inspection import select_and_inspect
 from qbit_core.shared.selection import (
+    INSPECTION_ONLY_FILTER_FIELDS,
     AmbiguousTorrentHashError,
     InvalidTorrentSelectorError,
     SelectionRequest,
@@ -1350,6 +1353,168 @@ def test_search_torrents_by_name_returns_empty_when_nothing_matches() -> None:
 
     assert report["summary"]["matched"] == 0
     assert report["matches"] == []
+
+
+# --- search_torrents: the shared engine's client-facing entry point --------
+
+
+def test_search_torrents_calls_torrents_info_once_never_trackers() -> None:
+    """Piège 5: `search_torrents` must go through
+    `select_torrents_from_items`, never `select_torrents` -- the latter
+    conditionally calls `torrents_trackers()` per surviving candidate,
+    an INSPECT pass this read-only command must never pay for."""
+    client = FakeQbitClient(
+        torrents=[_torrent(hash="a" * 40, name="Amour Est")],
+    )
+
+    search_torrents(client, "amour")
+
+    assert client.torrents_info_calls == 1
+    assert client.torrents_trackers_calls == 0
+
+
+def test_search_torrents_rejects_blank_query_before_any_api_call() -> None:
+    client = FakeQbitClient(torrents=[_torrent()])
+
+    with pytest.raises(InvalidInputError):
+        search_torrents(client, "")
+
+    assert client.torrents_info_calls == 0
+
+
+def test_search_torrents_rejects_a_query_that_normalizes_to_blank() -> None:
+    client = FakeQbitClient(torrents=[_torrent()])
+
+    with pytest.raises(InvalidInputError):
+        search_torrents(client, "---")
+
+    assert client.torrents_info_calls == 0
+
+
+def test_search_torrents_rejects_inspection_only_filters_before_api_call() -> (
+    None
+):
+    """AC4: the mechanism is `TorrentFilter.requires_inspection`, never a
+    copied field list -- and the message points at `torrents list`."""
+    client = FakeQbitClient(torrents=[_torrent()])
+    filters = TorrentFilter(tracker_health=("healthy",))
+
+    with pytest.raises(InvalidInputError, match="torrents list"):
+        search_torrents(client, "amour", filters=filters)
+
+    assert client.torrents_info_calls == 0
+
+
+_INSPECTION_ONLY_FILTER_SAMPLES: tuple[tuple[str, TorrentFilter], ...] = (
+    ("trackers", TorrentFilter(trackers=("tracker.example",))),
+    (
+        "trackers_excluded",
+        TorrentFilter(trackers_excluded=("tracker.example",)),
+    ),
+    ("tracker_health", TorrentFilter(tracker_health=("healthy",))),
+)
+
+
+def test_inspection_only_filter_samples_cover_every_field() -> None:
+    """Non-vacuity: the parametrized test below must exercise every
+    field `INSPECTION_ONLY_FILTER_FIELDS` names -- the mechanism AC4
+    relies on -- not a hand-copied subset."""
+    assert {name for name, _ in _INSPECTION_ONLY_FILTER_SAMPLES} == set(
+        INSPECTION_ONLY_FILTER_FIELDS
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "filters"),
+    _INSPECTION_ONLY_FILTER_SAMPLES,
+    ids=[name for name, _ in _INSPECTION_ONLY_FILTER_SAMPLES],
+)
+def test_search_torrents_rejects_every_inspection_only_field(
+    field_name: str, filters: TorrentFilter
+) -> None:
+    client = FakeQbitClient(torrents=[_torrent()])
+
+    with pytest.raises(InvalidInputError):
+        search_torrents(client, "amour", filters=filters)
+
+    assert client.torrents_info_calls == 0
+
+
+def test_search_torrents_delegates_ranking_to_the_shared_engine() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="a" * 40, name="Amour Est Dans Le Pre"),
+            _torrent(hash="b" * 40, name="Something Else Entirely"),
+        ],
+    )
+
+    results = search_torrents(client, "amour est", mode="tokens")
+
+    assert results.matched == 1
+    assert results.hits[0].torrent.hash == "a" * 40
+    assert results.hits[0].tier == "prefix"
+
+
+def test_search_torrents_scanned_reports_the_full_library_before_filters() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="a" * 40, name="Amour Sonarr", category="sonarr"),
+            _torrent(hash="b" * 40, name="Amour Radarr", category="radarr"),
+        ],
+    )
+    filters = build_torrent_filter(categories=["sonarr"])
+
+    results = search_torrents(client, "amour", filters=filters)
+
+    assert results.scanned == 2
+    assert results.matched == 1
+    assert results.hits[0].torrent.hash == "a" * 40
+
+
+def test_search_torrents_applies_composable_filters_before_scoring() -> None:
+    """The composable filter narrows the corpus that gets scored -- a
+    torrent excluded by the filter never appears regardless of how
+    well it would otherwise match the query."""
+    client = FakeQbitClient(
+        torrents=[
+            _torrent(hash="a" * 40, name="Amour Sonarr", category="sonarr"),
+            _torrent(hash="b" * 40, name="Amour Radarr", category="radarr"),
+        ],
+    )
+    filters = build_torrent_filter(categories=["sonarr"])
+
+    results = search_torrents(client, "amour", filters=filters)
+
+    assert [hit.torrent.hash for hit in results.hits] == ["a" * 40]
+
+
+def test_search_torrents_default_hash_min_length_is_eight() -> None:
+    """`hash_min_length` is 8 by default here (the CLI value) -- a
+    hex-looking query shorter than that never triggers the hash tier."""
+    target_hash = "3f2a1b9cdeadbeef0123456789abcdef01234567"
+    client = FakeQbitClient(
+        torrents=[_torrent(hash=target_hash, name="Completely Unrelated")],
+    )
+
+    results = search_torrents(client, "3f2a1b9", mode="tokens")
+
+    assert results.matched == 0
+
+
+def test_search_torrents_hash_min_length_is_overridable() -> None:
+    target_hash = "3f2a1b9cdeadbeef0123456789abcdef01234567"
+    client = FakeQbitClient(
+        torrents=[_torrent(hash=target_hash, name="Completely Unrelated")],
+    )
+
+    results = search_torrents(
+        client, "3f2a1b9", mode="tokens", hash_min_length=4
+    )
+
+    assert results.matched == 1
+    assert results.hits[0].tier == "hash"
 
 
 def test_list_category_usage_counts_torrents_per_category() -> None:
