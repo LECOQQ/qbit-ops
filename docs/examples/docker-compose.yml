@@ -8,26 +8,12 @@ services:
   qbit-ops:
     image: ghcr.io/lecoqq/qbit-ops:latest
     profiles: ["cli"]
-
     environment:
-      QBIT_HOST: ${QBIT_HOST:?set QBIT_HOST in a .env file next to this compose file}
-      QBIT_USER: ${QBIT_USER:?set QBIT_USER in a .env file next to this compose file}
-      QBIT_PASSWORD: ${QBIT_PASSWORD:?set QBIT_PASSWORD in a .env file next to this compose file}
-
+      QBIT_HOST: ${QBIT_HOST}
+      QBIT_USER: ${QBIT_USER}
+      QBIT_PASSWORD: ${QBIT_PASSWORD}
+    env_file:
+      - .env
     volumes:
-      # `/data` is the image's working directory, so relative paths in
-      # commands resolve here.
       - ./qbit-data:/data
       - ./torrents:/input:ro
-
-    # The image runs as UID/GID 1000; adjust if your host user differs.
-    # user: "${UID:-1000}:${GID:-1000}"
-
-    # `QBIT_HOST` above assumes qBittorrent is reachable by service name
-    # on a shared network. Uncomment to join one managed elsewhere.
-    # networks: [qbittorrent]
-
-# networks:
-#   qbittorrent:
-#     external: true
-#     name: <the network your qBittorrent container is on>
