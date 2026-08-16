@@ -26,6 +26,7 @@
 - Stall, error and inactivity filters, composable across CLI and TUI ✅
 - Health that answers "must I act" ✅
 - Bulk category and tag management ✅
+- Bulk rate limiting, per torrent or library-wide ✅
 - Composable filtering across mutating operations ✅
 - Machine-readable results for every mutation ✅
 - JSONL output ✅
@@ -39,7 +40,6 @@
 
 > Select precisely. Operate on thousands of torrents safely.
 
-- Bulk throttling
 - Tracker URL migration
 - Saved selectors
 - Batch-aware reannounce and recheck

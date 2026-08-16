@@ -107,6 +107,7 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `torrents category clear` | ✅ | ✅ | -- | -- |
 | `torrents tag add` | ✅ | ✅ | -- | -- |
 | `torrents tag remove` | ✅ | ✅ | -- | -- |
+| `torrents throttle` | ✅ | ✅ | -- | -- |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ |
 | `trackers status` | ✅ | ✅ | ✅ | ✅ |
 | `trackers inspect` | ✅ | ✅ | ✅ | ✅ |
@@ -662,6 +663,43 @@ qbit-ops torrents tag remove stale --tag-all cross-seed --no-dry-run
   `NO_MATCH`: the selector matched it, there was just nothing to apply.
 - Selection follows the same `--hash`/filters/`--all` rules as every
   other bulk torrent command.
+
+## 🚦 Bulk rate limiting
+
+`torrents throttle` sets per-torrent download and upload limits on any
+selection -- one torrent, a category, or the whole library. Built for
+bandwidth preservation, and for an external program that throttles on a
+signal and releases when it lifts.
+
+```bash
+qbit-ops torrents throttle --all --down 500KB --no-dry-run
+qbit-ops torrents throttle --category cross-seed --up 1MB/s --no-dry-run
+qbit-ops torrents throttle --all --down unlimited --up unlimited --no-dry-run
+qbit-ops torrents throttle --hash abc123 --down unlimited --no-dry-run
+```
+
+- 📏 **A unit is mandatory.** `--down 500` is refused: it would be 500
+  bytes per second where you meant 500 KB/s. Write `500KB`, `1MiB`, or
+  add `/s` if you prefer -- `500KB/s` is the same value.
+- 🔓 **Releasing a limit is `unlimited`**, not `0`. There is no
+  `unthrottle` verb: the unit carries the meaning. `0` is refused
+  because qBittorrent reads it as "no limit" while a human reads it as
+  "no bytes".
+- ↔️ **Each direction is independent.** Naming only `--down` leaves the
+  upload limit exactly as it was. Releasing both takes both words.
+- 🚫 Neither option is refused before any API call -- `throttle` with no
+  limit names no change at all.
+- 🤖 **`--format json` reports the limits it applied**, alongside the
+  hashes, in qBittorrent's own encoding (`0` is unlimited, `null` is a
+  direction you did not name). A caller compares them straight against
+  `torrents list` instead of trusting that the call worked.
+- 🧠 **Nothing is remembered.** `--down unlimited` removes a limit, it
+  does not restore an earlier one -- a torrent carrying its own limit
+  loses it when a library-wide throttle covers it.
+- 🧪 LOW risk: dry-run by default, `--no-dry-run` applies without a
+  prompt, so a headless caller is never blocked on a question.
+- ⚖️ A torrent already at the requested limit is skipped as a no-op --
+  `NO_CHANGES`, not `NO_MATCH`.
 
 ## 📥 Importing `.torrent` files
 
