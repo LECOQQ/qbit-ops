@@ -92,6 +92,11 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `torrents inspect` | ✅ | ✅ | ✅ | -- |
 | `torrents search` | ✅ | ✅ | ✅ | ✅ |
 | `torrents import` | ✅ | ✅ | -- | -- |
+| `torrents pause` | ✅ | ✅ | -- | -- |
+| `torrents resume` | ✅ | ✅ | -- | -- |
+| `torrents start` | ✅ | ✅ | -- | -- |
+| `torrents reannounce` | ✅ | ✅ | -- | -- |
+| `torrents delete` | ✅ | ✅ | -- | -- |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ |
 | `trackers status` | ✅ | ✅ | ✅ | ✅ |
 | `trackers inspect` | ✅ | ✅ | ✅ | ✅ |
