@@ -1480,7 +1480,7 @@ def _search_match_to_dict(hit: SearchHit) -> dict[str, Any]:
 
     Deliberately not `torrent_snapshot_to_dict`: that one also emits
     `tracker_count`/`download_rate`/`upload_rate`, none of which are
-    part of this contract (see `.agents/specs/search.md`). `match` is
+    part of this contract (see `.agents/features/search/SPEC.md`). `match` is
     the ladder tier name; no numeric score is ever exposed here --
     `similarity` only reaches the table, and only under `--verbose`.
     """

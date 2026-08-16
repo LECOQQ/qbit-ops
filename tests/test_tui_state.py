@@ -462,7 +462,7 @@ def test_search_narrows_the_corpus_but_operator_sort_still_wins() -> None:
 
 def test_search_hash_prefix_needs_only_one_character() -> None:
     """`hash_min_length=1` in the TUI (8 in the CLI, see
-    `.agents/specs/search.md`): a single hex character is enough to
+    `.agents/features/search/SPEC.md`): a single hex character is enough to
     trigger tier 0, unlike the CLI's anti-noise threshold."""
     client = FakeQbitClient(
         torrents=[
