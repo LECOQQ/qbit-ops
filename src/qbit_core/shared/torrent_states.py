@@ -153,6 +153,11 @@ class TorrentSnapshot:
     never derived from `downloaded`/`uploaded`, so a rule built on it
     always designates the same torrents as the `--ratio` filter.
 
+    `download_limit`/`upload_limit` are the torrent's own rate caps in
+    bytes per second, and are plain `int` rather than optional: `0` is
+    qBittorrent's encoding for "no limit", a real value rather than a
+    missing one, so there is no unknown to distinguish here.
+
     An optional measure is `None` when qBittorrent reported nothing
     usable -- absent, null, or one of its "unset" markers (see
     `qbit_core.qbit.fields.UNSET_NUMERIC`/`UNSET_TIMESTAMP`). Never `0`
@@ -172,6 +177,8 @@ class TorrentSnapshot:
     ratio: float
     download_rate: int
     upload_rate: int
+    download_limit: int
+    upload_limit: int
     downloaded: int | None
     uploaded: int | None
     seeding_time: int | None
@@ -218,6 +225,8 @@ def build_torrent_snapshot(torrent: Any) -> TorrentSnapshot:
         ratio=get_field_as_float(torrent, "ratio"),
         download_rate=get_field_as_int(torrent, "dlspeed"),
         upload_rate=get_field_as_int(torrent, "upspeed"),
+        download_limit=get_field_as_int(torrent, "dl_limit"),
+        upload_limit=get_field_as_int(torrent, "up_limit"),
         downloaded=get_optional_int(
             torrent, "downloaded", sentinels=UNSET_NUMERIC
         ),

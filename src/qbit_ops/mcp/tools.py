@@ -225,6 +225,8 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
                 "ratio": snapshot.ratio,
                 "download_rate": snapshot.download_rate,
                 "upload_rate": snapshot.upload_rate,
+                "download_limit": snapshot.download_limit,
+                "upload_limit": snapshot.upload_limit,
                 "downloaded": snapshot.downloaded,
                 "uploaded": snapshot.uploaded,
                 "seeding_time": snapshot.seeding_time,

@@ -904,8 +904,10 @@ def torrent_snapshot_to_dict(
 
     `tracker_count=None` means no tracker inspection ran, distinct from
     `0` (inspected, no active tracker). `download_rate`/`upload_rate`
-    are dropped before the `table`/`csv` renderers, kept only in
-    `json`/`jsonl`.
+    and `download_limit`/`upload_limit` are dropped before the
+    `table`/`csv` renderers, kept only in `json`/`jsonl`: a library is
+    overwhelmingly unlimited, so two columns of zeros would crowd out
+    the ones an operator reads.
     """
     return {
         "hash": snapshot.hash,
@@ -918,6 +920,8 @@ def torrent_snapshot_to_dict(
         "tracker_count": tracker_count,
         "download_rate": snapshot.download_rate,
         "upload_rate": snapshot.upload_rate,
+        "download_limit": snapshot.download_limit,
+        "upload_limit": snapshot.upload_limit,
     }
 
 
