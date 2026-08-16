@@ -127,6 +127,36 @@ def test_pure_modules_never_import_typer_rich_textual_or_qbittorrentapi() -> (
     assert checked == len(_PURE_DOMAIN_MODULE_NAMES)
 
 
+def test_mcp_import_stays_confined_to_the_mcp_server_module() -> None:
+    """R7: only `qbit_ops/mcp/server.py` imports the MCP SDK.
+
+    Same shape as R6, for the same reason: the spike must stay optional,
+    so a normal `poetry install` never needs the SDK. It also keeps
+    `qbit_ops/mcp/tools.py` -- where the bounds live -- testable without
+    the protocol, and the whole package deletable in one commit.
+    """
+    files = [
+        path
+        for path in _production_python_files(APP_PACKAGE_DIR)
+        if path.name != "server.py" or path.parent.name != "mcp"
+    ]
+
+    assert files, "expected production modules outside qbit_ops/mcp/server.py"
+    assert any(
+        path.name == "tools.py" and path.parent.name == "mcp" for path in files
+    ), (
+        "expected qbit_ops/mcp/tools.py to be part of the scanned set -- an "
+        "empty or wrong scan would make this test vacuously pass"
+    )
+
+    for path in files:
+        roots = _module_level_imported_roots(path.read_text(encoding="utf-8"))
+        assert "mcp" not in roots, (
+            f"{path} imports the MCP SDK at module level -- it must stay "
+            "optional, and only qbit_ops/mcp/server.py may import it (R7)."
+        )
+
+
 def test_textual_import_stays_confined_to_the_tui_package() -> None:
     """R6: no production module outside qbit_ops/tui/** imports Textual at
     module level."""

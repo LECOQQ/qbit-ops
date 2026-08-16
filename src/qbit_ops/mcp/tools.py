@@ -1,0 +1,192 @@
+"""Bounded, read-only views over `qbit_core`, shaped for an agent.
+
+The problem this package exists to solve was measured, not assumed: a
+`torrents list --format json` over a 1000-torrent library serialises
+~346 KiB. An MCP tool result cannot be piped through `jq` or `head` --
+it lands in the model's context whole. So the bound lives here, on the
+server, never in the model's good intentions.
+
+The shape is drill-down, and it is deliberate:
+
+    summary  ->  find (bounded)  ->  inspect one  ->  explain one
+
+Each step returns just enough to choose the next one. `find_torrents`
+returns six fields per torrent, not the sixteen a snapshot carries,
+because a hash, a name and a state are what a next step is chosen from.
+
+No tool mutates. No tool holds a rule of its own: every classification
+comes from `qbit_core`, so this surface cannot drift from the CLI's
+answers -- and it can be deleted without taking a verdict with it.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from qbit_core.features.explain import explain_torrent
+from qbit_core.features.status import collect_status_snapshot
+from qbit_core.features.torrents import list_torrent_snapshots
+from qbit_core.shared.torrent_states import TorrentSnapshot
+
+# A hard server-side cap. `DEFAULT_LIMIT` is what an agent gets when it
+# does not think about it; `MAX_LIMIT` is what it gets when it asks for
+# five thousand. Neither is negotiable from the client side.
+DEFAULT_LIMIT = 20
+MAX_LIMIT = 50
+
+
+def _bounded(limit: int | None) -> int:
+    if limit is None:
+        return DEFAULT_LIMIT
+    return max(1, min(limit, MAX_LIMIT))
+
+
+def _brief(snapshot: TorrentSnapshot) -> dict[str, Any]:
+    """The fields a next drill-down step is chosen from, and no more."""
+    return {
+        "hash": snapshot.hash,
+        "name": snapshot.name,
+        "state": snapshot.state,
+        "state_group": snapshot.state_group,
+        "progress": snapshot.progress,
+        "ratio": snapshot.ratio,
+    }
+
+
+def library_summary(client: Any) -> dict[str, Any]:
+    """Counts and health for the whole library, in a fixed-size answer.
+
+    Fixed-size is the point: this is the one tool that reads everything,
+    so it must never grow with the library. It reuses
+    `collect_status_snapshot`, which already carries the alert
+    vocabulary and the health verdict the CLI shows.
+    """
+    snapshot = collect_status_snapshot(client)
+    return {
+        "torrents": snapshot.counts.total,
+        "by_state": {
+            "downloading": snapshot.counts.downloading,
+            "seeding": snapshot.counts.seeding,
+            "completed": snapshot.counts.completed,
+            "stalled": snapshot.counts.stalled,
+            "errored": snapshot.counts.errored,
+            "checking": snapshot.counts.checking,
+            "unknown": snapshot.counts.unknown,
+        },
+        "health": str(snapshot.health),
+        "alerts": [
+            {
+                "code": alert.code,
+                "severity": str(alert.severity),
+                "count": alert.count,
+            }
+            for alert in snapshot.alerts
+        ],
+    }
+
+
+def find_torrents(
+    client: Any,
+    *,
+    state_group: str | None = None,
+    name_contains: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Find torrents, bounded, with just enough to pick one.
+
+    Deliberately not the 39 filter options `torrents list` offers: an
+    agent narrowing a conversation needs a state and a name fragment,
+    and every extra parameter is permanent context cost for a tool that
+    may never be called.
+
+    `matched` counts before truncation, so the agent can tell a slice
+    from a whole answer -- the same contract `torrents search` has.
+    """
+    snapshots = list_torrent_snapshots(client)
+
+    if state_group is not None:
+        wanted = state_group.strip().lower()
+        snapshots = tuple(
+            snapshot for snapshot in snapshots if snapshot.state_group == wanted
+        )
+
+    if name_contains:
+        needle = name_contains.strip().lower()
+        snapshots = tuple(
+            snapshot
+            for snapshot in snapshots
+            if needle in snapshot.name.lower()
+        )
+
+    bound = _bounded(limit)
+    shown = snapshots[:bound]
+    return {
+        "matched": len(snapshots),
+        "returned": len(shown),
+        "truncated": len(shown) < len(snapshots),
+        "limit": bound,
+        "torrents": [_brief(snapshot) for snapshot in shown],
+    }
+
+
+def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
+    """Every field of one explicitly chosen torrent.
+
+    Unbounded on purpose: one torrent is a bounded answer. This is where
+    the sixteen snapshot fields belong -- after an agent has narrowed to
+    a single item, not before.
+    """
+    wanted = torrent_hash.strip().lower()
+    for snapshot in list_torrent_snapshots(client):
+        if snapshot.hash.lower() == wanted:
+            return {
+                "hash": snapshot.hash,
+                "name": snapshot.name,
+                "category": snapshot.category,
+                "state": snapshot.state,
+                "state_group": snapshot.state_group,
+                "size": snapshot.size,
+                "progress": snapshot.progress,
+                "ratio": snapshot.ratio,
+                "download_rate": snapshot.download_rate,
+                "upload_rate": snapshot.upload_rate,
+                "downloaded": snapshot.downloaded,
+                "uploaded": snapshot.uploaded,
+                "seeding_time": snapshot.seeding_time,
+                "added_at": _isoformat(snapshot.added_at),
+                "completed_at": _isoformat(snapshot.completed_at),
+                "last_activity_at": _isoformat(snapshot.last_activity_at),
+            }
+    return None
+
+
+def explain(client: Any, torrent_hash: str) -> dict[str, Any] | None:
+    """Why one torrent is in its current state.
+
+    Calls `qbit_core.features.explain.explain_torrent` unchanged. There
+    is no second diagnostic engine here, and there must never be one:
+    two engines would eventually disagree, and the operator would have
+    no way to know which answer was true.
+    """
+    report = explain_torrent(client, torrent_hash)
+    if report is None:
+        return None
+    return {
+        "target": report.target_identity,
+        "severity": str(report.overall_severity),
+        "summary": report.summary,
+        "findings": [
+            {
+                "code": finding.code,
+                "severity": str(finding.severity),
+                "title": finding.title,
+                "explanation": finding.explanation,
+                "next_commands": list(finding.next_commands),
+            }
+            for finding in report.findings
+        ],
+    }
+
+
+def _isoformat(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
