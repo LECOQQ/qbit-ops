@@ -137,4 +137,10 @@ def test_pyproject_console_script_matches_the_installed_entry_point() -> None:
     )
     scripts = pyproject["tool"]["poetry"]["scripts"]
 
-    assert scripts == {"qbit-ops": "qbit_ops.cli.app:app"}
+    assert scripts == {
+        "qbit-ops": "qbit_ops.cli.app:app",
+        # Experimental MCP spike. Installed unconditionally like any
+        # console script, but it only runs with the `mcp` extra present
+        # -- the entry point exists, the SDK it needs may not.
+        "qbit-ops-mcp": "qbit_ops.mcp.server:main",
+    }

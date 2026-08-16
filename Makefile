@@ -19,7 +19,7 @@ DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
 
 .sync-stamp: pyproject.toml poetry.lock
-	@poetry install --sync --extras tui --no-interaction
+	@poetry install --sync --extras "tui mcp" --no-interaction
 	@touch .sync-stamp
 
 sync: .sync-stamp ## dev: Sync the virtualenv when pyproject.toml or poetry.lock changes
@@ -66,7 +66,7 @@ help: ## diag: Show this help
 	$(call help_section,Diagnostics,diag)
 
 install: doctor ## dev: Install dependencies and configure Git hooks
-	@poetry install --extras tui
+	@poetry install --extras "tui mcp"
 	@touch .sync-stamp
 	@$(PY) pre-commit install --hook-type commit-msg
 
@@ -131,7 +131,7 @@ test-tui: sync ## qa: Run the complete TUI suite (mutation lifecycle, concurrenc
 	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_security.py tests/test_tui_state.py tests/test_tui_table_performance.py
 
 ci: ## qa: Run CI checks (install, lint, tests, CLI entrypoint)
-	@poetry install --extras tui --no-interaction --no-ansi
+	@poetry install --extras "tui mcp" --no-interaction --no-ansi
 	@$(MAKE) check
 	@$(MAKE) ci-entrypoint
 

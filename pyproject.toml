@@ -40,12 +40,15 @@ typer = "*"
 rich = "^15.0.0"
 packaging = "*"
 textual = { version = ">=8.2.8", optional = true }
+mcp = { version = ">=1.0", optional = true }
 
 [tool.poetry.extras]
 tui = ["textual"]
+mcp = ["mcp"]
 
 [tool.poetry.scripts]
 qbit-ops = "qbit_ops.cli.app:app"
+qbit-ops-mcp = "qbit_ops.mcp.server:main"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
@@ -78,6 +81,10 @@ fix = true
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
+# `mcp` is an optional extra: a normal `poetry install` leaves it out,
+# so its import cannot be resolved in the default environment. The
+# module that imports it is confined by R7 in tests/test_layering.py.
+reportMissingImports = "warning"
 include = ["src", "tests", "scripts"]
 extraPaths = ["scripts"]
 typeCheckingMode = "basic"
