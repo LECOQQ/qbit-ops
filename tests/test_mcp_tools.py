@@ -137,6 +137,7 @@ def test_registered_mcp_tools_are_exactly_the_read_only_four() -> None:
     assert names == {
         "library_summary",
         "find_torrents",
+        "aggregate_stats",
         "inspect_torrent",
         "explain_torrent",
     }
@@ -238,3 +239,32 @@ def test_inspect_asks_upstream_for_one_torrent_not_the_library() -> None:
     tools.inspect_torrent(client, f"{7:040x}")
 
     assert transferred == 1, "one lookup must not transfer 200 torrents"
+
+
+def test_aggregate_totals_a_filtered_selection() -> None:
+    """A model adding four `uploaded` fields by hand will eventually get
+    it wrong in silence. The engine already computes these totals for
+    `torrents stats`, so both surfaces answer the same number.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=f"{index:040x}",
+                name=f"T{index}",
+                state="uploading",
+                category="cross-seed" if index % 2 else "movies",
+                uploaded=100 * index,
+            )
+            for index in range(1, 11)
+        ]
+    )
+
+    everything = tools.aggregate_stats(client)
+    cross_seed = tools.aggregate_stats(client, category="cross-seed")
+
+    assert everything["torrents"] == 10
+    assert everything["uploaded_bytes"] == sum(100 * n for n in range(1, 11))
+    assert cross_seed["torrents"] == 5
+    assert cross_seed["uploaded_bytes"] == sum(
+        100 * n for n in range(1, 11) if n % 2
+    )

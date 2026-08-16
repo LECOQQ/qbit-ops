@@ -24,8 +24,13 @@ from __future__ import annotations
 from typing import Any
 
 from qbit_core.features.explain import explain_torrent
+from qbit_core.features.stats import collect_torrent_stats
 from qbit_core.features.status import collect_status_snapshot
-from qbit_core.features.torrents import list_torrent_snapshots
+from qbit_core.features.torrents import (
+    build_torrent_filter,
+    list_torrent_snapshots,
+)
+from qbit_core.shared.selection import SelectionRequest
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
 # A hard server-side cap. `DEFAULT_LIMIT` is what an agent gets when it
@@ -149,6 +154,49 @@ def find_torrents(
         "next_offset": next_offset if next_offset < len(snapshots) else None,
         "limit": bound,
         "torrents": [_brief(snapshot) for snapshot in shown],
+    }
+
+
+def aggregate_stats(
+    client: Any,
+    *,
+    state_group: str | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Totals over a selection: sizes, transfer, ratio, seeding time.
+
+    Exists so a model never adds bytes by hand. Arithmetic across four
+    `uploaded` fields is arithmetic a model will eventually get wrong in
+    silence, and nothing downstream would catch it.
+
+    Reuses `collect_torrent_stats`, which is already bounded and already
+    computes the aggregate ratio the CLI reports -- so this surface and
+    `torrents stats` can never disagree. Fixed size whatever the
+    selection.
+    """
+    filters = build_torrent_filter(
+        categories=[category] if category else (),
+        states=[state_group] if state_group else (),
+    )
+    # `select_all` means "no filter at all" in the domain, and refuses to
+    # combine with one -- so the request carries either the filter or the
+    # flag, never both.
+    request = (
+        SelectionRequest(filters=filters)
+        if not filters.is_empty
+        else SelectionRequest(select_all=True, filters=filters)
+    )
+    report = collect_torrent_stats(client, request)
+    library = report.library
+    return {
+        "torrents": library.torrents,
+        "scanned": library.scanned,
+        "total_size_bytes": library.total_size_bytes,
+        "downloaded_bytes": library.downloaded_bytes,
+        "uploaded_bytes": library.uploaded_bytes,
+        "aggregate_ratio": library.aggregate_ratio,
+        "seeding_time_total_seconds": library.seeding_time_total_seconds,
+        "seeding_time_median_seconds": library.seeding_time_median_seconds,
     }
 
 

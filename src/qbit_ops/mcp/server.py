@@ -78,6 +78,21 @@ def find_torrents(
 
 
 @server.tool()
+def aggregate_stats(
+    state_group: str | None = None,
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Totals over a selection: sizes, transfer, ratio, seeding time.
+
+    Use this instead of adding up fields from `find_torrents` yourself.
+    Same filters, fixed-size answer whatever the selection.
+    """
+    return tools.aggregate_stats(
+        _client(), state_group=state_group, category=category
+    )
+
+
+@server.tool()
 def inspect_torrent(torrent_hash: str) -> dict[str, Any] | None:
     """Every field of one torrent, by full infohash."""
     return tools.inspect_torrent(_client(), torrent_hash)
