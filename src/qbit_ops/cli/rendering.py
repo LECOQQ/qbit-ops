@@ -926,6 +926,7 @@ def print_torrent_selection(
     output_format: OutputFormat,
     *,
     tracker_counts: Mapping[str, int] | None = None,
+    limit: int = 0,
 ) -> None:
     """Print a torrent selection, one shared shape for every filter.
 
@@ -934,8 +935,15 @@ def print_torrent_selection(
     usual `summary`/`torrents`. `tracker_counts=None` means no tracker
     inspection ran: every `tracker_count` renders as `null` and the
     `Trackers` column is omitted entirely.
+
+    `limit` truncates the rendered rows, `0` meaning no limit -- the
+    same vocabulary `torrents search` uses. `summary.matched` keeps
+    counting every match, so the answer to "how many are there" never
+    depends on how many were printed.
     """
     inspected = tracker_counts is not None
+    matched = selection.matched
+    shown = matched[:limit] if limit > 0 else matched
     torrents = [
         torrent_snapshot_to_dict(
             snapshot,
@@ -945,14 +953,16 @@ def print_torrent_selection(
                 else None
             ),
         )
-        for snapshot in selection.matched
+        for snapshot in shown
     ]
     filters = selection.request.filters
     payload = {
         "filters": torrent_filter_to_dict(filters),
         "summary": {
             "scanned": selection.scanned,
-            "matched": len(selection.matched),
+            "matched": len(matched),
+            "returned": len(torrents),
+            "truncated": len(torrents) < len(matched),
         },
         "torrents": torrents,
     }
@@ -992,9 +1002,12 @@ def print_torrent_selection(
             fold_columns={"Hash"},
         )
 
-    print_summary(
-        {"scanned": selection.scanned, "matched": len(selection.matched)}
-    )
+    summary = {"scanned": selection.scanned, "matched": len(matched)}
+    if len(torrents) < len(matched):
+        # Without this the table looks complete: an operator who caps the
+        # output would read the rows and never learn what he did not see.
+        summary["returned"] = len(torrents)
+    print_summary(summary)
 
 
 UNKNOWN_METRIC_LABEL = "unknown"
@@ -1706,6 +1719,31 @@ def bulk_torrent_summary_rows(
         rows["with_data"] = plan.delete_files
     rows["status"] = status
     return rows
+
+
+def bulk_torrent_result_to_dict(
+    plan: BulkTorrentActionPlan,
+    *,
+    status: MutationStatus,
+    dry_run: bool,
+    applied: bool,
+) -> dict[str, Any]:
+    """Build the `--format json` payload for a bulk torrent action.
+
+    Wraps `bulk_torrent_summary_rows` rather than restating it, so the
+    machine payload and the Rich summary can never disagree about what a
+    plan matched or changed. `hashes` is what the table only showed
+    under `--verbose`, and what a caller needs to know *which* torrents
+    a preview covered rather than just how many.
+    """
+    rows = bulk_torrent_summary_rows(plan, status=status)
+    return {
+        **rows,
+        "status": str(rows["status"]),
+        "dry_run": dry_run,
+        "applied": applied,
+        "hashes": [change.hash for change in plan.changes],
+    }
 
 
 def bulk_delete_confirmation_message(plan: BulkTorrentActionPlan) -> str:

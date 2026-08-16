@@ -458,13 +458,20 @@ def _command_options(command_name: str) -> set[str]:
     }
 
 
+# `--limit` is not part of the filter vocabulary: it bounds what is
+# rendered, never what is selected. `stats` aggregates over the whole
+# selection, so truncating its output would misstate its own totals.
+_NOT_A_FILTER = {"--limit"}
+
+
 def test_stats_accepts_every_option_torrents_list_does() -> None:
     """The contract is "no exception, no subset": an operator who knows
     how to filter `torrents list` knows how to filter `torrents stats`.
     Asserted against the registered commands, so a filter added to
     `list` alone fails here instead of silently splitting the two
     vocabularies."""
-    assert _command_options("list") - _command_options("stats") == set()
+    missing = _command_options("list") - _command_options("stats")
+    assert missing - _NOT_A_FILTER == set()
 
 
 def test_stats_adds_only_the_two_selectors_that_stand_apart() -> None:

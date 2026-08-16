@@ -1,7 +1,7 @@
 """Register the `torrents` command group."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -25,7 +25,7 @@ from qbit_core.features.torrents import (
     search_torrents,
     select_torrents,
 )
-from qbit_core.shared.execution import MutationOperation
+from qbit_core.shared.execution import MutationOperation, MutationStatus
 from qbit_core.shared.search import SearchMode
 from qbit_core.shared.selection import (
     AmbiguousTorrentHashError,
@@ -212,7 +212,9 @@ def _run_bulk_torrent_action(
     verbose: bool,
     assume_yes: bool = False,
     delete_files: bool = False,
+    output_format: OutputFormat = OutputFormat.table,
 ) -> None:
+    validate_format_support(f"torrents_{action}", output_format)
     try:
         validate_selection_request(request)
     except ValueError as error:
@@ -247,6 +249,17 @@ def _run_bulk_torrent_action(
         except RuntimeError as error:
             error_boundary.fail(str(error))
 
+    machine_readable = output_format == OutputFormat.json
+    # `run_mutation` owns the status: it is the only thing that knows
+    # whether a plan previewed, applied, or matched nothing. Capturing it
+    # as it renders keeps one source of truth rather than re-deriving the
+    # same decision here, where it could drift.
+    captured: dict[str, MutationStatus] = {}
+
+    def _summary_rows(status: MutationStatus) -> dict[str, Any]:
+        captured["status"] = status
+        return rendering.bulk_torrent_summary_rows(plan, status=status)
+
     applied = run_mutation(
         operation=operation,
         dry_run=dry_run,
@@ -254,9 +267,8 @@ def _run_bulk_torrent_action(
         matched=plan.matched,
         has_changes=bool(plan.changes),
         apply_fn=_apply,
-        summary_rows=lambda status: rendering.bulk_torrent_summary_rows(
-            plan, status=status
-        ),
+        summary_rows=_summary_rows,
+        quiet=machine_readable,
         confirmation_message=(
             rendering.bulk_delete_confirmation_message(plan)
             if action == "delete"
@@ -264,7 +276,16 @@ def _run_bulk_torrent_action(
         ),
     )
 
-    if verbose:
+    if machine_readable:
+        rendering.print_json_output(
+            rendering.bulk_torrent_result_to_dict(
+                plan,
+                status=captured.get("status", MutationStatus.PREVIEW),
+                dry_run=dry_run,
+                applied=applied,
+            )
+        )
+    elif verbose:
         rendering.print_bulk_torrent_details(plan, applied=applied)
     exit_if_no_targeted_matches(plan.matched)
 
@@ -310,6 +331,12 @@ def list_qbit_torrents(
     completed_within: CompletedWithinOption = None,
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit", help="Maximum number of results. Use 0 for no limit."
+        ),
+    ] = 0,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -324,6 +351,11 @@ def list_qbit_torrents(
     `--state` values combine with OR. No filter means every torrent, as
     before. See docs/COMMANDS.md ("Filters") for the full
     vocabulary and combination rules.
+
+    `--limit` caps the rows rendered, `0` meaning no limit -- the same
+    vocabulary `torrents search` uses. It never changes what is
+    selected: `summary.matched` still counts every match, alongside
+    `returned` and `truncated`.
     """
     validate_format_support("torrents_list", output_format)
     try:
@@ -391,7 +423,7 @@ def list_qbit_torrents(
             )
 
     rendering.print_torrent_selection(
-        selection, output_format, tracker_counts=tracker_counts
+        selection, output_format, tracker_counts=tracker_counts, limit=limit
     )
     if not filters.is_empty:
         exit_if_no_targeted_matches(len(selection.matched))
@@ -987,6 +1019,10 @@ def pause(
     active_within: ActiveWithinOption = None,
     select_all: PauseAllOption = False,
     dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
     verbose: VerboseOption = False,
 ) -> None:
     """Pause torrents matching a hash, one or more filters, or all."""
@@ -1037,6 +1073,7 @@ def pause(
         ),
         dry_run=dry_run,
         verbose=verbose,
+        output_format=output_format,
     )
 
 
@@ -1084,6 +1121,10 @@ def resume(
     active_within: ActiveWithinOption = None,
     select_all: ResumeAllOption = False,
     dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
     verbose: VerboseOption = False,
 ) -> None:
     """Resume torrents matching a hash, one or more filters, or all."""
@@ -1134,6 +1175,7 @@ def resume(
         ),
         dry_run=dry_run,
         verbose=verbose,
+        output_format=output_format,
     )
 
 
@@ -1181,6 +1223,10 @@ def start(
     active_within: ActiveWithinOption = None,
     select_all: StartAllOption = False,
     dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
     verbose: VerboseOption = False,
 ) -> None:
     """Start stopped torrents matching a hash, one or more filters, or all."""
@@ -1231,6 +1277,7 @@ def start(
         ),
         dry_run=dry_run,
         verbose=verbose,
+        output_format=output_format,
     )
 
 
@@ -1278,6 +1325,10 @@ def reannounce(
     active_within: ActiveWithinOption = None,
     select_all: ReannounceAllOption = False,
     dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
     verbose: VerboseOption = False,
 ) -> None:
     """Reannounce torrents matching a hash, one or more filters, or all."""
@@ -1328,6 +1379,7 @@ def reannounce(
         ),
         dry_run=dry_run,
         verbose=verbose,
+        output_format=output_format,
     )
 
 
@@ -1390,6 +1442,10 @@ def delete(
         bool,
         typer.Option("--yes", help="Skip confirmation for real execution."),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
     verbose: VerboseOption = False,
 ) -> None:
     """Permanently delete torrents matching a hash, one or more filters, or all.
@@ -1446,6 +1502,7 @@ def delete(
         ),
         dry_run=dry_run,
         verbose=verbose,
+        output_format=output_format,
         assume_yes=assume_yes,
         delete_files=with_data,
     )
