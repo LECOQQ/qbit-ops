@@ -46,6 +46,14 @@ uv tool install "qbit-ops[tui]"
 pipx install "qbit-ops[tui]"
 ```
 
+With the experimental MCP server, to talk to your library through an
+agent:
+
+```bash
+uv tool install "qbit-ops[mcp]"
+pipx install "qbit-ops[mcp]"
+```
+
 To upgrade later:
 
 ```bash
@@ -235,6 +243,43 @@ qbit-ops tui
 | ![Search results](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrent-details.webp) | ![Frozen bulk-action preview](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/action-preview.webp) |
 
 Press `?` inside the TUI to see the available controls.
+
+## 🤖 Agent-ready (experimental)
+
+An MCP server exposes a **read-only, bounded** view of your library, so
+an agent can explore it conversationally:
+
+> *"What's the state of my library?"* -> *"Which torrents look
+> stalled?"* -> *"Why is this one stalled?"*
+
+```bash
+uv tool install "qbit-ops[mcp]"
+```
+
+Then point an MCP host at the `stdio` entry point -- for Claude Desktop,
+in its config file:
+
+```json
+{
+  "mcpServers": {
+    "qbit-ops": {
+      "command": "qbit-ops-mcp"
+    }
+  }
+}
+```
+
+It reads the same configuration the CLI does, so if `qbit-ops status`
+works, this works.
+
+**Four tools, no mutation.** `library_summary`, `find_torrents`,
+`inspect_torrent`, `explain_torrent` -- nothing that pauses, deletes or
+edits anything. Answers stay small whatever the library size, so a
+large one is explored by drilling down rather than dumped whole.
+
+> **Experimental and personal.** This is a spike, not a supported
+> surface: it may be extended, or removed. See
+> [docs/MCP.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/MCP.md).
 
 ## 🧩 Compatibility
 
