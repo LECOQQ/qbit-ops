@@ -498,7 +498,7 @@ class TuiController:
     def set_search(self, text: str) -> int:
         """Apply the shared search engine's `tokens` ladder (tiers 0-5).
 
-        `hash_min_length=1`, `limit=0` -- see `.agents/specs/search.md`.
+        `hash_min_length=1`, `limit=0` -- see `.agents/features/search/SPEC.md`.
         Zero API calls; a no-longer-matching focus is cleared. Returns
         the number of selected hashes hidden and dropped. Unlike
         `set_filters()`, reconciles the selection live on every

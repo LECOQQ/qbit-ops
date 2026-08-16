@@ -2,7 +2,7 @@
 
 Mirrors `tests/test_tui_security.py`'s and `tests/test_package_layout.py`'s
 approach: compile-time guarantees, not just runtime tests, that a search
-result can never reach a mutation. See `.agents/specs/search.md`.
+result can never reach a mutation. See `.agents/features/search/SPEC.md`.
 """
 
 from __future__ import annotations

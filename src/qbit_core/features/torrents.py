@@ -418,7 +418,8 @@ def search_torrents(
 
     Rejects a query that is blank or normalizes to blank, and any
     `INSPECTION_ONLY_FILTER_FIELDS` filter, before any qBittorrent call
-    (see `.agents/specs/search.md`). Costs exactly one `torrents_info()`:
+    (see `.agents/features/search/SPEC.md`). Costs exactly one
+    `torrents_info()`:
     filters are applied via `select_torrents_from_items`, never
     `select_torrents`, whose conditional `torrents_trackers()` INSPECT
     pass this command must never pay for.

@@ -53,7 +53,7 @@ _MODE_TIERS: dict[SearchMode, frozenset[MatchTier]] = {
     "fuzzy": frozenset(_TIER_ORDER),
 }
 
-# The fuzzy tier's two figured points (see `.agents/specs/search.md`):
+# The fuzzy tier's two figured points (see `.agents/features/search/SPEC.md`):
 # never a `_score_name_match`-style parameter default, since the floor
 # lives with the caller, not the callee.
 FUZZY_SIMILARITY_THRESHOLD = 0.75
@@ -115,7 +115,7 @@ class SearchResults:
 
     `matched` counts every match *before* truncation; `truncated` is
     `matched > len(hits)`. Deliberately exposes no hash set and no
-    `to_selection_request()` -- see `.agents/specs/search.md`.
+    `to_selection_request()` -- see `.agents/features/search/SPEC.md`.
     """
 
     query: str
