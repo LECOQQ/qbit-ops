@@ -9,8 +9,9 @@
 > A line describes a capability, never an implementation owed. When a
 > capability turns out to already exist, the line is corrected against
 > the code rather than a feature built to satisfy its wording.
-> `doctor` enrichment was removed on 2026-08-16 after a discovery run
-> concluded `REJECT`.
+> Enriching `doctor` and `explain` was removed on 2026-08-16: two
+> discovery runs found the capabilities already served elsewhere, and
+> concluded `REJECT` rather than building to tick a line.
 
 ## 🚧 WIP - v0.5.0: 📚 Know Your Library - Part 2
 
@@ -27,7 +28,8 @@
   expressible today but not named, and three non-equivalent filter
   combinations answer it differently.
 - Duration-range filters (`--seeded-for`) on the TUI as well as the CLI
-- Enriched `explain`
+- Health that answers "must I act": a torrent completed from local data
+  no longer raises a warning ✅
 
 ## 🔭 Later
 
@@ -35,11 +37,12 @@
 
 > Select precisely. Operate on thousands of torrents safely.
 
-- Bulk category management
-- Bulk tag management
+- Bulk category management ✅
+- Bulk tag management ✅
 - Bulk throttling
 - Tracker URL migration
-- Composable filtering across mutating operations
+- Composable filtering across mutating operations ✅
+- Machine-readable results for every mutation ✅
 - Saved selectors
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
@@ -55,7 +58,7 @@
 - Path validation
 - Orphan detection
 - Storage-aware operations
-- Duplicate-content detection in `doctor`
+- Duplicate-content detection
 
 ### v0.8.0 - 🛡️ Guardrails
 
@@ -77,7 +80,7 @@
 
 > Becoming a scriptable operational substrate.
 
-- JSONL output
+- JSONL output ✅
 - Machine-readable selectors
 - Automation-friendly commands
 - Reporting
