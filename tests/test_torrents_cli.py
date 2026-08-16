@@ -1,5 +1,7 @@
 """Test hash-centric torrent selection at the CLI level."""
 
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -665,3 +667,98 @@ def test_inspect_separates_peer_discovery_from_trackers(
     assert "PeX" not in trackers_section
     assert "tracker.example" in trackers_section
     assert "tracker.example" not in peer_discovery_line
+
+
+def test_list_limit_caps_rows_without_changing_what_matched(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--limit` bounds the output, never the selection. `matched` keeps
+    answering "how many are there", which is what a caller needs to know
+    it is looking at a slice -- the same contract `torrents search` has.
+    """
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=f"{index:040x}", name=f"T{index}")
+                for index in range(1, 6)
+            ]
+        )
+    )
+
+    result = runner.invoke(
+        app, ["torrents", "list", "--limit", "2", "--format", "json"]
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {
+        "scanned": 5,
+        "matched": 5,
+        "returned": 2,
+        "truncated": True,
+    }
+    assert len(payload["torrents"]) == 2
+
+
+def test_list_without_limit_returns_everything(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The default is `0`, so existing callers keep the whole list."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=f"{index:040x}", name=f"T{index}")
+                for index in range(1, 4)
+            ]
+        )
+    )
+
+    result = runner.invoke(app, ["torrents", "list", "--format", "json"])
+
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["truncated"] is False
+    assert payload["summary"]["returned"] == 3
+    assert len(payload["torrents"]) == 3
+
+
+def test_bulk_pause_emits_a_machine_readable_preview(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A dry-run preview is the moment an operator decides whether to
+    apply. Before this, that decision was only available as a Rich table
+    whose width depends on the terminal -- so a script could read how
+    many matched, never which ones.
+    """
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=TORRENT_A_HASH, name="A", state="uploading"),
+                make_torrent(hash=UNIQUE_HASH, name="B", state="uploading"),
+            ]
+        )
+    )
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--all", "--format", "json"]
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "pause"
+    assert payload["dry_run"] is True
+    assert payload["applied"] is False
+    assert payload["matched"] == 2
+    assert sorted(payload["hashes"]) == sorted([TORRENT_A_HASH, UNIQUE_HASH])
+
+
+def test_bulk_action_rejects_streaming_formats(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A mutation produces one result, not a stream of rows."""
+    configure_qbit_backend(client=FakeQbitClient(torrents=[]))
+
+    result = runner.invoke(
+        app, ["torrents", "pause", "--all", "--format", "csv"]
+    )
+
+    assert result.exit_code != ExitCode.SUCCESS
+    assert "not supported" in result.stderr.lower()
