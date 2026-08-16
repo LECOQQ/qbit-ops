@@ -50,13 +50,15 @@ def test_find_defaults_to_a_small_page() -> None:
 
 
 def test_find_returns_only_drill_down_fields() -> None:
-    """Six fields, not the sixteen a snapshot carries: what a next step
-    is chosen from. Every extra field is permanent context cost."""
+    """Seven fields, not the sixteen a snapshot carries: what a next step
+    is chosen from. Every extra field is permanent context cost, so this
+    pins the set -- adding one is a decision, never a drift."""
     result = tools.find_torrents(_library(1))
 
     assert set(result["torrents"][0]) == {
         "hash",
         "name",
+        "category",
         "state",
         "state_group",
         "progress",
@@ -138,3 +140,55 @@ def test_registered_mcp_tools_are_exactly_the_read_only_four() -> None:
         "inspect_torrent",
         "explain_torrent",
     }
+
+
+def test_explain_keeps_evidence_and_limitations() -> None:
+    """`limitations` is what stops an agent stating a conclusion more
+    firmly than the engine did. Dropping it handed the model a bare
+    verdict on a product whose promise is evidence, never a guess --
+    found by using the surface, not by reading it.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="c" * 40, name="Stalled", state="stalledUP", progress=1.0
+            )
+        ],
+        trackers_by_hash={
+            "c" * 40: [{"url": "https://tracker.example/announce", "status": 2}]
+        },
+    )
+
+    report = tools.explain(client, "c" * 40)
+
+    assert report is not None
+    finding = report["findings"][0]
+    assert finding["evidence"], "a finding without its evidence is a bare claim"
+    assert set(finding["evidence"][0]) == {"code", "label", "value", "source"}
+    assert "limitations" in finding
+
+
+def test_find_returns_category_and_can_filter_on_it() -> None:
+    """Category is the one axis the operator defines himself: it is what
+    separates a release from a cross-seed link to that same release.
+    Without it, four `inspect_torrent` calls were needed to learn one
+    field.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=f"{index:040x}",
+                name=f"T{index}",
+                state="uploading",
+                category="cross-seed" if index % 2 else "movies",
+            )
+            for index in range(1, 11)
+        ]
+    )
+
+    every = tools.find_torrents(client)
+    assert "category" in every["torrents"][0]
+
+    filtered = tools.find_torrents(client, category="cross-seed")
+    assert filtered["matched"] == 5
+    assert {t["category"] for t in filtered["torrents"]} == {"cross-seed"}
