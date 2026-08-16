@@ -47,8 +47,13 @@ def run_mutation(
     )
 
     def _print(status: MutationStatus) -> None:
+        # `summary_rows` is called even when quiet, because a caller that
+        # renders its own payload still needs to learn the status --
+        # skipping the call left it reading the default and reporting
+        # `preview` on a mutation that had actually been applied.
+        rows = summary_rows(status)
         if not quiet:
-            rendering.print_summary(summary_rows(status))
+            rendering.print_summary(rows)
 
     if matched == 0:
         _print(MutationStatus.NO_MATCH)
