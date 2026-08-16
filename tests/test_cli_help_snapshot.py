@@ -49,7 +49,11 @@ GROUP_SUBCOMMAND_NAMES = {
         "reannounce",
         "delete",
         "import",
+        "category",
+        "tag",
     },
+    "torrents category": {"set", "clear"},
+    "torrents tag": {"add", "remove"},
     "trackers": {
         "add-if-present",
         "list",
@@ -81,6 +85,10 @@ REPRESENTATIVE_COMMAND_OPTIONS: dict[str, set[str]] = {
     "torrents start": {"--hash", "--all", "--dry-run"},
     "torrents reannounce": {"--hash", "--all", "--dry-run"},
     "torrents delete": {"--hash", "--all", "--dry-run", "--yes", "--with-data"},
+    "torrents category set": {"--hash", "--all", "--dry-run", "--create"},
+    "torrents category clear": {"--hash", "--all", "--dry-run"},
+    "torrents tag add": {"--hash", "--all", "--dry-run"},
+    "torrents tag remove": {"--hash", "--all", "--dry-run"},
     "torrents import": {
         "--dry-run",
         "--yes",
@@ -124,9 +132,9 @@ def _assert_clean_help(result) -> None:
     assert "Usage:" in result.output
 
 
-def test_exit_code_table_covers_exactly_twenty_nine_commands() -> None:
+def test_exit_code_table_covers_exactly_thirty_three_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
-    assert len(EXIT_CODE_TABLE) == 29
+    assert len(EXIT_CODE_TABLE) == 33
 
 
 def test_root_help_succeeds_without_traceback() -> None:
@@ -159,7 +167,7 @@ def test_command_group_help_lists_its_registered_subcommands(
     group: str,
     subcommands: set[str],
 ) -> None:
-    result = runner.invoke(app, [group, "--help"])
+    result = runner.invoke(app, [*group.split(" "), "--help"])
     _assert_clean_help(result)
     for name in sorted(subcommands):
         assert (

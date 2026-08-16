@@ -1,5 +1,6 @@
 """Register the `torrents` command group."""
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -22,6 +23,7 @@ from qbit_core.features.torrents import (
     inspect_torrent,
     list_category_usage,
     plan_bulk_torrent_action,
+    resolve_category_availability,
     search_torrents,
     select_torrents,
 )
@@ -43,7 +45,11 @@ from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
     ActiveOption,
     ActiveWithinOption,
+    CategoryClearAllOption,
+    CategoryClearHashOption,
     CategoryOption,
+    CategorySetAllOption,
+    CategorySetHashOption,
     CompletedBeforeOption,
     CompletedOption,
     CompletedWithinOption,
@@ -87,8 +93,12 @@ from qbit_ops.cli.selector_options import (
     StateOption,
     StatsAllOption,
     StatsHashOption,
+    TagAddAllOption,
+    TagAddHashOption,
     TagAllOption,
     TagOption,
+    TagRemoveAllOption,
+    TagRemoveHashOption,
     TrackerHealthOption,
     TrackerOption,
     UploadedMaxOption,
@@ -97,11 +107,17 @@ from qbit_ops.cli.selector_options import (
     build_filter_from_options,
 )
 from qbit_ops.cli.validation import (
+    validate_category_name,
     validate_format_support,
     validate_hash_option,
+    validate_tag_names,
 )
 
 torrents_app = typer.Typer(help="Inspect qBittorrent torrents.")
+category_app = typer.Typer(help="Bulk category assignment.")
+tag_app = typer.Typer(help="Bulk tag assignment.")
+torrents_app.add_typer(category_app, name="category")
+torrents_app.add_typer(tag_app, name="tag")
 
 
 def _build_selection_request(
@@ -212,6 +228,9 @@ def _run_bulk_torrent_action(
     verbose: bool,
     assume_yes: bool = False,
     delete_files: bool = False,
+    category: str | None = None,
+    tags: Sequence[str] = (),
+    create_category: bool = False,
     output_format: OutputFormat = OutputFormat.table,
 ) -> None:
     validate_format_support(f"torrents_{action}", output_format)
@@ -223,9 +242,14 @@ def _run_bulk_torrent_action(
     enabled = rendering.progress_enabled(
         interactive=rendering.is_interactive_terminal()
     )
+    category_needs_creation = False
     try:
         with error_boundary.qbit_error_boundary():
             client = error_boundary.create_qbit_client()
+            if action == "category_set":
+                category_needs_creation = resolve_category_availability(
+                    client, category or "", create=create_category
+                )
             with rendering.transient_progress(
                 f"Scanning torrents to {action}...", enabled=enabled
             ) as advance:
@@ -236,6 +260,9 @@ def _run_bulk_torrent_action(
                     select_all=request.select_all,
                     filters=request.filters,
                     delete_files=delete_files,
+                    category=category,
+                    tags=tags,
+                    category_needs_creation=category_needs_creation,
                     on_progress=advance,
                 )
     except AmbiguousTorrentHashError as error:
@@ -1505,6 +1532,459 @@ def delete(
         output_format=output_format,
         assume_yes=assume_yes,
         delete_files=with_data,
+    )
+
+
+@category_app.command(name="set")
+@error_boundary.catch_internal_errors
+def category_set(
+    category_name: Annotated[
+        str,
+        typer.Argument(help="Category name to assign to matched torrents."),
+    ],
+    create: Annotated[
+        bool,
+        typer.Option(
+            "--create",
+            help="Create the category first if it does not already exist.",
+        ),
+    ] = False,
+    torrent_hash: CategorySetHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: CategorySetAllOption = False,
+    dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+    verbose: VerboseOption = False,
+) -> None:
+    """Assign a category to torrents matching a hash, one or more filters,
+    or all.
+
+    The category must already exist -- refused before any mutation, in
+    dry-run exactly as in real execution -- unless `--create` is given.
+    """
+    validated_category = validate_category_name(category_name)
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_CATEGORY_SET,
+        action="category_set",
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            tracker_health=tracker_health,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+            select_all=select_all,
+        ),
+        dry_run=dry_run,
+        verbose=verbose,
+        output_format=output_format,
+        category=validated_category,
+        create_category=create,
+    )
+
+
+@category_app.command(name="clear")
+@error_boundary.catch_internal_errors
+def category_clear(
+    torrent_hash: CategoryClearHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: CategoryClearAllOption = False,
+    dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+    verbose: VerboseOption = False,
+) -> None:
+    """Clear the category from torrents matching a hash, one or more
+    filters, or all."""
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_CATEGORY_CLEAR,
+        action="category_clear",
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            tracker_health=tracker_health,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+            select_all=select_all,
+        ),
+        dry_run=dry_run,
+        verbose=verbose,
+        output_format=output_format,
+    )
+
+
+@tag_app.command(name="add")
+@error_boundary.catch_internal_errors
+def tag_add(
+    tag_names: Annotated[
+        list[str],
+        typer.Argument(help="Tag name(s) to add to matched torrents."),
+    ],
+    torrent_hash: TagAddHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: TagAddAllOption = False,
+    dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+    verbose: VerboseOption = False,
+) -> None:
+    """Add one or more tags to torrents matching a hash, one or more
+    filters, or all.
+
+    Unlike `category set`, a tag is created implicitly by being applied
+    -- qBittorrent's own behavior -- so there is no `--create` flag and
+    no existence check.
+    """
+    validated_tags = validate_tag_names(tag_names)
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_TAG_ADD,
+        action="tag_add",
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            tracker_health=tracker_health,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+            select_all=select_all,
+        ),
+        dry_run=dry_run,
+        verbose=verbose,
+        output_format=output_format,
+        tags=validated_tags,
+    )
+
+
+@tag_app.command(name="remove")
+@error_boundary.catch_internal_errors
+def tag_remove(
+    tag_names: Annotated[
+        list[str],
+        typer.Argument(help="Tag name(s) to remove from matched torrents."),
+    ],
+    torrent_hash: TagRemoveHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: TagRemoveAllOption = False,
+    dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+    verbose: VerboseOption = False,
+) -> None:
+    """Remove one or more tags from torrents matching a hash, one or more
+    filters, or all.
+
+    A torrent not carrying a given tag is left alone; if none of the
+    matched torrents carry any of the listed tags, the result is
+    `NO_CHANGES`, not `NO_MATCH` -- the selection matched, there was
+    just nothing to change.
+    """
+    validated_tags = validate_tag_names(tag_names)
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_TAG_REMOVE,
+        action="tag_remove",
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            tracker_health=tracker_health,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+            select_all=select_all,
+        ),
+        dry_run=dry_run,
+        verbose=verbose,
+        output_format=output_format,
+        tags=validated_tags,
     )
 
 

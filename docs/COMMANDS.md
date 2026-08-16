@@ -32,7 +32,13 @@ qbit-ops
 │   ├── start
 │   ├── reannounce
 │   ├── delete
-│   └── import
+│   ├── import
+│   ├── category
+│   │   ├── set
+│   │   └── clear
+│   └── tag
+│       ├── add
+│       └── remove
 ├── trackers
 │   ├── list
 │   ├── status
@@ -97,6 +103,10 @@ Machine-readable output contains only serialized data on stdout and no ANSI deco
 | `torrents start` | ✅ | ✅ | -- | -- |
 | `torrents reannounce` | ✅ | ✅ | -- | -- |
 | `torrents delete` | ✅ | ✅ | -- | -- |
+| `torrents category set` | ✅ | ✅ | -- | -- |
+| `torrents category clear` | ✅ | ✅ | -- | -- |
+| `torrents tag add` | ✅ | ✅ | -- | -- |
+| `torrents tag remove` | ✅ | ✅ | -- | -- |
 | `trackers list` | ✅ | ✅ | ✅ | ✅ |
 | `trackers status` | ✅ | ✅ | ✅ | ✅ |
 | `trackers inspect` | ✅ | ✅ | ✅ | ✅ |
@@ -619,6 +629,39 @@ qbit-ops torrents delete --hash abc123 --with-data --no-dry-run --yes
   or deleted, so the two outcomes are never confused at the prompt.
 - Selection follows the same `--hash`/filters/`--all` rules as every
   other bulk torrent command -- no selector ever silently means "all".
+
+## 🏷️ Bulk category and tag management
+
+Four commands, two verbs per field -- a torrent has **one** category and
+**N** tags, and the surface mirrors that:
+
+```bash
+qbit-ops torrents category set movies --category radarr-old   # dry-run
+qbit-ops torrents category set movies --category radarr-old --no-dry-run
+qbit-ops torrents category clear --tag stale --no-dry-run
+qbit-ops torrents tag add cross-seed --category sonarr --no-dry-run
+qbit-ops torrents tag remove stale --tag-all cross-seed --no-dry-run
+```
+
+- 🧪 LOW risk, like `pause`/`resume`/`start`/`reannounce`: dry-run by
+  default, `--no-dry-run` applies without a confirmation prompt.
+- 🔍 **`category set` verifies the name first.** It must already be a
+  registered category, checked via one read call before any plan is
+  built -- refused in dry-run exactly as in real execution, so the
+  preview never claims a change that would actually fail. `--create`
+  creates it as part of the same run, but only once there is at least
+  one real torrent to attach it to.
+- 🌱 **`tag add` creates tags implicitly**, like qBittorrent's own UI:
+  no `--create`, no existence check. A typo becomes a new tag rather
+  than an error.
+- ⏭️ No `tag set`: replacing a torrent's whole tag set would drop tags
+  the operator never named. No `category add`: a torrent has one
+  category, never several.
+- ⚖️ A torrent already carrying the target category, or missing every
+  tag being removed, is skipped as a no-op -- `NO_CHANGES`, not
+  `NO_MATCH`: the selector matched it, there was just nothing to apply.
+- Selection follows the same `--hash`/filters/`--all` rules as every
+  other bulk torrent command.
 
 ## 📥 Importing `.torrent` files
 

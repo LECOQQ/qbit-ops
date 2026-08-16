@@ -1717,6 +1717,11 @@ def bulk_torrent_summary_rows(
     }
     if plan.action == "delete":
         rows["with_data"] = plan.delete_files
+    elif plan.action == "category_set":
+        rows["category"] = plan.category
+        rows["category_created"] = plan.category_needs_creation
+    elif plan.action in ("tag_add", "tag_remove"):
+        rows["tags"] = list(plan.tags)
     rows["status"] = status
     return rows
 

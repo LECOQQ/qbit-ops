@@ -20,6 +20,10 @@ LOW_RISK_OPERATIONS = [
     MutationOperation.TORRENTS_RESUME,
     MutationOperation.TORRENTS_START,
     MutationOperation.TORRENTS_REANNOUNCE,
+    MutationOperation.TORRENTS_CATEGORY_SET,
+    MutationOperation.TORRENTS_CATEGORY_CLEAR,
+    MutationOperation.TORRENTS_TAG_ADD,
+    MutationOperation.TORRENTS_TAG_REMOVE,
 ]
 MEDIUM_RISK_OPERATIONS = [
     MutationOperation.TRACKERS_ADD_IF_PRESENT,
@@ -66,6 +70,24 @@ def test_mutation_risk_has_no_unclassified_extra_entries() -> None:
     assert len(MUTATION_RISK) == len(MutationOperation)
 
 
+def _collect_commands(
+    typer_instance, prefix: str, registered: set[str]
+) -> None:
+    """Recurse into every nested sub-typer (e.g. `torrents category set`),
+    not just direct subcommands -- a group can itself hold groups."""
+    for command in typer_instance.registered_commands:
+        assert command.callback is not None
+        command_name = command.name or command.callback.__name__.replace(
+            "_", "-"
+        )
+        registered.add(f"{prefix} {command_name}")
+    for group in typer_instance.registered_groups:
+        assert group.name is not None
+        _collect_commands(
+            group.typer_instance, f"{prefix} {group.name}", registered
+        )
+
+
 def test_every_mutation_operation_is_registered_as_a_cli_command() -> None:
     """Prevents documentation/CLI registration from silently omitting (or
     misnaming) a mutation command relative to the risk table.
@@ -78,12 +100,7 @@ def test_every_mutation_operation_is_registered_as_a_cli_command() -> None:
             if group.name == group_name
         )
         assert group is not None
-        for command in group.registered_commands:
-            assert command.callback is not None
-            command_name = command.name or command.callback.__name__.replace(
-                "_", "-"
-            )
-            registered.add(f"{group_name} {command_name}")
+        _collect_commands(group, group_name, registered)
 
     for operation in MutationOperation:
         assert operation.value in registered, operation.value

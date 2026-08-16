@@ -59,6 +59,10 @@ COMMAND_PATH: dict[str, list[str]] = {
     "torrents_start": ["torrents", "start"],
     "torrents_reannounce": ["torrents", "reannounce"],
     "torrents_delete": ["torrents", "delete"],
+    "torrents_category_set": ["torrents", "category", "set"],
+    "torrents_category_clear": ["torrents", "category", "clear"],
+    "torrents_tag_add": ["torrents", "tag", "add"],
+    "torrents_tag_remove": ["torrents", "tag", "remove"],
     "status": ["status"],
     "connection_check": ["connection", "check"],
     "doctor": ["doctor"],
@@ -92,6 +96,10 @@ _EXCLUDED_FROM_ARGV = {
     "torrents_start",
     "torrents_reannounce",
     "torrents_delete",
+    "torrents_category_set",
+    "torrents_category_clear",
+    "torrents_tag_add",
+    "torrents_tag_remove",
 }
 assert set(COMMAND_ARGV) == set(FORMAT_SUPPORT) - _EXCLUDED_FROM_ARGV
 assert set(COMMAND_PATH) == set(FORMAT_SUPPORT)
@@ -393,5 +401,10 @@ def test_docs_format_matrix_lists_every_command(command_id: str) -> None:
     matrix_section = matrix_text.split("## Format Support Matrix", 1)[1]
     matrix_section = matrix_section.split("## Machine-Readable", 1)[0]
 
-    command_name = command_id.replace("_", " ", 1)
+    # Every underscore separates a command-tree level (`torrents_pause` ->
+    # "torrents pause", `torrents_category_set` -> "torrents category
+    # set"): replacing them all, not just the first, is what lets a
+    # nested command (`category set`, `tag add`) match its documented
+    # three-word name.
+    command_name = command_id.replace("_", " ")
     assert f"`{command_name}`" in matrix_section
