@@ -9,6 +9,7 @@ mutation planning) stay in their own modules (`qbit_core.features.torrents`,
 """
 
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
+from qbit_core.shared.parsers import parse_rate
 from qbit_ops.cli.error_boundary import fail
 from qbit_ops.cli.rendering import OutputFormat
 
@@ -46,6 +47,7 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     ),
     "torrents_tag_add": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_tag_remove": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_throttle": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_search": frozenset(OutputFormat),
     "backup_restore": frozenset({OutputFormat.table, OutputFormat.json}),
     "trackers_list": frozenset(OutputFormat),
@@ -129,3 +131,28 @@ def validate_tag_names(values: list[str]) -> tuple[str, ...]:
             ErrorCategory.INVALID_INPUT,
         )
     return normalized
+
+
+def validate_rate_limits(
+    download: str | None, upload: str | None
+) -> tuple[int | None, int | None]:
+    """Parse `--down`/`--up` into bytes per second, requiring at least one.
+
+    `throttle` with neither option names no change at all, so it is
+    refused before any qBittorrent call rather than applied as an
+    expensive no-op. An option left out stays `None`: that direction is
+    not touched, which is never the same as setting it to unlimited.
+    """
+    if download is None and upload is None:
+        fail(
+            "Provide at least one of --down or --up. Use 'unlimited' to "
+            "remove a limit.",
+            ErrorCategory.INVALID_INPUT,
+        )
+    try:
+        return (
+            None if download is None else parse_rate(download),
+            None if upload is None else parse_rate(upload),
+        )
+    except InvalidInputError as error:
+        fail(str(error), ErrorCategory.INVALID_INPUT)

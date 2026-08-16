@@ -206,6 +206,10 @@ TagRemoveHashOption = Annotated[
     str | None,
     typer.Option("--hash", help=_hash_help("Remove the tag(s) from")),
 ]
+ThrottleHashOption = Annotated[
+    str | None,
+    typer.Option("--hash", help=_hash_help("Set the rate limit for")),
+]
 
 CategorySetAllOption = Annotated[
     bool, typer.Option("--all", help="Set the category for all torrents.")
@@ -218,6 +222,28 @@ TagAddAllOption = Annotated[
 ]
 TagRemoveAllOption = Annotated[
     bool, typer.Option("--all", help="Remove the tag(s) from all torrents.")
+]
+ThrottleAllOption = Annotated[
+    bool, typer.Option("--all", help="Set the rate limit for all torrents.")
+]
+
+
+# --- rate limits ------------------------------------------------------------
+
+# A unit is mandatory here, unlike the size filters: `--down 500` would
+# be 500 bytes per second where the operator meant 500 KB/s. See
+# `qbit_core.shared.parsers.parse_rate`.
+_RATE_HELP = (
+    "%s rate limit: a size with a unit (500KB, 1MiB, optionally suffixed "
+    "/s), or 'unlimited' to remove the limit. Leaving it out leaves that "
+    "direction untouched."
+)
+
+DownloadLimitOption = Annotated[
+    str | None, typer.Option("--down", help=_RATE_HELP % "Download")
+]
+UploadLimitOption = Annotated[
+    str | None, typer.Option("--up", help=_RATE_HELP % "Upload")
 ]
 
 

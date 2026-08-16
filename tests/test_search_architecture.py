@@ -240,6 +240,7 @@ def test_mutating_torrents_command_discovery_is_non_vacuous() -> None:
         "category_clear",
         "tag_add",
         "tag_remove",
+        "throttle",
     }
 
 

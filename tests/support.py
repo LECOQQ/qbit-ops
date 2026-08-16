@@ -37,6 +37,7 @@ class FakeQbitClient:
         add_tags_error: Exception | None = None,
         remove_tags_error: Exception | None = None,
         add_trackers_error: Exception | None = None,
+        set_limit_error: Exception | None = None,
     ) -> None:
         """Store fake instance data returned to callers.
 
@@ -64,12 +65,15 @@ class FakeQbitClient:
         self.add_tags_error = add_tags_error
         self.remove_tags_error = remove_tags_error
         self.add_trackers_error = add_trackers_error
+        self.set_limit_error = set_limit_error
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.added_torrent_files: list[list[bytes]] = []
         self.created_categories: list[str] = []
         self.set_categories: list[tuple[str | list[str], str]] = []
         self.added_tags: list[tuple[str | list[str], list[str]]] = []
         self.removed_tags: list[tuple[str | list[str], list[str]]] = []
+        self.download_limits: list[tuple[str | list[str], int]] = []
+        self.upload_limits: list[tuple[str | list[str], int]] = []
         self.app_version_calls = 0
         self.app_web_api_version_calls = 0
         self.torrents_trackers_calls = 0
@@ -263,6 +267,32 @@ class FakeQbitClient:
             raise self.remove_tags_error
         tag_list = [tags] if isinstance(tags, str) else list(tags)
         self.removed_tags.append((torrent_hashes, tag_list))
+
+    def torrents_set_download_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Record a fake download rate limit; raise `set_limit_error`."""
+        self._record(
+            "torrents_set_download_limit",
+            torrent_hashes=torrent_hashes,
+            limit=limit,
+        )
+        if self.set_limit_error is not None:
+            raise self.set_limit_error
+        self.download_limits.append((torrent_hashes, limit))
+
+    def torrents_set_upload_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Record a fake upload rate limit; raise `set_limit_error`."""
+        self._record(
+            "torrents_set_upload_limit",
+            torrent_hashes=torrent_hashes,
+            limit=limit,
+        )
+        if self.set_limit_error is not None:
+            raise self.set_limit_error
+        self.upload_limits.append((torrent_hashes, limit))
 
     def torrents_add(self, **kwargs: Any) -> str:
         """Record a fake add call; raise `torrents_add_error` if set."""

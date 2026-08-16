@@ -105,6 +105,7 @@ EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "torrents category clear": ExitCode,
     "torrents tag add": ExitCode,
     "torrents tag remove": ExitCode,
+    "torrents throttle": ExitCode,
     "trackers add-if-present": ExitCode,
     "trackers list": ExitCode,
     "trackers status": TrackerStatusExitCode,

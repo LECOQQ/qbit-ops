@@ -81,6 +81,7 @@ TorrentBulkAction = Literal[
     "category_clear",
     "tag_add",
     "tag_remove",
+    "throttle",
 ]
 
 # The public `--tracker-health` vocabulary: exactly the verdicts
@@ -595,6 +596,12 @@ class BulkTorrentActionPlan:
     and only once real changes exist -- creating a category with no
     torrent to attach it to is out of scope (see `.agents/specs/
     bulk-category-tag.md`, "Hors périmètre").
+
+    `download_limit`/`upload_limit` are bytes per second for
+    `action == "throttle"`, where `0` means unlimited (qBittorrent's own
+    encoding) and `None` means the caller did not ask to touch that
+    direction. `None` is never "unlimited": conflating the two would
+    turn a one-sided throttle into a two-sided one.
     """
 
     action: TorrentBulkAction
@@ -609,6 +616,8 @@ class BulkTorrentActionPlan:
     category: str | None = None
     tags: tuple[str, ...] = ()
     category_needs_creation: bool = False
+    download_limit: int | None = None
+    upload_limit: int | None = None
 
 
 def validate_torrent_selector(
@@ -677,6 +686,8 @@ def plan_bulk_torrent_action(
     category: str | None = None,
     tags: Sequence[str] = (),
     category_needs_creation: bool = False,
+    download_limit: int | None = None,
+    upload_limit: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> BulkTorrentActionPlan:
     """Plan a bulk torrent action against a filtered torrent selection.
@@ -700,6 +711,12 @@ def plan_bulk_torrent_action(
     each matched torrent's raw payload, narrowed to the matched hashes --
     `TorrentSnapshot` deliberately does not carry `tags` (see
     `.agents/MEMORY.md`, "Pipeline SELECT -> INSPECT -> PLAN -> APPLY").
+    `"throttle"` reads its current `dl_limit`/`up_limit` the same way,
+    and for the same reason.
+
+    `download_limit`/`upload_limit` are only meaningful for
+    `"throttle"`, in bytes per second, `0` being unlimited and `None`
+    "leave this direction alone".
     """
     selection = select_torrents_for_mutation(
         client,
@@ -710,10 +727,14 @@ def plan_bulk_torrent_action(
     )
 
     normalized_tags = _normalize_tokens(tags)
+    matched_hashes = [torrent.hash for torrent in selection.matched]
     current_tags_by_hash = (
-        _tags_by_hash(client, [torrent.hash for torrent in selection.matched])
+        _tags_by_hash(client, matched_hashes)
         if action in ("tag_add", "tag_remove")
         else {}
+    )
+    current_limits_by_hash = (
+        _limits_by_hash(client, matched_hashes) if action == "throttle" else {}
     )
 
     changes: list[BulkTorrentChange] = []
@@ -727,6 +748,9 @@ def plan_bulk_torrent_action(
             target_category=category,
             current_tags=current_tags_by_hash.get(torrent.hash.lower(), ()),
             target_tags=normalized_tags,
+            current_limits=current_limits_by_hash.get(torrent.hash.lower()),
+            target_download_limit=download_limit,
+            target_upload_limit=upload_limit,
         )
         if skip_reason is not None:
             skips.append(
@@ -751,7 +775,31 @@ def plan_bulk_torrent_action(
         category=category,
         tags=normalized_tags,
         category_needs_creation=category_needs_creation and bool(changes),
+        download_limit=download_limit,
+        upload_limit=upload_limit,
     )
+
+
+def _limits_by_hash(
+    client: Any, hashes: Sequence[str]
+) -> dict[str, tuple[int, int]]:
+    """Read current `(dl_limit, up_limit)` for exactly `hashes`.
+
+    Same bounded second read as `_tags_by_hash`, and for the same
+    reason: both fields ride along in `torrents_info()` but neither is
+    carried by `TorrentSnapshot`, which stays narrow rather than growing
+    a column for one consumer.
+    """
+    if not hashes:
+        return {}
+    raw_torrents = client.torrents_info(torrent_hashes=list(hashes))
+    return {
+        get_field_as_string(item, "hash").lower(): (
+            get_field_as_int(item, "dl_limit"),
+            get_field_as_int(item, "up_limit"),
+        )
+        for item in raw_torrents
+    }
 
 
 def _tags_by_hash(
@@ -891,6 +939,18 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
             client.torrents_remove_tags(
                 torrent_hashes=hashes, tags=list(plan.tags)
             )
+        elif plan.action == "throttle":
+            # One call per direction actually requested. `None` is
+            # skipped rather than sent as `0`, which qBittorrent would
+            # read as "remove the limit" on a direction nobody named.
+            if plan.download_limit is not None:
+                client.torrents_set_download_limit(
+                    torrent_hashes=hashes, limit=plan.download_limit
+                )
+            if plan.upload_limit is not None:
+                client.torrents_set_upload_limit(
+                    torrent_hashes=hashes, limit=plan.upload_limit
+                )
         else:
             _call_bulk_torrent_action(
                 client, plan.action, hashes, delete_files=plan.delete_files
@@ -1126,13 +1186,17 @@ def _bulk_action_skip_reason(
     target_category: str | None = None,
     current_tags: Sequence[str] = (),
     target_tags: Sequence[str] = (),
+    current_limits: tuple[int, int] | None = None,
+    target_download_limit: int | None = None,
+    target_upload_limit: int | None = None,
 ) -> str | None:
     """Return a skip reason when a bulk action would be a no-op.
 
     "reannounce" and "delete" have no no-op state -- always a change.
-    `current_category`/`target_category` and `current_tags`/
-    `target_tags` are only meaningful for the category/tag actions;
-    every other action ignores them.
+    `current_category`/`target_category`, `current_tags`/`target_tags`
+    and `current_limits`/`target_*_limit` are only meaningful for the
+    category, tag and throttle actions respectively; every other action
+    ignores them.
     """
     if action == "pause" and is_stopped_state(state):
         return "already_stopped"
@@ -1159,6 +1223,20 @@ def _bulk_action_skip_reason(
         and not (set(target_tags) & set(current_tags))
     ):
         return "not_tagged"
+
+    if action == "throttle" and current_limits is not None:
+        current_download, current_upload = current_limits
+        requested = (
+            (target_download_limit, current_download),
+            (target_upload_limit, current_upload),
+        )
+        # Only the directions actually asked for count: a `--down`-only
+        # throttle must not be skipped because the untouched upload
+        # limit happens to differ.
+        if all(
+            target is None or target == current for target, current in requested
+        ):
+            return "already_at_limit"
 
     return None
 
