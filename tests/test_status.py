@@ -123,11 +123,59 @@ def test_collect_status_snapshot_reports_warning_for_stalled_torrents() -> None:
     assert snapshot.alerts[0].count == 1
 
 
+def test_stalled_up_completed_from_local_data_does_not_warn() -> None:
+    """A `stalledUP` torrent with `downloaded == 0` and `progress == 1`
+    was assembled from local data, not the network: it needs no action,
+    so it must not turn the library's health to warning nor raise the
+    `torrents_stalled` alert."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a", state="stalledUP", progress=1.0, downloaded=0
+            ),
+            make_torrent(
+                hash="b", state="stalledUP", progress=1.0, downloaded=0
+            ),
+        ],
+    )
+
+    snapshot = collect_status_snapshot(client)
+
+    assert snapshot.health == Health.HEALTHY
+    assert snapshot.alerts == ()
+    # The raw per-state breakdown still reports both torrents as stalled.
+    assert snapshot.counts.stalled == 2
+
+
+def test_one_unexplained_stall_among_explained_ones_still_warns() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a", state="stalledUP", progress=1.0, downloaded=0
+            ),
+            make_torrent(
+                hash="b", state="stalledUP", progress=1.0, downloaded=1
+            ),
+        ],
+    )
+
+    snapshot = collect_status_snapshot(client)
+
+    assert snapshot.health == Health.WARNING
+    assert len(snapshot.alerts) == 1
+    assert snapshot.alerts[0].code == "torrents_stalled"
+    assert snapshot.alerts[0].count == 1
+    assert snapshot.counts.stalled == 2
+
+
 def test_collect_status_snapshot_reports_critical_for_errored() -> None:
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a", state="error"),
-            make_torrent(hash="b", state="stalledUP"),
+            # `downloaded > 0`: an actionable stall, not a torrent
+            # completed from local data alone (see
+            # `is_stalled_up_without_network_load`).
+            make_torrent(hash="b", state="stalledUP", downloaded=1),
         ],
     )
 

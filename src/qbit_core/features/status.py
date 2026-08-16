@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from qbit_core.qbit.fields import (
     get_field,
+    get_field_as_float,
     get_field_as_int,
     get_field_as_string,
     get_transfer_rates,
@@ -24,6 +25,7 @@ from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
     is_completed_torrent,
+    is_stalled_up_without_network_load,
 )
 
 SCHEMA_VERSION = "1"
@@ -187,9 +189,9 @@ def build_status_snapshot_from_data(
     API calls that feed it.
     """
     rates = _transfer_rates_from_data(transfer_info_data)
-    counts, unknown_states = _count_torrents(torrents)
-    alerts = _build_alerts(counts, unknown_states)
-    health = _compute_health(counts)
+    counts, unknown_states, unexplained_stalled = _count_torrents(torrents)
+    alerts = _build_alerts(counts, unknown_states, unexplained_stalled)
+    health = _compute_health(counts, unexplained_stalled)
 
     return StatusSnapshot(
         schema_version=SCHEMA_VERSION,
@@ -371,8 +373,15 @@ def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
 
 def _count_torrents(
     torrents: list[Any],
-) -> tuple[TransferCounts, frozenset[str]]:
-    """Group torrents by state and count completed torrents by progress."""
+) -> tuple[TransferCounts, frozenset[str], int]:
+    """Group torrents by state and count completed/unexplained-stalled ones.
+
+    `unexplained_stalled` excludes `stalledUP` torrents completed purely
+    from local data (see `is_stalled_up_without_network_load`) -- they
+    need no action, so neither health nor the `torrents_stalled` alert
+    may count them. `TransferCounts.stalled` itself stays the raw
+    per-state tally reported to callers.
+    """
     group_totals: dict[TorrentStateGroup, int] = {
         "downloading": 0,
         "seeding": 0,
@@ -383,6 +392,7 @@ def _count_torrents(
     }
     unknown_states: set[str] = set()
     completed = 0
+    unexplained_stalled = 0
 
     for torrent in torrents:
         state = get_field_as_string(torrent, "state")
@@ -390,6 +400,14 @@ def _count_torrents(
         group_totals[group] += 1
         if group == "unknown" and state != "":
             unknown_states.add(state)
+
+        if group == "stalled":
+            downloaded = get_field_as_int(torrent, "downloaded")
+            progress = get_field_as_float(torrent, "progress")
+            if not is_stalled_up_without_network_load(
+                state, downloaded, progress
+            ):
+                unexplained_stalled += 1
 
         if is_completed_torrent(torrent):
             completed += 1
@@ -404,14 +422,20 @@ def _count_torrents(
         errored=group_totals["errored"],
         unknown=group_totals["unknown"],
     )
-    return counts, frozenset(unknown_states)
+    return counts, frozenset(unknown_states), unexplained_stalled
 
 
 def _build_alerts(
     counts: TransferCounts,
     unknown_states: frozenset[str],
+    unexplained_stalled: int,
 ) -> tuple[StatusAlert, ...]:
-    """Build structured alerts from computed torrent counts."""
+    """Build structured alerts from computed torrent counts.
+
+    `torrents_stalled` counts `unexplained_stalled`, not
+    `counts.stalled`: a stalled torrent that needs no action does not
+    belong in a signal meant to say "intervene".
+    """
     alerts: list[StatusAlert] = []
 
     if counts.errored > 0:
@@ -424,13 +448,13 @@ def _build_alerts(
             )
         )
 
-    if counts.stalled > 0:
+    if unexplained_stalled > 0:
         alerts.append(
             StatusAlert(
                 code="torrents_stalled",
                 severity=Health.WARNING,
-                message=f"{counts.stalled} stalled torrent(s)",
-                count=counts.stalled,
+                message=f"{unexplained_stalled} stalled torrent(s)",
+                count=unexplained_stalled,
             )
         )
 
@@ -451,11 +475,16 @@ def _build_alerts(
     return tuple(alerts)
 
 
-def _compute_health(counts: TransferCounts) -> Health:
-    """Compute overall health, keeping the most severe condition."""
+def _compute_health(counts: TransferCounts, unexplained_stalled: int) -> Health:
+    """Compute overall health, keeping the most severe condition.
+
+    Uses `unexplained_stalled`, not `counts.stalled`: a `stalledUP`
+    torrent completed purely from local data needs no action and must
+    not by itself turn a healthy library into a warning one.
+    """
     if counts.errored > 0:
         return Health.CRITICAL
-    if counts.stalled > 0 or counts.unknown > 0:
+    if unexplained_stalled > 0 or counts.unknown > 0:
         return Health.WARNING
     return Health.HEALTHY
 
