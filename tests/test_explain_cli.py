@@ -494,3 +494,17 @@ def test_explain_tracker_no_observations_path_never_leaks_the_raw_url(
     assert SECRET_PASSKEY not in result.stdout
     assert SECRET_PASSKEY not in result.stderr
     assert "tracker.example" in result.stdout
+
+
+def test_report_tracker_help_never_promises_repetition() -> None:
+    """`--tracker` is a single-value option on both report commands, but
+    both advertised the composable filter's help text ("repeatable;
+    combines with OR"). Typer keeps the last value silently, so an
+    operator auditing two trackers got a report on one and no warning.
+    """
+    for command in (("explain", "tracker"), ("trackers", "inspect")):
+        result = CliRunner().invoke(app, [*command, "--help"])
+        rendered = " ".join(result.stdout.split())
+
+        assert "repeatable" not in rendered, command
+        assert "Restrict the report to one tracker" in rendered, command

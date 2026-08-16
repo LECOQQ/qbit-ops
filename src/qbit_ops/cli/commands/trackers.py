@@ -33,7 +33,7 @@ from qbit_ops.cli.commands._shared import (
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
-    TRACKER_FILTER_HELP,
+    REPORT_TRACKER_FILTER_HELP,
     ActiveOption,
     ActiveWithinOption,
     CategoryOption,
@@ -521,7 +521,7 @@ def inspect_tracker_usage(
         str,
         typer.Option(
             "--tracker",
-            help=TRACKER_FILTER_HELP,
+            help=REPORT_TRACKER_FILTER_HELP,
         ),
     ],
     output_format: Annotated[
