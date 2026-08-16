@@ -120,11 +120,25 @@ class FakeQbitClient:
             }
         }
 
-    def torrents_info(self) -> list[dict[str, Any]]:
-        """Return fake torrents."""
+    def torrents_info(
+        self, torrent_hashes: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return fake torrents, narrowed upstream when asked.
+
+        Mirrors `qbittorrent-api`: passing hashes filters server-side, so
+        a caller that fetches one torrent does not transfer the library.
+        Modelled here too, or a test could not tell the two apart.
+        """
         self.torrents_info_calls += 1
         self._record("torrents_info")
-        return self.torrents
+        if torrent_hashes is None:
+            return self.torrents
+        wanted = {value.lower() for value in torrent_hashes}
+        return [
+            torrent
+            for torrent in self.torrents
+            if str(torrent.get("hash", "")).lower() in wanted
+        ]
 
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
         """Record a per-torrent tracker call that `status` must avoid."""

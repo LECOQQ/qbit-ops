@@ -444,12 +444,24 @@ def search_torrents(
     )
 
 
-def list_torrent_snapshots(client: Any) -> tuple[TorrentSnapshot, ...]:
-    """List every torrent as a `TorrentSnapshot`, unfiltered, one
-    `torrents_info()` call -- the non-CLI counterpart to `select_torrents`."""
-    return tuple(
-        build_torrent_snapshot(torrent) for torrent in client.torrents_info()
-    )
+def list_torrent_snapshots(
+    client: Any,
+    *,
+    hashes: Collection[str] | None = None,
+) -> tuple[TorrentSnapshot, ...]:
+    """List torrents as `TorrentSnapshot`s, one `torrents_info()` call.
+
+    The non-CLI counterpart to `select_torrents`. `hashes` narrows the
+    request upstream instead of fetching the whole library and filtering
+    locally -- which matters for a caller that only wants one torrent,
+    where the difference is a full library transfer per lookup.
+    """
+    if hashes is None:
+        items = client.torrents_info()
+    else:
+        wanted = list(hashes)
+        items = client.torrents_info(torrent_hashes=wanted) if wanted else []
+    return tuple(build_torrent_snapshot(torrent) for torrent in items)
 
 
 def list_category_usage(client: Any) -> dict[str, int]:
