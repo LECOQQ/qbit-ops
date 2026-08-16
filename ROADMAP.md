@@ -5,6 +5,13 @@
 > [!NOTE]
 > This roadmap describes direction, not commitments. Features may move between releases as `qbit-ops` evolves.
 
+> [!NOTE]
+> A line describes a capability, never an implementation owed. When a
+> capability turns out to already exist, the line is corrected against
+> the code rather than a feature built to satisfy its wording.
+> `doctor` enrichment was removed on 2026-08-16 after a discovery run
+> concluded `REJECT`.
+
 ## 🚧 WIP - v0.5.0: 📚 Know Your Library - Part 2
 
 > Find anything. Understand what is happening.
@@ -14,8 +21,13 @@
 - Trackers inventory ✅
 - Library statistics ✅
 - Per-tracker statistics ✅
-- Detection of tracker errors and torrents that are no longer seeding
-- Enriched `doctor` and `explain`
+- Tracker health inventory and per-torrent tracker verdicts ✅
+- Stall, error and inactivity filters, composable across CLI and TUI ✅
+- A canonical vocabulary for "no longer seeding". The notion is
+  expressible today but not named, and three non-equivalent filter
+  combinations answer it differently.
+- Duration-range filters (`--seeded-for`) on the TUI as well as the CLI
+- Enriched `explain`
 
 ## 🔭 Later
 
