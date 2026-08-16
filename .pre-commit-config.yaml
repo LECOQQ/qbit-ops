@@ -11,3 +11,8 @@ repos:
         entry: python3 scripts/check_commit_provenance.py --commit-msg-file
         language: system
         stages: [commit-msg]
+      - id: commit-body
+        name: Refuse a commit body written as prose
+        entry: python3 scripts/check_commit_body.py --commit-msg-file
+        language: system
+        stages: [commit-msg]
