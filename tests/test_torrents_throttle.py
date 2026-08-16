@@ -1,9 +1,9 @@
 """Test `torrents throttle`, the per-torrent rate-limit bulk action.
 
-See `.agents/specs/bulk-throttle.md`. Three layers: `parse_rate`, which
-owns the mandatory-unit rule; domain planning/applying; and the CLI
-command, routed through `_run_bulk_torrent_action` exactly like the
-other bulk actions.
+See `.agents/features/bulk-throttle/SPEC.md`. Three layers:
+`parse_rate`, which owns the mandatory-unit rule; domain planning and
+applying; and the CLI command, routed through
+`_run_bulk_torrent_action` exactly like the other bulk actions.
 
 The machine payload gets its own section: the whole point of the
 feature is an external caller that throttles on a signal and releases
