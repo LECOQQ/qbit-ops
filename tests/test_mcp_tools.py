@@ -39,7 +39,7 @@ def test_find_caps_a_request_larger_than_the_hard_maximum() -> None:
     assert result["returned"] == tools.MAX_LIMIT
     assert result["limit"] == tools.MAX_LIMIT
     assert result["matched"] == 120
-    assert result["truncated"] is True
+    assert result["next_offset"] == tools.MAX_LIMIT
 
 
 def test_find_defaults_to_a_small_page() -> None:
@@ -192,3 +192,49 @@ def test_find_returns_category_and_can_filter_on_it() -> None:
     filtered = tools.find_torrents(client, category="cross-seed")
     assert filtered["matched"] == 5
     assert {t["category"] for t in filtered["torrents"]} == {"cross-seed"}
+
+
+def test_find_pages_through_everything_it_reports_as_matched() -> None:
+    """Telling a caller that 69 matched and then refusing to show 19 of
+    them is half an answer. The cap is a page size, not a dead end:
+    depth is paid in calls, never in context.
+    """
+    client = _library(69)
+
+    first = tools.find_torrents(client)
+    assert first["matched"] == 69
+    assert first["next_offset"] == first["returned"]
+
+    seen: list[str] = []
+    offset: int | None = 0
+    while offset is not None:
+        page = tools.find_torrents(client, offset=offset)
+        seen.extend(torrent["hash"] for torrent in page["torrents"])
+        offset = page["next_offset"]
+
+    assert len(seen) == 69
+    assert len(set(seen)) == 69, "paging must not repeat or skip a torrent"
+
+
+def test_inspect_asks_upstream_for_one_torrent_not_the_library() -> None:
+    """The output was bounded while the input was not: every lookup
+    fetched the whole library. Invisible to the model, very real for the
+    instance.
+    """
+    transferred = 0
+    library = [
+        make_torrent(hash=f"{index:040x}", name=f"T{index}", state="uploading")
+        for index in range(1, 201)
+    ]
+
+    class Counting(FakeQbitClient):
+        def torrents_info(self, torrent_hashes=None):  # type: ignore[override]
+            nonlocal transferred
+            result = super().torrents_info(torrent_hashes)
+            transferred += len(result)
+            return result
+
+    client = Counting(torrents=library)
+    tools.inspect_torrent(client, f"{7:040x}")
+
+    assert transferred == 1, "one lookup must not transfer 200 torrents"

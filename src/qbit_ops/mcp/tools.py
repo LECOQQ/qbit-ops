@@ -93,6 +93,7 @@ def find_torrents(
     category: str | None = None,
     name_contains: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find torrents, bounded, with just enough to pick one.
 
@@ -104,6 +105,12 @@ def find_torrents(
 
     `matched` counts before truncation, so the agent can tell a slice
     from a whole answer -- the same contract `torrents search` has.
+
+    `offset` makes the cap a page size rather than a dead end. Telling a
+    caller that 69 matched and then refusing to show 19 of them is half
+    an answer; paging keeps every result reachable while each response
+    stays bounded. The doctrine holds -- depth is paid in calls, never
+    in context.
     """
     snapshots = list_torrent_snapshots(client)
 
@@ -130,11 +137,16 @@ def find_torrents(
         )
 
     bound = _bounded(limit)
-    shown = snapshots[:bound]
+    start = max(0, offset)
+    shown = snapshots[start : start + bound]
+    next_offset = start + len(shown)
     return {
         "matched": len(snapshots),
         "returned": len(shown),
-        "truncated": len(shown) < len(snapshots),
+        "offset": start,
+        # `null` when the collection is exhausted, so an agent knows it
+        # has seen everything rather than guessing from a count.
+        "next_offset": next_offset if next_offset < len(snapshots) else None,
         "limit": bound,
         "torrents": [_brief(snapshot) for snapshot in shown],
     }
@@ -146,9 +158,13 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     Unbounded on purpose: one torrent is a bounded answer. This is where
     the sixteen snapshot fields belong -- after an agent has narrowed to
     a single item, not before.
+
+    Asks upstream for that hash alone. Fetching the whole library to
+    find one torrent kept the *output* bounded while leaving the *input*
+    unbounded -- invisible to the model, and very real for the instance.
     """
     wanted = torrent_hash.strip().lower()
-    for snapshot in list_torrent_snapshots(client):
+    for snapshot in list_torrent_snapshots(client, hashes=[wanted]):
         if snapshot.hash.lower() == wanted:
             return {
                 "hash": snapshot.hash,

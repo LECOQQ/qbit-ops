@@ -55,6 +55,7 @@ def find_torrents(
     category: str | None = None,
     name_contains: str | None = None,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find torrents by state group, category and/or name fragment.
 
@@ -63,7 +64,8 @@ def find_torrents(
     `unknown`). `category` matches exactly, and is the axis the operator
     defines himself -- often what separates two torrents that look
     identical. Results are capped server-side; `matched` tells you how
-    many exist beyond what was returned.
+    many exist beyond what was returned, and `next_offset` is where to
+    resume -- `null` once you have seen everything.
     """
     return tools.find_torrents(
         _client(),
@@ -71,6 +73,7 @@ def find_torrents(
         category=category,
         name_contains=name_contains,
         limit=limit,
+        offset=offset,
     )
 
 
