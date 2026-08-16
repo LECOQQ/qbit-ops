@@ -15,7 +15,7 @@ from qbit_core.shared.selection import AmbiguousTorrentHashError
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.exit_codes import ExplainExitCode
 from qbit_ops.cli.rendering import OutputFormat
-from qbit_ops.cli.selector_options import TRACKER_FILTER_HELP
+from qbit_ops.cli.selector_options import REPORT_TRACKER_FILTER_HELP
 from qbit_ops.cli.validation import validate_format_support
 
 explain_app = typer.Typer(
@@ -95,7 +95,7 @@ def explain_tracker_command(
         str,
         typer.Option(
             "--tracker",
-            help=TRACKER_FILTER_HELP,
+            help=REPORT_TRACKER_FILTER_HELP,
         ),
     ],
     output_format: Annotated[
