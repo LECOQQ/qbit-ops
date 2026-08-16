@@ -171,6 +171,35 @@ def test_explain_torrent_healthy_exits_zero(
     assert result.exit_code == ExplainExitCode.INFO
 
 
+def test_explain_torrent_table_does_not_repeat_the_summary(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`explain torrent` always builds exactly one finding, whose
+    `explanation` *is* the report summary -- so printing both showed the
+    same sentence twice on every single invocation. The TUI already
+    skipped it (`qbit_ops.tui.formatting`); the CLI did not.
+    """
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=TORRENT_A, name="A", state="uploading")
+            ],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {"url": "https://tracker.example/announce", "status": 2}
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(app, ["explain", "torrent", "--hash", TORRENT_A])
+
+    assert result.exit_code == ExplainExitCode.INFO
+    # The sentence still reaches the reader -- once, in the finding.
+    assert "actively seeding" in result.stdout
+    assert "Summary" not in result.stdout
+
+
 def test_explain_torrent_critical_exits_two(
     runner: CliRunner, configure_qbit_backend
 ) -> None:

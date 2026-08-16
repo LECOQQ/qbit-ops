@@ -715,9 +715,15 @@ def render_explanation(report: ExplanationReport) -> None:
     console.print(
         f"Severity · [{style}]{report.overall_severity.value}[/{style}]"
     )
-    console.print()
-    console.print("[bold]Summary[/bold]")
-    console.print(report.summary)
+    # A single-finding report's summary is, by construction
+    # (`qbit_core.features.explain.build_torrent_explanation`), the
+    # finding's own `explanation` -- printing both shows the same
+    # sentence twice. `qbit_ops.tui.formatting` already skips it; this
+    # is the same rule on the CLI surface, so the two agree.
+    if not report.findings or report.summary != report.findings[0].explanation:
+        console.print()
+        console.print("[bold]Summary[/bold]")
+        console.print(report.summary)
 
     for finding in report.findings:
         console.print()
