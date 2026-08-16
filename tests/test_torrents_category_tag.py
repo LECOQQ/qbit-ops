@@ -1,6 +1,6 @@
 """Test bulk `category`/`tag` assignment.
 
-See `.agents/specs/bulk-category-tag.md`.
+See `.agents/features/bulk-category-tag/SPEC.md`.
 
 Domain-level (`plan_bulk_torrent_action`/`apply_bulk_torrent_action`/
 `resolve_category_availability`) and CLI-level coverage for the four new
