@@ -272,9 +272,9 @@ in its config file:
 It reads the same configuration the CLI does, so if `qbit-ops status`
 works, this works.
 
-**Four tools, no mutation.** `library_summary`, `find_torrents`,
-`inspect_torrent`, `explain_torrent` -- nothing that pauses, deletes or
-edits anything. Answers stay small whatever the library size, so a
+**Five tools, no mutation.** `library_summary`, `find_torrents`,
+`aggregate_stats`, `inspect_torrent`, `explain_torrent` -- nothing that
+pauses, deletes or edits anything. Answers stay small whatever the library size, so a
 large one is explored by drilling down rather than dumped whole.
 
 > **Experimental and personal.** This is a spike, not a supported

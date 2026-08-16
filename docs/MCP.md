@@ -28,16 +28,19 @@ Each step returns enough to choose the next one.
 | Tool | Answers |
 |---|---|
 | `library_summary` | counts, health and alerts, in fixed size |
-| `find_torrents` | by state group and/or name fragment, capped at 50 |
+| `find_torrents` | by state group, category and/or name, one page at a time |
+| `aggregate_stats` | totals over a selection, so nobody adds bytes by hand |
 | `inspect_torrent` | every field of one torrent, by hash |
-| `explain_torrent` | why it is in that state, using qbit-ops's own rules |
+| `explain_torrent` | why it is in that state, with its evidence and limitations |
 
 **No tool mutates**, and none is planned here. `pause`, `delete`,
 tracker edits and imports are absent by construction rather than
 guarded: what a mutation means without a human at the keyboard is a
 design question this spike deliberately does not answer.
 
-The cap is applied server-side. Asking for 5000 torrents returns 50.
+The cap is applied server-side: asking for 5000 torrents returns a page
+of 50, and `next_offset` says where to resume. Every match stays
+reachable -- depth is paid in calls, never in context.
 
 ## 🚀 Install and run
 
