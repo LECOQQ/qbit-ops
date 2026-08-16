@@ -68,6 +68,25 @@ def test_status_reports_warning_for_stalled_torrents(
     assert "warning" in result.stdout
 
 
+def test_status_exits_healthy_when_all_stalled_are_locally_completed(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """The public rupture this feature introduces: a `stalledUP` torrent
+    with `downloaded == 0` and `progress == 1` needs no action, so a
+    library made only of such torrents must report `healthy` and exit
+    `0` -- `status` used to exit `1` on every stalled torrent."""
+    torrents = [
+        make_torrent(hash="a", state="stalledUP", progress=1.0, downloaded=0)
+    ]
+    configure_qbit_backend(client=FakeQbitClient(torrents=torrents))
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == StatusExitCode.HEALTHY
+    assert "healthy" in result.stdout
+
+
 def test_status_reports_critical_for_errored_torrents(
     runner: CliRunner,
     configure_qbit_backend,

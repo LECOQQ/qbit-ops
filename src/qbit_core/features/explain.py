@@ -40,6 +40,7 @@ from qbit_core.shared.selection import (
 from qbit_core.shared.torrent_states import (
     TorrentStateGroup,
     classify_torrent_state,
+    is_stalled_up_without_network_load,
     is_stopped_state,
 )
 
@@ -206,6 +207,7 @@ def build_torrent_explanation(
     progress = get_field_as_float(torrent_item, "progress")
     download_rate = get_field_as_int(torrent_item, "dlspeed")
     upload_rate = get_field_as_int(torrent_item, "upspeed")
+    downloaded = get_field_as_int(torrent_item, "downloaded")
     category = get_field_as_string(torrent_item, "category")
 
     finding = _build_torrent_finding(
@@ -215,6 +217,7 @@ def build_torrent_explanation(
         progress=progress,
         download_rate=download_rate,
         upload_rate=upload_rate,
+        downloaded=downloaded,
         category=category,
         endpoints=(
             safe_tracker_details if safe_tracker_details is not None else []
@@ -289,6 +292,7 @@ def _build_torrent_finding(
     progress: float,
     download_rate: int,
     upload_rate: int,
+    downloaded: int,
     category: str,
     endpoints: list[dict[str, Any]],
     tracker_collection_failed: bool,
@@ -409,6 +413,34 @@ def _build_torrent_finding(
                 "qBittorrent does not indicate whether a peer currently "
                 "requests data from this torrent.",
             )
+
+            if is_stalled_up_without_network_load(state, downloaded, progress):
+                evidence += (
+                    Evidence(
+                        "downloaded", "Downloaded", downloaded, "torrents_info"
+                    ),
+                )
+                limitations.append(
+                    "A torrent whose transfer counters were reset would "
+                    "show the same downloaded=0 reading; qbit-ops cannot "
+                    "distinguish that case from a genuine local "
+                    "completion."
+                )
+                return ExplanationFinding(
+                    code="TORRENT_STALLED_UP",
+                    severity=ExplanationSeverity.INFO,
+                    title="Stalled upload",
+                    explanation=(
+                        "The torrent is complete, but nothing was "
+                        "downloaded from the network: it was assembled "
+                        "from data already on disk. No peer activity is "
+                        "required."
+                    ),
+                    evidence=evidence,
+                    limitations=tuple(limitations),
+                    next_commands=tuple(next_commands),
+                )
+
             return ExplanationFinding(
                 code="TORRENT_STALLED_UP",
                 severity=ExplanationSeverity.WARNING,

@@ -21,9 +21,19 @@ PASSKEY_URL = f"https://tracker.example/announce/{SECRET_PASSKEY}"
 
 
 def _client_with_stalled_upload() -> FakeQbitClient:
+    """A `stalledUP` torrent that did receive network data -- an
+    actionable stall (`WARNING`), not one completed from local data
+    alone. See `tests/test_explain.py` for the `downloaded == 0` rule
+    this deliberately avoids triggering.
+    """
     return FakeQbitClient(
         torrents=[
-            make_torrent(hash=TORRENT_A, name="Debian ISO", state="stalledUP")
+            make_torrent(
+                hash=TORRENT_A,
+                name="Debian ISO",
+                state="stalledUP",
+                downloaded=1,
+            )
         ],
         trackers_by_hash={
             TORRENT_A: [
@@ -134,6 +144,41 @@ def test_explain_torrent_jsonl_matches_json(
     jsonl_payload.pop("generated_at")
     json_payload.pop("generated_at")
     assert jsonl_payload == json_payload
+
+
+def test_explain_torrent_stalled_upload_without_network_load_exits_info(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A `stalledUP` torrent completed from local data alone (`downloaded
+    == 0`, `progress == 1`) reports `INFO` and exits `0` -- the public
+    rupture this feature introduces: `explain torrent` used to exit `1`
+    on every `stalledUP` torrent, regardless of arithmetic."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(
+                    hash=TORRENT_A,
+                    name="Debian ISO",
+                    state="stalledUP",
+                    downloaded=0,
+                )
+            ],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {"url": "https://tracker.example/announce", "status": 2}
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(
+        app, ["explain", "torrent", "--hash", TORRENT_A, "--format", "json"]
+    )
+
+    assert result.exit_code == ExplainExitCode.INFO
+    payload = json.loads(result.stdout)
+    assert payload["findings"][0]["code"] == "TORRENT_STALLED_UP"
+    assert payload["findings"][0]["severity"] == "info"
 
 
 def test_explain_torrent_csv_is_rejected_before_any_api_call(

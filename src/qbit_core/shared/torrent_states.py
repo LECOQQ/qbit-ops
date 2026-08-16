@@ -61,6 +61,31 @@ def is_completed_torrent(torrent: Any) -> bool:
     return get_field_as_float(torrent, "progress") >= 1.0
 
 
+def is_stalled_up_without_network_load(
+    state: str, downloaded: int, progress: float
+) -> bool:
+    """Whether a `stalledUP` torrent was completed from local data alone.
+
+    `downloaded == 0` and `progress == 1` is an arithmetic contradiction,
+    not an inference: the torrent is complete but the network delivered
+    nothing, so every byte was already on disk before the transfer
+    started. Scoped to `stalledUP` only -- a `stoppedUP` torrent
+    satisfying the same arithmetic reflects an operator decision, not a
+    diagnostic, and keeps its own finding.
+
+    Shared by `qbit_core.features.status`'s health computation and
+    `qbit_core.features.explain`'s per-torrent findings so the two
+    surfaces can never disagree about the same torrent (mirrors
+    `qbit_core.features.torrents.compute_torrent_tracker_health`'s role
+    for tracker health).
+
+    Known false positive: a torrent whose transfer counters were reset
+    presents the same arithmetic. Callers must surface this as a
+    limitation, not silently trust the verdict.
+    """
+    return state == "stalledUP" and downloaded == 0 and progress >= 1.0
+
+
 def classify_torrent_state(state: str) -> TorrentStateGroup:
     """Classify a raw qBittorrent torrent state into a status group.
 

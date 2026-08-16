@@ -12,6 +12,11 @@ from qbit_core.features.explain import (
     explanation_report_to_dict,
     finding_to_dict,
 )
+from qbit_core.features.status import (
+    Health,
+    collect_status_snapshot,
+    status_exit_code,
+)
 from qbit_core.features.torrents import get_safe_tracker_details
 from qbit_core.shared.selection import AmbiguousTorrentHashError
 from tests.support import FakeQbitClient, make_torrent
@@ -36,6 +41,8 @@ def test_explanation_exit_code_mapping() -> None:
 
 
 def test_stalled_upload_explanation() -> None:
+    """A `stalledUP` torrent that did receive data from the network (a
+    genuine, actionable stall) keeps `WARNING`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(
@@ -44,6 +51,7 @@ def test_stalled_upload_explanation() -> None:
                 state="stalledUP",
                 progress=1.0,
                 upspeed=0,
+                downloaded=500_000_000,
             )
         ],
         trackers_by_hash={
@@ -62,9 +70,107 @@ def test_stalled_upload_explanation() -> None:
     assert explanation_exit_code(report.overall_severity) == 1
     assert "reannounce" in " ".join(finding.next_commands)
     assert not any(
+        evidence.code == "downloaded" for evidence in finding.evidence
+    )
+    assert not any(
         "network" in limitation.lower() or "failure" in limitation.lower()
         for limitation in finding.limitations
     )
+
+
+def test_stalled_upload_without_network_load_is_info() -> None:
+    """`downloaded == 0` and `progress == 1` on a `stalledUP` torrent is
+    an arithmetic contradiction: it was completed from local data, needs
+    no action, and must be reported as `INFO`, not `WARNING`."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="T1",
+                state="stalledUP",
+                progress=1.0,
+                upspeed=0,
+                downloaded=0,
+            )
+        ],
+        trackers_by_hash={
+            HASH_A: [{"url": "https://tracker.example/announce", "status": 2}]
+        },
+    )
+
+    report = explain_torrent(client, HASH_A)
+
+    assert report is not None
+    finding = report.findings[0]
+    assert finding.code == "TORRENT_STALLED_UP"
+    assert finding.severity is ExplanationSeverity.INFO
+    assert report.overall_severity is ExplanationSeverity.INFO
+    assert explanation_exit_code(report.overall_severity) == 0
+    downloaded_evidence = [
+        item for item in finding.evidence if item.code == "downloaded"
+    ]
+    assert len(downloaded_evidence) == 1
+    assert downloaded_evidence[0].value == 0
+    assert "network" in finding.explanation.lower()
+    assert any(
+        "reset" in limitation.lower() for limitation in finding.limitations
+    )
+
+
+def test_stalled_upload_with_downloaded_bytes_stays_a_warning() -> None:
+    """AC2: same torrent, `downloaded > 0` -- unchanged `WARNING`, no
+    `downloaded` evidence, no reset limitation."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="T1",
+                state="stalledUP",
+                progress=1.0,
+                upspeed=0,
+                downloaded=1,
+            )
+        ],
+        trackers_by_hash={
+            HASH_A: [{"url": "https://tracker.example/announce", "status": 2}]
+        },
+    )
+
+    report = explain_torrent(client, HASH_A)
+
+    assert report is not None
+    finding = report.findings[0]
+    assert finding.code == "TORRENT_STALLED_UP"
+    assert finding.severity is ExplanationSeverity.WARNING
+    assert not any(item.code == "downloaded" for item in finding.evidence)
+    assert not any(
+        "reset" in limitation.lower() for limitation in finding.limitations
+    )
+
+
+def test_stopped_up_with_the_same_arithmetic_is_unaffected() -> None:
+    """AC7: `stoppedUP` satisfying the same arithmetic is out of scope --
+    it keeps `TORRENT_STOPPED`, untouched by the `stalledUP` rule."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="T1",
+                state="stoppedUP",
+                progress=1.0,
+                downloaded=0,
+            )
+        ],
+        trackers_by_hash={HASH_A: []},
+    )
+
+    report = explain_torrent(client, HASH_A)
+
+    assert report is not None
+    finding = report.findings[0]
+    assert finding.code == "TORRENT_STOPPED"
+    assert finding.severity is ExplanationSeverity.INFO
+    assert not any(item.code == "downloaded" for item in finding.evidence)
 
 
 def test_stalled_download_with_healthy_trackers() -> None:
@@ -681,3 +787,87 @@ def test_evidence_and_finding_serialize_to_plain_dicts() -> None:
     assert payload["findings"][0]["evidence"][0] == evidence_to_dict(
         report.findings[0].evidence[0]
     )
+
+
+# --- Catalogue size -----------------------------------------------------------
+
+
+def test_torrent_finding_catalogue_still_has_eight_codes() -> None:
+    """AC5: giving `TORRENT_STALLED_UP` a conditional `INFO` severity must
+    not grow the catalogue -- one code per state-group rule, still
+    eight."""
+    scenarios = [
+        {"state": "error"},
+        {"state": "checkingDL"},
+        # `downloaded == 0`: exercises the conditional `INFO` branch --
+        # the one this feature added -- not just the unchanged `WARNING`
+        # path already covered by `downloaded > 0` elsewhere.
+        {"state": "stalledUP", "progress": 1.0, "downloaded": 0},
+        {"state": "stalledDL", "progress": 0.5},
+        {"state": "stoppedUP"},
+        {"state": "uploading"},
+        {"state": "downloading"},
+        {"state": "somethingNew"},
+    ]
+
+    codes = {
+        build_torrent_explanation(
+            make_torrent(hash=HASH_A, name="T1", **overrides), []
+        )
+        .findings[0]
+        .code
+        for overrides in scenarios
+    }
+
+    assert codes == {
+        "TORRENT_ERROR_STATE",
+        "TORRENT_CHECKING",
+        "TORRENT_STALLED_UP",
+        "TORRENT_STALLED_DL",
+        "TORRENT_STOPPED",
+        "TORRENT_HEALTHY_SEEDING",
+        "TORRENT_HEALTHY_DOWNLOADING",
+        "TORRENT_UNKNOWN_STATE",
+    }
+    assert len(codes) == 8
+
+
+# --- Cross-surface parity: `status` vs `explain` (AC6) ------------------------
+#
+# The most important acceptance criterion: `status` and `explain torrent`
+# must never disagree about the same torrent. Both read
+# `is_stalled_up_without_network_load` -- this pins the agreement down
+# directly rather than trusting each surface's own tests not to drift
+# apart.
+
+
+def test_status_and_explain_agree_on_a_locally_completed_stall() -> None:
+    torrent = make_torrent(
+        hash=HASH_A, name="T1", state="stalledUP", progress=1.0, downloaded=0
+    )
+    client = FakeQbitClient(torrents=[torrent], trackers_by_hash={HASH_A: []})
+
+    status_snapshot = collect_status_snapshot(client)
+    explain_report = explain_torrent(client, HASH_A)
+
+    assert explain_report is not None
+    assert status_snapshot.health == Health.HEALTHY
+    assert explain_report.overall_severity == ExplanationSeverity.INFO
+    assert status_exit_code(status_snapshot.health) == 0
+    assert explanation_exit_code(explain_report.overall_severity) == 0
+
+
+def test_status_and_explain_agree_on_an_unexplained_stall() -> None:
+    torrent = make_torrent(
+        hash=HASH_A, name="T1", state="stalledUP", progress=1.0, downloaded=1
+    )
+    client = FakeQbitClient(torrents=[torrent], trackers_by_hash={HASH_A: []})
+
+    status_snapshot = collect_status_snapshot(client)
+    explain_report = explain_torrent(client, HASH_A)
+
+    assert explain_report is not None
+    assert status_snapshot.health == Health.WARNING
+    assert explain_report.overall_severity == ExplanationSeverity.WARNING
+    assert status_exit_code(status_snapshot.health) == 1
+    assert explanation_exit_code(explain_report.overall_severity) == 1
