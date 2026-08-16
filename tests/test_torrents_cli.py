@@ -603,7 +603,7 @@ def test_inspect_rejects_the_removed_name_option(
     runner: CliRunner,
     configure_qbit_backend,
 ) -> None:
-    """`--name` is gone (S8, `.agents/specs/search.md`'s breaking-change
+    """`--name` is gone (S8, `.agents/features/search/SPEC.md`'s breaking-change
     table): the fuzzy search now lives at `torrents search`, a
     read-only, ranked cul-de-sac, never a selector for `inspect`."""
     configure_qbit_backend(client=FakeQbitClient(torrents=[]))
@@ -762,3 +762,44 @@ def test_bulk_action_rejects_streaming_formats(
 
     assert result.exit_code != ExitCode.SUCCESS
     assert "not supported" in result.stderr.lower()
+
+
+def test_bulk_json_reports_the_status_it_actually_reached(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--format json` silences the Rich summary, and silencing it also
+    skipped the call that computes the status -- so a mutation that had
+    been applied still reported `preview`. A machine payload that
+    misstates what happened is worse than no payload.
+    """
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=TORRENT_A_HASH, name="A", state="uploading")
+            ]
+        )
+    )
+    applied = json.loads(
+        runner.invoke(
+            app,
+            ["torrents", "pause", "--all", "--no-dry-run", "--format", "json"],
+        ).stdout
+    )
+    assert applied["status"] == "applied"
+    assert applied["applied"] is True
+
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=TORRENT_A_HASH, name="A", state="pausedUP")
+            ]
+        )
+    )
+    unchanged = json.loads(
+        runner.invoke(
+            app,
+            ["torrents", "pause", "--all", "--no-dry-run", "--format", "json"],
+        ).stdout
+    )
+    assert unchanged["status"] == "no_changes"
+    assert unchanged["applied"] is False
