@@ -24,12 +24,14 @@
 - Per-tracker statistics ✅
 - Tracker health inventory and per-torrent tracker verdicts ✅
 - Stall, error and inactivity filters, composable across CLI and TUI ✅
-- A canonical vocabulary for "no longer seeding". The notion is
-  expressible today but not named, and three non-equivalent filter
-  combinations answer it differently.
-- Duration-range filters (`--seeded-for`) on the TUI as well as the CLI
-- Health that answers "must I act": a torrent completed from local data
-  no longer raises a warning ✅
+- Health that answers "must I act" ✅
+- Bulk category and tag management ✅
+- Composable filtering across mutating operations ✅
+- Machine-readable results for every mutation ✅
+- JSONL output ✅
+- Experimental MCP server, read-only and bounded ✅
+- A canonical name for "no longer seeding"
+- Duration-range filters on the TUI
 
 ## 🔭 Later
 
@@ -37,12 +39,8 @@
 
 > Select precisely. Operate on thousands of torrents safely.
 
-- Bulk category management ✅
-- Bulk tag management ✅
 - Bulk throttling
 - Tracker URL migration
-- Composable filtering across mutating operations ✅
-- Machine-readable results for every mutation ✅
 - Saved selectors
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
@@ -80,7 +78,6 @@
 
 > Becoming a scriptable operational substrate.
 
-- JSONL output ✅
 - Machine-readable selectors
 - Automation-friendly commands
 - Reporting
