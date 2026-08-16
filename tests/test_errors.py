@@ -351,14 +351,27 @@ def test_exit_code_table_matches_registered_commands() -> None:
     for group in app.registered_groups:
         assert group.name is not None
         assert group.typer_instance is not None
-        for command in group.typer_instance.registered_commands:
-            assert command.callback is not None
-            command_name = command.name or command.callback.__name__.replace(
-                "_", "-"
-            )
-            registered.add(f"{group.name} {command_name}")
+        _collect_command_names(group.typer_instance, group.name, registered)
 
     assert registered == set(EXIT_CODE_TABLE)
+
+
+def _collect_command_names(
+    typer_instance, prefix: str, registered: set[str]
+) -> None:
+    """Recurse into every nested sub-typer (e.g. `torrents category set`),
+    not just direct subcommands -- a group can itself hold groups."""
+    for command in typer_instance.registered_commands:
+        assert command.callback is not None
+        command_name = command.name or command.callback.__name__.replace(
+            "_", "-"
+        )
+        registered.add(f"{prefix} {command_name}")
+    for group in typer_instance.registered_groups:
+        assert group.name is not None
+        _collect_command_names(
+            group.typer_instance, f"{prefix} {group.name}", registered
+        )
 
 
 # --- TUI readiness: qbit_core.errors importable without Typer/Rich/main ----

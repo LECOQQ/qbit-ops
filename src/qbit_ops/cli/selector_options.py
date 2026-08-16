@@ -192,6 +192,33 @@ StatsAllOption = Annotated[
         ),
     ),
 ]
+CategorySetHashOption = Annotated[
+    str | None, typer.Option("--hash", help=_hash_help("Set the category for"))
+]
+CategoryClearHashOption = Annotated[
+    str | None,
+    typer.Option("--hash", help=_hash_help("Clear the category for")),
+]
+TagAddHashOption = Annotated[
+    str | None, typer.Option("--hash", help=_hash_help("Add the tag(s) to"))
+]
+TagRemoveHashOption = Annotated[
+    str | None,
+    typer.Option("--hash", help=_hash_help("Remove the tag(s) from")),
+]
+
+CategorySetAllOption = Annotated[
+    bool, typer.Option("--all", help="Set the category for all torrents.")
+]
+CategoryClearAllOption = Annotated[
+    bool, typer.Option("--all", help="Clear the category for all torrents.")
+]
+TagAddAllOption = Annotated[
+    bool, typer.Option("--all", help="Add the tag(s) to all torrents.")
+]
+TagRemoveAllOption = Annotated[
+    bool, typer.Option("--all", help="Remove the tag(s) from all torrents.")
+]
 
 
 # --- exclusions -------------------------------------------------------------

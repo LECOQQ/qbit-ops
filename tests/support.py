@@ -35,6 +35,7 @@ class FakeQbitClient:
         create_category_error: Exception | None = None,
         set_category_error: Exception | None = None,
         add_tags_error: Exception | None = None,
+        remove_tags_error: Exception | None = None,
         add_trackers_error: Exception | None = None,
     ) -> None:
         """Store fake instance data returned to callers.
@@ -61,12 +62,14 @@ class FakeQbitClient:
         self.create_category_error = create_category_error
         self.set_category_error = set_category_error
         self.add_tags_error = add_tags_error
+        self.remove_tags_error = remove_tags_error
         self.add_trackers_error = add_trackers_error
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.added_torrent_files: list[list[bytes]] = []
         self.created_categories: list[str] = []
         self.set_categories: list[tuple[str | list[str], str]] = []
         self.added_tags: list[tuple[str | list[str], list[str]]] = []
+        self.removed_tags: list[tuple[str | list[str], list[str]]] = []
         self.app_version_calls = 0
         self.app_web_api_version_calls = 0
         self.torrents_trackers_calls = 0
@@ -248,6 +251,18 @@ class FakeQbitClient:
             raise self.add_tags_error
         tag_list = [tags] if isinstance(tags, str) else list(tags)
         self.added_tags.append((torrent_hashes, tag_list))
+
+    def torrents_remove_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Record a fake tag removal; raise `remove_tags_error` if set."""
+        self._record(
+            "torrents_remove_tags", torrent_hashes=torrent_hashes, tags=tags
+        )
+        if self.remove_tags_error is not None:
+            raise self.remove_tags_error
+        tag_list = [tags] if isinstance(tags, str) else list(tags)
+        self.removed_tags.append((torrent_hashes, tag_list))
 
     def torrents_add(self, **kwargs: Any) -> str:
         """Record a fake add call; raise `torrents_add_error` if set."""

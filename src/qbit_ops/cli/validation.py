@@ -40,6 +40,12 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
     "torrents_start": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_reannounce": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_delete": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_category_set": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_category_clear": frozenset(
+        {OutputFormat.table, OutputFormat.json}
+    ),
+    "torrents_tag_add": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_tag_remove": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_search": frozenset(OutputFormat),
     "backup_restore": frozenset({OutputFormat.table, OutputFormat.json}),
     "trackers_list": frozenset(OutputFormat),
@@ -100,3 +106,26 @@ def validate_hash_option(
         return require_non_blank(value, field_name=option_name)
     except InvalidInputError as error:
         fail(str(error), ErrorCategory.INVALID_INPUT)
+
+
+def validate_category_name(value: str) -> str:
+    """Reject a blank/whitespace-only category name before any API call."""
+    try:
+        return require_non_blank(value, field_name="category")
+    except InvalidInputError as error:
+        fail(str(error), ErrorCategory.INVALID_INPUT)
+
+
+def validate_tag_names(values: list[str]) -> tuple[str, ...]:
+    """Strip, drop blanks and deduplicate one or more `tag add`/`tag
+    remove` names, rejecting an empty result before any API call.
+    """
+    normalized = tuple(
+        dict.fromkeys(value.strip() for value in values if value.strip() != "")
+    )
+    if not normalized:
+        fail(
+            "Provide at least one non-blank tag name.",
+            ErrorCategory.INVALID_INPUT,
+        )
+    return normalized

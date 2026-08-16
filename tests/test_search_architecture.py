@@ -140,6 +140,29 @@ def test_shared_search_never_imports_shared_selection() -> None:
 # --- Test 3: no mutating torrents command calls a search_* function -------
 
 
+def _collect_mutating_names(
+    typer_instance, prefix: str, mutation_values: set[str], names: set[str]
+) -> None:
+    """Recurse into every nested sub-typer (e.g. `torrents category set`),
+    not just direct subcommands -- a group can itself hold groups (mirrors
+    `test_execution.py`'s and `test_errors.py`'s own registry walks)."""
+    for command in typer_instance.registered_commands:
+        assert command.callback is not None
+        command_name = command.name or command.callback.__name__.replace(
+            "_", "-"
+        )
+        if f"{prefix} {command_name}" in mutation_values:
+            names.add(command.callback.__name__)
+    for group in typer_instance.registered_groups:
+        assert group.name is not None
+        _collect_mutating_names(
+            group.typer_instance,
+            f"{prefix} {group.name}",
+            mutation_values,
+            names,
+        )
+
+
 def _mutating_torrents_command_function_names() -> set[str]:
     """Callback `__name__`s for every registered `torrents` command that
     is a `MutationOperation` -- read from `MutationOperation`, never a
@@ -154,13 +177,7 @@ def _mutating_torrents_command_function_names() -> set[str]:
 
     mutation_values = {operation.value for operation in MutationOperation}
     names: set[str] = set()
-    for command in torrents_group.registered_commands:
-        assert command.callback is not None
-        command_name = command.name or command.callback.__name__.replace(
-            "_", "-"
-        )
-        if f"torrents {command_name}" in mutation_values:
-            names.add(command.callback.__name__)
+    _collect_mutating_names(torrents_group, "torrents", mutation_values, names)
     return names
 
 
@@ -219,6 +236,10 @@ def test_mutating_torrents_command_discovery_is_non_vacuous() -> None:
         "reannounce",
         "delete",
         "import_torrents",
+        "category_set",
+        "category_clear",
+        "tag_add",
+        "tag_remove",
     }
 
 

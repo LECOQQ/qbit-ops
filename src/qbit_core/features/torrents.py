@@ -9,9 +9,10 @@ Kept free of Typer and Rich so both the CLI and the TUI can reuse it
 without pulling in presentation concerns.
 """
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from difflib import get_close_matches
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -70,7 +71,17 @@ from qbit_core.shared.torrent_states import (
     is_stopped_state,
 )
 
-TorrentBulkAction = Literal["pause", "resume", "start", "reannounce", "delete"]
+TorrentBulkAction = Literal[
+    "pause",
+    "resume",
+    "start",
+    "reannounce",
+    "delete",
+    "category_set",
+    "category_clear",
+    "tag_add",
+    "tag_remove",
+]
 
 # The public `--tracker-health` vocabulary: exactly the verdicts
 # `compute_torrent_tracker_health` can produce for one torrent.
@@ -576,7 +587,14 @@ class BulkTorrentActionPlan:
     resolved full hash when `--hash` selected the target, `None`
     otherwise; `filters` is empty when `--hash` or `--all` was used.
     `delete_files` only matters for `action == "delete"`; ignored by
-    every other action.
+    every other action. `category` is the target category
+    (`action in ("category_set",)`; `None` for every other action,
+    including `"category_clear"`, which always clears to `""`). `tags`
+    is the target tag set (`action in ("tag_add", "tag_remove")`).
+    `category_needs_creation` is only ever `True` for `"category_set"`,
+    and only once real changes exist -- creating a category with no
+    torrent to attach it to is out of scope (see `.agents/specs/
+    bulk-category-tag.md`, "Hors périmètre").
     """
 
     action: TorrentBulkAction
@@ -588,6 +606,9 @@ class BulkTorrentActionPlan:
     changes: tuple[BulkTorrentChange, ...]
     skipped: tuple[BulkTorrentSkip, ...]
     delete_files: bool = False
+    category: str | None = None
+    tags: tuple[str, ...] = ()
+    category_needs_creation: bool = False
 
 
 def validate_torrent_selector(
@@ -653,6 +674,9 @@ def plan_bulk_torrent_action(
     select_all: bool = False,
     filters: TorrentFilter = EMPTY_TORRENT_FILTER,
     delete_files: bool = False,
+    category: str | None = None,
+    tags: Sequence[str] = (),
+    category_needs_creation: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> BulkTorrentActionPlan:
     """Plan a bulk torrent action against a filtered torrent selection.
@@ -662,7 +686,20 @@ def plan_bulk_torrent_action(
     prefix raises `AmbiguousTorrentHashError` before any plan is built,
     while an unmatched hash resolves to zero selected torrents, same as
     any other filter that matches nothing. `delete_files` is only
-    meaningful for `action="delete"`.
+    meaningful for `action="delete"`; `category` for `"category_set"`;
+    `tags` for `"tag_add"`/`"tag_remove"`.
+
+    `category_needs_creation` is the caller's own read of
+    `client.torrents_categories()` (see `resolve_category_availability`)
+    -- planning never issues that read itself, so a `category_set` dry-run
+    costs exactly the one call the caller already made. It only survives
+    into the returned plan when there is at least one real change:
+    creating a category nothing ends up wearing is out of scope.
+
+    For `"tag_add"`/`"tag_remove"`, current tag membership is read from
+    each matched torrent's raw payload, narrowed to the matched hashes --
+    `TorrentSnapshot` deliberately does not carry `tags` (see
+    `.agents/MEMORY.md`, "Pipeline SELECT -> INSPECT -> PLAN -> APPLY").
     """
     selection = select_torrents_for_mutation(
         client,
@@ -672,11 +709,25 @@ def plan_bulk_torrent_action(
         on_progress=on_progress,
     )
 
+    normalized_tags = _normalize_tokens(tags)
+    current_tags_by_hash = (
+        _tags_by_hash(client, [torrent.hash for torrent in selection.matched])
+        if action in ("tag_add", "tag_remove")
+        else {}
+    )
+
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
 
     for torrent in selection.matched:
-        skip_reason = _bulk_action_skip_reason(action, torrent.state)
+        skip_reason = _bulk_action_skip_reason(
+            action,
+            torrent.state,
+            current_category=torrent.category,
+            target_category=category,
+            current_tags=current_tags_by_hash.get(torrent.hash.lower(), ()),
+            target_tags=normalized_tags,
+        )
         if skip_reason is not None:
             skips.append(
                 BulkTorrentSkip(
@@ -697,6 +748,58 @@ def plan_bulk_torrent_action(
         changes=tuple(changes),
         skipped=tuple(skips),
         delete_files=delete_files,
+        category=category,
+        tags=normalized_tags,
+        category_needs_creation=category_needs_creation and bool(changes),
+    )
+
+
+def _tags_by_hash(
+    client: Any, hashes: Sequence[str]
+) -> dict[str, tuple[str, ...]]:
+    """Read current tags for exactly `hashes`, keyed by lowercased hash.
+
+    A second, bounded `torrents_info()` call, narrowed the same way
+    `list_torrent_snapshots` narrows one -- used only by `"tag_add"`/
+    `"tag_remove"` planning, never by the other bulk actions.
+    """
+    if not hashes:
+        return {}
+    raw_torrents = client.torrents_info(torrent_hashes=list(hashes))
+    return {
+        get_field_as_string(item, "hash").lower(): tuple(
+            get_field_as_tag_list(item)
+        )
+        for item in raw_torrents
+    }
+
+
+def resolve_category_availability(
+    client: Any, category: str, *, create: bool
+) -> bool:
+    """Check `category` against `client.torrents_categories()`.
+
+    Returns whether it still needs creating. Raises `ValueError` when it
+    is unknown and `create` is `False` -- called before any plan is
+    built, so `category set` on an unknown name refuses the same way in
+    dry-run and in real execution.
+    """
+    existing = client.torrents_categories()
+    if category in existing:
+        return False
+    if not create:
+        raise ValueError(_category_not_found_message(category, existing))
+    return True
+
+
+def _category_not_found_message(
+    category: str, existing: Mapping[str, Any]
+) -> str:
+    suggestion = get_close_matches(category, list(existing), n=1, cutoff=0.6)
+    hint = f" Did you mean '{suggestion[0]}'?" if suggestion else ""
+    return (
+        f"Category '{category}' does not exist.{hint} Use --create to "
+        "create it."
     )
 
 
@@ -762,16 +865,36 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
     """Apply a previously built plan. Mutates exactly `plan.changes`.
 
     Never rescans torrents: the plan is the sole source of truth for what
-    gets mutated, so preview and execution can never diverge.
+    gets mutated, so preview and execution can never diverge. For
+    `"category_set"`, creates the category first when
+    `plan.category_needs_creation` is set -- always paired with
+    assigning it, per the plan's own non-empty `changes`.
     """
     if not plan.changes:
         return
 
     hashes = [change.hash for change in plan.changes]
     try:
-        _call_bulk_torrent_action(
-            client, plan.action, hashes, delete_files=plan.delete_files
-        )
+        if plan.action == "category_set":
+            if plan.category_needs_creation:
+                client.torrents_create_category(name=plan.category)
+            client.torrents_set_category(
+                torrent_hashes=hashes, category=plan.category or ""
+            )
+        elif plan.action == "category_clear":
+            client.torrents_set_category(torrent_hashes=hashes, category="")
+        elif plan.action == "tag_add":
+            client.torrents_add_tags(
+                torrent_hashes=hashes, tags=list(plan.tags)
+            )
+        elif plan.action == "tag_remove":
+            client.torrents_remove_tags(
+                torrent_hashes=hashes, tags=list(plan.tags)
+            )
+        else:
+            _call_bulk_torrent_action(
+                client, plan.action, hashes, delete_files=plan.delete_files
+            )
     except Exception as error:
         raise RuntimeError(
             f"Failed to {plan.action} selected torrents: {error}"
@@ -998,16 +1121,44 @@ def _call_bulk_torrent_action(
 def _bulk_action_skip_reason(
     action: TorrentBulkAction,
     state: str,
+    *,
+    current_category: str = "",
+    target_category: str | None = None,
+    current_tags: Sequence[str] = (),
+    target_tags: Sequence[str] = (),
 ) -> str | None:
     """Return a skip reason when a bulk action would be a no-op.
 
     "reannounce" and "delete" have no no-op state -- always a change.
+    `current_category`/`target_category` and `current_tags`/
+    `target_tags` are only meaningful for the category/tag actions;
+    every other action ignores them.
     """
     if action == "pause" and is_stopped_state(state):
         return "already_stopped"
 
     if action in ("resume", "start") and not is_stopped_state(state):
         return "already_running"
+
+    if action == "category_set" and current_category == (target_category or ""):
+        return "already_set"
+
+    if action == "category_clear" and current_category == "":
+        return "already_cleared"
+
+    if (
+        action == "tag_add"
+        and target_tags
+        and set(target_tags) <= set(current_tags)
+    ):
+        return "already_tagged"
+
+    if (
+        action == "tag_remove"
+        and target_tags
+        and not (set(target_tags) & set(current_tags))
+    ):
+        return "not_tagged"
 
     return None
 
