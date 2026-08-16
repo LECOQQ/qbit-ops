@@ -33,6 +33,13 @@ FORMAT_SUPPORT: dict[str, frozenset[OutputFormat]] = {
         {OutputFormat.table, OutputFormat.json, OutputFormat.jsonl}
     ),
     "torrents_import": frozenset({OutputFormat.table, OutputFormat.json}),
+    # Bulk actions: table or json, never jsonl/csv -- a mutation
+    # produces one result, not a stream of rows.
+    "torrents_pause": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_resume": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_start": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_reannounce": frozenset({OutputFormat.table, OutputFormat.json}),
+    "torrents_delete": frozenset({OutputFormat.table, OutputFormat.json}),
     "torrents_search": frozenset(OutputFormat),
     "backup_restore": frozenset({OutputFormat.table, OutputFormat.json}),
     "trackers_list": frozenset(OutputFormat),

@@ -28,8 +28,8 @@ TORRENT_HASH = "abc123def456000000000000000000000000000a"
 TRACKER_URL = "https://tracker.example/announce"
 
 # Full argv (including any required options) for every read-only command
-# except `backup diff`/`backup restore` (need on-disk export files) and
-# `torrents import` (a mutation command, not read-only). Their own
+# except `backup diff`/`backup restore` (need on-disk export files)
+# and the mutation commands, which are not read-only. Their own
 # `--format` coverage lives in `tests/test_torrents_import_cli.py` and
 # `tests/test_backup_restore_cli.py`.
 COMMAND_ARGV: dict[str, list[str]] = {
@@ -54,6 +54,11 @@ COMMAND_ARGV: dict[str, list[str]] = {
 # Command path only (no options), valid for --help regardless of any
 # required option, since --help is resolved eagerly by Click/Typer.
 COMMAND_PATH: dict[str, list[str]] = {
+    "torrents_pause": ["torrents", "pause"],
+    "torrents_resume": ["torrents", "resume"],
+    "torrents_start": ["torrents", "start"],
+    "torrents_reannounce": ["torrents", "reannounce"],
+    "torrents_delete": ["torrents", "delete"],
     "status": ["status"],
     "connection_check": ["connection", "check"],
     "doctor": ["doctor"],
@@ -75,7 +80,19 @@ COMMAND_PATH: dict[str, list[str]] = {
     "backup_restore": ["backup", "restore"],
 }
 
-_EXCLUDED_FROM_ARGV = {"backup_diff", "torrents_import", "backup_restore"}
+_EXCLUDED_FROM_ARGV = {
+    "backup_diff",
+    "torrents_import",
+    "backup_restore",
+    # Bulk actions are mutations: their `--format json` coverage is
+    # in `tests/test_torrents_cli.py`, where a fake backend can
+    # prove a preview never applies anything.
+    "torrents_pause",
+    "torrents_resume",
+    "torrents_start",
+    "torrents_reannounce",
+    "torrents_delete",
+}
 assert set(COMMAND_ARGV) == set(FORMAT_SUPPORT) - _EXCLUDED_FROM_ARGV
 assert set(COMMAND_PATH) == set(FORMAT_SUPPORT)
 
