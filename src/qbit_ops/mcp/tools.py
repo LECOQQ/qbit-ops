@@ -46,6 +46,7 @@ def _brief(snapshot: TorrentSnapshot) -> dict[str, Any]:
     return {
         "hash": snapshot.hash,
         "name": snapshot.name,
+        "category": snapshot.category,
         "state": snapshot.state,
         "state_group": snapshot.state_group,
         "progress": snapshot.progress,
@@ -89,15 +90,17 @@ def find_torrents(
     client: Any,
     *,
     state_group: str | None = None,
+    category: str | None = None,
     name_contains: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Find torrents, bounded, with just enough to pick one.
 
-    Deliberately not the 39 filter options `torrents list` offers: an
-    agent narrowing a conversation needs a state and a name fragment,
-    and every extra parameter is permanent context cost for a tool that
-    may never be called.
+    Deliberately not every filter `torrents list` offers: each extra
+    parameter is permanent context cost for a tool that may never be
+    called. `category` earns its place because it is the one axis the
+    operator defines himself -- it is what separates a release from a
+    cross-seed link to that same release, which no other field shows.
 
     `matched` counts before truncation, so the agent can tell a slice
     from a whole answer -- the same contract `torrents search` has.
@@ -108,6 +111,14 @@ def find_torrents(
         wanted = state_group.strip().lower()
         snapshots = tuple(
             snapshot for snapshot in snapshots if snapshot.state_group == wanted
+        )
+
+    if category is not None:
+        wanted_category = category.strip()
+        snapshots = tuple(
+            snapshot
+            for snapshot in snapshots
+            if (snapshot.category or "") == wanted_category
         )
 
     if name_contains:
@@ -181,6 +192,20 @@ def explain(client: Any, torrent_hash: str) -> dict[str, Any] | None:
                 "severity": str(finding.severity),
                 "title": finding.title,
                 "explanation": finding.explanation,
+                # `limitations` is the field that stops an agent stating
+                # a conclusion more firmly than the engine did. Dropping
+                # it left the verdict looking unqualified -- on a product
+                # whose promise is evidence, never a guess.
+                "evidence": [
+                    {
+                        "code": item.code,
+                        "label": item.label,
+                        "value": item.value,
+                        "source": str(item.source),
+                    }
+                    for item in finding.evidence
+                ],
+                "limitations": list(finding.limitations),
                 "next_commands": list(finding.next_commands),
             }
             for finding in report.findings

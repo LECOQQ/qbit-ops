@@ -52,19 +52,23 @@ def library_summary() -> dict[str, Any]:
 @server.tool()
 def find_torrents(
     state_group: str | None = None,
+    category: str | None = None,
     name_contains: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Find torrents by state group and/or name fragment.
+    """Find torrents by state group, category and/or name fragment.
 
     `state_group` is one of qbit-ops's canonical groups (`seeding`,
     `downloading`, `stalled`, `errored`, `checking`, `stopped`,
-    `unknown`). Results are capped server-side; `matched` tells you how
+    `unknown`). `category` matches exactly, and is the axis the operator
+    defines himself -- often what separates two torrents that look
+    identical. Results are capped server-side; `matched` tells you how
     many exist beyond what was returned.
     """
     return tools.find_torrents(
         _client(),
         state_group=state_group,
+        category=category,
         name_contains=name_contains,
         limit=limit,
     )
