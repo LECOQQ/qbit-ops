@@ -693,6 +693,11 @@ qbit-ops torrents throttle --hash abc123 --down unlimited --no-dry-run
   hashes, in qBittorrent's own encoding (`0` is unlimited, `null` is a
   direction you did not name). A caller compares them straight against
   `torrents list` instead of trusting that the call worked.
+- 👀 **`torrents list --format json` reports the current limits**
+  (`download_limit`/`upload_limit`), so a caller reads the state back
+  rather than tracking it. They stay out of the table: a library is
+  overwhelmingly unlimited, and two columns of zeros would crowd out
+  the ones you read.
 - 🧠 **Nothing is remembered.** `--down unlimited` removes a limit, it
   does not restore an earlier one -- a torrent carrying its own limit
   loses it when a library-wide throttle covers it.

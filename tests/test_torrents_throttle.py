@@ -528,3 +528,64 @@ def test_a_failing_limit_call_is_reported_not_swallowed(
 
     assert result.exit_code == ExitCode.ERROR
     assert "throttle" in result.stderr
+
+
+# --- The snapshot carries the limits, so nothing pays twice for them ------
+
+
+def test_planning_a_throttle_costs_a_single_library_scan() -> None:
+    """`TorrentSnapshot` carries `download_limit`/`upload_limit`, so
+    throttle planning reads what every other bulk action reads -- once.
+    Before the field existed this cost a second `torrents_info()` purely
+    to learn the current limits."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A, dl_limit=0, up_limit=0),
+            make_torrent(hash=TORRENT_B, dl_limit=0, up_limit=0),
+        ]
+    )
+
+    plan_bulk_torrent_action(
+        client=client,
+        action="throttle",
+        select_all=True,
+        download_limit=500_000,
+    )
+
+    assert client.torrents_info_calls == 1
+
+
+def test_torrents_list_json_reports_the_current_limits(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """What lets a caller verify a throttle it did not itself perform."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A, dl_limit=500_000, up_limit=0),
+        ]
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, ["torrents", "list", "--format", "json"])
+
+    torrent = json.loads(result.stdout)["torrents"][0]
+    assert torrent["download_limit"] == 500_000
+    assert torrent["upload_limit"] == 0
+
+
+def test_the_table_stays_free_of_the_limit_columns(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """A library is overwhelmingly unlimited: two columns of zeros would
+    crowd out the ones an operator actually reads."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_A, dl_limit=500_000, up_limit=0)]
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(app, ["torrents", "list"])
+
+    assert "Limit" not in result.stdout
+    assert "500000" not in result.stdout

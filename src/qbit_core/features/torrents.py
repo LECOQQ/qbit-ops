@@ -711,8 +711,9 @@ def plan_bulk_torrent_action(
     each matched torrent's raw payload, narrowed to the matched hashes --
     `TorrentSnapshot` deliberately does not carry `tags` (see
     `.agents/MEMORY.md`, "Pipeline SELECT -> INSPECT -> PLAN -> APPLY").
-    `"throttle"` reads its current `dl_limit`/`up_limit` the same way,
-    and for the same reason.
+    `"throttle"` needs no such second read: `TorrentSnapshot` carries
+    the current limits, so planning costs the one scan every other
+    action costs.
 
     `download_limit`/`upload_limit` are only meaningful for
     `"throttle"`, in bytes per second, `0` being unlimited and `None`
@@ -733,10 +734,6 @@ def plan_bulk_torrent_action(
         if action in ("tag_add", "tag_remove")
         else {}
     )
-    current_limits_by_hash = (
-        _limits_by_hash(client, matched_hashes) if action == "throttle" else {}
-    )
-
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
 
@@ -748,7 +745,7 @@ def plan_bulk_torrent_action(
             target_category=category,
             current_tags=current_tags_by_hash.get(torrent.hash.lower(), ()),
             target_tags=normalized_tags,
-            current_limits=current_limits_by_hash.get(torrent.hash.lower()),
+            current_limits=(torrent.download_limit, torrent.upload_limit),
             target_download_limit=download_limit,
             target_upload_limit=upload_limit,
         )
@@ -778,28 +775,6 @@ def plan_bulk_torrent_action(
         download_limit=download_limit,
         upload_limit=upload_limit,
     )
-
-
-def _limits_by_hash(
-    client: Any, hashes: Sequence[str]
-) -> dict[str, tuple[int, int]]:
-    """Read current `(dl_limit, up_limit)` for exactly `hashes`.
-
-    Same bounded second read as `_tags_by_hash`, and for the same
-    reason: both fields ride along in `torrents_info()` but neither is
-    carried by `TorrentSnapshot`, which stays narrow rather than growing
-    a column for one consumer.
-    """
-    if not hashes:
-        return {}
-    raw_torrents = client.torrents_info(torrent_hashes=list(hashes))
-    return {
-        get_field_as_string(item, "hash").lower(): (
-            get_field_as_int(item, "dl_limit"),
-            get_field_as_int(item, "up_limit"),
-        )
-        for item in raw_torrents
-    }
 
 
 def _tags_by_hash(
