@@ -1722,6 +1722,14 @@ def bulk_torrent_summary_rows(
         rows["category_created"] = plan.category_needs_creation
     elif plan.action in ("tag_add", "tag_remove"):
         rows["tags"] = list(plan.tags)
+    elif plan.action == "throttle":
+        # Numeric, and `0` for unlimited: these are the values
+        # qBittorrent itself reports as `dl_limit`/`up_limit`, so a
+        # caller verifying its own throttle compares them directly
+        # against `torrents list` rather than translating first. `None`
+        # keeps "not requested" distinct from "unlimited".
+        rows["download_limit"] = plan.download_limit
+        rows["upload_limit"] = plan.upload_limit
     rows["status"] = status
     return rows
 

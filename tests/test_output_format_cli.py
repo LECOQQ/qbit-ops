@@ -63,6 +63,7 @@ COMMAND_PATH: dict[str, list[str]] = {
     "torrents_category_clear": ["torrents", "category", "clear"],
     "torrents_tag_add": ["torrents", "tag", "add"],
     "torrents_tag_remove": ["torrents", "tag", "remove"],
+    "torrents_throttle": ["torrents", "throttle"],
     "status": ["status"],
     "connection_check": ["connection", "check"],
     "doctor": ["doctor"],
@@ -100,6 +101,7 @@ _EXCLUDED_FROM_ARGV = {
     "torrents_category_clear",
     "torrents_tag_add",
     "torrents_tag_remove",
+    "torrents_throttle",
 }
 assert set(COMMAND_ARGV) == set(FORMAT_SUPPORT) - _EXCLUDED_FROM_ARGV
 assert set(COMMAND_PATH) == set(FORMAT_SUPPORT)

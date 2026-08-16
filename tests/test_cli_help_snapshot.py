@@ -132,9 +132,9 @@ def _assert_clean_help(result) -> None:
     assert "Usage:" in result.output
 
 
-def test_exit_code_table_covers_exactly_thirty_three_commands() -> None:
+def test_exit_code_table_covers_exactly_thirty_four_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
-    assert len(EXIT_CODE_TABLE) == 33
+    assert len(EXIT_CODE_TABLE) == 34
 
 
 def test_root_help_succeeds_without_traceback() -> None:

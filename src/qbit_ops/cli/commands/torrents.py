@@ -55,6 +55,7 @@ from qbit_ops.cli.selector_options import (
     CompletedWithinOption,
     DeleteAllOption,
     DeleteHashOption,
+    DownloadLimitOption,
     DryRunOption,
     ErroredOption,
     ExcludeCategoryOption,
@@ -99,10 +100,13 @@ from qbit_ops.cli.selector_options import (
     TagOption,
     TagRemoveAllOption,
     TagRemoveHashOption,
+    ThrottleAllOption,
+    ThrottleHashOption,
     TrackerHealthOption,
     TrackerOption,
     UploadedMaxOption,
     UploadedMinOption,
+    UploadLimitOption,
     VerboseOption,
     build_filter_from_options,
 )
@@ -110,6 +114,7 @@ from qbit_ops.cli.validation import (
     validate_category_name,
     validate_format_support,
     validate_hash_option,
+    validate_rate_limits,
     validate_tag_names,
 )
 
@@ -231,6 +236,8 @@ def _run_bulk_torrent_action(
     category: str | None = None,
     tags: Sequence[str] = (),
     create_category: bool = False,
+    download_limit: int | None = None,
+    upload_limit: int | None = None,
     output_format: OutputFormat = OutputFormat.table,
 ) -> None:
     validate_format_support(f"torrents_{action}", output_format)
@@ -263,6 +270,8 @@ def _run_bulk_torrent_action(
                     category=category,
                     tags=tags,
                     category_needs_creation=category_needs_creation,
+                    download_limit=download_limit,
+                    upload_limit=upload_limit,
                     on_progress=advance,
                 )
     except AmbiguousTorrentHashError as error:
@@ -1985,6 +1994,124 @@ def tag_remove(
         verbose=verbose,
         output_format=output_format,
         tags=validated_tags,
+    )
+
+
+@torrents_app.command()
+@error_boundary.catch_internal_errors
+def throttle(
+    down: DownloadLimitOption = None,
+    up: UploadLimitOption = None,
+    torrent_hash: ThrottleHashOption = None,
+    category: CategoryOption = [],  # noqa: B006 - Typer requires a literal default to detect list options
+    state: StateOption = [],  # noqa: B006
+    tracker: TrackerOption = [],  # noqa: B006
+    completed: CompletedOption = False,
+    incomplete: IncompleteOption = False,
+    active: ActiveOption = False,
+    inactive: InactiveOption = False,
+    stalled: StalledOption = False,
+    errored: ErroredOption = False,
+    exclude_category: ExcludeCategoryOption = [],  # noqa: B006
+    tag: TagOption = [],  # noqa: B006
+    tag_all: TagAllOption = [],  # noqa: B006
+    exclude_tag: ExcludeTagOption = [],  # noqa: B006
+    save_path: SavePathOption = [],  # noqa: B006
+    exclude_save_path: ExcludeSavePathOption = [],  # noqa: B006
+    name_contains: NameContainsOption = [],  # noqa: B006
+    exclude_name: ExcludeNameOption = [],  # noqa: B006
+    name_regex: NameRegexOption = None,
+    exclude_state: ExcludeStateOption = [],  # noqa: B006
+    exclude_tracker: ExcludeTrackerOption = [],  # noqa: B006
+    no_tracker: NoTrackerOption = False,
+    tracker_health: TrackerHealthOption = [],  # noqa: B006
+    private: PrivateOption = None,
+    ratio_min: RatioMinOption = None,
+    ratio_max: RatioMaxOption = None,
+    size_min: SizeMinOption = None,
+    size_max: SizeMaxOption = None,
+    progress_min: ProgressMinOption = None,
+    progress_max: ProgressMaxOption = None,
+    uploaded_min: UploadedMinOption = None,
+    uploaded_max: UploadedMaxOption = None,
+    seeded_for: SeededForOption = None,
+    older_than: OlderThanOption = None,
+    newer_than: NewerThanOption = None,
+    completed_before: CompletedBeforeOption = None,
+    completed_within: CompletedWithinOption = None,
+    inactive_for: InactiveForOption = None,
+    active_within: ActiveWithinOption = None,
+    select_all: ThrottleAllOption = False,
+    dry_run: DryRunOption = True,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = OutputFormat.table,
+    verbose: VerboseOption = False,
+) -> None:
+    """Set per-torrent rate limits on torrents matching a hash, one or
+    more filters, or all.
+
+    `--down`/`--up` take a size with a unit (`500KB`, `1MiB/s`) or
+    `unlimited` to remove the limit. A bare number is refused: `500`
+    would be 500 bytes per second. Each direction is independent --
+    leaving one out leaves that limit untouched.
+
+    Nothing is remembered: `--down unlimited` removes a limit, it does
+    not restore a previous one, so a torrent's own limit is lost if a
+    library-wide throttle covers it.
+    """
+    download_limit, upload_limit = validate_rate_limits(down, up)
+    _run_bulk_torrent_action(
+        operation=MutationOperation.TORRENTS_THROTTLE,
+        action="throttle",
+        request=_build_selection_request(
+            torrent_hash=torrent_hash,
+            category=category,
+            state=state,
+            tracker=tracker,
+            completed=completed,
+            incomplete=incomplete,
+            active=active,
+            inactive=inactive,
+            stalled=stalled,
+            errored=errored,
+            exclude_category=exclude_category,
+            tag=tag,
+            tag_all=tag_all,
+            exclude_tag=exclude_tag,
+            save_path=save_path,
+            exclude_save_path=exclude_save_path,
+            name_contains=name_contains,
+            exclude_name=exclude_name,
+            name_regex=name_regex,
+            exclude_state=exclude_state,
+            exclude_tracker=exclude_tracker,
+            no_tracker=no_tracker,
+            tracker_health=tracker_health,
+            private=private,
+            ratio_min=ratio_min,
+            ratio_max=ratio_max,
+            size_min=size_min,
+            size_max=size_max,
+            progress_min=progress_min,
+            progress_max=progress_max,
+            uploaded_min=uploaded_min,
+            uploaded_max=uploaded_max,
+            seeded_for=seeded_for,
+            older_than=older_than,
+            newer_than=newer_than,
+            completed_before=completed_before,
+            completed_within=completed_within,
+            inactive_for=inactive_for,
+            active_within=active_within,
+            select_all=select_all,
+        ),
+        dry_run=dry_run,
+        verbose=verbose,
+        output_format=output_format,
+        download_limit=download_limit,
+        upload_limit=upload_limit,
     )
 
 

@@ -98,6 +98,74 @@ def parse_size(value: str) -> int:
     return round(float(match.group("number")) * multiplier)
 
 
+# qBittorrent encodes "no limit" as a zero rate. qbit-ops accepts the
+# word instead, and refuses the digit: `0` reads as "zero bytes" to a
+# human, which is the opposite of what it does.
+UNLIMITED_RATE = 0
+
+_UNLIMITED_KEYWORD = "unlimited"
+
+# A rate is per second by definition here, so the suffix is decoration a
+# human may or may not type. Both forms mean the same thing.
+_RATE_SUFFIXES = ("/s", "ps")
+
+
+def parse_rate(value: str) -> int:
+    """Parse a transfer rate in bytes per second, or `unlimited`.
+
+    A unit is mandatory, unlike `parse_size`: a bare `500` on a rate
+    would be 500 bytes per second where the operator meant 500 KB/s, a
+    thousandfold error with no signal. The trailing `/s` (or `ps`) is
+    accepted and ignored -- a rate is per second either way.
+
+    `unlimited` returns `UNLIMITED_RATE`; the literal `0` is refused, so
+    "no limit" always has exactly one spelling.
+    """
+    # Case is folded for the keyword and suffix comparisons only. What
+    # reaches `parse_size` keeps the case that was typed, so its own
+    # messages can quote `500M` back rather than a `500m` nobody wrote.
+    normalized = _require_compact(value, field_name="rate")
+    if normalized.lower() == _UNLIMITED_KEYWORD:
+        return UNLIMITED_RATE
+
+    for suffix in _RATE_SUFFIXES:
+        if normalized.lower().endswith(suffix) and len(normalized) > len(
+            suffix
+        ):
+            normalized = normalized[: -len(suffix)]
+            break
+
+    match = _SIZE_PATTERN.match(normalized.lower())
+    if match is not None:
+        # Zero is checked before the missing unit, or a bare `0` would be
+        # answered with "did you mean '0KB'?" -- a suggestion that is
+        # itself refused two lines later.
+        if float(match.group("number")) == 0.0:
+            raise _zero_rate_error(value)
+        if match.group("unit") == "":
+            number = match.group("number")
+            raise InvalidInputError(
+                f"Rate '{value}' needs a unit. Did you mean '{number}KB'? "
+                f"Use {_SIZE_UNIT_HELP}, or '{_UNLIMITED_KEYWORD}' to "
+                "remove the limit."
+            )
+
+    rate = parse_size(normalized)
+    if rate == UNLIMITED_RATE:
+        # `parse_size` rounds, so a non-zero `0.4b` still lands on zero.
+        # Refused here rather than passed through: it would otherwise be
+        # a silent second spelling of "no limit".
+        raise _zero_rate_error(value)
+    return rate
+
+
+def _zero_rate_error(value: str) -> InvalidInputError:
+    return InvalidInputError(
+        f"Rate '{value}' is zero, which qBittorrent reads as 'no limit'. "
+        f"Write '{_UNLIMITED_KEYWORD}' when that is what you mean."
+    )
+
+
 def parse_duration(value: str) -> int:
     """Parse a duration such as `30m`, `12h` or `90d`, in seconds.
 
