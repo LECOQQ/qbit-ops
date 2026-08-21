@@ -12,6 +12,7 @@ qbit-ops <group> <command> --help
 
 ```text
 qbit-ops
+├── init
 ├── status [--watch]
 ├── doctor
 ├── version
@@ -53,6 +54,38 @@ qbit-ops
     └── tracker
 ```
 
+## 🔌 Getting connected
+
+```bash
+qbit-ops init            # asks, tests, writes ~/.config/qbit-ops/.env
+qbit-ops init --force    # replaces an existing file
+```
+
+`init` asks for three things -- host, user, password -- tests them
+against the instance, and writes them to
+`$XDG_CONFIG_HOME/qbit-ops/.env` (`~/.config/qbit-ops/.env` by default)
+with `0600` permissions.
+
+- 🔎 **The test informs, it does not forbid.** A failed connection is
+  reported and the write is offered anyway: an instance that is not
+  started yet is as ordinary as a typo.
+- 🛡️ **Nothing is overwritten by surprise.** An existing file stops the
+  command, naming `--force`.
+- 🖥️ **A terminal is required.** Without one, `init` refuses instead of
+  waiting for input nobody will type, and names
+  `QBIT_HOST`/`QBIT_USER`/`QBIT_PASSWORD` -- the scriptable path, which
+  never needed a file. There is deliberately no `--password`: it would
+  put the secret in shell history and in every command collector.
+- ⚠️ **It says what will actually win.** A `.env` in the current
+  directory and an exported variable both take precedence over the file
+  `init` writes, so `init` names whichever one masks it instead of
+  reporting a success that lies.
+
+`qbit-ops tui` shows the same form when qbit-ops is not configured yet,
+writes through the same path, then opens on the library.
+
+`doctor` names `qbit-ops init` when the configuration is missing.
+
 ## 📜 Common recipes
 
 ```bash
@@ -81,6 +114,8 @@ qbit-ops torrents delete --hash abc123 --with-data --no-dry-run --yes
 ## 📤 Output
 
 Read commands support `table`, `json`, `jsonl`, and sometimes `csv`. Unsupported formats fail before contacting qBittorrent.
+
+`init` and `tui` are absent from the matrix below: neither takes a `--format`, because neither produces a report to serialize.
 
 Machine-readable output contains only serialized data on stdout and no ANSI decoration.
 
@@ -608,6 +643,9 @@ columns; `jsonl` emits exactly one compact document.
 - ❓ Low-risk mutations apply without a prompt; medium/high-risk mutations (tracker changes, `torrents delete`) prompt in an interactive terminal.
 - ⏭️ `--yes` skips that prompt but never enables real execution by itself.
 - 🚫 Empty selections never mean “all”.
+- 🔌 `init` is not one of them: it writes qbit-ops' own configuration
+  file, never the instance. No selector, nothing to preview, and
+  `--force` already guards the single file it touches.
 
 ## 🗑️ Deleting torrents
 

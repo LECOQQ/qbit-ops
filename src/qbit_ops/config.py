@@ -3,15 +3,31 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-from qbit_core.config import QbitConfig
+from qbit_core.config import (
+    CONNECTION_VARIABLES,
+    HOST_VARIABLE,
+    PASSWORD_VARIABLE,
+    USER_VARIABLE,
+    QbitConfig,
+)
+from qbit_core.features.connection_setup import (
+    MaskingSource,
+    detect_masking_sources,
+)
 
 PROJECT_ENV_FILE = ".env"
 APP_ENV_FILE_VARIABLE = "QBIT_OPS_ENV_FILE"
 APP_CONFIG_DIR = "qbit-ops"
 
-__all__ = ["QbitConfig", "ConfigError", "load_qbit_config"]
+__all__ = [
+    "QbitConfig",
+    "ConfigError",
+    "load_qbit_config",
+    "get_user_env_file",
+    "collect_masking_sources",
+]
 
 
 class ConfigError(RuntimeError):
@@ -23,16 +39,16 @@ def load_qbit_config() -> QbitConfig:
     _load_env_files()
 
     missing_variables: list[str] = []
-    host = _read_required_env("QBIT_HOST", missing_variables)
-    username = _read_required_env("QBIT_USER", missing_variables)
-    password = _read_required_env("QBIT_PASSWORD", missing_variables)
+    host = _read_required_env(HOST_VARIABLE, missing_variables)
+    username = _read_required_env(USER_VARIABLE, missing_variables)
+    password = _read_required_env(PASSWORD_VARIABLE, missing_variables)
 
     if missing_variables:
         variables = ", ".join(missing_variables)
         raise ConfigError(
             "Missing required environment variable(s): "
-            f"{variables}. Create a .env file from .env.example, or create "
-            f"{_get_user_env_file()} for an installed application."
+            f"{variables}. Run 'qbit-ops init' to create "
+            f"{get_user_env_file()}, or set them in the environment."
         )
 
     return QbitConfig(host=host, username=username, password=password)
@@ -60,11 +76,11 @@ def _get_default_env_files() -> list[Path]:
     """
     return [
         Path.cwd() / PROJECT_ENV_FILE,
-        _get_user_env_file(),
+        get_user_env_file(),
     ]
 
 
-def _get_user_env_file() -> Path:
+def get_user_env_file() -> Path:
     """Return the user-level qbit-ops env file path."""
     xdg_config_home = os.getenv("XDG_CONFIG_HOME")
     config_home = (
@@ -74,6 +90,39 @@ def _get_user_env_file() -> Path:
     )
 
     return config_home / APP_CONFIG_DIR / PROJECT_ENV_FILE
+
+
+def collect_masking_sources(target: Path) -> tuple[MaskingSource, ...]:
+    """Report which live configuration sources outrank `target`.
+
+    The observation half of the precedence contract: reads the process
+    environment and the current directory's `.env` (the two sources
+    `_load_env_files` resolves before the user file), then hands the
+    facts to `detect_masking_sources` for classification. A snapshot,
+    not a prediction -- a shell opened later with different exports is
+    not covered.
+    """
+    project_env_file: Path | None = None
+    project_env_variables: tuple[str, ...] = ()
+
+    if not (os.getenv(APP_ENV_FILE_VARIABLE) or "").strip():
+        candidate = Path.cwd() / PROJECT_ENV_FILE
+        if candidate.is_file():
+            values = dotenv_values(candidate)
+            project_env_file = candidate
+            project_env_variables = tuple(
+                variable
+                for variable in CONNECTION_VARIABLES
+                if (values.get(variable) or "").strip()
+            )
+
+    return detect_masking_sources(
+        target,
+        environment=os.environ,
+        explicit_env_file_variable=APP_ENV_FILE_VARIABLE,
+        project_env_file=project_env_file,
+        project_env_variables=project_env_variables,
+    )
 
 
 def _read_required_env(name: str, missing_variables: list[str]) -> str:

@@ -6,6 +6,7 @@ import typer
 
 from qbit_ops import __version__
 from qbit_ops.cli.commands import doctor as doctor_commands
+from qbit_ops.cli.commands import init as init_commands
 from qbit_ops.cli.commands import tui as tui_commands
 from qbit_ops.cli.commands import version as version_commands
 from qbit_ops.cli.commands.backup import backup_app
@@ -30,6 +31,7 @@ app.add_typer(explain_app, name="explain")
 # root back (avoiding a circular import).
 register_status(app)
 doctor_commands.register(app)
+init_commands.register(app)
 tui_commands.register(app)
 version_commands.register(app)
 

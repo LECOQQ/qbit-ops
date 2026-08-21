@@ -22,6 +22,7 @@ from typing import Any
 import typer
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
+from rich.markup import escape
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -30,7 +31,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from qbit_core.features.backup import BackupRestorePlan, BackupRestoreResult
@@ -223,6 +224,42 @@ def confirm(prompt: str) -> bool:
     `err_console.is_terminal` itself.
     """
     return Confirm.ask(prompt, console=err_console, default=False)
+
+
+def prompt_line(label: str, *, default: str | None = None) -> str:
+    """Ask for one line of input on stderr.
+
+    Same terminal contract as `confirm()`: the caller must already have
+    established the context is interactive.
+    """
+    if default is None:
+        return Prompt.ask(label, console=err_console)
+    return Prompt.ask(label, console=err_console, default=default)
+
+
+def prompt_secret(label: str) -> str:
+    """Ask for one secret on stderr, without echoing it."""
+    return Prompt.ask(label, console=err_console, password=True)
+
+
+def print_notice(message: str) -> None:
+    """Print an operational result line on stdout.
+
+    Escaped: these lines carry paths and hosts, and Rich reads `[...]`
+    as markup and swallows it silently.
+    """
+    console.print(escape(message))
+
+
+def print_warning(message: str) -> None:
+    """Print a non-fatal warning on stderr.
+
+    Deliberately not routed through `print_error`: that funnel redacts
+    every URL-shaped substring, which would erase the very path or host
+    a warning exists to name. Escaped for the same reason as
+    `print_notice`.
+    """
+    err_console.print(f"[bold yellow]⚠[/bold yellow] {escape(message)}")
 
 
 def print_cancelled() -> None:

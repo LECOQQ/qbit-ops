@@ -30,11 +30,13 @@ def register(app: typer.Typer) -> None:
             ),
         ] = DEFAULT_STATUS_WATCH_INTERVAL_SECONDS,
     ) -> None:
-        """Launch the read-only interactive TUI.
+        """Launch the interactive TUI.
 
-        Read-only: status header, torrent table, shared filters, read-only
-        search, and safe focused-torrent details -- no mutation is
-        reachable. Requires the optional `tui` extra.
+        Shows the status header, torrent table, shared filters, search
+        and focused-torrent details, and reaches exactly two kinds of
+        write: the LOW-risk bulk actions of `QbitTorrentMutator`, and
+        its own configuration file when qbit-ops is not set up yet.
+        Requires the optional `tui` extra.
         """
         if not (interval > 0) or math.isinf(interval):
             error_boundary.fail(
@@ -77,13 +79,18 @@ def register(app: typer.Typer) -> None:
         from qbit_ops.tui.app import run_tui
 
         host: str | None = None
+        needs_setup = False
         try:
             host = error_boundary.load_qbit_config().host
         except ConfigError:
-            host = None
+            # Absent *or* incomplete: the same form answers both, and
+            # `qbit-ops tui` must never send someone to another command
+            # to get started.
+            needs_setup = True
 
         run_tui(
             client_factory=error_boundary.create_qbit_client,
             host=host,
             refresh_interval=interval,
+            needs_setup=needs_setup,
         )

@@ -176,6 +176,61 @@ def test_tui_modules_never_import_ui_module() -> None:
         )
 
 
+_CONNECTION_SETUP_MODULE = "qbit_core.features.connection_setup"
+_DOMAIN_WRITER = "write_connection_env_file"
+# Every way a module can put bytes on disk itself. A TUI module that
+# called one of these would be a second implementation of the file
+# mode and of the precedence warning -- the two things a divergence
+# would land on.
+_FILE_WRITING_CALLS = {"open", "write_text", "write_bytes", "mkdir"}
+
+
+def _called_names(source: str) -> set[str]:
+    """Every called function/method name, at any nesting."""
+    tree = ast.parse(source)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def test_the_tui_writes_its_configuration_only_through_the_shared_domain() -> (
+    None
+):
+    """The TUI's one on-disk write goes through `qbit_core`, never
+    through a file call of its own.
+
+    Non-vacuous by construction: the same scan must also *find* the
+    domain writer imported, so an empty or mis-rooted scan fails here
+    instead of passing quietly.
+    """
+    importers: list[Path] = []
+    offenders: dict[str, set[str]] = {}
+    for path in _tui_module_files():
+        source = path.read_text(encoding="utf-8")
+        imports = _imported_names_by_module(source)
+        if _DOMAIN_WRITER in imports.get(_CONNECTION_SETUP_MODULE, set()):
+            importers.append(path)
+        leaked = _called_names(source) & _FILE_WRITING_CALLS
+        if leaked:
+            offenders[str(path)] = leaked
+
+    assert len(importers) == 1, (
+        f"expected exactly one TUI module to import {_DOMAIN_WRITER}, "
+        f"found {[str(path) for path in importers]}"
+    )
+    assert not offenders, (
+        f"TUI modules writing files themselves: {offenders} -- the file "
+        f"mode and the precedence warning live in {_CONNECTION_SETUP_MODULE}, "
+        "and a second writer would diverge from them."
+    )
+
+
 def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
     """Prove a nested file survives the same discovery pattern
     `_tui_module_files` uses.

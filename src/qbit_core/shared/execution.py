@@ -20,7 +20,13 @@ class MutationRisk(StrEnum):
 
 
 class MutationOperation(StrEnum):
-    """Every mutating CLI command, named after its exact invocation."""
+    """Every mutating CLI command, named after its exact invocation.
+
+    "Mutating" means changing the *qBittorrent instance*. A command that
+    only writes qbit-ops' own configuration file (`init`) is deliberately
+    absent: it has no selector to widen, no plan to preview, and no blast
+    radius beyond one local file that `--force` already guards.
+    """
 
     TORRENTS_PAUSE = "torrents pause"
     TORRENTS_RESUME = "torrents resume"

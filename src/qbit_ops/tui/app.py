@@ -1,4 +1,4 @@
-"""Textual application for `qbit-ops tui` (read-only, LOW-risk bulk actions).
+"""Textual application for `qbit-ops tui` (LOW-risk bulk actions only).
 
 Security boundary -- only imports the
 LOW-risk, frozen-plan Pause/Resume/Reannounce functions -- never a
@@ -13,7 +13,7 @@ UI thread.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -35,6 +35,15 @@ from textual.widgets.data_table import (
 )
 from textual.worker import Worker, WorkerState
 
+from qbit_core.config import QbitConfig
+from qbit_core.errors import InvalidInputError
+from qbit_core.features.connection_setup import (
+    ConnectionAttempt,
+    EnvFileExistsError,
+    build_connection_config,
+    try_connection,
+    write_connection_env_file,
+)
 from qbit_core.features.explain import ExplanationReport
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
@@ -49,6 +58,7 @@ from qbit_ops.app_services import (
     TuiRefreshResult,
     create_qbit_client,
 )
+from qbit_ops.config import collect_masking_sources, get_user_env_file
 from qbit_ops.tui.formatting import (
     _COLUMN_WIDTHS,
     NARROW_WIDTH_THRESHOLD,
@@ -70,6 +80,7 @@ from qbit_ops.tui.modals.filters import FiltersScreen
 from qbit_ops.tui.modals.help import HelpScreen
 from qbit_ops.tui.modals.preview import PreviewScreen
 from qbit_ops.tui.modals.result import ResultScreen
+from qbit_ops.tui.modals.setup import SetupScreen
 from qbit_ops.tui.modals.sort import SortScreen
 from qbit_ops.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -101,6 +112,7 @@ from qbit_ops.tui.widgets.status_bar import (
 REFRESH_WORKER_GROUP = "qbit-refresh"
 DETAIL_WORKER_GROUP = "qbit-detail"
 MUTATION_WORKER_GROUP = "qbit-mutation"
+SETUP_WORKER_GROUP = "qbit-setup"
 
 
 class MainScreen(Screen[None]):
@@ -126,7 +138,7 @@ class MainScreen(Screen[None]):
 
 
 class QbitOpsTuiApp(App[None]):
-    """The Overview-first, read-only TUI."""
+    """The Overview-first operator dashboard."""
 
     # No qbit-ops commands live in the command palette yet.
     ENABLE_COMMAND_PALETTE = False
@@ -404,12 +416,14 @@ class QbitOpsTuiApp(App[None]):
         client_factory: Any = create_qbit_client,
         host: str | None = None,
         refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
+        needs_setup: bool = False,
     ) -> None:
         super().__init__()
         self.controller = TuiController(
             client_factory=client_factory, host=host
         )
         self.refresh_interval = refresh_interval
+        self.needs_setup = needs_setup
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
         # Incremental-update bookkeeping for `_render_table` -- see its
@@ -430,6 +444,8 @@ class QbitOpsTuiApp(App[None]):
         self._active_mutation_plan: BulkTorrentActionPlan | None = None
         self._last_operation_id = 0
         self._last_mutation_result: MutationUiResult | None = None
+        self._setup_worker: Worker[Any] | None = None
+        self._setup_config: QbitConfig | None = None
 
     def get_default_screen(self) -> Screen[None]:
         return MainScreen(id="_default")
@@ -455,6 +471,14 @@ class QbitOpsTuiApp(App[None]):
         self._render_workspace_visibility()
         self._render_all()
         self.refresh_bindings()
+        if self.needs_setup:
+            # Nothing may reach qBittorrent before the form is answered:
+            # the periodic refresh only starts once a file is written.
+            self.push_screen(SetupScreen())
+            return
+        self._begin_refreshing()
+
+    def _begin_refreshing(self) -> None:
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
         self._start_periodic_refresh()
 
@@ -508,6 +532,8 @@ class QbitOpsTuiApp(App[None]):
             self._on_detail_worker_state_changed(event)
         elif event.worker.group == MUTATION_WORKER_GROUP:
             self._on_mutation_worker_state_changed(event)
+        elif event.worker.group == SETUP_WORKER_GROUP:
+            self._on_setup_worker_state_changed(event)
 
     def _on_refresh_worker_state_changed(
         self, event: Worker.StateChanged
@@ -1635,6 +1661,109 @@ class QbitOpsTuiApp(App[None]):
         self._render_filter_summary()
         self.refresh_bindings()
 
+    # -- first-run setup -------------------------------------------------
+
+    def submit_setup(
+        self, *, host: str, username: str, password: str, force: bool
+    ) -> None:
+        """Validate the form, then test the connection off the UI thread.
+
+        `force` carries the operator's answer to whatever
+        `SetupScreen.request_confirmation` already reported (a failed
+        test, an existing file), so a confirmed submission writes
+        without testing again.
+        """
+        screen = self._setup_screen()
+        if screen is None:
+            return
+        try:
+            config = build_connection_config(
+                host=host, username=username, password=password
+            )
+        except InvalidInputError as error:
+            screen.show_message(str(error))
+            return
+
+        if force:
+            self._complete_setup(config, force=True)
+            return
+
+        if (
+            self._setup_worker is not None
+            and not self._setup_worker.is_finished
+        ):
+            return
+
+        self._setup_config = config
+        screen.show_message(f"Testing {config.host}...")
+        self._setup_worker = self.run_worker(
+            self._setup_worker_body,
+            group=SETUP_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _setup_worker_body(self) -> ConnectionAttempt:
+        """Run on a background thread: one login attempt, never raises
+        for a recognized unreachable/rejected instance."""
+        assert self._setup_config is not None
+        return try_connection(self._setup_config)
+
+    def _on_setup_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS or not self.is_running:
+            return
+        screen = self._setup_screen()
+        config = self._setup_config
+        if screen is None or config is None:
+            return
+
+        attempt = cast(ConnectionAttempt, event.worker.result)
+        reasons: list[str] = []
+        if not attempt.ok:
+            reasons.append(attempt.detail or "Connection failed.")
+        target = get_user_env_file()
+        if target.exists():
+            reasons.append(f"{target} already exists.")
+
+        if reasons:
+            # A failed test informs, it never cancels: an instance that
+            # is simply not started yet is as ordinary as a typo.
+            screen.request_confirmation(reasons)
+            return
+        self._complete_setup(config, force=False)
+
+    def _complete_setup(self, config: QbitConfig, *, force: bool) -> None:
+        screen = self._setup_screen()
+        if screen is None:
+            return
+        target = get_user_env_file()
+        try:
+            written = write_connection_env_file(target, config, force=force)
+        except (EnvFileExistsError, OSError) as error:
+            screen.show_message(str(error))
+            return
+
+        self.controller.set_host(config.host)
+        self.needs_setup = False
+        self.pop_screen()
+        self.notify(f"Wrote {written} (0600).")
+        for source in collect_masking_sources(written):
+            self.notify(source.message, severity="warning")
+        self.refresh_bindings()
+        self._begin_refreshing()
+
+    def _setup_screen(self) -> SetupScreen | None:
+        return next(
+            (
+                screen
+                for screen in self.screen_stack
+                if isinstance(screen, SetupScreen)
+            ),
+            None,
+        )
+
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
         self.refresh_bindings()
@@ -1654,6 +1783,10 @@ class QbitOpsTuiApp(App[None]):
         if len(self.screen_stack) > 1:
             screen = self.screen
             if isinstance(screen, PreviewScreen) and screen.applying:
+                return
+            if isinstance(screen, SetupScreen):
+                # Nothing behind it to go back to -- leaving is the
+                # form's own Quit button, never a dismissal.
                 return
             if isinstance(screen, FiltersScreen):
                 self.controller.set_filters(screen.original_filters)
@@ -1697,11 +1830,13 @@ def run_tui(
     client_factory: Any = create_qbit_client,
     host: str | None = None,
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
+    needs_setup: bool = False,
 ) -> None:
     """Run the TUI application (blocking until the user quits)."""
     app = QbitOpsTuiApp(
         client_factory=client_factory,
         host=host,
         refresh_interval=refresh_interval,
+        needs_setup=needs_setup,
     )
     app.run()

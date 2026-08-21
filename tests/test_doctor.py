@@ -99,6 +99,39 @@ def test_config_load_failure_skips_everything_downstream() -> None:
     assert doctor_exit_code(report.overall_status) == 2
 
 
+def test_missing_configuration_names_a_command_that_actually_exists() -> None:
+    """`doctor` diagnoses, it never executes -- so naming the human
+    gesture is its whole job. Asserted against the real command tree so
+    a renamed or dropped `init` cannot leave the remediation pointing
+    at nothing.
+    """
+    report = collect_doctor_report(
+        config=None,
+        config_error=RuntimeError("Missing required environment variable(s)"),
+        connection_outcome=None,
+        connection_error=None,
+        client=None,
+    )
+
+    remediation = _checks_by_code(report)["CFG001"].remediation or ""
+    named = [
+        word.strip("'\"`.,")
+        for word in remediation.split()
+        if word.strip("'\"`.,") in _registered_root_command_names()
+    ]
+    assert "init" in named, remediation
+
+
+def _registered_root_command_names() -> set[str]:
+    from qbit_ops.cli.app import app
+
+    names = set()
+    for command in app.registered_commands:
+        assert command.callback is not None
+        names.add(command.name or command.callback.__name__.replace("_", "-"))
+    return names
+
+
 def test_malformed_host_fails_cfg002_but_still_checks_cfg003() -> None:
     config = make_config(host="not-a-url")
     report = collect_doctor_report(

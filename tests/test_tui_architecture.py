@@ -71,6 +71,7 @@ _CANONICAL_HOME: dict[str, str] = {
     "PreviewScreen": "modals/preview.py",
     "ResultScreen": "modals/result.py",
     "SortScreen": "modals/sort.py",
+    "SetupScreen": "modals/setup.py",
     "MutationUiResult": "state.py",
 }
 
@@ -210,6 +211,7 @@ def test_app_level_bindings_are_all_still_registered() -> None:
         ("modals/filters.py", {"clear"}),
         ("modals/actions.py", {"dismiss"}),
         ("modals/sort.py", {"dismiss"}),
+        ("modals/setup.py", set()),
         ("modals/preview.py", set()),
         ("modals/result.py", set()),
     ],

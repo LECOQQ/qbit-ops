@@ -235,6 +235,23 @@ def test_internal_type_error_is_not_converted_to_unavailable(
     assert result.exit_code == ExitCode.INTERNAL
 
 
+def test_abandoning_a_prompt_is_not_reported_as_an_internal_error(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """Ctrl-D at a prompt raises `EOFError`. Folding it into the internal
+    scheme told a person who simply changed their mind that the tool had
+    a defect, and answered with exit 70 -- the code reserved for a
+    programming error."""
+    configure_qbit_backend(client_error=EOFError())
+
+    result = runner.invoke(app, ["torrents", "list"])
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "Internal error" not in result.stderr
+    assert "Aborted" in result.stderr
+
+
 # --- 10: unexpected exceptions do not leak secrets --------------------------
 
 

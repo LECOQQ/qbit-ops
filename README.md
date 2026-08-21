@@ -73,13 +73,17 @@ pipx upgrade qbit-ops
 brew upgrade qbit-ops
 ```
 
-Create `~/.config/qbit-ops/.env`:
+Then set up the connection:
 
-```env
-QBIT_HOST=http://localhost:8080
-QBIT_USER=admin
-QBIT_PASSWORD=change-me
+```bash
+qbit-ops init
 ```
+
+It asks for the host, the user and the password, tests them, and writes
+`~/.config/qbit-ops/.env` with `0600` permissions. `qbit-ops tui` shows
+the same form when nothing is configured yet. For scripts and
+containers, export `QBIT_HOST`, `QBIT_USER` and `QBIT_PASSWORD` instead
+-- they take precedence over the file, and `init` says so when they do.
 
 Then:
 
