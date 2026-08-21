@@ -89,3 +89,73 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  bump-tap:
+    name: Bump the Homebrew tap
+    needs: publish
+    runs-on: ubuntu-latest
+
+    # Nothing is written in THIS repository, so the default token needs
+    # no scope at all. Write access to the tap comes from the PAT below,
+    # which `GITHUB_TOKEN` could never provide: it is confined to the
+    # repository the workflow runs in.
+    permissions: {}
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: source
+
+      - name: Check out the tap
+        uses: actions/checkout@v7
+        with:
+          repository: LECOQQ/homebrew-qbit-ops
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Require the formula to already exist
+        # Separated from the bump below so an unseeded tap fails in one
+        # second with its own cause, instead of spending six retries
+        # reporting that PyPI has not listed the release -- which would
+        # be false, and would send the reader to the wrong system.
+        run: |
+          if [ ! -f tap/Formula/qbit-ops.rb ]; then
+            echo "::error::tap/Formula/qbit-ops.rb is missing. The tap \
+          must carry a formula before a release can bump it."
+            exit 1
+          fi
+
+      - name: Point the formula at the published sdist
+        # Retried, not raced: PyPI serves the upload before its JSON API
+        # lists it, and a first-attempt 404 here would mean "not
+        # published" -- which is exactly the message the script gives
+        # for a genuinely missing release.
+        run: |
+          version="${{ inputs.tag || github.ref_name }}"
+          for attempt in 1 2 3 4 5 6; do
+            if python3 source/scripts/bump_homebrew_formula.py \
+                 tap/Formula/qbit-ops.rb --version "$version"; then
+              exit 0
+            fi
+            echo "PyPI has not listed $version yet; retrying in 15s."
+            sleep 15
+          done
+          echo "::error::PyPI never listed $version after 6 attempts."
+          exit 1
+
+      - name: Commit and push the bump
+        working-directory: tap
+        run: |
+          if git diff --quiet; then
+            echo "Formula already current; nothing to push."
+            exit 0
+          fi
+          version="${{ inputs.tag || github.ref_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/qbit-ops.rb
+          git commit -m "qbit-ops ${version#v}"
+          git push
