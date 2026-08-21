@@ -172,6 +172,35 @@ names a real file without naming a path from the repository root. Mark
 a deliberate exception with `<!-- doc-links: ignore-next-line -->` on
 the preceding line.
 
+## Seeing the TUI
+
+```bash
+python3 scripts/tui_gallery.py                 # -> docs/assets/tui/
+python3 scripts/tui_gallery.py --out /tmp/before
+python3 scripts/tui_gallery.py --only filters,sort
+```
+
+Drives the real app headlessly and exports each screen as SVG, using
+Textual's own `export_screenshot`. A redesign judged from source is
+judged on intent; this shows what a terminal would actually paint --
+colours, borders, spacing, alignment.
+
+Capture a `before/` directory, make the change, capture an `after/`,
+and compare by file name.
+
+**Not a gate.** It has no baseline and fails nothing: during a redesign
+every screen changes on purpose, and a wall there would only be
+climbed.
+
+What *is* a gate is that the gallery captures the screen it claims to.
+A modal that fails to open still exports a valid picture -- of the
+screen underneath -- so `tests/test_tui_gallery.py` pins each entry to
+text no other screen renders. Those markers are derived by measuring
+each screen's exclusive vocabulary, never chosen by eye: the first
+attempt used plausible words that also appeared in a table column and a
+footer binding, and the test stayed green on a capture of the wrong
+screen.
+
 ## Secret scanning
 
 ```bash
