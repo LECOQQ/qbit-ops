@@ -157,5 +157,8 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/qbit-ops.rb
-          git commit -m "qbit-ops ${version#v}"
+          # Conventional Commits, like every other repository here --
+          # the tap keeps the subject Homebrew readers expect inside a
+          # subject line this project's own tooling can parse.
+          git commit -m "build: qbit-ops ${version#v}"
           git push
