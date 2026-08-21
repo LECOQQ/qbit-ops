@@ -232,6 +232,25 @@ its own right, since that responsive fallback has never been inspected.
 Companion to the gallery, not a substitute. The gallery answers "is it
 pretty"; the wireframe answers "is it consistent".
 
+### Taking inventory
+
+```bash
+python3 scripts/tui_wireframe.py --inventory
+python3 scripts/tui_wireframe.py --inventory --out tmp/design/after
+```
+
+One row per surface: container, origin, size, nesting depth, and how
+many lines of CSS the screen class declares by itself. Where the
+wireframe shows one screen's structure, the inventory puts every screen
+on the same axes, which is the only way "these four widths belong to no
+scale" becomes a fact rather than an impression.
+
+Two columns are the ones to read. **Width, origin and height** should
+match across the modals -- they all come from `QbitModal`, so a lone
+outlier means a rule escaped the shared frame. **Own css** should be
+`0` everywhere: a screen that declares its own block is re-deciding
+what the stylesheet already decided.
+
 Both default to `tmp/`, which is gitignored: these are working artefacts
 of a design pass, regenerated in seconds and 100 KB apiece.
 

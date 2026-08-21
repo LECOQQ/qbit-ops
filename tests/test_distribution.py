@@ -128,6 +128,19 @@ def test_the_wheel_ships_the_packaged_compatibility_matrix(
         assert "qbit_core/data/qbittorrent-matrix.toml" in archive.namelist()
 
 
+def test_the_wheel_ships_the_tui_stylesheet(
+    built: tuple[Path, Path],
+) -> None:
+    """`QbitOpsTuiApp.CSS_PATH` reads this sheet at startup, and without
+    it every TUI surface loses its frame. A packaging change that
+    stopped shipping non-`.py` files would break only an installed
+    user -- never a test run from the repo, where the file is simply
+    there on disk."""
+    wheel, _ = built
+    with zipfile.ZipFile(wheel) as archive:
+        assert "qbit_ops/tui/qbit_ops.tcss" in archive.namelist()
+
+
 def test_the_wheel_declares_the_console_script(
     built: tuple[Path, Path],
 ) -> None:

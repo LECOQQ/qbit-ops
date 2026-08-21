@@ -11,18 +11,18 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
-from textual.screen import ModalScreen
+from textual.containers import Horizontal
 from textual.widgets import Button, Static
 
 from qbit_core.features.torrents import BulkTorrentActionPlan
 from qbit_ops.tui.formatting import _format_preview_text
+from qbit_ops.tui.modals.base import KeyHint, QbitModal
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
 
 
-class PreviewScreen(ModalScreen[None]):
+class PreviewScreen(QbitModal):
     """Preview of a frozen `BulkTorrentActionPlan` before Apply.
 
     Owns and displays exactly the plan passed at construction -- the
@@ -35,6 +35,15 @@ class PreviewScreen(ModalScreen[None]):
     close and rebuild from current data. `mark_stale()` is one-way.
     """
 
+    MODAL_TITLE = "Preview"
+    MODAL_WIDTH = "large"
+    MODAL_KEYS = (
+        KeyHint(("up", "down"), "Move"),
+        KeyHint(("enter",), "Apply"),
+        KeyHint(("escape",), "Cancel"),
+    )
+    DIALOG_ID = "preview-dialog"
+
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel", priority=True),
         # Up/Down move between the Cancel/Apply buttons, same as
@@ -42,27 +51,6 @@ class PreviewScreen(ModalScreen[None]):
         Binding("up", "app.focus_previous", "Up", show=False),
         Binding("down", "app.focus_next", "Down", show=False),
     ]
-
-    CSS = """
-    PreviewScreen {
-        align: center middle;
-    }
-    #preview-dialog {
-        width: 76%;
-        max-width: 90;
-        max-height: 90%;
-        border: round #ff9933;
-        background: $surface;
-        padding: 1 2;
-    }
-    #preview-actions {
-        height: auto;
-        margin-top: 1;
-    }
-    #preview-actions Button {
-        margin-right: 1;
-    }
-    """
 
     def __init__(
         self,
@@ -88,20 +76,22 @@ class PreviewScreen(ModalScreen[None]):
         so keyboard Apply cannot bypass what the button forbids."""
         return not self.stale and not self.applying
 
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="preview-dialog"):
-            yield Static(id="preview-content")
-            with Horizontal(id="preview-actions"):
-                yield Button("Cancel", id="preview-cancel")
-                yield Button("Apply", id="preview-apply", variant="primary")
+    def compose_dialog(self) -> ComposeResult:
+        yield Static(id="preview-content")
+        with Horizontal(id="preview-actions"):
+            yield Button("Cancel", id="preview-cancel")
+            yield Button("Apply", id="preview-apply", variant="primary")
 
     def on_mount(self) -> None:
         self._render_content()
         self.query_one("#preview-apply", Button).focus()
 
     def _render_content(self) -> None:
-        self.query_one("#preview-dialog").border_title = (
-            f"{self.plan.action.title()} · Preview"
+        # The action is part of this modal's identity, not decoration:
+        # "Pause · Preview" and "Resume · Preview" must never be
+        # mistaken for each other.
+        self.query_one(f"#{self.DIALOG_ID}").border_title = (
+            f"{self.plan.action.title()} · {self.MODAL_TITLE}"
         )
         self.query_one("#preview-content", Static).update(
             _format_preview_text(self.plan, self.snapshot_at, stale=self.stale)

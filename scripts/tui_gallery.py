@@ -116,6 +116,18 @@ class _GalleryClient:
     def torrents_categories(self) -> dict[str, dict[str, Any]]:
         return {name: {"name": name} for name in ("sonarr", "radarr")}
 
+    # The three LOW-risk bulk actions the TUI can reach. Accepted and
+    # discarded: without them the `result` capture photographs a client
+    # defect rather than the screen the gallery claims to show.
+    def torrents_pause(self, torrent_hashes: Any = None) -> None:
+        return None
+
+    def torrents_resume(self, torrent_hashes: Any = None) -> None:
+        return None
+
+    def torrents_reannounce(self, torrent_hashes: Any = None) -> None:
+        return None
+
 
 # Each entry drives the app to one screen. The keys are stable file
 # names: a reviewer compares `before/filters.svg` with `after/filters.svg`
@@ -128,15 +140,28 @@ SCREENS: dict[str, list[str]] = {
     "help": ["t", "question_mark"],
     "details": ["t", "enter"],
     "actions": ["t", "space", "a"],
+    "explain": ["t", "e"],
+    "preview": ["t", "space", "a", "enter"],
+    "result": ["t", "space", "a", "enter", "enter"],
+    "setup": [],
 }
 
+# The one screen no key sequence can reach: it is shown *instead of*
+# the dashboard, decided at construction, so it needs its own app.
+NEEDS_SETUP = frozenset({"setup"})
 
-async def _capture(name: str, keys: list[str], out: Path) -> Path:
-    app = QbitOpsTuiApp(
+
+def build_app(name: str) -> QbitOpsTuiApp:
+    return QbitOpsTuiApp(
         client_factory=lambda: _GalleryClient(),
         host="http://localhost:8080",
         refresh_interval=3600.0,
+        needs_setup=name in NEEDS_SETUP,
     )
+
+
+async def _capture(name: str, keys: list[str], out: Path) -> Path:
+    app = build_app(name)
     async with app.run_test(size=GALLERY_SIZE) as pilot:
         await pilot.pause()
         for key in keys:

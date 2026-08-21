@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.screen import ModalScreen
 from textual.widgets import Static
+
+from qbit_ops.tui.modals.base import KeyHint, QbitModal
 
 _HELP_TEXT = """[bold]Global[/bold]
 1, g       Overview
 2, t       Torrents
+←/→        Previous / next page
 ?          Help
 esc        Close modal / clear selection / back
 q          Quit
@@ -41,33 +42,24 @@ never the selection.[/dim]
 """
 
 
-class HelpScreen(ModalScreen[None]):
+class HelpScreen(QbitModal):
     """A real, dedicated help screen listing only bindings that work."""
+
+    MODAL_TITLE = "Help"
+    MODAL_WIDTH = "medium"
+    MODAL_KEYS = (
+        KeyHint(("up", "down"), "Scroll"),
+        KeyHint(("escape",), "Close"),
+    )
+    DIALOG_ID = "help-dialog"
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close", priority=True),
         Binding("question_mark", "dismiss", "Close"),
     ]
 
-    CSS = """
-    HelpScreen {
-        align: center middle;
-    }
-    #help-dialog {
-        width: 64;
-        max-height: 90%;
-        border: round #ff9933;
-        background: $background;
-        padding: 1 2;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="help-dialog"):
-            yield Static(_HELP_TEXT)
-
-    def on_mount(self) -> None:
-        self.query_one("#help-dialog").border_title = "Help"
+    def compose_dialog(self) -> ComposeResult:
+        yield Static(_HELP_TEXT)
 
     def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
         self.dismiss()

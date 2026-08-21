@@ -4,6 +4,7 @@
     python3 scripts/tui_wireframe.py                 # every screen
     python3 scripts/tui_wireframe.py --only filters
     python3 scripts/tui_wireframe.py --out wireframes/
+    python3 scripts/tui_wireframe.py --inventory        # one table
 
 A terminal is a character grid, so a wireframe drawn in that grid is not
 an approximation of the interface -- it is a projection of it, at 1:1.
@@ -28,8 +29,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+
+from textual.screen import ModalScreen
 
 from qbit_ops.tui.app import QbitOpsTuiApp
 
@@ -46,7 +51,7 @@ if __package__ in (None, ""):  # pragma: no cover - entry-point plumbing
 from scripts.tui_gallery import (  # noqa: E402
     GALLERY_SIZE,
     SCREENS,
-    _GalleryClient,
+    build_app,
 )
 
 # The gallery's size, so a wireframe and its screenshot describe the
@@ -156,6 +161,23 @@ def _legend(app: QbitOpsTuiApp, max_depth: int) -> str:
     return "\n".join(lines)
 
 
+@asynccontextmanager
+async def _driven_app(
+    name: str, keys: list[str], size: tuple[int, int]
+) -> AsyncIterator[QbitOpsTuiApp]:
+    app = build_app(name)
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        for key in keys:
+            await pilot.press(key)
+            await pilot.pause()
+        # A second settle: pushing a screen mounts widgets whose own
+        # layout lands on the next frame, and measuring between the two
+        # reports a half-placed dialog.
+        await pilot.pause()
+        yield app
+
+
 async def capture(
     name: str,
     keys: list[str],
@@ -163,18 +185,122 @@ async def capture(
     max_depth: int,
     size: tuple[int, int] = WIREFRAME_SIZE,
 ) -> str:
-    app = QbitOpsTuiApp(
-        client_factory=lambda: _GalleryClient(),
-        host="http://localhost:8080",
-        refresh_interval=3600.0,
-    )
-    async with app.run_test(size=size) as pilot:
-        await pilot.pause()
-        for key in keys:
-            await pilot.press(key)
-            await pilot.pause()
-        await pilot.pause()
+    async with _driven_app(name, keys, size) as app:
         return render(app, max_depth=max_depth, size=size)
+
+
+class Surface(NamedTuple):
+    """One screen's outer frame, measured -- the row of the inventory."""
+
+    screen: str
+    frame: str
+    container: str
+    x: int
+    y: int
+    width: int
+    height: int
+    depth: int
+    css_lines: int
+
+
+def _frame_box(app: QbitOpsTuiApp, boxes: list[tuple[int, str, Any]]) -> Any:
+    """The box carrying the surface's outer frame.
+
+    A `ModalScreen` is full-bleed and transparent; its *dialog* child
+    carries the border, the width and the centring -- so that child is
+    the surface. Every other screen frames itself.
+    """
+    screen_depth = _depth(app.screen)
+    if isinstance(app.screen, ModalScreen):
+        deeper = [entry for entry in boxes if entry[0] > screen_depth]
+        if deeper:
+            return deeper[0]
+    return next(
+        (entry for entry in boxes if entry[0] == screen_depth), boxes[0]
+    )
+
+
+def _own_css_lines(app: QbitOpsTuiApp) -> int:
+    """Non-blank lines of CSS the screen class declares *itself*.
+
+    `type(...).__dict__`, never `getattr`: an inherited `CSS` belongs to
+    the base class, and counting it against every subclass would report
+    the duplication a base class exists to remove.
+    """
+    declared = type(app.screen).__dict__.get("CSS", "")
+    return sum(1 for line in str(declared).splitlines() if line.strip())
+
+
+def measure(app: QbitOpsTuiApp, name: str, max_depth: int) -> Surface:
+    boxes = _boxes(app, max_depth)
+    depth, container, region = _frame_box(app, boxes)
+    return Surface(
+        screen=name,
+        frame=type(app.screen).__name__,
+        container=container,
+        x=region.x,
+        y=region.y,
+        width=region.width,
+        height=region.height,
+        depth=max(entry[0] for entry in boxes),
+        css_lines=_own_css_lines(app),
+    )
+
+
+async def capture_inventory(
+    name: str,
+    keys: list[str],
+    *,
+    max_depth: int,
+    size: tuple[int, int] = WIREFRAME_SIZE,
+) -> Surface:
+    async with _driven_app(name, keys, size) as app:
+        return measure(app, name, max_depth)
+
+
+def format_inventory(surfaces: list[Surface]) -> str:
+    """Tabulate width, origin, container and depth, one row per surface."""
+    header = (
+        f"{'screen':<10} {'screen class':<14} {'container':<16} "
+        f"{'x,y':<8} {'w*h':<9} {'depth':<6} {'own css'}"
+    )
+    lines = [header, "-" * len(header)]
+    for surface in surfaces:
+        lines.append(
+            f"{surface.screen:<10} {surface.frame:<14} "
+            f"{surface.container:<16} "
+            f"{f'{surface.x},{surface.y}':<8} "
+            f"{f'{surface.width}*{surface.height}':<9} "
+            f"{surface.depth:<6} {surface.css_lines}"
+        )
+    widths = sorted({surface.width for surface in surfaces})
+    lines.append("")
+    lines.append(f"widths      {widths}")
+    lines.append(
+        f"own css     {sum(s.css_lines for s in surfaces)} lines "
+        f"across {sum(1 for s in surfaces if s.css_lines)} screen(s)"
+    )
+    return "\n".join(lines)
+
+
+async def _run_inventory(
+    names: list[str], out: Path | None, max_depth: int, size: tuple[int, int]
+) -> int:
+    surfaces = [
+        await capture_inventory(
+            name, SCREENS[name], max_depth=max_depth, size=size
+        )
+        for name in names
+    ]
+    table = format_inventory(surfaces)
+    if out is None:
+        print(table)
+        return 0
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / "inventory.txt"
+    target.write_text(table + "\n", encoding="utf-8")
+    print(f"  {'inventory':10} {target}")
+    return 0
 
 
 async def _run(
@@ -203,6 +329,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default="", help="comma-separated names")
     parser.add_argument("--depth", type=int, default=DEFAULT_DEPTH)
     parser.add_argument(
+        "--inventory",
+        action="store_true",
+        help=(
+            "tabulate width, origin, container and depth of every "
+            "surface instead of drawing frames"
+        ),
+    )
+    parser.add_argument(
         "--size",
         default="x".join(str(value) for value in WIREFRAME_SIZE),
         help=(
@@ -226,6 +360,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Known: {', '.join(SCREENS)}")
         return 1
 
+    if args.inventory:
+        return asyncio.run(
+            _run_inventory(names, args.out, args.depth, (width, height))
+        )
     return asyncio.run(_run(names, args.out, args.depth, (width, height)))
 
 

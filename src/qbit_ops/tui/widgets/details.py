@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Vertical
 from textual.widgets import Static
 
 from qbit_ops.tui.formatting import (
     _details_dialog_content_width,
     _format_details_identity,
     _format_details_metrics,
-    _format_details_modal_footer,
     _format_details_trackers,
 )
 from qbit_ops.tui.state import TuiState
 
 
-class DetailsPanel(VerticalScroll):
+class DetailsPanel(Vertical):
     """Safe details for the focused torrent.
+
+    A plain container, never a scroll region: `QbitModal`'s dialog is
+    the one thing that scrolls, in this modal as in every other. Two
+    nested scroll areas would split the wheel and the arrow keys
+    between them.
 
     Only ever renders `TorrentSnapshot` fields (live from the periodic
     snapshot) and `get_safe_tracker_details`-shaped structural tracker
@@ -30,7 +34,6 @@ class DetailsPanel(VerticalScroll):
         yield Static(id="details-metrics")
         yield Static("Trackers", id="details-trackers-heading")
         yield Static(id="details-trackers")
-        yield Static(_format_details_modal_footer(), id="details-footer")
 
     def render_state(self, state: TuiState, *, app_width: int) -> None:
         torrent = state.focused_torrent()

@@ -28,7 +28,7 @@ qbit_core/
 
 qbit_ops/
 ├── cli/        # Typer commands, Rich rendering, exit handling
-├── tui/        # Textual app, widgets, modals, TUI state
+├── tui/        # Textual app, widgets, modals, theme, stylesheet
 ├── config.py   # .env/environment loading -> qbit_core.config.QbitConfig
 └── app_services.py  # create_qbit_client() env wrapper + TUI refresh glue
 ```
@@ -96,6 +96,38 @@ preview, log, or summary.
 Around this, `shared/execution.py` decides whether a plan previews,
 prompts, applies, or is refused (dry-run by default), and the TUI adds
 a refresh after APPLY.
+
+### 🎨 TUI style system
+
+Every TUI surface -- nine modals and two workspaces -- is styled from
+one place:
+
+```text
+qbit_ops/tui/qbit_ops.tcss   # the single stylesheet (App.CSS_PATH)
+qbit_ops/tui/theme.py        # the palette, as a textual.theme.Theme
+qbit_ops/tui/modals/base.py  # QbitModal: the shared modal frame
+```
+
+A modal declares a title, a width **name** (`small`, `medium`,
+`large`) and the **keys** it advertises; the frame, the border title,
+the border subtitle and the scrolling come from `QbitModal`. Picking a
+word rather than a column count is what keeps the widths on one scale.
+
+One grammar for keys, everywhere: the command bar and every border
+render `[key->Description]` through the same `_format_command_entry`.
+A modal names real Textual keys and never spells their display -- that
+comes from the binding Textual resolved -- so a border cannot promise a
+gesture the screen does not answer. `tests/test_tui_app.py` holds each
+announced key to being active on that screen, and each key labelled as
+leaving the modal to actually leaving it.
+
+The theme is built *from* the brand, so `$primary` resolves to
+qbit-ops' orange rather than Textual's blue. `formatting.py` reads
+those colours; it defines none. Changing the brand colour is one edit
+in `theme.py`.
+
+`scripts/tui_wireframe.py --inventory` measures the result -- see
+[Development](DEVELOPMENT.md).
 
 ### 🧵 TUI workers
 

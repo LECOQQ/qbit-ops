@@ -16,11 +16,10 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
 from qbit_core.features.connection_setup import DEFAULT_HOST, DEFAULT_USERNAME
+from qbit_ops.tui.modals.base import KeyHint, QbitModal
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
@@ -29,7 +28,7 @@ _SAVE_LABEL = "Test and save"
 _CONFIRM_LABEL = "Save anyway"
 
 
-class SetupScreen(ModalScreen[None]):
+class SetupScreen(QbitModal):
     """Ask for the three connection settings, once, before anything else.
 
     Deliberately has no escape binding: the dashboard behind it has
@@ -37,72 +36,39 @@ class SetupScreen(ModalScreen[None]):
     Quit rather than a dismissal that lands nowhere.
     """
 
+    MODAL_TITLE = "Connection setup"
+    MODAL_WIDTH = "medium"
+    MODAL_KEYS = (
+        KeyHint(("tab",), "Move"),
+        KeyHint(("enter",), "Save"),
+    )
+    DIALOG_ID = "setup-dialog"
+
     BINDINGS = [
         Binding("up", "app.focus_previous", "Up", show=False),
         Binding("down", "app.focus_next", "Down", show=False),
     ]
 
-    CSS = """
-    SetupScreen {
-        align: center middle;
-    }
-    #setup-dialog {
-        width: 64;
-        max-height: 90%;
-        border: round #ff9933;
-        background: $background;
-        padding: 1 2;
-    }
-    #setup-dialog Button {
-        width: 100%;
-    }
-    .setup-label {
-        color: $text-muted;
-    }
-    #setup-status {
-        margin-top: 1;
-        color: $warning;
-    }
-    Button {
-        height: 1;
-        min-width: 0;
-        border: none;
-        background: transparent;
-        color: $text;
-        text-style: none;
-    }
-    Button:hover {
-        background: $panel-lighten-2;
-    }
-    Button:focus {
-        background: #ff9933 20%;
-        color: #ff9933;
-        text-style: bold;
-    }
-    """
-
     def __init__(self) -> None:
         super().__init__()
         self._confirming = False
 
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="setup-dialog"):
-            yield Static(
-                "qbit-ops needs a qBittorrent instance to talk to.",
-                classes="setup-label",
-            )
-            yield Static("Host", classes="setup-label")
-            yield Input(value=DEFAULT_HOST, id="setup-host")
-            yield Static("User", classes="setup-label")
-            yield Input(value=DEFAULT_USERNAME, id="setup-user")
-            yield Static("Password", classes="setup-label")
-            yield Input(password=True, id="setup-password")
-            yield Static("", id="setup-status")
-            yield Button(_SAVE_LABEL, id="setup-save")
-            yield Button("Quit", id="setup-quit")
+    def compose_dialog(self) -> ComposeResult:
+        yield Static(
+            "qbit-ops needs a qBittorrent instance to talk to.",
+            classes="setup-label",
+        )
+        yield Static("Host", classes="setup-label")
+        yield Input(value=DEFAULT_HOST, id="setup-host")
+        yield Static("User", classes="setup-label")
+        yield Input(value=DEFAULT_USERNAME, id="setup-user")
+        yield Static("Password", classes="setup-label")
+        yield Input(password=True, id="setup-password")
+        yield Static("", id="setup-status")
+        yield Button(_SAVE_LABEL, id="setup-save")
+        yield Button("Quit", id="setup-quit")
 
     def on_mount(self) -> None:
-        self.query_one("#setup-dialog").border_title = "Connection setup"
         self.query_one("#setup-host", Input).focus()
 
     @property

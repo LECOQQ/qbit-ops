@@ -10,18 +10,17 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
 from qbit_ops.tui.formatting import _format_result_text
+from qbit_ops.tui.modals.base import KeyHint, QbitModal
 from qbit_ops.tui.state import MutationUiResult
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
 
 
-class ResultScreen(ModalScreen[None]):
+class ResultScreen(QbitModal):
     """A truthful, dismissible report of what an Apply actually did.
 
     `outcome` is computed by the App from the mutation worker's real
@@ -33,35 +32,25 @@ class ResultScreen(ModalScreen[None]):
     binding here -- it would never fire behind the App's priority one).
     """
 
-    BINDINGS: list[Binding] = []
+    MODAL_TITLE = "Result"
+    MODAL_WIDTH = "medium"
+    MODAL_KEYS = (
+        KeyHint(("up", "down"), "Scroll"),
+        KeyHint(("escape",), "Close"),
+    )
+    DIALOG_ID = "result-dialog"
 
-    CSS = """
-    ResultScreen {
-        align: center middle;
-    }
-    #result-dialog {
-        width: 64;
-        max-height: 90%;
-        border: round #ff9933;
-        background: $surface;
-        padding: 1 2;
-    }
-    #result-close {
-        margin-top: 1;
-    }
-    """
+    BINDINGS: list[Binding] = []
 
     def __init__(self, outcome: MutationUiResult) -> None:
         super().__init__()
         self.outcome = outcome
 
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="result-dialog"):
-            yield Static(id="result-content")
-            yield Button("Close", id="result-close")
+    def compose_dialog(self) -> ComposeResult:
+        yield Static(id="result-content")
+        yield Button("Close", id="result-close")
 
     def on_mount(self) -> None:
-        self.query_one("#result-dialog").border_title = "Result"
         self.query_one("#result-content", Static).update(
             _format_result_text(self.outcome)
         )

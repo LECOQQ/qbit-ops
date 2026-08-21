@@ -16,8 +16,10 @@ signal.
 
 import pytest
 
-from scripts.tui_gallery import SCREENS, _capture
+from qbit_ops.tui.modals.base import MODAL_WIDTHS
+from scripts.tui_gallery import GALLERY_SIZE, SCREENS, _capture
 from scripts.tui_wireframe import capture as capture_wireframe
+from scripts.tui_wireframe import capture_inventory
 
 pytestmark = pytest.mark.tui
 
@@ -42,6 +44,10 @@ SCREEN_MARKERS: dict[str, tuple[str, ...]] = {
     "help": ("Navigate", "Deselect"),
     "details": ("Hash", "Size"),
     "actions": ("Reannounce", "Resume"),
+    "explain": ("Evidence", "Consider"),
+    "preview": ("Affected", "Snapshot"),
+    "result": ("Submitted", "observable"),
+    "setup": ("Password", "Host"),
 }
 
 
@@ -109,3 +115,101 @@ async def test_the_wireframe_and_the_gallery_agree_on_size() -> None:
     from scripts.tui_wireframe import WIREFRAME_SIZE
 
     assert GALLERY_SIZE == WIREFRAME_SIZE
+
+
+# --- The inventory measures what it claims to -----------------------------
+
+
+@pytest.mark.parametrize("name", sorted(SCREENS))
+async def test_the_inventory_measures_the_surface_not_the_screen(
+    name: str,
+) -> None:
+    """A `ModalScreen` is full-bleed and transparent: measuring it
+    instead of its dialog would report every modal as 140 columns wide
+    and hide the very divergence the inventory exists to expose."""
+    surface = await capture_inventory(name, SCREENS[name], max_depth=6)
+
+    assert surface.screen == name
+    assert surface.width >= 4 and surface.height >= 2
+    assert surface.depth >= 1
+    if surface.frame != "MainScreen":
+        assert surface.width < GALLERY_SIZE[0], (
+            f"{name}: measured the modal screen ({surface.container}), "
+            "not the dialog inside it"
+        )
+
+
+async def test_the_inventory_counts_only_css_a_screen_declares_itself() -> None:
+    """Counting an inherited `CSS` against every subclass would report
+    a shared base class as nine copies of the duplication it removes."""
+    from scripts.tui_wireframe import _own_css_lines
+
+    class _Base:
+        CSS = "a\nb\nc\n"
+
+    class _Child(_Base):
+        pass
+
+    class _App:
+        screen = _Child()
+
+    assert _own_css_lines(_App()) == 0  # type: ignore[arg-type]
+    _App.screen = _Base()  # type: ignore[assignment]
+    assert _own_css_lines(_App()) == 3  # type: ignore[arg-type]
+
+
+# --- The measured result of the style system ------------------------------
+
+# Every surface that is a modal: the two workspaces frame themselves and
+# are measured as the screen, not as a dialog floating on one.
+MODAL_SCREENS: tuple[str, ...] = tuple(
+    name for name in SCREENS if name not in ("overview", "torrents")
+)
+
+
+async def _modal_surfaces() -> list:
+    return [
+        await capture_inventory(name, SCREENS[name], max_depth=6)
+        for name in MODAL_SCREENS
+    ]
+
+
+async def test_no_surface_declares_a_stylesheet_of_its_own() -> None:
+    """One sheet, one file. A class-level `CSS` block is how the frame
+    got re-decided nine times; a tenth would start the drift again."""
+    for name in SCREENS:
+        surface = await capture_inventory(name, SCREENS[name], max_depth=6)
+        assert surface.css_lines == 0, (
+            f"{name} declares {surface.css_lines} lines of its own CSS; "
+            "it belongs in src/qbit_ops/tui/qbit_ops.tcss"
+        )
+
+
+async def test_every_modal_is_measured_on_the_width_scale() -> None:
+    """Measured, not declared: a modal could name `medium` and still be
+    squeezed by a stray rule. Only the rendered width proves the scale."""
+    scale = set(MODAL_WIDTHS.values())
+    for surface in await _modal_surfaces():
+        assert surface.width in scale, (
+            f"{surface.screen} renders {surface.width} columns wide, "
+            f"outside the scale {sorted(scale)}"
+        )
+
+
+async def test_every_modal_shares_container_origin_and_height() -> None:
+    """`details` used to be the outlier on all three axes at once --
+    a `Vertical` at `20,4`, 32 rows tall while every sibling was a
+    `VerticalScroll` at y=2, 36 rows tall."""
+    surfaces = await _modal_surfaces()
+
+    assert {s.container for s in surfaces} == {"VerticalScroll"}
+    assert len({s.y for s in surfaces}) == 1, [
+        (s.screen, s.y) for s in surfaces
+    ]
+    assert len({s.height for s in surfaces}) == 1, [
+        (s.screen, s.height) for s in surfaces
+    ]
+    # Centred horizontally at the character: the one convention that
+    # already held before this system, and must survive it.
+    for surface in surfaces:
+        assert surface.x == (GALLERY_SIZE[0] - surface.width) // 2

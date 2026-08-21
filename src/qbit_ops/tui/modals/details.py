@@ -10,16 +10,15 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
-from textual.screen import ModalScreen
 
+from qbit_ops.tui.modals.base import KeyHint, QbitModal
 from qbit_ops.tui.widgets.details import DetailsPanel
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
 
 
-class DetailsScreen(ModalScreen[None]):
+class DetailsScreen(QbitModal):
     """A wide modal Details view, opened by `enter` at every terminal
     width -- the sole way to see a focused torrent's full detail.
 
@@ -28,6 +27,17 @@ class DetailsScreen(ModalScreen[None]):
     top (see `FiltersScreen` for the `priority=True` exception).
     """
 
+    MODAL_TITLE = "Torrent details"
+    MODAL_WIDTH = "large"
+    MODAL_KEYS = (
+        KeyHint(("up", "down"), "Scroll"),
+        KeyHint(("c",), "Copy hash"),
+        KeyHint(("e",), "Explain"),
+        KeyHint(("r",), "Refresh"),
+        KeyHint(("escape",), "Close"),
+    )
+    DIALOG_ID = "details-dialog"
+
     BINDINGS = [
         Binding("escape", "dismiss", "Close", priority=True),
         Binding("c", "copy_hash", "Copy hash"),
@@ -35,54 +45,10 @@ class DetailsScreen(ModalScreen[None]):
         Binding("r", "refresh", "Refresh"),
     ]
 
-    CSS = """
-    DetailsScreen {
-        align: center middle;
-    }
-    #details-dialog {
-        width: 86%;
-        min-width: 60;
-        max-width: 100;
-        height: auto;
-        max-height: 80%;
-        border: round #ff9933;
-        background: $background;
-        padding: 1 2;
-    }
-    #details-identity {
-        height: auto;
-        text-align: center;
-        margin-bottom: 1;
-    }
-    #details-metrics {
-        height: auto;
-        text-align: center;
-    }
-    #details-trackers-heading {
-        height: 1;
-        text-align: center;
-        text-style: bold;
-        border-top: solid $panel-lighten-2;
-        padding-top: 1;
-    }
-    #details-trackers {
-        height: auto;
-        text-align: center;
-    }
-    #details-footer {
-        height: auto;
-        text-align: center;
-        border-top: solid $panel-lighten-2;
-        padding-top: 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="details-dialog"):
-            yield DetailsPanel()
+    def compose_dialog(self) -> ComposeResult:
+        yield DetailsPanel()
 
     def on_mount(self) -> None:
-        self.query_one("#details-dialog").border_title = "Torrent details"
         app = cast("QbitOpsTuiApp", self.app)
         # Snapshot fields first, immediately -- tracker details (which
         # may still be loading, or stale from a prior focus) update in

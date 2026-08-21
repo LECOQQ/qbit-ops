@@ -212,7 +212,7 @@ def _tab_label(name: str, keys: str, active: bool) -> str:
     """Style one workspace tab: the active page in brand orange, the
     other in a restrained blue (`_INACTIVE_TAB_ACCENT`) -- a real,
     deliberate exception to "no colour-block decoration" (see
-    `QbitOpsTuiApp.CSS`'s `#workspace-tabs` rule): which page you're on
+    `qbit_ops.tcss`'s `#workspace-tabs` rule): which page you're on
     is meaningful information, not decoration, so it stays legible
     without leaning on a background panel.
 

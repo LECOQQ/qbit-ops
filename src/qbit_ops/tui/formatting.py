@@ -35,31 +35,32 @@ from qbit_ops.tui.state import (
     _split_skips,
     _state_label,
 )
+from qbit_ops.tui.theme import (
+    BRAND_ACCENT,
+    BRAND_GRADIENT_END,
+    BRAND_GRADIENT_START,
+    BRAND_SECONDARY,
+)
 
 NARROW_WIDTH_THRESHOLD = 100
 WIDE_WIDTH_THRESHOLD = 130
 
-# qbit-ops' warm orange -> coral brand family, the single source of
-# truth for both `BrandHeader`'s gradient (`tui.widgets.overview`,
-# which imports these two) and every restrained accent used here:
-# focus indicator, selection mark, active-sort arrow, title marker.
-# Never used for health/warning/error signalling -- that vocabulary
-# stays exclusively in `_STATE_STYLES`/`_TRACKER_STYLES` below.
-_GRADIENT_START = (255, 153, 51)
-_GRADIENT_END = (214, 40, 57)
-_BRAND_ACCENT = "#{:02x}{:02x}{:02x}".format(*_GRADIENT_START)
+# Read from `qbit_ops.tui.theme`, never redefined here: the theme is
+# built *from* these colours, so `$primary` is the brand orange and a
+# Rich style and a CSS rule cannot drift apart. Rich needs a literal
+# hex (it has no access to Textual's variables), so this module
+# resolves the theme rather than duplicating it.
+#
+# Brand accents mark focus, selection, the active sort arrow and every
+# title; they are never used for health/warning/error signalling --
+# that vocabulary stays exclusively in `_STATE_STYLES`/`_TRACKER_STYLES`
+# below.
+_GRADIENT_START = BRAND_GRADIENT_START
+_GRADIENT_END = BRAND_GRADIENT_END
+_BRAND_ACCENT = BRAND_ACCENT
+_INACTIVE_TAB_ACCENT = BRAND_SECONDARY
 
-# The one deliberate exception to "the brand accent is the only
-# accent" (see `WorkspaceTabs._tab_label`): the *inactive* workspace
-# tab is real information (which page you are not on), not decoration,
-# so it needs its own distinct, still-legible colour rather than the
-# brand orange or a dim grey. Textual's own `$primary` (`#0178d4`) is
-# more saturated than this restrained dark-terminal palette wants, so
-# this is a literal hex from the sky-blue range a lighter theme
-# variable would otherwise fall in.
-_INACTIVE_TAB_ACCENT = "#5fa8d3"
-
-# The outer AppFrame border (see `QbitOpsTuiApp.CSS`) is drawn only at
+# The outer AppFrame border (see `qbit_ops.tcss`) is drawn only at
 # non-narrow widths, one column each side -- accounted for here so
 # column/`Name`-width math is never off by the frame's own overhead.
 _FRAME_BORDER_COLS = 2
@@ -193,7 +194,7 @@ _COLUMN_WIDTHS: dict[str, int] = {
 # check mark") is also reused, unstyled, as a plain bullet in preview
 # text below -- keep both usages in sync if this glyph ever changes.
 # Both glyphs use the brand accent, not Textual's default (blue)
-# `$accent`, and never the row background -- see `QbitOpsTuiApp.CSS`'s
+# `$accent`, and never the row background -- see `qbit_ops.tcss`'s
 # `#torrents` cursor override for the row-level focus treatment.
 _FOCUS_MARK = "›"
 _SELECTED_MARK = "✔"
@@ -367,7 +368,7 @@ _SCROLLBAR_RESERVE = 2
 
 
 # The `#torrents` DataTable's own titled-region border (round, one
-# column each side) -- see `QbitOpsTuiApp.CSS`.
+# column each side) -- see `qbit_ops.tcss`.
 _TORRENTS_BORDER_COLS = 2
 
 # Mirrors `DetailsScreen.CSS`'s `#details-dialog` rule (`width: 86%;
@@ -471,7 +472,7 @@ def _torrent_row_values(
 # Maps each sortable field to the table column it drives, so the
 # active sort gets one small brand-accent arrow in that column's
 # header -- the table's only per-header colour, everything else stays
-# neutral (see `QbitOpsTuiApp.CSS`'s restrained `.datatable--header`).
+# neutral (see `qbit_ops.tcss`'s restrained `.datatable--header`).
 # Down and Up both drive the same merged `Rate` column.
 _SORT_FIELD_COLUMN: dict[SortField, str] = {
     SortField.NAME: "Name",
@@ -714,19 +715,6 @@ def _format_details_trackers(
             f"[dim]Last fetched {_format_local_time(fetched_at)}[/dim]"
         )
     return "\n".join(lines)
-
-
-_DETAILS_MODAL_ACTIONS: tuple[tuple[str, str], ...] = (
-    ("Esc", "Close"),
-    ("c", "Copy hash"),
-    ("e", "Explain"),
-    ("r", "Refresh"),
-)
-
-
-def _format_details_modal_footer() -> str:
-    """The Details modal's own compact command-hint footer."""
-    return _format_command_bar(list(_DETAILS_MODAL_ACTIONS))
 
 
 def _format_command_entry(key_display: str, description: str) -> str:

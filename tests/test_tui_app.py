@@ -30,14 +30,18 @@ exactly when a fake network call resolves -- never an arbitrary sleep.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
 import threading
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.color import Color
 from textual.content import Content
 from textual.coordinate import Coordinate
 from textual.pilot import Pilot
@@ -52,6 +56,8 @@ from textual.widgets import (
 from textual.worker import Worker, WorkerState
 
 import qbit_ops
+import qbit_ops.tui.app
+import qbit_ops.tui.formatting
 from qbit_core.shared.selection import TorrentFilter
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.app import (
@@ -68,18 +74,22 @@ from qbit_ops.tui.app import (
     PreviewScreen,
     QbitOpsTuiApp,
     ResultScreen,
+    SetupScreen,
     SortScreen,
     WorkspaceTabs,
     _columns_for_width,
 )
 from qbit_ops.tui.formatting import (
     _BRAND_ACCENT,
+    _GRADIENT_END,
+    _GRADIENT_START,
     _INACTIVE_TAB_ACCENT,
     _format_byte_rate,
     _format_local_time,
     _indicator_cell,
     _truncate,
 )
+from qbit_ops.tui.modals.base import MODAL_WIDTHS, QbitModal
 from qbit_ops.tui.state import (
     ConnectionState,
     SortDirection,
@@ -87,6 +97,7 @@ from qbit_ops.tui.state import (
     SortOrder,
     Workspace,
 )
+from qbit_ops.tui.theme import QBIT_OPS_THEME
 from qbit_ops.tui.widgets.overview import (
     _BRAND_COMPACT_MIN_WIDTH,
     _BRAND_FULL_MIN_WIDTH,
@@ -103,6 +114,43 @@ from qbit_ops.tui.widgets.status_bar import (
 from tests.support import FakeQbitClient, make_torrent
 
 pytestmark = pytest.mark.tui
+
+# Every modal the TUI can push. A fixed list, not a scan: a tenth
+# modal must be added here deliberately, which is the moment the shared
+# frame is either adopted or knowingly skipped.
+_ALL_MODALS: tuple[type[QbitModal], ...] = (
+    ActionsScreen,
+    DetailsScreen,
+    ExplainScreen,
+    FiltersScreen,
+    HelpScreen,
+    PreviewScreen,
+    ResultScreen,
+    SetupScreen,
+    SortScreen,
+)
+
+
+def _rule_styles(app: QbitOpsTuiApp, selector: str) -> dict[str, Any]:
+    """The declared styles of one *parsed* stylesheet rule.
+
+    Parsed, never grepped: the sheet documents its own rules in CSS
+    comments, so a text search would happily pass on a comment
+    describing a rule that no longer exists.
+    """
+    for rule_set in app.stylesheet.rules:
+        if rule_set.selector_names == {selector}:
+            return dict(rule_set.styles.get_rules())
+    raise AssertionError(f"no rule for {selector!r} in the stylesheet")
+
+
+# Each modal, and the key that opens it from the Torrents workspace.
+_MODAL_ENTRY_KEYS: tuple[tuple[str, type], ...] = (
+    ("f", FiltersScreen),
+    ("s", SortScreen),
+    ("question_mark", HelpScreen),
+    ("enter", DetailsScreen),
+)
 
 LARGE_INTERVAL = 999.0  # effectively disables the periodic timer mid-test
 WIDE_SIZE = (140, 40)
@@ -1956,8 +2004,10 @@ async def test_overview_health_color_reflects_state_not_brand_gradient() -> (
         content = str(health_section.content)
         assert "bold yellow" in content
         assert "ov-health-warning" in health_section.classes
-        assert "#ff9933" not in content
-        assert "#d62839" not in content
+        # The brand accents, resolved -- a stale literal here would
+        # be an assertion that can no longer fail.
+        assert _BRAND_ACCENT not in content
+        assert "#{:02x}{:02x}{:02x}".format(*_GRADIENT_END) not in content
 
 
 async def test_overview_health_color_is_green_when_healthy() -> None:
@@ -4748,14 +4798,26 @@ async def test_resize_preserves_selection_markers() -> None:
 # --- Torrent explorer refinement: palette, header, local sorting -----------
 
 
-def test_datatable_cursor_never_uses_the_default_blue_block() -> None:
-    """`QbitOpsTuiApp` must override `#torrents`' cursor styling --
-    Textual's own `DataTable` default (`$block-cursor-background`)
-    resolves to the active theme's `primary` colour, `#0178D4` (a
-    strong blue) for the built-in `textual-dark` theme this app uses,
-    unless overridden."""
-    assert "#torrents > .datatable--cursor" in QbitOpsTuiApp.CSS
-    assert "block-cursor-background" not in QbitOpsTuiApp.CSS
+async def test_datatable_cursor_never_uses_the_default_block_cursor() -> None:
+    """Textual's own `DataTable` cursor fills with
+    `$block-cursor-background`, which this theme resolves to the brand
+    orange -- a full-width bar that would outshout the `›`/`✔` glyphs
+    carrying the real focus/selection signal. Asserted on the *resolved*
+    component style, not on the stylesheet's text."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        table = app.query_one("#torrents", DataTable)
+        cursor = table.get_component_styles("datatable--cursor").background
+        variables = app.get_css_variables()
+        block_cursor = Color.parse(variables["block-cursor-background"])
+
+        assert cursor.rgb != block_cursor.rgb
+        assert cursor.rgb == Color.parse(variables["panel-lighten-3"]).rgb
 
 
 def test_focus_and_selection_marks_use_brand_accent_not_default() -> None:
@@ -5317,22 +5379,44 @@ async def test_modal_dialogs_expose_expected_border_titles() -> None:
         await pilot.pause()
 
 
-def test_modal_borders_use_the_brand_accent_not_default_accent() -> None:
-    """Every modal dialog's border uses the same warm brand orange
-    (`#ff9933`, matching `formatting._BRAND_ACCENT`), never Textual's
-    default (blue) `$accent`."""
-    for screen_class in (
-        FiltersScreen,
-        ActionsScreen,
-        SortScreen,
-        PreviewScreen,
-        ResultScreen,
-        ExplainScreen,
-        HelpScreen,
-    ):
-        css = screen_class.CSS
-        assert "#ff9933" in css, screen_class
-        assert "$accent" not in css, screen_class
+def test_every_modal_is_built_from_the_shared_frame() -> None:
+    """A modal that skipped `QbitModal` would be free to re-decide its
+    width, border and title -- exactly the divergence the base class
+    exists to make impossible."""
+    for screen_class in _ALL_MODALS:
+        assert issubclass(screen_class, QbitModal), screen_class
+        assert screen_class.MODAL_WIDTH in MODAL_WIDTHS, screen_class
+        assert screen_class.MODAL_TITLE, screen_class
+
+
+def test_a_modal_cannot_declare_a_width_outside_the_scale() -> None:
+    """The scale is the guarantee: a tenth modal picks a word, and a
+    word outside the scale must not reach a running app."""
+    with pytest.raises(ValueError, match="MODAL_WIDTH"):
+
+        class _Rogue(QbitModal):
+            MODAL_TITLE = "Rogue"
+            DIALOG_ID = "rogue-dialog"
+            MODAL_WIDTH = "enormous"
+
+
+async def test_the_shared_dialog_border_carries_the_brand_accent() -> None:
+    """One frame, one accent: the dialog's border and its border title
+    both resolve to the theme's `$primary`, never Textual's own."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        dialog = app.screen.query_one("#filters-dialog")
+        accent = Color.parse(_BRAND_ACCENT)
+
+        assert dialog.styles.border_top == ("round", accent)
+        assert dialog.styles.border_title_color == accent
 
 
 async def test_command_bar_keys_use_the_brand_accent() -> None:
@@ -5466,30 +5550,18 @@ async def test_workspace_tabs_show_both_pages_in_distinct_colours() -> None:
         assert content.index(_INACTIVE_TAB_ACCENT) < content.index("Overview")
 
 
-def test_workspace_tabs_region_carries_no_panel_background() -> None:
-    """`#workspace-tabs` and `#command-bar` no longer fill with `$panel`
-    -- the empty grey seam the user reported above the black
-    background. Scoped to each rule's own `{ ... }` block, not a bare
-    substring check: `#torrents`'s cursor-tint background
-    (`$panel-lighten-2 60%`, a deliberately kept functional signal)
-    also contains the text "background: $panel"."""
-    css = QbitOpsTuiApp.CSS
-    for selector in ("#workspace-tabs", "#command-bar"):
-        match = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
-        assert match, selector
-        assert "background" not in match.group(1), selector
-
-
-async def test_workspace_tabs_computed_background_is_unset() -> None:
+async def test_the_top_and_bottom_strips_carry_no_panel_background() -> None:
+    """`#workspace-tabs` and `#command-bar` must not fill with `$panel`
+    -- that was the empty grey seam above the black background. A fully
+    transparent alpha means they show whatever is behind them rather
+    than a distinct fill."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        tabs = app.query_one("#workspace-tabs", WorkspaceTabs)
-        # No explicit background rule -> fully transparent alpha, i.e.
-        # it shows whatever is behind it rather than a distinct fill.
-        assert tabs.styles.background.a == 0
+        for selector in ("#workspace-tabs", "#command-bar"):
+            assert app.query_one(selector).styles.background.a == 0, selector
 
 
 async def test_search_footer_replaces_search_token_in_same_row() -> None:
@@ -5625,10 +5697,22 @@ async def test_matching_characters_are_highlighted_orange_while_searching() -> (
 
 
 async def test_search_result_notification_toast_uses_brand_styling() -> None:
-    """The `Toast` App-level CSS override applies the brand orange to
-    the default `-information` state, not Textual's default green."""
-    assert "Toast.-information" in QbitOpsTuiApp.CSS
-    assert "#ff9933" in QbitOpsTuiApp.CSS
+    """The default `-information` toast reads as brand orange, not
+    Textual's default green. Asserted on the *parsed* stylesheet: the
+    sheet documents its own rules in comments, and a text search would
+    pass on one of them."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        accent = Color.parse(_BRAND_ACCENT)
+
+        assert _rule_styles(app, ".-information")["border_left"] == (
+            "outer",
+            accent,
+        )
+        assert _rule_styles(app, ".toast--title")["color"] == accent
 
 
 async def test_filters_and_sort_modals_still_expose_all_options() -> None:
@@ -5804,12 +5888,12 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
     `RadioSet`'s highlighted option all draw from `$primary`/
     `$block-cursor-background` -- a saturated blue (`#0178d4`) -- by
     default. Every one of those is overridden to the brand orange in
-    `FiltersScreen`/`SortScreen`/`ActionsScreen`'s own CSS; this checks
+    `qbit_ops.tcss`'s shared `.qbit-dialog` rules; this checks
     the actual computed styles a user would see, not the CSS source.
 
     Also asserts the *foreground* colour on each orange fill: an
     earlier draft used the dialog's near-white `$text` there, which is
-    only ~2:1 contrast against `#ff9933` -- barely more legible than
+    only ~2:1 contrast against the brand orange -- barely more legible than
     the default Textual blue it replaced. The app's own dark
     `$background` tone reused as foreground gives ~9:1."""
     from textual.widgets import Checkbox, RadioSet
@@ -5818,7 +5902,7 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
     )
     app = _app(client)
-    orange = (255, 153, 51)
+    orange = _GRADIENT_START
     dark = (18, 18, 18)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
@@ -5880,3 +5964,433 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         pause_button.focus()
         await pilot.pause()
         assert pause_button.styles.color.rgb == orange
+
+
+# --- The style system, seen from a running app ----------------------------
+
+
+def test_the_stylesheet_is_loaded_from_a_file_next_to_the_app() -> None:
+    """`CSS_PATH` is what makes one sheet possible; a class-level `CSS`
+    block on the App would quietly reopen the nine-blocks door."""
+    sheet = Path(qbit_ops.tui.app.__file__).parent / str(QbitOpsTuiApp.CSS_PATH)
+
+    assert sheet.is_file()
+    assert not QbitOpsTuiApp.__dict__.get("CSS")
+
+
+def test_formatting_names_no_brand_colour_of_its_own() -> None:
+    """Criterion: `formatting.py` reads the theme, it does not define
+    it. Scanned as *code* (string constants only), so a hex mentioned
+    in a comment neither passes nor fails this."""
+    source = Path(qbit_ops.tui.formatting.__file__).read_text(encoding="utf-8")
+    literals = [
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    hexes = [
+        value for value in literals if re.fullmatch(r"#[0-9a-fA-F]{6}", value)
+    ]
+
+    assert not hexes, hexes
+    # Non-vacuous: the module *does* carry string constants to scan.
+    assert len(literals) > 50
+
+
+def test_the_theme_makes_primary_the_brand_orange() -> None:
+    """The reversal this system is built on: Textual's `$primary` was
+    rejected as too saturated for this palette, so the palette now sets
+    what `$primary` is instead of arguing with it."""
+    variables = QBIT_OPS_THEME.to_color_system().generate()
+
+    assert Color.parse(variables["primary"]) == Color.parse(_BRAND_ACCENT)
+    assert Color.parse(variables["primary"]) != Color.parse("#0178d4")
+
+
+def test_both_gradient_ends_reach_the_stylesheet() -> None:
+    """A `Theme` has one `primary` slot and the brand gradient has two
+    ends, so the second would otherwise have nowhere to live but a
+    Python literal."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    variables = _app(client).get_css_variables()
+
+    assert Color.parse(variables["brand-gradient-start"]).rgb == _GRADIENT_START
+    assert Color.parse(variables["brand-gradient-end"]).rgb == _GRADIENT_END
+
+
+async def test_every_modal_titles_itself_in_its_border() -> None:
+    """The title belongs in the interrupted border, coloured by the
+    theme -- not in a `Static` the modal composes for itself."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+    accent = Color.parse(_BRAND_ACCENT)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        for key, screen_class in (
+            ("f", FiltersScreen),
+            ("s", SortScreen),
+            ("question_mark", HelpScreen),
+            ("enter", DetailsScreen),
+        ):
+            await pilot.press(key)
+            await _settle(app, pilot)
+            screen = app.screen
+            assert isinstance(screen, screen_class)
+            dialog = screen.query_one(f"#{screen_class.DIALOG_ID}")
+
+            assert str(dialog.border_title) == screen_class.MODAL_TITLE
+            assert dialog.styles.border_title_color == accent
+            await pilot.press("escape")
+            await _settle(app, pilot)
+
+
+async def test_every_modal_advertises_its_keys_in_its_border_subtitle() -> None:
+    """No modal ships a bare border, and none of them writes a
+    sentence: every hint is a `[key->Label]` token, the same grammar
+    the command bar uses. Which keys appear is measured per modal, not
+    assumed -- `filters` opens on a text field, where `up`/`down`
+    scroll the dialog rather than move focus, so it advertises `tab`.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        for key, _screen_class in _MODAL_ENTRY_KEYS:
+            await pilot.press(key)
+            await _settle(app, pilot)
+            screen = cast(QbitModal, app.screen)
+            plain = Text.from_markup(
+                str(screen.query_one(f"#{screen.DIALOG_ID}").border_subtitle)
+            ).plain
+
+            assert plain.startswith("["), (screen, plain)
+            assert plain.count("[") == len(screen.MODAL_KEYS), (screen, plain)
+            # The old hand-written grammar, gone for good.
+            assert "\u00b7" not in plain, (screen, plain)
+            # Every modal reachable by `escape` says so.
+            assert "esc" in plain, (screen, plain)
+            await pilot.press("escape")
+            await _settle(app, pilot)
+
+
+async def test_the_details_modal_scrolls() -> None:
+    """The only divergence that was a defect rather than a choice: a
+    `Vertical` dialog clipped the app's densest surface instead of
+    scrolling it."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    # Short enough that the details content genuinely overflows; at a
+    # tall terminal a non-scrolling dialog and a scrolling one are
+    # indistinguishable, which is how the defect survived.
+    async with app.run_test(size=(140, 20)) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _open_details(app, pilot)
+
+        dialog = app.screen.query_one(f"#{DetailsScreen.DIALOG_ID}")
+        assert dialog.max_scroll_y > 0
+        assert dialog.allow_vertical_scroll
+
+
+async def test_the_table_advertises_page_navigation_that_works() -> None:
+    """`←`/`→` in the table's own border, and the keys behind it: an
+    indication of navigation that did nothing would be a lie."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        table = app.query_one("#torrents", DataTable)
+        assert "←" in str(table.border_subtitle)
+        assert "→" in str(table.border_subtitle)
+
+        # `DataTable` binds left/right itself; without the App's
+        # priority binding it would swallow both.
+        await pilot.press("left")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.OVERVIEW
+
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.TORRENTS
+
+
+async def test_page_navigation_never_steals_the_search_caret() -> None:
+    """A focused text field owns `left`/`right`. The priority binding
+    that beats `DataTable` would otherwise beat `Input` too."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Ubuntu ISO")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await _type_into_search(pilot, "ubu")
+
+        search = app.query_one("#search-input", Input)
+        await pilot.press("left")
+        await pilot.pause()
+
+        assert app.controller.state.workspace is Workspace.TORRENTS
+        assert search.cursor_position == 2
+
+
+def _keys_the_screen_answers(app: QbitOpsTuiApp) -> set[str]:
+    """Every key Textual would dispatch to a binding on this screen.
+
+    Mirrors Textual's own two passes, because one alone is a wrong
+    answer. `Screen.active_bindings` walks the *modal* chain, which
+    stops at the screen -- so it never lists `escape`, an App binding
+    that reaches a modal only because it is `priority=True`. Checking
+    that source alone would call a working key a lie.
+    """
+    answered = set(app.screen.active_bindings)
+    answered |= {
+        binding.key
+        for binding in app.BINDINGS
+        if isinstance(binding, Binding) and binding.priority
+    }
+    return answered
+
+
+# Labels that promise the operator leaves this modal. `Save` is not
+# one: setup validates first and stays open to report what it found.
+_LABELS_THAT_LEAVE = frozenset({"Cancel", "Close", "Select", "Apply", "Run"})
+
+
+async def test_every_announced_key_is_a_binding_that_is_actually_active() -> (
+    None
+):
+    """A border that advertises a key the screen does not answer is
+    worse than a bare border: it teaches a gesture that does nothing.
+
+    Deliberately not *derived* from the live bindings: `sort` alone
+    exposes 17, including `Page Left` and `Copy selected text`, so the
+    list stays a per-modal editorial choice. This makes it a verifiable
+    one.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+    checked = 0
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        for key, screen_class in _MODAL_ENTRY_KEYS:
+            await pilot.press(key)
+            await _settle(app, pilot)
+            screen = cast(QbitModal, app.screen)
+            assert isinstance(screen, screen_class)
+            answered = _keys_the_screen_answers(app)
+
+            for hint in screen.MODAL_KEYS:
+                for announced in hint.keys:
+                    assert announced in answered, (
+                        f"{screen_class.__name__} announces {announced!r} "
+                        f"as {hint.label!r}, but no active binding "
+                        "answers that key on this screen"
+                    )
+                    checked += 1
+            await pilot.press("escape")
+            await _settle(app, pilot)
+
+    # Non-vacuous: a modal that declared no key at all would otherwise
+    # satisfy every assertion above by having none to run.
+    assert checked >= 10, checked
+
+
+async def test_a_key_announced_as_leaving_the_modal_actually_leaves_it() -> (
+    None
+):
+    """The sharper half of the same question. `sort` used to announce
+    `enter select`: `enter` is answered -- by the App's priority
+    `activate` binding -- but on that screen it does nothing at all,
+    and the key that selects is `space`. "Is it bound" and "does it do
+    what the border says" are different questions, and only the second
+    one is the promise the operator reads.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+    checked = 0
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        for entry_key, screen_class in _MODAL_ENTRY_KEYS:
+            for hint in screen_class.MODAL_KEYS:
+                if hint.label not in _LABELS_THAT_LEAVE:
+                    continue
+                for announced in hint.keys:
+                    await pilot.press(entry_key)
+                    await _settle(app, pilot)
+                    assert isinstance(app.screen, screen_class)
+
+                    # `sort` only fires on a *change* of option, so
+                    # move first: pressing Select on the option that is
+                    # already chosen is legitimately a no-op.
+                    if screen_class is SortScreen:
+                        await pilot.press("down")
+                        await _settle(app, pilot)
+
+                    await pilot.press(announced)
+                    await _settle(app, pilot)
+                    assert not isinstance(app.screen, screen_class), (
+                        f"{screen_class.__name__} announces {announced!r} "
+                        f"as {hint.label!r}, but pressing it leaves the "
+                        "modal open"
+                    )
+                    checked += 1
+                    if app.screen is not app.get_default_screen():
+                        await pilot.press("escape")
+                        await _settle(app, pilot)
+
+    assert checked >= 6, checked
+
+
+async def test_border_hints_and_the_command_bar_share_one_grammar() -> None:
+    """Two grammars for the same thing is one to learn twice. Both the
+    footer and every border render `[key->Description]` through
+    `_format_command_entry`."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+
+        subtitle = str(
+            app.screen.query_one(f"#{SortScreen.DIALOG_ID}").border_subtitle
+        )
+        plain = Text.from_markup(subtitle).plain
+
+        # The real key displays, resolved by Textual -- never spelled
+        # out in the modal, so they cannot drift from what it answers.
+        assert "[space\u2192Select]" in plain, plain
+        assert "[esc\u2192Cancel]" in plain, plain
+        assert "\u00b7" not in plain, plain
+
+
+async def test_a_modal_border_never_outgrows_its_own_width() -> None:
+    """The narrowest surface is the binding constraint: a subtitle
+    wider than the border is silently truncated, and a truncated hint
+    reads as a different key."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        for key, screen_class in (
+            ("f", FiltersScreen),
+            ("s", SortScreen),
+            ("question_mark", HelpScreen),
+            ("enter", DetailsScreen),
+        ):
+            await pilot.press(key)
+            await _settle(app, pilot)
+            dialog = app.screen.query_one(f"#{screen_class.DIALOG_ID}")
+            width = Text.from_markup(str(dialog.border_subtitle)).cell_len
+            # Two corners plus one dash of border on each side.
+            budget = MODAL_WIDTHS[screen_class.MODAL_WIDTH] - 4
+
+            assert width <= budget, (
+                f"{screen_class.__name__}: subtitle is {width} cells, "
+                f"border allows {budget}"
+            )
+            await pilot.press("escape")
+            await _settle(app, pilot)
+
+
+async def test_navigation_is_advertised_where_there_is_something_to_move() -> (
+    None
+):
+    """`j`/`k`/`up`/`down` were all `show=False`, so nothing in the app
+    ever told a first-time operator how to move between torrents.
+
+    One visible token, announcing the arrows alone, and only on the
+    page that has rows: `action_cursor_*` already no-ops on Overview,
+    so advertising it there would teach a move that does nothing.
+
+    The bar teaches the gesture a first-time reader reaches for; it is
+    not the key inventory. `j`/`k` stay bound and stay working, and the
+    help modal lists the whole set.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        bar = app.query_one("#command-bar", CommandBar)
+
+        overview = Text.from_markup(str(bar.content)).plain
+        assert "Navigate" not in overview, overview
+
+        await _goto_torrents(app, pilot)
+        torrents = Text.from_markup(str(bar.content)).plain
+
+        assert "[↑/↓→Navigate]" in torrents, torrents
+        # The vim aliases work but are not advertised here.
+        assert "j/k" not in torrents, torrents
+        # Exactly one token for the four keys, not four saying the same.
+        assert torrents.count("Navigate") == 1, torrents
+        # The keys behind it still work, all four of them -- including
+        # the two the bar deliberately does not name.
+        for key in ("j", "down", "k", "up"):
+            await pilot.press(key)
+            await pilot.pause()
+        assert app.controller.state.focused_hash == "a" * 40
+
+
+async def test_the_command_bar_still_fits_the_page_it_describes() -> None:
+    """Adding a token can push another off the end. The bar has no
+    ellipsis: what overflows is simply not there to be read."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        bar = app.query_one("#command-bar", CommandBar)
+        rendered = Text.from_markup(str(bar.content))
+
+        # `#command-bar` is `width: 1fr` with `padding: 0 1` inside the
+        # app frame's own one-column border on each side.
+        budget = WIDE_SIZE[0] - 4
+        assert (
+            rendered.cell_len <= budget
+        ), f"{rendered.cell_len} cells of {budget}: {rendered.plain}"
+        # Non-vacuous: the bar is genuinely populated.
+        assert rendered.plain.count("[") >= 6, rendered.plain

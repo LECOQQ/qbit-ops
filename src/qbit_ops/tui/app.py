@@ -91,6 +91,11 @@ from qbit_ops.tui.state import (
     Workspace,
     _classify_mutation_error,
 )
+from qbit_ops.tui.theme import (
+    BRAND_CSS_VARIABLES,
+    QBIT_OPS_THEME,
+    THEME_NAME,
+)
 from qbit_ops.tui.widgets.details import DetailsPanel
 from qbit_ops.tui.widgets.filters import FiltersPanel
 from qbit_ops.tui.widgets.overview import (
@@ -113,6 +118,12 @@ REFRESH_WORKER_GROUP = "qbit-refresh"
 DETAIL_WORKER_GROUP = "qbit-detail"
 MUTATION_WORKER_GROUP = "qbit-mutation"
 SETUP_WORKER_GROUP = "qbit-setup"
+
+# The horizontal half of the keyboard grammar: `up`/`down` move within
+# a surface, `left`/`right` between the two pages. Advertised in the
+# table's own border rather than the footer, so the keys are read where
+# they apply.
+TABLE_NAV_HINT = "← Overview · Torrents →"
 
 
 class MainScreen(Screen[None]):
@@ -143,236 +154,11 @@ class QbitOpsTuiApp(App[None]):
     # No qbit-ops commands live in the command palette yet.
     ENABLE_COMMAND_PALETTE = False
 
-    # One shared chrome grammar, reused by every titled region below:
-    # a neutral `$panel-lighten-2` border while inactive, warm brand
-    # orange (`#ff9933` -- must stay in sync with
-    # `qbit_ops.tui.formatting._BRAND_ACCENT`; a literal here, not an
-    # f-string interpolation, since CSS's own `{ }` blocks would
-    # otherwise need escaping throughout this entire string) on
-    # `:focus-within`, expressed purely in CSS -- no extra reactive
-    # state tracks "is this region focused" in Python.
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-    /* Thinner (1 column, Textual's default is 2), brand-orange
-       vertical scrollbar. Scrollbar properties do *not* cascade down
-       the DOM the way most Textual styles do (confirmed empirically:
-       a `Screen`-level declaration alone left every descendant at
-       Textual's own default) -- so this is declared once per type,
-       against `DataTable`/`VerticalScroll` directly, and reaches the
-       torrent table, the Overview scroll area, and every modal's own
-       `VerticalScroll` dialog (App-level `CSS` applies across every
-       `Screen`, not just the default one). */
-    DataTable, VerticalScroll {
-        scrollbar-size-vertical: 1;
-        scrollbar-color: #ff9933 40%;
-        scrollbar-color-hover: #ff9933 70%;
-        scrollbar-color-active: #ff9933;
-        scrollbar-background: $surface;
-        scrollbar-corner-color: $surface;
-    }
-    MainScreen {
-        border: round $panel-lighten-2;
-    }
-    /* Narrow terminals drop the decorative outer frame entirely --
-       every column is worth more than a floating title there. */
-    MainScreen.narrow {
-        border: none;
-    }
-    /* No fill here: this
-       strip used to carry a `$panel` background + bottom border that
-       read as an empty grey seam. The active/inactive tab colours
-       (see `WorkspaceTabs`) now carry all of this row's meaning. */
-    #top-bar {
-        height: 1;
-        padding: 0 1;
-    }
-    #workspace-tabs {
-        width: 1fr;
-    }
-    #global-rate {
-        width: auto;
-    }
-    #banner {
-        height: auto;
-        padding: 0 1;
-        background: $warning-darken-2;
-        display: none;
-    }
-    #banner.visible {
-        display: block;
-    }
-    #overview-workspace {
-        height: 1fr;
-        padding: 0 1;
-    }
-    #brand-header {
-        height: auto;
-        margin-bottom: 1;
-    }
-    .ov-rail {
-        height: auto;
-        padding: 0 0 1 0;
-        border-bottom: solid $panel-lighten-2;
-        margin-bottom: 1;
-    }
-    #overview-cards {
-        height: auto;
-    }
-    #overview-cards.grid {
-        layout: grid;
-        grid-size: 2;
-        grid-columns: 3fr 2fr;
-        grid-gutter: 0 2;
-        grid-rows: auto;
-    }
-    .ov-torrents {
-        height: auto;
-        padding: 0 1 0 0;
-    }
-    .ov-health {
-        height: auto;
-        padding: 0 0 0 1;
-        border-left: solid $panel-lighten-2;
-        margin-top: 1;
-    }
-    #overview-cards.grid .ov-health {
-        margin-top: 0;
-    }
-    .ov-health-healthy {
-        border-left: solid $success;
-    }
-    .ov-health-warning {
-        border-left: solid $warning;
-    }
-    .ov-health-critical, .ov-health-unavailable {
-        border-left: solid $error;
-    }
-    /* column-span, not a 3rd grid column: avoids an empty cell in
-       row 2 of the 2-column grid. */
-    .ov-instance {
-        height: auto;
-        padding: 1 0 0 0;
-        border-top: solid $panel-lighten-2;
-        margin-top: 1;
-    }
-    #overview-cards.grid .ov-instance {
-        column-span: 2;
-    }
-    .ov-nav {
-        color: $text-muted;
-        padding: 1 0 0 0;
-        border-top: solid $panel-lighten-2;
-        margin-top: 1;
-        height: auto;
-    }
-    #filter-summary {
-        height: auto;
-        padding: 0 1;
-        color: $text-muted;
-    }
-    #last-action {
-        height: 1;
-        padding: 0 1;
-        color: $text-muted;
-        display: none;
-    }
-    #last-action.visible {
-        display: block;
-    }
-    /* Restrained header: a subtle dark surface + muted text, not the
-       default bright/bold bar -- and a cursor row that reads as a
-       slim warm accent, never Textual's default full-width blue
-       block (DataTable's own cursor variable defaults to the theme's
-       blue primary colour). The `›`/`✔` glyphs (see `formatting.py`)
-       carry the actual focus/selection signal; this background is
-       deliberately subtle so it never outcompetes them or the brand. */
-    #torrents {
-        width: 1fr;
-        height: 1fr;
-        border: round $panel-lighten-2;
-        background: transparent;
-    }
-    /* DataTable's own DEFAULT_CSS tints its background by 5% on focus
-       (`&:focus { background-tint: ... }`), which -- even with the
-       `background: transparent` above -- still composited a visibly
-       lighter panel than the rest of the app's uniform background
-       while the table (the Torrents workspace's default focus target)
-       was focused. Zeroed out here to keep the table's background
-       genuinely uniform with its surroundings in every focus state. */
-    #torrents:focus {
-        background-tint: transparent;
-    }
-    #torrents:focus-within {
-        border: round #ff9933;
-    }
-    #torrents > .datatable--header {
-        background: $surface;
-        color: $text-muted;
-        text-style: bold;
-    }
-    #torrents > .datatable--cursor {
-        background: $panel-lighten-2 60%;
-        color: $text;
-        text-style: none;
-    }
-    #torrents:focus > .datatable--cursor {
-        background: $panel-lighten-3 70%;
-        color: $text;
-        text-style: bold;
-    }
-    /* The footer row: `CommandBar` renders every `[key→Description]`
-       token plus the live `|search: xxx|` token (see
-       `CommandBar.set_search_state`); `FooterTotal` is a `width: auto`
-       sibling that `CommandBar`'s own `width: 1fr` pins to the row's
-       right edge, showing `|Total: y|` only while search is active.
-       `#search-input` is a zero-width, invisible keystroke sink
-       mounted alongside them only while search is active (see
-       `mount_search_input`). Zero width still keeps a Textual `Input`
-       genuinely focusable and able to receive key presses -- confirmed
-       empirically, not merely assumed. */
-    #footer-row {
-        height: auto;
-    }
-    #command-bar {
-        width: 1fr;
-        height: auto;
-        padding: 0 1;
-        border-top: solid $panel-lighten-2;
-    }
-    #footer-total {
-        width: auto;
-        height: auto;
-        padding: 0 1;
-        border-top: solid $panel-lighten-2;
-    }
-    #search-input {
-        width: 0;
-        height: 1;
-        border: none;
-        padding: 0;
-        background: transparent;
-    }
-    #search-input:focus {
-        border: none;
-    }
-    /* Restyle Textual's built-in toast notifications (`self.notify`)
-       to the same dark-uniform surface + brand accent as every modal
-       -- `-warning`/`-error` keep Textual's own semantic colours
-       (see `Toast`'s own `DEFAULT_CSS`), only the default
-       `-information` state switches from `$success` green to the
-       brand orange, since that's this app's "primary/success" accent. */
-    Toast {
-        background: $surface;
-    }
-    Toast.-information {
-        border-left: outer #ff9933;
-    }
-    Toast.-information .toast--title {
-        color: #ff9933;
-    }
-    """
+    # Every rule lives in one external sheet, shipped inside the wheel
+    # (see `tests/test_distribution.py`). Nine per-class `CSS` blocks
+    # used to re-decide the same frame nine times; the sheet plus
+    # `QbitModal` leave each surface only what is its own.
+    CSS_PATH = "qbit_ops.tcss"
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -383,10 +169,24 @@ class QbitOpsTuiApp(App[None]):
         Binding("g", "show_overview", "Overview", show=False),
         Binding("2", "show_torrents", "Torrents", show=False),
         Binding("t", "show_torrents", "Torrents", show=False),
-        Binding("j", "cursor_down", "Down", show=False),
-        Binding("k", "cursor_up", "Up", show=False),
-        Binding("down", "cursor_down", "Down", show=False),
-        Binding("up", "cursor_up", "Up", show=False),
+        # Non-priority on purpose: a focused `Input` handles `left`/
+        # `right` first and keeps them, so typing a search term still
+        # moves the caret instead of changing page.
+        Binding("left", "show_overview", "Overview", show=False),
+        Binding("right", "show_torrents", "Torrents", show=False),
+        # One visible token, announcing the arrows alone: the command bar
+        # teaches the gesture a first-time reader reaches for, it is not
+        # the key inventory. `j`/`k` keep working, and the help modal
+        # lists `j/k, ↑/↓` together for whoever wants the whole set.
+        #
+        # The token hangs off `j`, not `down`, and that is load-bearing:
+        # a focused `DataTable` binds `up`/`down` itself, so the screen's
+        # own arrow bindings are shadowed out of `active_bindings` and
+        # the command bar would render nothing at all.
+        Binding("j", "cursor_down", "Navigate", key_display="↑/↓"),
+        Binding("k", "cursor_up", "Navigate", show=False),
+        Binding("down", "cursor_down", "Navigate", show=False),
+        Binding("up", "cursor_up", "Navigate", show=False),
         Binding("slash", "focus_search", "Search"),
         Binding("f", "open_filters", "Filters"),
         Binding("s", "open_sort", "Sort"),
@@ -464,8 +264,18 @@ class QbitOpsTuiApp(App[None]):
             yield CommandBar(id="command-bar")
             yield FooterTotal(id="footer-total")
 
+    def get_css_variables(self) -> dict[str, str]:
+        # The brand gradient has two ends and a `Theme` has one
+        # `primary` slot, so the ends reach the stylesheet here.
+        return {**super().get_css_variables(), **BRAND_CSS_VARIABLES}
+
     def on_mount(self) -> None:
+        # Registered before anything paints: `$primary` must already be
+        # the brand orange the first time a rule resolves it.
+        self.register_theme(QBIT_OPS_THEME)
+        self.theme = THEME_NAME
         self.screen.border_title = f"qbit-ops v{__version__}"
+        self.query_one("#torrents", DataTable).border_subtitle = TABLE_NAV_HINT
         # Render the initial empty state so the screen isn't blank
         # while the first refresh worker is still in flight.
         self._render_workspace_visibility()
@@ -875,13 +685,19 @@ class QbitOpsTuiApp(App[None]):
         """Hide (and disable) footer/help-panel actions not meaningful
         in the current context; also gates whether a key press fires.
         """
+        if action in ("cursor_up", "cursor_down"):
+            # Unchanged inside a modal, where the dialog scrolls. On
+            # the main screen `action_cursor_*` already no-ops outside
+            # Torrents -- gating it here only stops the command bar
+            # advertising a move there is nothing to move through.
+            if len(self.screen_stack) > 1:
+                return True
+            return self.controller.state.workspace is Workspace.TORRENTS
         if action in (
             "quit",
             "toggle_help",
             "activate",
             "dismiss_overlay",
-            "cursor_up",
-            "cursor_down",
             # Textual's Screen base binds Tab/Shift+Tab to
             # app.focus_next/focus_previous -- must stay allowed even
             # while a modal is open, or in-modal Tab navigation breaks.
@@ -891,7 +707,6 @@ class QbitOpsTuiApp(App[None]):
             return True
         if len(self.screen_stack) > 1:
             return False
-
         state = self.controller.state
         if action == "show_overview":
             return state.workspace is Workspace.TORRENTS
@@ -1169,7 +984,7 @@ class QbitOpsTuiApp(App[None]):
         search = Input(value=self.controller.state.search, id="search-input")
         # Mounted into `#footer-row`, alongside `CommandBar` -- not a
         # separate row above the footer. Zero-width/borderless (see the
-        # module CSS): it renders nothing itself, it only captures
+        # the stylesheet): it renders nothing itself, it only captures
         # keystrokes, while `CommandBar.set_search_state` renders the
         # visible `search: xxx`/`Total: y` tokens in its place. Awaited:
         # focusing a widget immediately after an unawaited `mount()` can

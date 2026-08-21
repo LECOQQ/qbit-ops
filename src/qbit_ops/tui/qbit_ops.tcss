@@ -1,0 +1,440 @@
+/*
+ * The one stylesheet every qbit-ops surface reads.
+ *
+ * Loaded by `QbitOpsTuiApp.CSS_PATH`, and shipped inside the wheel
+ * (asserted by `tests/test_distribution.py`) -- a packaging change
+ * that dropped it would break only an installed user, never the repo.
+ *
+ * Brand colours arrive as theme variables (`qbit_ops.tui.theme`):
+ * `$primary` *is* the brand orange here, so no rule names a hex.
+ */
+
+/* ==== The app frame and its two workspaces ========================= */
+
+Screen {
+    layout: vertical;
+}
+/* Thinner (1 column, Textual's default is 2), brand-orange
+   vertical scrollbar. Scrollbar properties do *not* cascade down
+   the DOM the way most Textual styles do (confirmed empirically:
+   a `Screen`-level declaration alone left every descendant at
+   Textual's own default) -- so this is declared once per type,
+   against `DataTable`/`VerticalScroll` directly, and reaches the
+   torrent table, the Overview scroll area, and every modal's own
+   `VerticalScroll` dialog (App-level `CSS` applies across every
+   `Screen`, not just the default one). */
+DataTable, VerticalScroll {
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $primary 40%;
+    scrollbar-color-hover: $primary 70%;
+    scrollbar-color-active: $primary;
+    scrollbar-background: $surface;
+    scrollbar-corner-color: $surface;
+}
+MainScreen {
+    border: round $panel-lighten-2;
+}
+/* Narrow terminals drop the decorative outer frame entirely --
+   every column is worth more than a floating title there. */
+MainScreen.narrow {
+    border: none;
+}
+/* No fill here: this
+   strip used to carry a `$panel` background + bottom border that
+   read as an empty grey seam. The active/inactive tab colours
+   (see `WorkspaceTabs`) now carry all of this row's meaning. */
+#top-bar {
+    height: 1;
+    padding: 0 1;
+}
+#workspace-tabs {
+    width: 1fr;
+}
+#global-rate {
+    width: auto;
+}
+#banner {
+    height: auto;
+    padding: 0 1;
+    background: $warning-darken-2;
+    display: none;
+}
+#banner.visible {
+    display: block;
+}
+#overview-workspace {
+    height: 1fr;
+    padding: 0 1;
+}
+#brand-header {
+    height: auto;
+    margin-bottom: 1;
+}
+.ov-rail {
+    height: auto;
+    padding: 0 0 1 0;
+    border-bottom: solid $panel-lighten-2;
+    margin-bottom: 1;
+}
+#overview-cards {
+    height: auto;
+}
+#overview-cards.grid {
+    layout: grid;
+    grid-size: 2;
+    grid-columns: 3fr 2fr;
+    grid-gutter: 0 2;
+    grid-rows: auto;
+}
+.ov-torrents {
+    height: auto;
+    padding: 0 1 0 0;
+}
+.ov-health {
+    height: auto;
+    padding: 0 0 0 1;
+    border-left: solid $panel-lighten-2;
+    margin-top: 1;
+}
+#overview-cards.grid .ov-health {
+    margin-top: 0;
+}
+.ov-health-healthy {
+    border-left: solid $success;
+}
+.ov-health-warning {
+    border-left: solid $warning;
+}
+.ov-health-critical, .ov-health-unavailable {
+    border-left: solid $error;
+}
+/* column-span, not a 3rd grid column: avoids an empty cell in
+   row 2 of the 2-column grid. */
+.ov-instance {
+    height: auto;
+    padding: 1 0 0 0;
+    border-top: solid $panel-lighten-2;
+    margin-top: 1;
+}
+#overview-cards.grid .ov-instance {
+    column-span: 2;
+}
+.ov-nav {
+    color: $text-muted;
+    padding: 1 0 0 0;
+    border-top: solid $panel-lighten-2;
+    margin-top: 1;
+    height: auto;
+}
+#filter-summary {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+#last-action {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    display: none;
+}
+#last-action.visible {
+    display: block;
+}
+/* Restrained header: a subtle dark surface + muted text, not the
+   default bright/bold bar -- and a cursor row that reads as a
+   slim warm accent, never Textual's default full-width blue
+   block (DataTable's own cursor variable defaults to the theme's
+   blue primary colour). The `›`/`✔` glyphs (see `formatting.py`)
+   carry the actual focus/selection signal; this background is
+   deliberately subtle so it never outcompetes them or the brand. */
+#torrents {
+    width: 1fr;
+    height: 1fr;
+    border: round $panel-lighten-2;
+    background: transparent;
+}
+/* DataTable's own DEFAULT_CSS tints its background by 5% on focus
+   (`&:focus { background-tint: ... }`), which -- even with the
+   `background: transparent` above -- still composited a visibly
+   lighter panel than the rest of the app's uniform background
+   while the table (the Torrents workspace's default focus target)
+   was focused. Zeroed out here to keep the table's background
+   genuinely uniform with its surroundings in every focus state. */
+#torrents:focus {
+    background-tint: transparent;
+}
+#torrents:focus-within {
+    border: round $primary;
+}
+#torrents > .datatable--header {
+    background: $surface;
+    color: $text-muted;
+    text-style: bold;
+}
+#torrents > .datatable--cursor {
+    background: $panel-lighten-2 60%;
+    color: $text;
+    text-style: none;
+}
+#torrents:focus > .datatable--cursor {
+    background: $panel-lighten-3 70%;
+    color: $text;
+    text-style: bold;
+}
+/* The footer row: `CommandBar` renders every `[key→Description]`
+   token plus the live `|search: xxx|` token (see
+   `CommandBar.set_search_state`); `FooterTotal` is a `width: auto`
+   sibling that `CommandBar`'s own `width: 1fr` pins to the row's
+   right edge, showing `|Total: y|` only while search is active.
+   `#search-input` is a zero-width, invisible keystroke sink
+   mounted alongside them only while search is active (see
+   `mount_search_input`). Zero width still keeps a Textual `Input`
+   genuinely focusable and able to receive key presses -- confirmed
+   empirically, not merely assumed. */
+#footer-row {
+    height: auto;
+}
+#command-bar {
+    width: 1fr;
+    height: auto;
+    padding: 0 1;
+    border-top: solid $panel-lighten-2;
+}
+#footer-total {
+    width: auto;
+    height: auto;
+    padding: 0 1;
+    border-top: solid $panel-lighten-2;
+}
+#search-input {
+    width: 0;
+    height: 1;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+#search-input:focus {
+    border: none;
+}
+/* Restyle Textual's built-in toast notifications (`self.notify`)
+   to the same dark-uniform surface + brand accent as every modal
+   -- `-warning`/`-error` keep Textual's own semantic colours
+   (see `Toast`'s own `DEFAULT_CSS`), only the default
+   `-information` state switches from `$success` green to the
+   brand orange, since that's this app's "primary/success" accent. */
+Toast {
+    background: $surface;
+}
+Toast.-information {
+    border-left: outer $primary;
+}
+Toast.-information .toast--title {
+    color: $primary;
+}
+
+/* ==== Modal chrome: one frame, three widths ======================== */
+
+/*
+ * Every modal is a `QbitModal` (`tui/modals/base.py`): the frame, the
+ * title in the interrupted border, the key hint in the subtitle, the
+ * scrolling and the width all come from here. A modal chooses a word
+ * (`MODAL_WIDTH`), never a number, which is what stops the tenth one
+ * from inventing a fourth width.
+ */
+QbitModal {
+    align: center middle;
+}
+.qbit-dialog {
+    max-height: 90%;
+    border: round $primary;
+    border-title-color: $primary;
+    border-title-align: left;
+    border-subtitle-color: $text-muted;
+    border-subtitle-align: right;
+    /* `$background`, not `$surface`: `$surface` is a visibly lighter
+       grey, which reads as a grey box clashing with the round border
+       rather than an outline floating on a uniform dark ground. */
+    background: $background;
+    padding: 1 2;
+}
+.qbit-dialog.-small {
+    width: 48;
+}
+.qbit-dialog.-medium {
+    width: 64;
+}
+.qbit-dialog.-large {
+    width: 100;
+}
+
+/* ---- Fields and buttons, once for every dialog -------------------- */
+
+/*
+ * Each of these widgets' own `DEFAULT_CSS` fills with `$surface` and
+ * accents with Textual's `$primary`/`$border`/`$block-cursor-*`. Left
+ * alone, every field reads as its own grey box nested in the dialog,
+ * accented in a colour from another palette. Scoped to `.qbit-dialog`
+ * so nothing here leaks onto the main screen.
+ */
+.qbit-dialog RadioSet {
+    border: round $panel-lighten-2;
+    background: transparent;
+    height: auto;
+}
+.qbit-dialog RadioSet:focus-within {
+    border: round $primary;
+}
+/* `color: $background`, not `$text` (near-white): white on `$primary`
+   is roughly 2:1 contrast, the app's own dark ground on it is ~9:1. */
+.qbit-dialog Checkbox:focus > .toggle--label,
+.qbit-dialog RadioSet:focus > RadioButton.-selected > .toggle--label {
+    background: $primary;
+    color: $background;
+    text-style: bold;
+}
+/* Textual's blurred selection falls back to a translucent `$primary`
+   -- which is now the brand orange, so only the alpha is set here. */
+.qbit-dialog RadioSet:blur > RadioButton.-selected > .toggle--label {
+    background: $primary 30%;
+}
+/* The "(x)" on-mark defaults to `$text-success` (green): no modal here
+   has green/red semantics, only the brand accent. */
+.qbit-dialog RadioSet > RadioButton.-on > .toggle--button {
+    color: $primary;
+}
+.qbit-dialog Input {
+    background: transparent;
+}
+.qbit-dialog Input:focus {
+    border: tall $primary;
+}
+.qbit-dialog Checkbox {
+    background: transparent;
+}
+.qbit-dialog Checkbox:focus {
+    border: tall $primary;
+}
+/* Flat, single-row buttons -- Textual's default `Button` is 3 rows
+   tall (a raised, "3D" shadow look) and pulls in `$surface`; both are
+   out of place in a restrained, terminal-native dialog. `border: none`
+   removes the extra two rows along with the shadow. */
+.qbit-dialog Button {
+    height: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: $text;
+    text-style: none;
+}
+.qbit-dialog Button:hover {
+    background: $panel-lighten-2;
+}
+.qbit-dialog Button:focus {
+    background: $primary 20%;
+    color: $primary;
+    text-style: bold;
+}
+.qbit-dialog Button.-primary {
+    background: transparent;
+    color: $primary;
+    text-style: bold;
+}
+.qbit-dialog Button.-primary:hover {
+    background: $primary 20%;
+}
+.qbit-dialog Button.-primary:focus {
+    background: $primary;
+    color: $background;
+}
+
+/* ==== What each modal owns beyond the shared frame ================= */
+
+/* -- actions -- */
+#actions-dialog Button {
+    width: 100%;
+    margin-bottom: 0;
+}
+.actions-names {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+/* -- filters -- */
+/* Same reason as `DetailsPanel` below: a panel that fills its dialog
+   pins the dialog's virtual size to its own and kills the scrolling. */
+FiltersPanel {
+    height: auto;
+}
+.f-columns {
+    height: auto;
+}
+.f-col {
+    width: 1fr;
+    height: auto;
+    padding: 0 1;
+}
+.f-actions {
+    height: auto;
+    margin-top: 1;
+}
+/* Full-width, stacked one per row -- the same component used the same
+   way as in `actions`, rather than a narrow horizontal row here alone. */
+.f-actions Button {
+    width: 100%;
+    margin-bottom: 0;
+}
+
+/* -- details -- */
+/* `height: auto`, not the container default `1fr`: filling the dialog
+   would make the dialog's virtual size equal its own, and the modal
+   would silently stop scrolling however long the content grew. */
+DetailsPanel {
+    height: auto;
+}
+#details-identity {
+    height: auto;
+    text-align: center;
+    margin-bottom: 1;
+}
+#details-metrics {
+    height: auto;
+    text-align: center;
+}
+#details-trackers-heading {
+    height: 1;
+    text-align: center;
+    text-style: bold;
+    border-top: solid $panel-lighten-2;
+    padding-top: 1;
+}
+#details-trackers {
+    height: auto;
+    text-align: center;
+}
+
+/* -- preview -- */
+#preview-actions {
+    height: auto;
+    margin-top: 1;
+}
+#preview-actions Button {
+    margin-right: 1;
+    width: auto;
+}
+
+/* -- result -- */
+#result-close {
+    margin-top: 1;
+}
+
+/* -- setup -- */
+#setup-dialog Button {
+    width: 100%;
+}
+.setup-label {
+    color: $text-muted;
+}
+#setup-status {
+    margin-top: 1;
+    color: $warning;
+}

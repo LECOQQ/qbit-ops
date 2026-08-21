@@ -63,6 +63,7 @@ _CANONICAL_HOME: dict[str, str] = {
     "ConnectionBanner": "widgets/status_bar.py",
     "LastActionBar": "widgets/status_bar.py",
     "FilterSummary": "widgets/status_bar.py",
+    "QbitModal": "modals/base.py",
     "HelpScreen": "modals/help.py",
     "FiltersScreen": "modals/filters.py",
     "DetailsScreen": "modals/details.py",
