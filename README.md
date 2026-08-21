@@ -39,6 +39,14 @@ Or with pipx:
 pipx install qbit-ops
 ```
 
+On macOS, with Homebrew:
+
+```bash
+brew install LECOQQ/qbit-ops/qbit-ops
+```
+
+The tap ships the TUI, so there is no extra to pick.
+
 With the optional TUI:
 
 ```bash
@@ -59,6 +67,7 @@ To upgrade later:
 ```bash
 uv tool upgrade qbit-ops
 pipx upgrade qbit-ops
+brew upgrade qbit-ops
 ```
 
 Create `~/.config/qbit-ops/.env`:
