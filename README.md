@@ -30,6 +30,8 @@ Inspect, diagnose and automate qBittorrent at scale - with composable filters, b
 
 Requires Python 3.12+ and a qBittorrent instance with the Web UI enabled.
 
+### 🐍 From PyPI
+
 Recommended, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
@@ -41,14 +43,6 @@ Or with pipx:
 ```bash
 pipx install qbit-ops
 ```
-
-On macOS, with Homebrew:
-
-```bash
-brew install LECOQQ/qbit-ops/qbit-ops
-```
-
-The tap ships the TUI, so there is no extra to pick.
 
 With the optional TUI:
 
@@ -65,13 +59,46 @@ uv tool install "qbit-ops[mcp]"
 pipx install "qbit-ops[mcp]"
 ```
 
-To upgrade later:
+### 🍺 With Homebrew
+
+```bash
+brew install LECOQQ/qbit-ops/qbit-ops
+```
+
+The tap ships the TUI, so there is no extra to pick. Upgrades follow the
+usual `brew upgrade qbit-ops`.
+
+### 🐳 With Docker
+
+Runs the same CLI on amd64 and arm64, with nothing installed on the
+host:
+
+```bash
+docker run --rm -it \
+  -e QBIT_HOST -e QBIT_USER -e QBIT_PASSWORD \
+  ghcr.io/lecoqq/qbit-ops:latest status
+```
+
+The TUI needs a TTY, which `-it` already gives you:
+
+```bash
+docker run --rm -it \
+  -e QBIT_HOST -e QBIT_USER -e QBIT_PASSWORD \
+  ghcr.io/lecoqq/qbit-ops:latest tui
+```
+
+For a long-lived setup, see the
+[Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
+
+### ⬆️ Upgrading
 
 ```bash
 uv tool upgrade qbit-ops
 pipx upgrade qbit-ops
 brew upgrade qbit-ops
 ```
+
+### 🔌 Connecting
 
 Then set up the connection:
 
@@ -93,9 +120,6 @@ qbit-ops doctor
 qbit-ops tui
 ```
 
-🐳 Prefer containers? `ghcr.io/lecoqq/qbit-ops:latest` runs the same CLI on
-amd64 and arm64 -- see the
-[Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
 
 ## 🎸 Greatest hits
 
