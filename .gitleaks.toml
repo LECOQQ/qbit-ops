@@ -1,0 +1,50 @@
+# gitleaks configuration for qbit-ops.
+#
+# Run through `make secrets`. Extends the upstream default ruleset
+# rather than replacing it: a hand-written rule list goes stale the
+# moment a new credential format appears, and nobody notices.
+#
+# A secret scanner is heuristic by nature, which is why `make secrets`
+# is its own target rather than part of the blocking `make check` gate
+# (see AGENTS.md, "Rien de probabiliste"). It reports; a human judges.
+
+[extend]
+useDefault = true
+
+[[rules]]
+# qBittorrent tracker passkeys are this project's real risk: they are
+# credentials embedded in URLs, and the codebase handles, redacts and
+# rewrites them. Named explicitly rather than left to entropy, which
+# misses a low-entropy passkey and flags a high-entropy hash.
+id = "qbit-tracker-passkey"
+description = "Tracker announce URL carrying a passkey"
+regex = '''(?i)https?://[^\s"']+[/?&](?:passkey|authkey|torrent_pass)[=/][A-Za-z0-9]{16,}'''
+tags = ["passkey", "tracker"]
+
+[allowlist]
+description = "Deliberate fixtures, never real credentials"
+
+# `UNMISTAKABLE-` is the repo's own convention for a fake secret: a
+# marker a test asserts never reaches an output, chosen to be
+# recognisable on sight. Allowlisting the *marker* keeps the scanner
+# fully live on the files that carry it -- unlike excluding `tests/`,
+# which is exactly where a real credential gets pasted while debugging.
+regexes = ['''UNMISTAKABLE-[A-Z0-9-]+''']
+
+# Generated, reproducible, or vendored -- never authored here.
+#
+# The agent telemetry log is excluded for a structural reason, not
+# convenience: it records shell commands verbatim, so *running a scan
+# writes the pattern being searched for into it*, and the next scan
+# flags its own output. A gate that reports itself is unusable. Nothing
+# there is distributed -- it is gitignored, and the `git` scope never
+# sees it. The exposure it does represent is real and documented in
+# docs/DEVELOPMENT.md instead of asserted here.
+paths = [
+    '''^\.agents/telemetry/''',
+    '''^\.venv/''',
+    '''^dist/''',
+    '''^htmlcov/''',
+    '''(^|/)__pycache__/''',
+    '''^poetry\.lock$''',
+]
