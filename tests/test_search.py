@@ -522,6 +522,58 @@ def test_all_tokens_tier_alone_is_not_monotone_under_forward_typing() -> None:
     ), "expected the isolated all_tokens tier to be non-monotone here"
 
 
+# The corpus tuned above never reaches the fuzzy tier: something always
+# matches on a higher one. Non-monotonicity only shows on a journey
+# whose *early* prefixes match nothing at all, so it needs its own.
+_FUZZY_MONOTONY_CORPUS = (
+    _snapshot(hash=HASH_A, name="Ubuntu Server 24.04 LTS"),
+    _snapshot(hash=HASH_B, name="Debian netinst 12"),
+)
+
+
+def test_adding_fuzzy_breaks_forward_typing_monotonicity() -> None:
+    """Why the TUI's live search stops at the `tokens` mode.
+
+    `TuiController.set_search` reconciles the selection on *every*
+    keystroke -- `reconcile_selection` drops any selected hash that is
+    no longer visible -- and that is only safe while the result set can
+    only shrink as the query grows.
+
+    Typing `xbuntu` matches nothing until the final character, where
+    fuzzy makes "Ubuntu Server" appear. An operator who had selected it
+    would have lost that selection at `x`, and the torrent coming back
+    at `xbuntu` comes back unselected. Silently.
+
+    Both halves are asserted: the same journey is monotone without the
+    fuzzy tier. So this test is not merely a prohibition -- if fuzzy
+    ever becomes monotone, it fails and says the TUI could adopt it.
+    """
+    journey = "xbuntu"
+
+    without_fuzzy = _prefix_journey_violations(
+        _FUZZY_MONOTONY_CORPUS,
+        journey,
+        tiers=_MONOTONY_TIERS_0_5,
+        hash_min_length=1,
+    )
+    assert not without_fuzzy, (
+        "tiers 0-5 must stay monotone here, or this test proves nothing "
+        f"about fuzzy: {without_fuzzy}"
+    )
+
+    with_fuzzy = _prefix_journey_violations(
+        _FUZZY_MONOTONY_CORPUS,
+        journey,
+        tiers=_MONOTONY_TIERS_0_5 | frozenset({"fuzzy"}),
+        hash_min_length=1,
+    )
+    assert with_fuzzy, (
+        "fuzzy is monotone under forward typing on this journey -- the "
+        "reason `TuiController.set_search` pins mode='tokens' no longer "
+        "holds, and the live search could adopt it"
+    )
+
+
 # --- S3: the fuzzy tier -----------------------------------------------------
 
 

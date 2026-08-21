@@ -517,6 +517,14 @@ class TuiController:
         doesn't apply. An empty search skips the engine entirely (see
         `_recompute_visible`): it must show the whole corpus, not the
         empty result the engine itself would return for a blank query.
+
+        **`fuzzy` stays out for that reason, not by oversight.** Typing
+        `xbuntu` matches nothing until the last character, where fuzzy
+        makes a torrent appear -- so a selection dropped at `x` never
+        comes back. Measured, and pinned by
+        `test_adding_fuzzy_breaks_forward_typing_monotonicity`, which
+        also fails the day fuzzy becomes monotone and the ban stops
+        being warranted.
         """
         self.state.search = text
         self._recompute_visible()
