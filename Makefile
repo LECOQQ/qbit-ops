@@ -103,14 +103,27 @@ check-docs: ## qa: Verify every Markdown link and repo-anchored path reference r
 # is an error, never a skip: a secret scanner that quietly does nothing
 # reports "clean" for the wrong reason.
 GITLEAKS_IMAGE := zricethezav/gitleaks:latest
+
+# `detect` rather than the newer `dir`/`git` subcommands: those do not
+# exist before gitleaks 8.18, and Ubuntu still ships 8.16. `detect` is
+# understood by every 8.x, verified on 8.16 and 8.30 against this same
+# config -- so the scope stays a qbit-ops word and gitleaks' own verb
+# churn stops being the caller's problem.
 GITLEAKS_SCOPE ?= dir
+GITLEAKS_SOURCE_FLAGS = $(if $(filter dir,$(GITLEAKS_SCOPE)),--no-git,)
 
 secrets: ## qa: Scan for committed credentials with gitleaks (GITLEAKS_SCOPE=dir|git)
+	@case "$(GITLEAKS_SCOPE)" in \
+		dir|git) ;; \
+		*) printf "Unknown GITLEAKS_SCOPE '%s'. Use 'dir' (working tree) or 'git' (history).\\n" "$(GITLEAKS_SCOPE)" >&2; exit 2 ;; \
+	esac
 	@if command -v gitleaks >/dev/null 2>&1; then \
-		gitleaks $(GITLEAKS_SCOPE) . -c .gitleaks.toml --no-banner --redact; \
+		gitleaks detect --source . $(GITLEAKS_SOURCE_FLAGS) \
+			-c .gitleaks.toml --no-banner --redact; \
 	elif command -v docker >/dev/null 2>&1; then \
 		docker run --rm -v "$(CURDIR):/repo" -w /repo $(GITLEAKS_IMAGE) \
-			$(GITLEAKS_SCOPE) . -c /repo/.gitleaks.toml --no-banner --redact; \
+			detect --source . $(GITLEAKS_SOURCE_FLAGS) \
+			-c /repo/.gitleaks.toml --no-banner --redact; \
 	else \
 		printf 'MISSING: gitleaks. Install it (https://github.com/gitleaks/gitleaks) or provide Docker.\n' >&2; \
 		exit 1; \
