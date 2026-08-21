@@ -246,8 +246,9 @@ def _configuration_checks(
                 message="Configuration failed to load.",
                 detail=str(config_error) if config_error else None,
                 remediation=(
-                    "Create a .env file from .env.example, or set "
-                    "QBIT_HOST/QBIT_USER/QBIT_PASSWORD in the environment."
+                    "Run 'qbit-ops init' to create the configuration "
+                    "file, or set QBIT_HOST/QBIT_USER/QBIT_PASSWORD in "
+                    "the environment."
                 ),
             )
         )

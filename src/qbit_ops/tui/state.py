@@ -294,6 +294,15 @@ class TuiController:
         self._detail_request_id = 0
         self.state = TuiState()
 
+    def set_host(self, host: str | None) -> None:
+        """Point the controller at a newly configured instance.
+
+        Only called before the first refresh, from the first-run setup
+        form: `_host` feeds the status snapshot's redacted host label,
+        and a stale one would mislabel every later refresh.
+        """
+        self._host = host
+
     @property
     def max_concurrent_remote_operations(self) -> int:
         """High-water mark of simultaneous remote client operations.

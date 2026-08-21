@@ -31,6 +31,7 @@
 - Machine-readable results for every mutation ✅
 - JSONL output ✅
 - Experimental MCP server, read-only and bounded ✅
+- Guided connection setup, from the CLI or the TUI ✅
 - A canonical name for "no longer seeding"
 - Duration-range filters on the TUI
 

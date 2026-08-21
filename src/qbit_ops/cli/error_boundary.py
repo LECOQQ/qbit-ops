@@ -50,6 +50,11 @@ def catch_internal_errors(
     concise message (no `repr()`, no traceback, no secret-bearing values)
     and the shared `ExitCode.INTERNAL` (70), regardless of the wrapped
     command's own exit-code scheme.
+
+    `EOFError` is the exception to that: it is what a prompt raises when
+    the reader closes the stream, which is a person pressing Ctrl-D to
+    walk away. Reporting it as an internal error told them the tool was
+    broken when they had simply changed their mind.
     """
 
     @functools.wraps(command)
@@ -60,6 +65,15 @@ def catch_internal_errors(
             raise
         except KeyboardInterrupt:
             raise
+        except EOFError as error:
+            record_app_error(
+                AppError(
+                    category=ErrorCategory.INVALID_INPUT,
+                    code="input_abandoned",
+                    message="Aborted.",
+                )
+            )
+            raise typer.Exit(code=ExitCode.ERROR) from error
         except Exception as error:
             message = f"Internal error: {type(error).__name__}: {error}"
             record_app_error(

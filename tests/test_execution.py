@@ -1,8 +1,10 @@
 """Test the shared mutation risk classification and execution policy."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
+from typer.main import get_command
 
 from qbit_core.shared.execution import (
     MUTATION_RISK,
@@ -104,6 +106,41 @@ def test_every_mutation_operation_is_registered_as_a_cli_command() -> None:
 
     for operation in MutationOperation:
         assert operation.value in registered, operation.value
+
+
+def _dry_run_capable_commands() -> set[str]:
+    """Every registered command id whose CLI offers `--dry-run`."""
+    found: set[str] = set()
+
+    def _walk(command: Any, prefix: str) -> None:
+        children = getattr(command, "commands", None)
+        if children:
+            for name, child in children.items():
+                _walk(child, f"{prefix} {name}".strip())
+            return
+        options: set[str] = set()
+        for parameter in command.params:
+            options.update(parameter.opts)
+        if "--dry-run" in options:
+            found.add(prefix)
+
+    _walk(get_command(app), "")
+    return found
+
+
+def test_only_classified_mutations_offer_the_dry_run_control() -> None:
+    """The membership rule for `MUTATION_RISK`, checked against the real
+    CLI rather than restated.
+
+    A command that can preview before applying is a mutation and must
+    carry a risk tier; `init` offers no `--dry-run` because it changes
+    nothing on the instance, and is therefore absent from both sides.
+    """
+    offering = _dry_run_capable_commands()
+
+    assert offering, "expected at least one command offering --dry-run"
+    assert offering == {operation.value for operation in MutationOperation}
+    assert "init" not in offering
 
 
 def test_docs_commands_reference_mentions_every_risk_tier() -> None:

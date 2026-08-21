@@ -88,6 +88,7 @@ EXIT_CODE_TABLE: dict[str, type[IntEnum]] = {
     "status": StatusExitCode,
     "doctor": DoctorExitCode,
     "version": ExitCode,
+    "init": ExitCode,
     "tui": ExitCode,
     "connection check": ExitCode,
     "torrents list": ExitCode,

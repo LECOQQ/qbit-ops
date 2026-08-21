@@ -23,6 +23,7 @@ from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE
 runner = CliRunner()
 
 TOP_LEVEL_COMMAND_NAMES = {
+    "init",
     "status",
     "doctor",
     "version",
@@ -76,6 +77,7 @@ REPRESENTATIVE_COMMAND_OPTIONS: dict[str, set[str]] = {
     "doctor": {"--format"},
     "version": {"--format"},
     "tui": {"--interval"},
+    "init": {"--force"},
     "connection check": set(),
     "torrents list": {"--format", "--category", "--state"},
     "torrents inspect": {"--hash", "--format"},
@@ -132,9 +134,9 @@ def _assert_clean_help(result) -> None:
     assert "Usage:" in result.output
 
 
-def test_exit_code_table_covers_exactly_thirty_four_commands() -> None:
+def test_exit_code_table_covers_exactly_thirty_five_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
-    assert len(EXIT_CODE_TABLE) == 34
+    assert len(EXIT_CODE_TABLE) == 35
 
 
 def test_root_help_succeeds_without_traceback() -> None:
@@ -179,7 +181,7 @@ def test_command_group_help_lists_its_registered_subcommands(
 def test_every_registered_command_help_succeeds_without_traceback(
     command_id: str,
 ) -> None:
-    """Every one of the 29 commands in `EXIT_CODE_TABLE` must still register.
+    """Every command in `EXIT_CODE_TABLE` must still register.
 
     This is the test that fails if a future migration accidentally
     drops or fails to register a command: an unregistered command makes
