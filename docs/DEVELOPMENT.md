@@ -185,6 +185,12 @@ back to the official container image. With neither available it
 **fails** rather than skipping: a scanner that quietly does nothing
 reports "clean" for the wrong reason.
 
+`GITLEAKS_SCOPE` is a qbit-ops word, not a gitleaks subcommand. The
+target invokes `detect`, understood by every 8.x release -- the newer
+`dir`/`git` subcommands do not exist before 8.18, and Ubuntu still
+packages 8.16. Verified on 8.16 and 8.30 against this config, custom
+rule included.
+
 The config extends the upstream ruleset and adds one project rule for
 tracker announce URLs carrying a passkey -- this codebase's real
 credential shape, and one entropy alone gets wrong in both directions.
