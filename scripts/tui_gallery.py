@@ -26,18 +26,29 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
 from qbit_ops.tui.app import QbitOpsTuiApp
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT = REPO_ROOT / "docs" / "assets" / "tui"
+# `tmp/` is gitignored: these are working artefacts of a design pass,
+# regenerated in seconds, and 100 KB apiece.
+DEFAULT_OUT = REPO_ROOT / "tmp" / "design" / "svg"
 
 # Wide enough that the table shows its full column set: the narrow
 # fallback is a different design and deserves its own pass, not a
 # silent substitution here.
 GALLERY_SIZE = (140, 40)
+
+# Rich draws a macOS window around every exported terminal: three
+# traffic-light circles above the content. They are pure decoration,
+# they imitate an OS this tool does not target, and in a before/after
+# pair they are the only part guaranteed identical. Dropped by string
+# surgery rather than a custom template, because the alternative is
+# re-implementing `export_screenshot` on top of Textual internals.
+_CHROME_CIRCLE = re.compile(r'\s*<circle cx="\d+" cy="0" r="7"[^>]*/>')
 
 
 def _torrent(index: int, **overrides: Any) -> dict[str, Any]:
@@ -135,7 +146,9 @@ async def _capture(name: str, keys: list[str], out: Path) -> Path:
         # first paint lands on the next frame, and exporting between the
         # two captures a half-drawn modal.
         await pilot.pause()
-        svg = app.export_screenshot(title=f"qbit-ops -- {name}")
+        svg = _CHROME_CIRCLE.sub(
+            "", app.export_screenshot(title=f"qbit-ops -- {name}")
+        )
 
     target = out / f"{name}.svg"
     target.write_text(svg, encoding="utf-8")

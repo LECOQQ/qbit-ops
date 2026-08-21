@@ -43,11 +43,18 @@ if __package__ in (None, ""):  # pragma: no cover - entry-point plumbing
 
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.tui_gallery import SCREENS, _GalleryClient  # noqa: E402
+from scripts.tui_gallery import (  # noqa: E402
+    GALLERY_SIZE,
+    SCREENS,
+    _GalleryClient,
+)
 
 # The gallery's size, so a wireframe and its screenshot describe the
 # same layout. Two sizes would make the pair impossible to reason about.
-WIREFRAME_SIZE = (140, 40)
+WIREFRAME_SIZE = GALLERY_SIZE
+
+# `tmp/` is gitignored: working artefacts of a design pass.
+DEFAULT_OUT = REPO_ROOT / "tmp" / "design" / "wireframes"
 
 # Leaves whose box carries no structural information: they are content,
 # and drawing them turns the frame into noise at exactly the depth where
@@ -84,9 +91,14 @@ def _boxes(app: QbitOpsTuiApp, max_depth: int) -> list[tuple[int, str, Any]]:
     return sorted(found, key=lambda entry: (entry[0], entry[2].y, entry[2].x))
 
 
-def render(app: QbitOpsTuiApp, *, max_depth: int = DEFAULT_DEPTH) -> str:
+def render(
+    app: QbitOpsTuiApp,
+    *,
+    max_depth: int = DEFAULT_DEPTH,
+    size: tuple[int, int] = WIREFRAME_SIZE,
+) -> str:
     """Draw the current screen's structure into a character grid."""
-    width, height = WIREFRAME_SIZE
+    width, height = size
     grid = [[" "] * width for _ in range(height)]
 
     for _, name, region in _boxes(app, max_depth):
@@ -144,24 +156,37 @@ def _legend(app: QbitOpsTuiApp, max_depth: int) -> str:
     return "\n".join(lines)
 
 
-async def capture(name: str, keys: list[str], *, max_depth: int) -> str:
+async def capture(
+    name: str,
+    keys: list[str],
+    *,
+    max_depth: int,
+    size: tuple[int, int] = WIREFRAME_SIZE,
+) -> str:
     app = QbitOpsTuiApp(
         client_factory=lambda: _GalleryClient(),
         host="http://localhost:8080",
         refresh_interval=3600.0,
     )
-    async with app.run_test(size=WIREFRAME_SIZE) as pilot:
+    async with app.run_test(size=size) as pilot:
         await pilot.pause()
         for key in keys:
             await pilot.press(key)
             await pilot.pause()
         await pilot.pause()
-        return render(app, max_depth=max_depth)
+        return render(app, max_depth=max_depth, size=size)
 
 
-async def _run(names: list[str], out: Path | None, max_depth: int) -> int:
+async def _run(
+    names: list[str],
+    out: Path | None,
+    max_depth: int,
+    size: tuple[int, int],
+) -> int:
     for name in names:
-        frame = await capture(name, SCREENS[name], max_depth=max_depth)
+        frame = await capture(
+            name, SCREENS[name], max_depth=max_depth, size=size
+        )
         if out is None:
             print(f"# {name}\n\n{frame}\n")
             continue
@@ -177,7 +202,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="write one .txt per screen")
     parser.add_argument("--only", default="", help="comma-separated names")
     parser.add_argument("--depth", type=int, default=DEFAULT_DEPTH)
+    parser.add_argument(
+        "--size",
+        default="x".join(str(value) for value in WIREFRAME_SIZE),
+        help=(
+            "terminal size as WxH. A narrower capture is not a smaller "
+            "picture of the same layout -- the TUI drops columns below a "
+            "threshold, so it measures a different design."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    try:
+        width, height = (int(part) for part in args.size.lower().split("x"))
+    except ValueError:
+        print(f"Invalid --size {args.size!r}. Use WxH, e.g. 100x30.")
+        return 1
 
     names = [n for n in args.only.split(",") if n] or list(SCREENS)
     unknown = [n for n in names if n not in SCREENS]
@@ -186,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Known: {', '.join(SCREENS)}")
         return 1
 
-    return asyncio.run(_run(names, args.out, args.depth))
+    return asyncio.run(_run(names, args.out, args.depth, (width, height)))
 
 
 if __name__ == "__main__":

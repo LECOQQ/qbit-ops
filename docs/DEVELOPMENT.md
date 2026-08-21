@@ -175,8 +175,8 @@ the preceding line.
 ## Seeing the TUI
 
 ```bash
-python3 scripts/tui_gallery.py                 # -> docs/assets/tui/
-python3 scripts/tui_gallery.py --out /tmp/before
+python3 scripts/tui_gallery.py                 # -> tmp/design/svg/
+python3 scripts/tui_gallery.py --out tmp/design/before/svg
 python3 scripts/tui_gallery.py --only filters,sort
 ```
 
@@ -205,7 +205,8 @@ screen.
 
 ```bash
 python3 scripts/tui_wireframe.py --only filters
-python3 scripts/tui_wireframe.py --out /tmp/before
+python3 scripts/tui_wireframe.py --out tmp/design/before/wireframes
+python3 scripts/tui_wireframe.py --size 100x30   # fits a narrow editor
 ```
 
 Draws each screen's widget tree as a true-scale box diagram, from the
@@ -224,8 +225,15 @@ with its parent is invisible in it. That coincidence is itself the
 finding -- it means no padding at all -- so the legend keeps it
 measurable rather than merely looked at.
 
+`--size` is not a zoom. The TUI drops columns below a width threshold,
+so a narrower capture measures a genuinely different layout -- useful in
+its own right, since that responsive fallback has never been inspected.
+
 Companion to the gallery, not a substitute. The gallery answers "is it
 pretty"; the wireframe answers "is it consistent".
+
+Both default to `tmp/`, which is gitignored: these are working artefacts
+of a design pass, regenerated in seconds and 100 KB apiece.
 
 ## Secret scanning
 

@@ -44,6 +44,13 @@ SKIPPED_DIRS = frozenset(
         "dist",
         "build",
         "htmlcov",
+        # Frozen records, not live documentation. A delivered feature's
+        # SPEC and a workflow-history entry cite the world as it was;
+        # this check enforces the world as it is. Holding an archive to
+        # it means every deletion rewrites history to satisfy a linter,
+        # which is the opposite of what an archive is for.
+        "features",
+        "workflow-history",
     }
 )
 

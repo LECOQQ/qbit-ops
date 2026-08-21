@@ -5,13 +5,11 @@
 .vscode
 AGENTS.md
 CLAUDE.md
+tmp/
 
 # Agent working memory: read by LLMs before intervening, never published
 .agents
-# Launcher wiring: symlinks into `.agents/`, so tracking them would
-# publish references that resolve to nothing in a clone.
 .claude
-docs/SEARCH.md
 .worktrees/
 
 # Operating system files
@@ -39,5 +37,3 @@ build/
 demo/generated/
 demo/output/
 
-# Personas du control-plane : lien vers .agents/personas, gardé local
-.claude/agents
