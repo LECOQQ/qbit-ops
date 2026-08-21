@@ -33,15 +33,14 @@ regexes = ['''UNMISTAKABLE-[A-Z0-9-]+''']
 
 # Generated, reproducible, or vendored -- never authored here.
 #
-# The agent telemetry log is excluded for a structural reason, not
-# convenience: it records shell commands verbatim, so *running a scan
-# writes the pattern being searched for into it*, and the next scan
-# flags its own output. A gate that reports itself is unusable. Nothing
-# there is distributed -- it is gitignored, and the `git` scope never
-# sees it. The exposure it does represent is real and documented in
-# docs/DEVELOPMENT.md instead of asserted here.
+# The agent telemetry log is deliberately NOT excluded. It records
+# shell commands verbatim, and its collector redacts credentials before
+# writing -- so scanning it is what proves the redaction still works. A
+# redactor nothing verifies is not a redactor, it is a belief. The
+# self-reference that once made this unusable (a scan writing the very
+# pattern it searches for) is gone for the same reason: the collector
+# redacts that pattern too.
 paths = [
-    '''^\.agents/telemetry/''',
     '''^\.venv/''',
     '''^dist/''',
     '''^htmlcov/''',
