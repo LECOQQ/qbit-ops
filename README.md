@@ -10,6 +10,9 @@
   <a href="https://github.com/LECOQQ/qbit-ops/blob/main/pyproject.toml"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python"></a>
   <a href="https://pypi.org/project/qbit-ops/"><img src="https://img.shields.io/pypi/v/qbit-ops.svg" alt="PyPI version"></a>
   <a href="https://pypi.org/project/qbit-ops/"><img src="https://img.shields.io/pypi/dm/qbit-ops.svg" alt="PyPI downloads"></a>
+  <a href="https://github.com/LECOQQ/homebrew-qbit-ops"><img src="https://img.shields.io/badge/Homebrew-brew%20install-FBB040?logo=homebrew&logoColor=white" alt="Homebrew tap"></a>
+  <a href="https://github.com/LECOQQ/homebrew-qbit-ops/actions/workflows/lint.yml"><img src="https://img.shields.io/github/actions/workflow/status/LECOQQ/homebrew-qbit-ops/lint.yml?label=tap&logo=homebrew&logoColor=white" alt="Tap lint"></a>
+  <a href="https://github.com/LECOQQ/qbit-ops/pkgs/container/qbit-ops"><img src="https://img.shields.io/badge/ghcr.io-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white" alt="Container image"></a>
 </p>
 
 🧯 **A tiny qBittorrent CLI and TUI for people who don't want to nuke their
