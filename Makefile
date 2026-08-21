@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -97,6 +97,24 @@ check-version: ## qa: Verify pyproject.toml and the Release Please manifest agre
 
 check-docs: ## qa: Verify every Markdown link and repo-anchored path reference resolves
 	@python3 scripts/check_doc_links.py
+
+# Prefer a local gitleaks; fall back to the official image so the target
+# works on a machine that has Docker and nothing else. Neither present
+# is an error, never a skip: a secret scanner that quietly does nothing
+# reports "clean" for the wrong reason.
+GITLEAKS_IMAGE := zricethezav/gitleaks:latest
+GITLEAKS_SCOPE ?= dir
+
+secrets: ## qa: Scan for committed credentials with gitleaks (GITLEAKS_SCOPE=dir|git)
+	@if command -v gitleaks >/dev/null 2>&1; then \
+		gitleaks $(GITLEAKS_SCOPE) . -c .gitleaks.toml --no-banner --redact; \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR):/repo" -w /repo $(GITLEAKS_IMAGE) \
+			$(GITLEAKS_SCOPE) . -c /repo/.gitleaks.toml --no-banner --redact; \
+	else \
+		printf 'MISSING: gitleaks. Install it (https://github.com/gitleaks/gitleaks) or provide Docker.\n' >&2; \
+		exit 1; \
+	fi
 
 check-ai: ## qa: Enforce AI hygiene -- provenance, generated artefacts, house style
 	@python3 scripts/check_ai_hygiene.py

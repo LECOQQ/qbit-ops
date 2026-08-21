@@ -172,6 +172,37 @@ names a real file without naming a path from the repository root. Mark
 a deliberate exception with `<!-- doc-links: ignore-next-line -->` on
 the preceding line.
 
+## Secret scanning
+
+```bash
+make secrets                      # the working tree
+make secrets GITLEAKS_SCOPE=git   # every commit in history
+```
+
+Runs [gitleaks](https://github.com/gitleaks/gitleaks) against
+`.gitleaks.toml`, preferring a locally installed binary and falling
+back to the official container image. With neither available it
+**fails** rather than skipping: a scanner that quietly does nothing
+reports "clean" for the wrong reason.
+
+The config extends the upstream ruleset and adds one project rule for
+tracker announce URLs carrying a passkey -- this codebase's real
+credential shape, and one entropy alone gets wrong in both directions.
+
+Fixtures are allowlisted by **marker**, not by path: a fake secret is
+spelled `UNMISTAKABLE-...`, so the scanner stays fully live on the test
+files that carry them. Excluding `tests/` would blind it to exactly
+where a real credential gets pasted while debugging.
+
+Deliberately **not** part of `make check`. A secret scanner is
+heuristic, and `AGENTS.md` reserves the blocking gates for deterministic
+rules -- this one reports, a human judges.
+
+> The scan covers the working tree, not only what Git tracks -- an
+> ignored file still sits in plaintext on disk. Local logs that record
+> shell commands verbatim are the usual culprit: a passkey typed into
+> one command lands in a file `git log` will never show you.
+
 ## Release validation
 
 Versioning is fully automated by [Release Please](https://github.com/googleapis/release-please)
