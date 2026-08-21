@@ -17,6 +17,7 @@ signal.
 import pytest
 
 from scripts.tui_gallery import SCREENS, _capture
+from scripts.tui_wireframe import capture as capture_wireframe
 
 pytestmark = pytest.mark.tui
 
@@ -79,3 +80,32 @@ async def test_the_gallery_reaches_the_screen_it_names(
             "no longer reach that screen, so the gallery is capturing "
             "whatever sits underneath it."
         )
+
+
+# --- The wireframe measures the same screens ------------------------------
+
+
+@pytest.mark.parametrize("name", sorted(SCREENS))
+async def test_the_wireframe_measures_a_real_layout(name: str) -> None:
+    """An empty grid is a valid wireframe of nothing. Without this, a
+    layout pass that never ran would render as a screen with no
+    structure -- and read as a finding rather than a broken tool."""
+    frame = await capture_wireframe(name, SCREENS[name], max_depth=6)
+
+    assert "LEGEND" in frame
+    boxes = [
+        line
+        for line in frame.splitlines()
+        if line.startswith("  ") and "*" in line
+    ]
+    assert len(boxes) >= 2, f"{name}: only {len(boxes)} box(es) measured"
+    assert "+" in frame, f"{name}: no box was drawn"
+
+
+async def test_the_wireframe_and_the_gallery_agree_on_size() -> None:
+    """They describe the same layout. Two sizes would make a screenshot
+    and its wireframe impossible to read against each other."""
+    from scripts.tui_gallery import GALLERY_SIZE
+    from scripts.tui_wireframe import WIREFRAME_SIZE
+
+    assert GALLERY_SIZE == WIREFRAME_SIZE

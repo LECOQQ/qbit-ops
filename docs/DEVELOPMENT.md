@@ -201,6 +201,32 @@ attempt used plausible words that also appeared in a table column and a
 footer binding, and the test stayed green on a capture of the wrong
 screen.
 
+### Measuring the layout
+
+```bash
+python3 scripts/tui_wireframe.py --only filters
+python3 scripts/tui_wireframe.py --out /tmp/before
+```
+
+Draws each screen's widget tree as a true-scale box diagram, from the
+regions computed by a real headless layout pass. A terminal is a
+character grid, so the wireframe is a projection of the interface at
+1:1, not an approximation of it -- which is what lets a hand-edited
+wireframe serve as a specification of layout, and lets the built result
+be read back against it.
+
+**Derived, never drawn.** A hand-drawn diagram is one person's reading
+of the code; this disagrees with the reader when the reader is wrong.
+
+The frame is followed by a legend giving every box its region, because
+the frame alone cannot say everything: a widget sharing all four edges
+with its parent is invisible in it. That coincidence is itself the
+finding -- it means no padding at all -- so the legend keeps it
+measurable rather than merely looked at.
+
+Companion to the gallery, not a substitute. The gallery answers "is it
+pretty"; the wireframe answers "is it consistent".
+
 ## Secret scanning
 
 ```bash
