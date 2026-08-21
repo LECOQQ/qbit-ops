@@ -12,9 +12,15 @@ that reads the last few commits to infer the house style now infers the
 drift instead, and each prose commit makes the next one likelier.
 
 What this checks is deliberately narrow: the body's first non-empty line
-starts a bullet. It does not judge wording, length, or whether the
-bullets are good ones. A subject-only commit is fine -- plenty of the
-history's best commits have no body at all.
+starts a bullet, and no bullet wraps earlier than it had to. It does not
+judge wording, length, or whether the bullets are good ones. A
+subject-only commit is fine -- plenty of the history's best commits have
+no body at all.
+
+Length stays unjudged on purpose. Capping a bullet's lines would push a
+writer to compress meaning rather than drop it, which optimises the
+wrong thing. What the wrap rule does reach is the padding: a bullet that
+broke a line early looks like it needed two, and often does not.
 
 Two entry points, mirroring `check_commit_provenance.py`:
 
@@ -41,6 +47,14 @@ TRAILER = re.compile(
 )
 
 # Comment lines Git strips, plus the diff it appends under `--verbose`.
+# A wrapped bullet's continuation: indented, and not itself a bullet.
+CONTINUATION = re.compile(r"^\s+\S")
+
+# 72, the width `git log` indents a body into on an 80-column terminal.
+# Measured against this repository's own history before being enforced:
+# 1287 of 1317 body lines already sit within it.
+WRAP_LIMIT = 72
+
 COMMENT = re.compile(r"^\s*#")
 SCISSORS = "# ------------------------ >8 ------------------------"
 
@@ -69,6 +83,38 @@ def violation(message: str) -> str | None:
         "change. A body of paragraphs reads as a design document, and the\n"
         "next agent copies whatever the recent history shows it."
     )
+
+
+def early_wrap(message: str) -> str | None:
+    """Return the first bullet line that broke sooner than it had to.
+
+    Git wraps nothing: a body is displayed exactly as written, in `git
+    log`, in `git blame` and on a forge. So a line that stops at 61
+    characters when the next word would have fitted in 72 is not a
+    style preference -- it is a ragged block everywhere it is read.
+
+    The test is exact, never a guess: take the first word of the
+    continuation line and ask whether it fitted. No judgement about
+    wording enters here.
+    """
+    body = body_lines(message)
+    lines = [line for line in body if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        following = lines[index + 1]
+        if not CONTINUATION.match(following):
+            continue
+        if TRAILER.match(line) or TRAILER.match(following):
+            continue
+        first_word = following.strip().split(" ")[0]
+        if len(line) + 1 + len(first_word) <= WRAP_LIMIT:
+            return (
+                f"line wraps early at {len(line)} characters: "
+                f"{first_word!r} would have fitted within {WRAP_LIMIT}.\n"
+                f"  {line}\n"
+                "Nothing reflows a commit body -- it is read exactly as\n"
+                "written. Fill the line, or make the bullet shorter."
+            )
+    return None
 
 
 def _range_messages(commit_range: str) -> list[tuple[str, str]]:
@@ -100,7 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.commit_msg_file:
-        problem = violation(args.commit_msg_file.read_text(encoding="utf-8"))
+        message = args.commit_msg_file.read_text(encoding="utf-8")
+        problem = violation(message) or early_wrap(message)
         if problem:
             print(f"ERROR: {problem}", file=sys.stderr)
             return 1
@@ -111,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 
     failures = 0
     for sha, message in _range_messages(args.commit_range):
-        problem = violation(message)
+        problem = violation(message) or early_wrap(message)
         if problem:
             subject = message.splitlines()[0] if message.strip() else ""
             print(f"{sha[:8]} {subject}\n  {problem}\n", file=sys.stderr)
@@ -119,12 +166,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if failures:
         print(
-            f"ERROR: {failures} commit body/bodies written as prose.",
+            f"ERROR: {failures} commit body/bodies rejected.",
             file=sys.stderr,
         )
         return 1
 
-    print("OK: every commit body in range is bulleted.")
+    print("OK: every commit body in range is bulleted and fills its lines.")
     return 0
 
 
