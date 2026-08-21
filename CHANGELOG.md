@@ -3,6 +3,72 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.5.0](https://github.com/LECOQQ/qbit-ops/compare/v0.4.0...v0.5.0) (2026-08-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **search:** `torrents inspect --name` and `--limit` are removed with no alias -- `torrents search` replaces them. In search output, `match_score` becomes `match`, the tier name; `summary.matched` now counts before truncation, alongside `returned` and `truncated`, so it answers "how many are there" rather than "how many did you print".
+
+### Features
+
+* **config:** guide a fresh install to its first working command ([b99e221](https://github.com/LECOQQ/qbit-ops/commit/b99e221a0b7d9a71baff53cab0a745c8c1d27d94))
+* **docker:** publish multi-arch container images to GHCR ([940bd92](https://github.com/LECOQQ/qbit-ops/commit/940bd928fc69a89e72d77a21eda3d1dd24bd30c5))
+* **mcp:** add an aggregate tool over a filtered selection ([994bac2](https://github.com/LECOQQ/qbit-ops/commit/994bac29c7b16f3c6f2327ad02dd2dc51c97e542))
+* **mcp:** add an experimental read-only MCP surface ([9b66634](https://github.com/LECOQQ/qbit-ops/commit/9b666347c8460b10768180b4b9e43efe79869b4d))
+* **search:** add `torrents search` and make the TUI `/` tolerant ([12e07f6](https://github.com/LECOQQ/qbit-ops/commit/12e07f6f69098719dd1c29b88fb0f1b4c8147c5d))
+* **search:** add the ranking engine behind `torrents search` ([da937e2](https://github.com/LECOQQ/qbit-ops/commit/da937e2f164fd74153da05880292da25872fd321))
+* **stats:** read a cumulative seed time in conventional units ([05d04f0](https://github.com/LECOQQ/qbit-ops/commit/05d04f0c7129e34b737274825fb30889a4dbb8a8))
+* **status,explain:** stop flagging a stall completed from local data ([9c2feaa](https://github.com/LECOQQ/qbit-ops/commit/9c2feaa79a5ee55cec44c22e4368e2d90c74d7b0))
+* **tooling:** check references inside code prose, not only Markdown ([3e3371f](https://github.com/LECOQQ/qbit-ops/commit/3e3371f0479d41875862a8137103c5d17706b4c5))
+* **tooling:** enforce commit provenance and prove squash integration ([57ee70c](https://github.com/LECOQQ/qbit-ops/commit/57ee70c61bb26aa26d1d235d13913bcaffcbedc9))
+* **tooling:** gate AI hygiene and break the diff down by kind of work ([eb0a688](https://github.com/LECOQQ/qbit-ops/commit/eb0a68880d2a0cbb5d8db72a05378e811e032721))
+* **tooling:** give each feature worktree its own proven virtualenv ([afa3046](https://github.com/LECOQQ/qbit-ops/commit/afa3046cfcedc5be1b9970bd519de0d8917e278d))
+* **tooling:** isolate the test suite from the operator's own instance ([b9d3d89](https://github.com/LECOQQ/qbit-ops/commit/b9d3d890786fac59b1c37051884ef5e3d5b6ae4c))
+* **tooling:** refuse a commit body written as prose ([0f19993](https://github.com/LECOQQ/qbit-ops/commit/0f1999311a61c29c26a38bbf03153de7c5a796e8))
+* **torrents:** add `torrents stats` over a canonical measure model ([2e4edec](https://github.com/LECOQQ/qbit-ops/commit/2e4edecf46a0357510c32563393a26cf80d1dc60))
+* **torrents:** add `torrents throttle` for bulk rate limiting ([edfa158](https://github.com/LECOQQ/qbit-ops/commit/edfa15847af7beb2a0bb64b9f43bccb0b0c4273f))
+* **torrents:** bound `torrents list` output with --limit ([af3552b](https://github.com/LECOQQ/qbit-ops/commit/af3552b53b76d491502cbb2292105edc8cdfb993))
+* **torrents:** carry per-torrent rate limits on the central model ([e7c9d07](https://github.com/LECOQQ/qbit-ops/commit/e7c9d07582149c79ee11051e113397e513a8045e))
+* **torrents:** give bulk actions a machine-readable result ([cb90d1c](https://github.com/LECOQQ/qbit-ops/commit/cb90d1cb0369797b157b96a7b91d4f9777c2bb24))
+* **torrents:** manage categories and tags in bulk ([123e402](https://github.com/LECOQQ/qbit-ops/commit/123e402b2bce6d8648e0e300da4930f1ebdd6654))
+* **trackers:** make `trackers list` readable on a normal terminal ([cbb4812](https://github.com/LECOQQ/qbit-ops/commit/cbb48126394cad7d99753c95759d998e5b4c6b0f))
+* **trackers:** report per-tracker volume and filter by tracker health ([78c5bfe](https://github.com/LECOQQ/qbit-ops/commit/78c5bfe20da29327503f3a0570da332a4bb009d2))
+
+
+### Bug Fixes
+
+* **cli:** stop advertising --tracker as repeatable on report commands ([34d63b5](https://github.com/LECOQQ/qbit-ops/commit/34d63b5b5516de68a2358e207a6924d940233c9c))
+* **cli:** stop printing a summary that repeats the only finding ([0e98c99](https://github.com/LECOQQ/qbit-ops/commit/0e98c99b2939decb15d6ebbde454b2c3c7c9d260))
+* **mcp:** make the cap a page size and stop refetching the library ([96fc9f7](https://github.com/LECOQQ/qbit-ops/commit/96fc9f7a9f5c288b6fe236004f1f0f97c5010fde))
+* **mcp:** stop dropping evidence, limitations and category ([8e9e632](https://github.com/LECOQQ/qbit-ops/commit/8e9e6322990c4387314c38d8da206e40bd86b933))
+* **qa:** make `make secrets` work on every gitleaks 8.x ([b0b5a5e](https://github.com/LECOQQ/qbit-ops/commit/b0b5a5e9be4287b5d0b624b85f1db558f9ad0b49))
+* **tooling:** detect a worktree leak and provision the venv ([25c4ca1](https://github.com/LECOQQ/qbit-ops/commit/25c4ca1d1f6134b63fcb45e7181a69412258c073))
+* **torrents:** report the status a bulk mutation actually reached ([877892b](https://github.com/LECOQQ/qbit-ops/commit/877892bb354634e7a2cd461f3348d0eac884f33b))
+* **tui:** repair the missing-extra remediation for PyPI installs ([baedbb0](https://github.com/LECOQQ/qbit-ops/commit/baedbb01df9b16edf3ee22b4d9d219fc594f485e))
+
+
+### Documentation
+
+* **compose:** update compose example ([c8318cb](https://github.com/LECOQQ/qbit-ops/commit/c8318cb76d880e46d482e7e1348cbff7199f7484))
+* cut the prose that serves the fewest readers ([f0c26cc](https://github.com/LECOQQ/qbit-ops/commit/f0c26cc84487957b75de4b200973e50008352685))
+* **mcp:** present the MCP surface by what it does ([11425d6](https://github.com/LECOQQ/qbit-ops/commit/11425d690a6370bca72b8ad14da917e60f1f1ff6))
+* point every stale reference at what it actually names, and trim ([4b6fc4c](https://github.com/LECOQQ/qbit-ops/commit/4b6fc4c5f86aa568d3487aff127c30431d3d2860))
+* point search references at the spec's delivered location ([bf4b000](https://github.com/LECOQQ/qbit-ops/commit/bf4b000f7fce72ea81a17004098d05357e40134e))
+* **readme:** add Homebrew and container badges ([2cafc98](https://github.com/LECOQQ/qbit-ops/commit/2cafc9809bc1b2628c5277e12c02451b863a2b76))
+* **readme:** add PyPI badges and stop inlining the 53 MB demo GIF ([9239845](https://github.com/LECOQQ/qbit-ops/commit/9239845a47222bcd56b66d29a93195c380000a08))
+* **readme:** add the Homebrew install for macOS ([da9c911](https://github.com/LECOQQ/qbit-ops/commit/da9c9119488afa89c283fd6fba7c30f34dca8fef))
+* **readme:** update readme, add docker distribution, add killer usecases ([93767df](https://github.com/LECOQQ/qbit-ops/commit/93767df2aa6759574f0c1a8b4e81e0ff4502ef43))
+* **roadmap:** add roadmap_archive, update roadmap w/ latest release ([112de6b](https://github.com/LECOQQ/qbit-ops/commit/112de6bae9193f9228e0bae37713faaf3e94ce76))
+* **roadmap:** describe capabilities against the code, not the wording ([99c86b8](https://github.com/LECOQQ/qbit-ops/commit/99c86b8a916e86af5cf83d65487a6c2b5da053c2))
+* **roadmap:** list every shipped capability under the current release ([488cd88](https://github.com/LECOQQ/qbit-ops/commit/488cd8891cc6e442550aaf0e741ff29a9e81a26a))
+* **roadmap:** mark the v0.5.0 items that have shipped ([cd74bf6](https://github.com/LECOQQ/qbit-ops/commit/cd74bf6d5aede09924924d98631c03d3ab668194))
+* **roadmap:** reconcile the map with what the code now does ([61c5420](https://github.com/LECOQQ/qbit-ops/commit/61c5420aca4208207af6c0bb30f831a08426163b))
+* **tests:** drop references to a document no clone will ever have ([77a48f1](https://github.com/LECOQQ/qbit-ops/commit/77a48f1b6c66f88224d1f16e63c0334b29fa7fd7))
+* **tests:** point the bulk spec reference at its delivered location ([d46baad](https://github.com/LECOQQ/qbit-ops/commit/d46baadacc5d9e85df4343aec3ce732513e079e5))
+* **tests:** point the throttle suite at the delivered spec ([7fc3c78](https://github.com/LECOQQ/qbit-ops/commit/7fc3c788a7dfb19303d8cb367278e61fe5836979))
+* **torrents:** document bulk rate limiting ([26e35df](https://github.com/LECOQQ/qbit-ops/commit/26e35df95a6e6ce90ca5734ff39110af762d7b09))
+
 ## [0.4.0](https://github.com/LECOQQ/qbit-ops/compare/v0.3.0...v0.4.0) (2026-08-13)
 
 
