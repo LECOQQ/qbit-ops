@@ -106,11 +106,8 @@ Then set up the connection:
 qbit-ops init
 ```
 
-It asks for the host, the user and the password, tests them, and writes
-`~/.config/qbit-ops/.env` with `0600` permissions. `qbit-ops tui` shows
-the same form when nothing is configured yet. For scripts and
-containers, export `QBIT_HOST`, `QBIT_USER` and `QBIT_PASSWORD` instead
--- they take precedence over the file, and `init` says so when they do.
+It asks, tests, and remembers. `qbit-ops tui` offers the same form when
+nothing is configured yet.
 
 Then:
 

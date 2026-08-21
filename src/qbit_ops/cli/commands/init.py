@@ -36,12 +36,9 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Set up the qBittorrent connection, interactively.
 
-        Asks for the host, user and password, tests them, and writes
-        them to the user configuration file at `0600`. A failed test
-        does not cancel the write -- an instance that is simply not
-        started yet is as ordinary as a typo. There is deliberately no
-        option to pass the password on the command line: the scriptable
-        path is QBIT_HOST/QBIT_USER/QBIT_PASSWORD in the environment.
+        Asks for the host, user and password, tests them, and saves
+        them. Needs a terminal; for scripts, set QBIT_HOST, QBIT_USER
+        and QBIT_PASSWORD in the environment instead.
         """
         target = get_user_env_file()
 
