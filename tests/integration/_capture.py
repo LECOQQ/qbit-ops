@@ -62,9 +62,9 @@ class CapturedFixtureSet:
     written_files: tuple[Path, ...]
 
 
-def _without_external_address(payload: dict[str, Any]) -> tuple[
-    dict[str, Any], list[str]
-]:
+def _without_external_address(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
     """Strip the instance's own public address from a payload.
 
     qBittorrent 5.1 added `last_external_address_v4`/`_v6`, and returns
@@ -286,7 +286,10 @@ def capture_matrix_fixtures(
     # without a captured payload to check itself against, so what the
     # instance really returns there was never verified against a real
     # qBittorrent.
-    sync_maindata = dict(client.sync_maindata())
+    # Annotated, not inferred: `client` is untyped, so the mapping
+    # comes back as `dict[Unknown, Unknown]` and every read off it
+    # widens into a type the sanitizer below cannot accept.
+    sync_maindata: dict[str, Any] = dict(client.sync_maindata())
     server_state, external_address_fields = _without_external_address(
         dict(sync_maindata.get("server_state") or {})
     )

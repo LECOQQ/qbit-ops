@@ -10,26 +10,26 @@ from rich.style import Style
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Static
 
-from qbit_core.features.status import Health
 from qbit_ops import __version__
 from qbit_ops.tui.formatting import (
     _BRAND_ACCENT,
     _GRADIENT_END,
     _GRADIENT_START,
     _INACTIVE_TAB_ACCENT,
-    _format_bytes,
+    _window_title,
 )
 from qbit_ops.tui.state import ConnectionState, TuiState, Workspace
-
-_HEALTH_STYLES: dict[Health, str] = {
-    Health.HEALTHY: "bold green",
-    Health.WARNING: "bold yellow",
-    Health.CRITICAL: "bold red",
-    Health.UNAVAILABLE: "bold red",
-}
+from qbit_ops.tui.widgets.overview_windows import (
+    SESSION_TITLE,
+    TRACKERS_TITLE,
+    SessionWindow,
+    TrackersWindow,
+    connection_marker,
+)
+from qbit_ops.tui.widgets.rate_graph import RateGraph
 
 _CONNECTION_LABELS: dict[ConnectionState, str] = {
     ConnectionState.CONNECTING: "connecting",
@@ -49,17 +49,6 @@ _CONNECTION_STYLES: dict[ConnectionState, str] = {
     ConnectionState.AUTH_FAILED: "bold red",
     ConnectionState.CONFIG_FAILED: "bold red",
 }
-
-_OVERVIEW_NAV_HINT = "[bold]Enter[/bold] / [bold]t[/bold]   Browse torrents"
-
-# Minimum Screen width for the `#overview-cards` two-column grid, kept
-# distinct from `NARROW_WIDTH_THRESHOLD` (which governs `.narrow`,
-# DetailsPanel visibility, etc.). Measured against this module's own
-# rendered content at the `grid-columns: 3fr 2fr` ratio below: Health's
-# widest realistic line ("999 errored · 999 unknown", 26 columns) needs
-# >= 27 columns once its 1-column padding + border are added, which the
-# grid first provides at Screen width 90.
-OVERVIEW_GRID_MIN_WIDTH = 90
 
 
 # -- BrandHeader ----------------------------------------------------------
@@ -86,16 +75,23 @@ _LOGO_COMPACT: tuple[str, ...] = (
 
 # BrandHeader picks its variant from its own measured logo widths, not
 # the general card-layout breakpoints in `formatting.py` -- reusing those
-# made the compact wordmark disappear far before it needed to. Margins
-# keep each logo from crowding its container.
+# made the compact wordmark disappear far before it needed to.
+#
+# The margins are one and two columns, not five and six: the wordmark no
+# longer owns the full width, it owns the identity column beside the
+# graph, and the old margins dropped the full wordmark at 140 columns --
+# the very width the design is drawn at.
 _FULL_LOGO_WIDTH = max(len(line) for line in _LOGO_FULL)
 _COMPACT_LOGO_WIDTH = max(len(line) for line in _LOGO_COMPACT)
-_BRAND_FULL_MIN_WIDTH = _FULL_LOGO_WIDTH + 6  # 64
-_BRAND_COMPACT_MIN_WIDTH = _COMPACT_LOGO_WIDTH + 5  # 50
+_BRAND_FULL_MIN_WIDTH = _FULL_LOGO_WIDTH + 2  # 59
+_BRAND_COMPACT_MIN_WIDTH = _COMPACT_LOGO_WIDTH + 1  # 46
 
-_TAGLINE_FULL = "Safe qBittorrent operations from your terminal"
+# Kept only for the variant that has no wordmark to identify the app
+# with. Beside a drawn wordmark the tagline restated what the picture
+# already said, and the hint restated `[?→Help]` in the command bar --
+# together they cost the masthead three of its ten lines, on the page
+# whose measured problem was emptiness.
 _TAGLINE_COMPACT = "Safe qBittorrent operations"
-_HINT = "Dry-run first · Press ? for help"
 _HINT_NARROW = "Dry-run first · ? Help"
 
 
@@ -139,24 +135,19 @@ def _version_text() -> str:
 
 
 def _render_variant(variant: HeaderVariant) -> Group:
-    version = _version_text()
+    """The wordmark, and nothing else while there is a wordmark.
+
+    The installed version is carried by the app frame's own border
+    title, so dropping it from beside the logo loses nothing -- and the
+    text-only variant, which has no wordmark at all, keeps it because
+    there is nothing else there to name the application.
+    """
     if variant is HeaderVariant.FULL:
-        return Group(
-            _gradient_logo(_LOGO_FULL),
-            Text(""),
-            Text(f"{_TAGLINE_FULL}   {version}"),
-            Text(_HINT),
-        )
+        return Group(_gradient_logo(_LOGO_FULL))
     if variant is HeaderVariant.COMPACT:
-        # No blank separator here (unlike full): the compact band has
-        # the least vertical room to spare above the fold.
-        return Group(
-            _gradient_logo(_LOGO_COMPACT),
-            Text(f"{_TAGLINE_COMPACT} · {version}"),
-            Text(_HINT),
-        )
+        return Group(_gradient_logo(_LOGO_COMPACT))
     return Group(
-        Text(f"qbit-ops {version}"),
+        Text(f"qbit-ops {_version_text()}"),
         Text(_TAGLINE_COMPACT),
         Text(_HINT_NARROW),
     )
@@ -230,43 +221,58 @@ def _tab_label(name: str, keys: str, active: bool) -> str:
 
 
 class OverviewPanel(VerticalScroll):
-    """The Overview workspace's content: one operational homepage built
-    entirely from the same `TuiState` the periodic refresh already
-    populates. No qBittorrent call of its own.
+    """The Overview workspace: what the machine is doing, in one screen.
 
-    `BrandHeader` and the Browse-torrents nav hint are mounted once and
-    never torn down; `render_state()` only updates the rail's text and
-    replaces the three `#overview-cards` cards.
+    Four regions, all built from the same `TuiState` the periodic
+    refresh already populates -- no qBittorrent call of its own:
 
-    Torrents and Health sub-counts don't partition their card's total
-    -- a torrent can count toward more than one at once (e.g. seeding
-    *and* completed *and* stalled). Instance is lifetime totals
-    (`TuiState.instance_stats`), never derived from the torrent list.
+        identity   the wordmark, and the instance's own status line
+        graph      sixty seconds of transfer, in the band beside it
+        ᴛʀᴀᴄᴋᴇʀꜱ    per-tracker activity, derived from torrent rates
+        ꜱᴇꜱꜱɪᴏɴ     the instance's counters and the library's shape
+
+    Every child is mounted once and never torn down; `render_state()`
+    only updates their content, so a refresh never costs a remount.
     """
 
+    def __init__(
+        self, *, id: str | None = None, small_caps: bool = True
+    ) -> None:
+        super().__init__(id=id)
+        self._small_caps = small_caps
+
     def compose(self) -> ComposeResult:
-        yield BrandHeader(id="brand-header")
-        yield Static(id="overview-rail", classes="ov-rail")
-        yield Vertical(id="overview-cards")
-        yield Static(_OVERVIEW_NAV_HINT, classes="ov-nav", id="overview-nav")
+        with Horizontal(id="overview-masthead"):
+            with Vertical(id="overview-identity"):
+                yield BrandHeader(id="brand-header")
+                yield Static(id="overview-rail", classes="ov-rail")
+            yield RateGraph(id="rate-graph")
+        with Horizontal(id="overview-windows"):
+            yield TrackersWindow(id="trackers-window")
+            yield SessionWindow(id="session-window")
+
+    def on_mount(self) -> None:
+        trackers = self.query_one("#trackers-window", TrackersWindow)
+        trackers.border_title = _window_title(
+            TRACKERS_TITLE, small_caps=self._small_caps
+        )
+        session = self.query_one("#session-window", SessionWindow)
+        session.border_title = _window_title(
+            SESSION_TITLE, small_caps=self._small_caps
+        )
 
     def render_state(self, state: TuiState) -> None:
         rail = self.query_one("#overview-rail", Static)
-        cards = self.query_one("#overview-cards", Vertical)
-        cards.remove_children()
-
         if state.status is None:
             rail.update("Connecting to qBittorrent...")
-            return
+        else:
+            rail.update(_overview_rail_text(state))
 
-        rail.update(_overview_rail_text(state))
-        torrents = Static(_overview_torrents_text(state), classes="ov-torrents")
-        health_class = f"ov-health ov-health-{state.status.health.value}"
-        health = Static(_overview_health_text(state), classes=health_class)
-        instance = Static(
-            _overview_instance_stats_text(state), classes="ov-instance"
+        self.query_one("#rate-graph", RateGraph).render_state(
+            state.rate_history
         )
-        cards.mount(torrents, health, instance)
+        self.query_one("#trackers-window", TrackersWindow).render_state(state)
+        self.query_one("#session-window", SessionWindow).render_state(state)
 
 
 def _format_rail_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
@@ -282,17 +288,29 @@ def _format_rail_time(moment: datetime, *, tz: tzinfo | None = None) -> str:
 
 
 def _overview_rail_text(state: TuiState) -> str:
-    """Connection/version/refresh status, one line.
+    """The instance's own status line: how it is reachable, and what it is.
 
-    Transfer rates live in the top-right `GlobalRateDisplay` now, not
-    here -- this rail only ever restates connection identity, never
-    duplicates data another region already owns.
+    While the TUI is connected, the word and the glyph come from
+    qBittorrent's *own* `connection_status`, not from the fact that the
+    call succeeded. The two are not the same claim: a firewalled
+    instance answers every request and still receives nothing, and
+    printing "Connected" over it hid exactly the cause a flat download
+    graph would otherwise leave unexplained.
+
+    Transfer rates live in the top-right `GlobalRateDisplay` and in the
+    graph, never here.
     """
     status = state.status
     assert status is not None
-    style = _CONNECTION_STYLES[state.connection]
-    label = _CONNECTION_LABELS[state.connection].capitalize()
-    parts = [f"[{style}]●[/{style}] [bold]{label}[/bold]"]
+
+    if state.connection is ConnectionState.CONNECTED:
+        glyph, label, style = connection_marker(state.instance_stats)
+    else:
+        glyph = "●"
+        label = _CONNECTION_LABELS[state.connection].capitalize()
+        style = _CONNECTION_STYLES[state.connection]
+
+    parts = [f"[{style}]{glyph}[/{style}] [bold]{label}[/bold]"]
     if status.qbittorrent_version:
         parts.append(f"qBittorrent {status.qbittorrent_version}")
     if status.api_version:
@@ -304,92 +322,9 @@ def _overview_rail_text(state: TuiState) -> str:
     else:
         parts.append("Refreshed never")
 
-    lines = ["   ".join(parts)]
+    lines = [" · ".join(parts)]
     if state.stale:
         lines.append(
             "[bold yellow]STALE[/bold yellow] -- showing last-good data"
         )
     return "\n".join(lines)
-
-
-# Label/value pairs, left column then right column, in display order.
-_TORRENT_ROWS: tuple[tuple[str, str], ...] = (
-    ("Completed", "Incomplete"),
-    ("Downloading", "Seeding"),
-    ("Stopped", "Checking"),
-)
-_TORRENT_LEFT_LABEL_WIDTH = max(len(left) for left, _ in _TORRENT_ROWS)
-_TORRENT_RIGHT_LABEL_WIDTH = max(len(right) for _, right in _TORRENT_ROWS)
-
-
-def _overview_torrents_text(state: TuiState) -> str:
-    status = state.status
-    assert status is not None
-    counts = status.counts
-    incomplete = max(counts.total - counts.completed, 0)
-
-    value_pairs = (
-        (counts.completed, incomplete),
-        (counts.downloading, counts.seeding),
-        (state.stopped_count, counts.checking),
-    )
-    # Shared value width so digit-count jumps (e.g. 4-digit totals)
-    # never shift one row's columns out of line with the others.
-    value_width = max(len(str(value)) for pair in value_pairs for value in pair)
-
-    rows = "\n".join(
-        f"{left_label:<{_TORRENT_LEFT_LABEL_WIDTH}}  "
-        f"{left_value:>{value_width}}    "
-        f"{right_label:<{_TORRENT_RIGHT_LABEL_WIDTH}}  "
-        f"{right_value:>{value_width}}"
-        for (left_label, right_label), (left_value, right_value) in zip(
-            _TORRENT_ROWS, value_pairs, strict=True
-        )
-    )
-    return (
-        "[bold]Torrents[/bold]\n"
-        "\n"
-        f"[bold]{counts.total} total[/bold]\n"
-        "\n"
-        f"{rows}"
-    )
-
-
-def _overview_health_text(state: TuiState) -> str:
-    status = state.status
-    assert status is not None
-    counts = status.counts
-    style = _HEALTH_STYLES[status.health]
-    finding_count = len(status.alerts)
-    finding_word = "finding" if finding_count == 1 else "findings"
-    lines = [
-        "[bold]Health[/bold]",
-        "",
-        f"[{style}]{status.health.value.title()}[/{style}] · "
-        f"{finding_count} {finding_word}",
-        f"{counts.stalled} stalled",
-        f"{counts.errored} errored · {counts.unknown} unknown",
-    ]
-    return "\n".join(lines)
-
-
-def _format_ratio(ratio: float | None) -> str:
-    """`None` means qBittorrent has no ratio computed yet."""
-    if ratio is None:
-        return "–"
-    return f"{ratio:.2f}"
-
-
-def _overview_instance_stats_text(state: TuiState) -> str:
-    """Lifetime totals (qBittorrent's "Statistics" dialog), never
-    derived from the current torrent list."""
-    stats = state.instance_stats
-    assert stats is not None
-    return (
-        "[bold]Instance[/bold]\n"
-        "\n"
-        f"↓ All-time {_format_bytes(stats.all_time_downloaded_bytes)}"
-        f"    ↑ All-time {_format_bytes(stats.all_time_uploaded_bytes)}\n"
-        f"Ratio {_format_ratio(stats.all_time_ratio)}"
-        f"    Connected peers {stats.connected_peers}"
-    )

@@ -15,7 +15,8 @@ Enforced by `tests/test_tui_security.py`.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -37,8 +38,15 @@ from qbit_core.features.torrents import (
     get_safe_tracker_details,
     select_torrents_from_items,
 )
-from qbit_core.features.trackers import sanitize_tracker_text
-from qbit_core.qbit.fields import get_field_as_string
+from qbit_core.features.trackers import (
+    sanitize_tracker_text,
+    tracker_host_or_none,
+)
+from qbit_core.qbit.fields import (
+    get_field_as_int,
+    get_field_as_string,
+    get_field_as_tag_list,
+)
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.search import search_snapshots
 from qbit_core.shared.selection import (
@@ -60,6 +68,307 @@ from qbit_ops.app_services import (
 from qbit_ops.config import ConfigError
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
+
+# The rate graph keeps a clock of its own, deliberately not
+# `--interval`. Sampling on the refresh tick would make the window
+# `slots x interval` seconds wide, so the `-60s` axis label would become
+# a false claim the moment an operator changed the interval. Fixed here
+# instead, and the label is then true *by construction* rather than by
+# arithmetic -- the assertion below is what keeps the three constants
+# from drifting apart.
+GRAPH_SAMPLE_INTERVAL_SECONDS = 5.0
+GRAPH_WINDOW_SECONDS = 60
+GRAPH_SLOTS = 12
+
+assert GRAPH_SLOTS * GRAPH_SAMPLE_INTERVAL_SECONDS == GRAPH_WINDOW_SECONDS
+
+# The bucket every torrent whose `tracker` field names no host falls
+# into: a DHT/PeX/LSD marker, an empty value on a torrent that has not
+# announced yet, or something unparsable. Kept as one bucket with its
+# own glyph rather than folded into a real tracker's row.
+NO_TRACKER_KEY = ""
+NO_TRACKER_LABEL = "(no tracker · DHT)"
+
+
+class TrackerActivityKind(StrEnum):
+    """What a tracker's torrents are *doing*, derived from their rates.
+
+    Deliberately not tracker health: nothing here reads an announce
+    status, and the vocabulary is disjoint from
+    `qbit_core.features.trackers.TrackerHealth` so the two can never be
+    confused by resemblance. The real per-endpoint status lives on the
+    Trackers page, which pays for a scan when it is opened.
+    """
+
+    BOTH = "up+down"
+    SEEDING = "seeding"
+    LEECHING = "leeching"
+    ERRORED = "errored"
+    IDLE = "idle"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class TrackerActivity:
+    """One row of the Overview's Trackers window.
+
+    Attributed by `torrents_info()`'s own `tracker` field -- already
+    loaded by the periodic refresh, so this costs no API call. That
+    field names only the torrent's *currently working* tracker, which is
+    why `torrents` here counts torrents attributed to this host and not
+    torrents announcing to it.
+    """
+
+    key: str
+    label: str
+    kind: TrackerActivityKind
+    download_rate: int
+    upload_rate: int
+    errored: int
+    torrents: int
+
+    @property
+    def total_rate(self) -> int:
+        return self.download_rate + self.upload_rate
+
+
+@dataclass(frozen=True)
+class TrackerBreakdown:
+    """Every tracker row plus the totals the window's footer states.
+
+    `exclusive`/`shared` read each torrent's own `trackers_count`, so
+    they never need a per-torrent `torrents_trackers()` call.
+    """
+
+    rows: tuple[TrackerActivity, ...]
+    torrents: int
+    exclusive: int
+    shared: int
+
+    def count_by_kind(self, kind: TrackerActivityKind) -> int:
+        return sum(1 for row in self.rows if row.kind is kind)
+
+
+@dataclass(frozen=True)
+class LibraryBreakdown:
+    """Size, categories and tags of the current library.
+
+    Derived from the same torrent list every other counter reads. A
+    torrent carries any number of tags, so the tag counts deliberately
+    do not partition the total the way the category counts do.
+    """
+
+    total_size_bytes: int
+    categories: tuple[tuple[str, int], ...]
+    tags: tuple[tuple[str, int], ...]
+    untagged: int
+
+
+def build_tracker_breakdown(raw_torrents: list[Any]) -> TrackerBreakdown:
+    """Group torrents by their working tracker's host. Zero API calls."""
+    rates: dict[str, list[int]] = {}
+    labels: dict[str, str] = {}
+    errored: dict[str, int] = {}
+    torrents: dict[str, int] = {}
+    exclusive = 0
+    shared = 0
+
+    for torrent in raw_torrents:
+        key, label = _tracker_identity(torrent)
+        labels.setdefault(key, label)
+        bucket = rates.setdefault(key, [0, 0])
+        bucket[0] += get_field_as_int(torrent, "dlspeed")
+        bucket[1] += get_field_as_int(torrent, "upspeed")
+        torrents[key] = torrents.get(key, 0) + 1
+        state = get_field_as_string(torrent, "state")
+        if classify_torrent_state(state) == "errored":
+            errored[key] = errored.get(key, 0) + 1
+
+        tracker_count = get_field_as_int(torrent, "trackers_count")
+        if tracker_count == 1:
+            exclusive += 1
+        elif tracker_count > 1:
+            shared += 1
+
+    rows = tuple(
+        sorted(
+            (
+                TrackerActivity(
+                    key=key,
+                    label=labels[key],
+                    kind=_tracker_activity_kind(
+                        key=key,
+                        download_rate=rates[key][0],
+                        upload_rate=rates[key][1],
+                        errored=errored.get(key, 0),
+                    ),
+                    download_rate=rates[key][0],
+                    upload_rate=rates[key][1],
+                    errored=errored.get(key, 0),
+                    torrents=torrents[key],
+                )
+                for key in rates
+            ),
+            key=lambda row: (-row.total_rate, row.label.casefold()),
+        )
+    )
+    return TrackerBreakdown(
+        rows=rows,
+        torrents=len(raw_torrents),
+        exclusive=exclusive,
+        shared=shared,
+    )
+
+
+def _tracker_identity(torrent: Any) -> tuple[str, str]:
+    """The host a torrent is attributed to, and how to print it.
+
+    Only the host survives: a raw announce URL carries a passkey, and
+    nothing on this screen needs one. `tracker_host_or_none` accepts a
+    bare host as well as a URL, so a value that is neither is rejected
+    here rather than printed verbatim -- an unparsable string must land
+    in the unknown bucket, never on screen.
+    """
+    host = tracker_host_or_none(get_field_as_string(torrent, "tracker"))
+    if host is None or not _is_host_shaped(host):
+        return NO_TRACKER_KEY, NO_TRACKER_LABEL
+    return host, host
+
+
+def _is_host_shaped(value: str) -> bool:
+    """Whether `value` can be a `host[:port]` and nothing else."""
+    return bool(value) and not any(
+        char.isspace() or char in "/?#@" for char in value
+    )
+
+
+def _tracker_activity_kind(
+    *, key: str, download_rate: int, upload_rate: int, errored: int
+) -> TrackerActivityKind:
+    """Classify one tracker's row. The order of these tests partitions
+    the rows, so the window's legend always adds up to its count."""
+    if key == NO_TRACKER_KEY:
+        return TrackerActivityKind.UNKNOWN
+    if errored > 0:
+        return TrackerActivityKind.ERRORED
+    if upload_rate > 0 and download_rate > 0:
+        return TrackerActivityKind.BOTH
+    if upload_rate > 0:
+        return TrackerActivityKind.SEEDING
+    if download_rate > 0:
+        return TrackerActivityKind.LEECHING
+    return TrackerActivityKind.IDLE
+
+
+def build_library_breakdown(raw_torrents: list[Any]) -> LibraryBreakdown:
+    """Total size, per-category and per-tag counts. Zero API calls."""
+    total_size = 0
+    categories: dict[str, int] = {}
+    tags: dict[str, int] = {}
+    untagged = 0
+
+    for torrent in raw_torrents:
+        total_size += get_field_as_int(torrent, "size")
+        label = format_category_label(get_field_as_string(torrent, "category"))
+        categories[label] = categories.get(label, 0) + 1
+        torrent_tags = get_field_as_tag_list(torrent)
+        if not torrent_tags:
+            untagged += 1
+        for tag in torrent_tags:
+            tags[tag] = tags.get(tag, 0) + 1
+
+    return LibraryBreakdown(
+        total_size_bytes=total_size,
+        categories=_ranked(categories),
+        tags=_ranked(tags),
+        untagged=untagged,
+    )
+
+
+def _ranked(counts: dict[str, int]) -> tuple[tuple[str, int], ...]:
+    """Busiest first, then alphabetical -- a stable order across refreshes."""
+    return tuple(
+        sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+    )
+
+
+class RateHistory:
+    """A rolling window of transfer samples, on the graph's own clock.
+
+    Holds `GRAPH_SLOTS` samples, oldest first. Nothing is persisted --
+    the window dies with the process, so a freshly started TUI has *no*
+    samples rather than a row of zeros. `measured` is what lets a caller
+    keep those two apart: an unmeasured slot is not a slot that measured
+    nothing.
+    """
+
+    def __init__(self, slots: int = GRAPH_SLOTS) -> None:
+        self._slots = slots
+        self._download: deque[int] = deque(maxlen=slots)
+        self._upload: deque[int] = deque(maxlen=slots)
+        self._by_tracker: dict[str, deque[int]] = {}
+
+    @property
+    def slots(self) -> int:
+        return self._slots
+
+    @property
+    def measured(self) -> int:
+        """How many of the window's slots hold a real sample."""
+        return len(self._download)
+
+    @property
+    def downloads(self) -> tuple[int, ...]:
+        return tuple(self._download)
+
+    @property
+    def uploads(self) -> tuple[int, ...]:
+        return tuple(self._upload)
+
+    @property
+    def tracker_keys(self) -> tuple[str, ...]:
+        return tuple(self._by_tracker)
+
+    def tracker(self, key: str) -> tuple[int, ...]:
+        return tuple(self._by_tracker.get(key, ()))
+
+    @property
+    def tracker_peak(self) -> int:
+        """The busiest sample across every tracker in the window.
+
+        One shared scale for every sparkline: rows drawn against their
+        own maxima would each peak at full ink and stop being
+        comparable, which is the only thing a column of them is for.
+        """
+        return max(
+            (max(samples, default=0) for samples in self._by_tracker.values()),
+            default=0,
+        )
+
+    def record(
+        self,
+        *,
+        download: int,
+        upload: int,
+        by_tracker: Mapping[str, int] | None = None,
+    ) -> None:
+        """Append one sample to every series the window tracks."""
+        self._download.append(max(download, 0))
+        self._upload.append(max(upload, 0))
+
+        seen = dict(by_tracker or {})
+        for key in list(self._by_tracker):
+            samples = self._by_tracker[key]
+            samples.append(max(seen.pop(key, 0), 0))
+            # A tracker that has left the library *and* has gone quiet
+            # for a whole window stops costing a series.
+            if not any(samples):
+                del self._by_tracker[key]
+        for key, value in seen.items():
+            samples = deque(maxlen=self._slots)
+            samples.append(max(value, 0))
+            self._by_tracker[key] = samples
+
 
 # Downloading/seeding are the two "active" groups a torrent spends most
 # of its life in; everything else (including a still-unclassified raw
@@ -216,6 +525,11 @@ class TuiState:
     """Instance-wide torrent count from the last successful refresh;
     `None` until one has landed."""
     stopped_count: int = 0
+    tracker_breakdown: TrackerBreakdown | None = None
+    library_breakdown: LibraryBreakdown | None = None
+    rate_history: RateHistory = field(default_factory=RateHistory)
+    """The graph's rolling 60 s window, filled by its own timer rather
+    than by the refresh -- see `GRAPH_SAMPLE_INTERVAL_SECONDS`."""
     filters: TorrentFilter = field(default_factory=TorrentFilter)
     search: str = ""
     visible: Selection | None = None
@@ -380,6 +694,12 @@ class TuiController:
         self.state.instance_stats = result.instance_stats
         self.state.total_torrents = result.total_torrents
         self.state.stopped_count = _count_stopped_torrents(result.raw_torrents)
+        self.state.tracker_breakdown = build_tracker_breakdown(
+            result.raw_torrents
+        )
+        self.state.library_breakdown = build_library_breakdown(
+            result.raw_torrents
+        )
         self.state.connection = ConnectionState.CONNECTED
         self.state.stale = False
         self.state.last_error = None
@@ -389,6 +709,33 @@ class TuiController:
         self._reconcile_focus()
         if reconcile:
             self.reconcile_selection()
+
+    def sample_rates(self) -> None:
+        """Record one graph sample. UI-thread only, zero API calls.
+
+        Driven by the graph's own timer, not the refresh: the window has
+        to be a fixed span of wall-clock time for its axis label to mean
+        anything. The values come from the last successful refresh, so
+        at the default interval every slot is a distinct measurement,
+        and at a longer one the newest reading repeats -- exactly what
+        every other region of the screen is already showing. A refresh
+        that has never landed records nothing at all rather than a zero.
+        """
+        status = self.state.status
+        if status is None:
+            return
+
+        breakdown = self.state.tracker_breakdown
+        by_tracker = (
+            {row.key: row.total_rate for row in breakdown.rows}
+            if breakdown is not None
+            else {}
+        )
+        self.state.rate_history.record(
+            download=status.rates.download_bytes_per_second,
+            upload=status.rates.upload_bytes_per_second,
+            by_tracker=by_tracker,
+        )
 
     def apply_refresh_failure(self, error: Exception) -> None:
         """Classify and apply a failed periodic refresh. UI-thread only.

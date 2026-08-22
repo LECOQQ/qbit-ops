@@ -265,11 +265,19 @@ See [PHILOSOPHY.md](https://github.com/LECOQQ/qbit-ops/blob/main/PHILOSOPHY.md) 
 
 ## 🖥️ TUI
 
-The optional Textual interface provides a branded overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
+The optional Textual interface provides an operational overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
+
+The overview answers "what is this machine doing" without reading a
+number: sixty seconds of transfer drawn in both directions, per-tracker
+activity, and the instance's own counters.
 
 ```bash
 qbit-ops tui
 ```
+
+Window titles are set in Unicode small capitals. If your terminal font
+does not carry them, `qbit-ops tui --ascii-titles` renders plain
+capitals instead.
 
 | Overview | Torrents |
 |---|---|

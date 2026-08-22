@@ -66,65 +66,92 @@ MainScreen.narrow {
     height: 1fr;
     padding: 0 1;
 }
-#brand-header {
+/* The masthead: the wordmark and the instance's status line on the
+   left, the sixty-second graph filling the band to their right. The
+   graph takes no line of its own -- it occupies cells the wordmark was
+   already reserving and leaving blank. */
+#overview-masthead {
     height: auto;
     margin-bottom: 1;
+}
+/* A fraction, not `auto`. `auto` looked right and was circular:
+   `BrandHeader` picks its variant from the width it is *given*, so an
+   auto column sized itself from the smallest variant, which then kept
+   the header small. Four to five leaves the wordmark its full form and
+   the plot the wider half. */
+#overview-identity {
+    width: 4fr;
+    height: auto;
+}
+#brand-header {
+    height: auto;
 }
 .ov-rail {
     height: auto;
-    padding: 0 0 1 0;
-    border-bottom: solid $panel-lighten-2;
-    margin-bottom: 1;
+    padding: 1 0 0 0;
 }
-#overview-cards {
-    height: auto;
-}
-#overview-cards.grid {
-    layout: grid;
-    grid-size: 2;
-    grid-columns: 3fr 2fr;
-    grid-gutter: 0 2;
-    grid-rows: auto;
-}
-.ov-torrents {
-    height: auto;
-    padding: 0 1 0 0;
-}
-.ov-health {
+/* `1fr`, so the plot gets every column the identity column leaves.
+   The separator is a border rather than a drawn character: one rule
+   instead of a column of `│` appended to nine strings. */
+#rate-graph {
+    width: 5fr;
     height: auto;
     padding: 0 0 0 1;
     border-left: solid $panel-lighten-2;
-    margin-top: 1;
+    margin-left: 1;
 }
-#overview-cards.grid .ov-health {
-    margin-top: 0;
+/* Three fractions to two: the tracker table has six columns to fit and
+   the Session window a label plus a value. An `auto` Session window was
+   tried first and rejected -- its width then moved with its longest
+   category list, so the tracker table's columns shifted whenever an
+   operator added a category. */
+#overview-windows {
+    height: 1fr;
 }
-.ov-health-healthy {
-    border-left: solid $success;
+#trackers-window {
+    width: 3fr;
+    height: 1fr;
+    border: round $panel-lighten-2;
+    border-title-color: $primary;
+    border-title-align: left;
+    padding: 0 1;
 }
-.ov-health-warning {
-    border-left: solid $warning;
+#session-window {
+    width: 2fr;
+    height: 1fr;
+    border: round $panel-lighten-2;
+    border-title-color: $primary;
+    border-title-align: left;
+    padding: 0 1;
+    margin-left: 1;
 }
-.ov-health-critical, .ov-health-unavailable {
-    border-left: solid $error;
-}
-/* column-span, not a 3rd grid column: avoids an empty cell in
-   row 2 of the 2-column grid. */
-.ov-instance {
+/* Narrow terminals stack the two windows instead of squeezing the
+   tracker table below the width its columns need. */
+MainScreen.narrow #overview-windows {
+    layout: vertical;
     height: auto;
-    padding: 1 0 0 0;
-    border-top: solid $panel-lighten-2;
-    margin-top: 1;
 }
-#overview-cards.grid .ov-instance {
-    column-span: 2;
-}
-.ov-nav {
-    color: $text-muted;
-    padding: 1 0 0 0;
-    border-top: solid $panel-lighten-2;
-    margin-top: 1;
+MainScreen.narrow #trackers-window,
+MainScreen.narrow #session-window {
+    width: 1fr;
     height: auto;
+    margin-left: 0;
+}
+MainScreen.narrow #overview-masthead {
+    layout: vertical;
+    height: auto;
+}
+/* A cross-axis `fr` in a vertical container does not mean "share of the
+   row" -- measured at 96 columns, `4fr` resolved to 372. Pinned back to
+   the full width once the masthead stops being a row. */
+MainScreen.narrow #overview-identity {
+    width: 1fr;
+}
+MainScreen.narrow #rate-graph {
+    width: 1fr;
+    border-left: none;
+    margin-left: 0;
+    padding: 0;
 }
 #filter-summary {
     height: auto;
@@ -246,6 +273,10 @@ QbitModal {
 }
 .qbit-dialog {
     max-height: 90%;
+    /* The exact counterpart of `max-height`, and it was missing: the
+       three width words below are absolute columns, so `-large`'s 100
+       ran its right border off a 96-column terminal. */
+    max-width: 100%;
     border: round $primary;
     border-title-color: $primary;
     border-title-align: left;

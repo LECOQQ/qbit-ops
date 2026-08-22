@@ -51,6 +51,18 @@ GALLERY_SIZE = (140, 40)
 _CHROME_CIRCLE = re.compile(r'\s*<circle cx="\d+" cy="0" r="7"[^>]*/>')
 
 
+# Enough distinct hosts that the Trackers window shows a real spread,
+# plus the two shapes that name no host at all.
+_TRACKERS: tuple[str, ...] = (
+    "https://tracker.example.org/announce",
+    "https://bt.private.tld/announce/passkey",
+    "udp://open.demonii.si:1337/announce",
+    "https://flaky.tracker.net/announce",
+    "** [DHT] **",
+    "",
+)
+
+
 def _torrent(index: int, **overrides: Any) -> dict[str, Any]:
     """One synthetic torrent, varied enough to exercise the renderers."""
     states = ["uploading", "downloading", "stalledUP", "error", "pausedUP"]
@@ -74,6 +86,11 @@ def _torrent(index: int, **overrides: Any) -> dict[str, Any]:
         "completion_on": 1_700_086_400 - index * 86_400,
         "last_activity": 1_700_090_000 - index * 3_600,
         "save_path": f"/downloads/{index}",
+        # The Overview attributes each torrent to its working tracker,
+        # so a fixture without one photographs a single "no tracker"
+        # row instead of the window under test.
+        "tracker": _TRACKERS[index % len(_TRACKERS)],
+        "trackers_count": 1 + index % 3,
     }
     base.update(overrides)
     return base
@@ -98,12 +115,23 @@ class _GalleryClient:
         return {"dl_info_speed": 4_200_000, "up_info_speed": 900_000}
 
     def sync_maindata(self) -> dict[str, Any]:
+        # Every field the Session window reads, or the capture shows
+        # blanks where the screen under review has values.
         return {
             "server_state": {
                 "alltime_dl": 8_400_000_000_000,
                 "alltime_ul": 12_900_000_000_000,
                 "global_ratio": "1.54",
                 "total_peer_connections": 214,
+                "dl_info_data": 442_000_000_000,
+                "up_info_data": 94_500_000_000,
+                "dht_nodes": 387,
+                "dl_rate_limit": 0,
+                "up_rate_limit": 2_097_152,
+                "use_alt_speed_limits": False,
+                "free_space_on_disk": 1_319_413_953_331,
+                "queueing": True,
+                "connection_status": "firewalled",
             }
         }
 
@@ -160,6 +188,37 @@ def build_app(name: str) -> QbitOpsTuiApp:
     )
 
 
+# One synthetic minute of transfer, so the Overview capture shows the
+# braille alphabet, the floored row sitting on the axis, and the
+# per-tracker sparklines. Left empty, the graph would photograph its
+# warm-up state -- honest, and useless for judging what it draws.
+_SEEDED_DOWNLOAD = (
+    1_900_000, 3_400_000, 5_100_000, 4_200_000, 6_100_000, 5_800_000,
+    2_600_000, 900_000, 3_100_000, 4_700_000, 6_100_000, 4_000_000,
+)  # fmt: skip
+_SEEDED_UPLOAD = (
+    260_000, 410_000, 900_000, 1_200_000, 700_000, 520_000,
+    880_000, 1_200_000, 340_000, 180_000, 760_000, 900_000,
+)  # fmt: skip
+
+
+def _seed_rate_history(app: QbitOpsTuiApp) -> None:
+    history = app.controller.state.rate_history
+    breakdown = app.controller.state.tracker_breakdown
+    rows = breakdown.rows if breakdown is not None else ()
+    for index, (down, up) in enumerate(
+        zip(_SEEDED_DOWNLOAD, _SEEDED_UPLOAD, strict=True)
+    ):
+        history.record(
+            download=down,
+            upload=up,
+            by_tracker={
+                row.key: row.total_rate * (1 + (index + position) % 4) // 4
+                for position, row in enumerate(rows)
+            },
+        )
+
+
 async def _capture(name: str, keys: list[str], out: Path) -> Path:
     app = build_app(name)
     async with app.run_test(size=GALLERY_SIZE) as pilot:
@@ -167,6 +226,11 @@ async def _capture(name: str, keys: list[str], out: Path) -> Path:
         for key in keys:
             await pilot.press(key)
             await pilot.pause()
+        if name == "overview":
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            _seed_rate_history(app)
+            app._render_all()
         # A second settle: pushing a screen mounts widgets whose own
         # first paint lands on the next frame, and exporting between the
         # two captures a half-drawn modal.

@@ -84,6 +84,7 @@ from qbit_ops.tui.modals.setup import SetupScreen
 from qbit_ops.tui.modals.sort import SortScreen
 from qbit_ops.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
+    GRAPH_SAMPLE_INTERVAL_SECONDS,
     ConnectionState,
     MutationUiResult,
     SortOrder,
@@ -98,11 +99,7 @@ from qbit_ops.tui.theme import (
 )
 from qbit_ops.tui.widgets.details import DetailsPanel
 from qbit_ops.tui.widgets.filters import FiltersPanel
-from qbit_ops.tui.widgets.overview import (
-    OVERVIEW_GRID_MIN_WIDTH,
-    OverviewPanel,
-    WorkspaceTabs,
-)
+from qbit_ops.tui.widgets.overview import OverviewPanel, WorkspaceTabs
 from qbit_ops.tui.widgets.status_bar import (
     CommandBar,
     ConnectionBanner,
@@ -139,10 +136,6 @@ class MainScreen(Screen[None]):
     def _apply_width(self, width: int) -> None:
         is_narrow = width < NARROW_WIDTH_THRESHOLD
         self.set_class(is_narrow, "narrow")
-        # Its own breakpoint, not tied to `is_narrow`: Health/Torrents
-        # fit the two-column grid well before the general narrow cutoff.
-        overview_cards = self.query_one("#overview-cards")
-        overview_cards.set_class(width >= OVERVIEW_GRID_MIN_WIDTH, "grid")
 
         assert isinstance(self.app, QbitOpsTuiApp)
         self.app._render_table()
@@ -217,6 +210,7 @@ class QbitOpsTuiApp(App[None]):
         host: str | None = None,
         refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
         needs_setup: bool = False,
+        small_caps_titles: bool = True,
     ) -> None:
         super().__init__()
         self.controller = TuiController(
@@ -224,6 +218,10 @@ class QbitOpsTuiApp(App[None]):
         )
         self.refresh_interval = refresh_interval
         self.needs_setup = needs_setup
+        # Font coverage for the small-capital block is the one risk here
+        # that no measurement lifts and no terminal query reports, so it
+        # gets an explicit setting rather than a probe.
+        self.small_caps_titles = small_caps_titles
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
         # Incremental-update bookkeeping for `_render_table` -- see its
@@ -255,7 +253,9 @@ class QbitOpsTuiApp(App[None]):
             yield WorkspaceTabs(id="workspace-tabs")
             yield GlobalRateDisplay(id="global-rate")
         yield ConnectionBanner(id="banner")
-        yield OverviewPanel(id="overview-workspace")
+        yield OverviewPanel(
+            id="overview-workspace", small_caps=self.small_caps_titles
+        )
         with Vertical(id="torrents-workspace"):
             yield FilterSummary(id="filter-summary")
             yield DataTable(id="torrents", cursor_type="row")
@@ -290,7 +290,18 @@ class QbitOpsTuiApp(App[None]):
 
     def _begin_refreshing(self) -> None:
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
+        # A second timer, deliberately not `refresh_interval`: the graph
+        # window has to be a fixed span of wall-clock time or its `-60s`
+        # axis label stops being true the moment an operator passes
+        # `--interval`. At the default interval the two coincide, so the
+        # common case pays nothing for the guarantee.
+        self.set_interval(GRAPH_SAMPLE_INTERVAL_SECONDS, self._sample_rates)
         self._start_periodic_refresh()
+
+    def _sample_rates(self) -> None:
+        """Record one graph sample and repaint. Zero API calls."""
+        self.controller.sample_rates()
+        self._render_overview()
 
     # -- refresh -----------------------------------------------------
 
@@ -1646,6 +1657,7 @@ def run_tui(
     host: str | None = None,
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
     needs_setup: bool = False,
+    small_caps_titles: bool = True,
 ) -> None:
     """Run the TUI application (blocking until the user quits)."""
     app = QbitOpsTuiApp(
@@ -1653,5 +1665,6 @@ def run_tui(
         host=host,
         refresh_interval=refresh_interval,
         needs_setup=needs_setup,
+        small_caps_titles=small_caps_titles,
     )
     app.run()

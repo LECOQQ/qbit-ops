@@ -29,6 +29,17 @@ def register(app: typer.Typer) -> None:
                 ),
             ),
         ] = DEFAULT_STATUS_WATCH_INTERVAL_SECONDS,
+        ascii_titles: Annotated[
+            bool,
+            typer.Option(
+                "--ascii-titles",
+                help=(
+                    "Render window titles in plain capitals instead of "
+                    "Unicode small capitals, for a terminal font that "
+                    "does not carry them."
+                ),
+            ),
+        ] = False,
     ) -> None:
         """Launch the interactive TUI.
 
@@ -93,4 +104,5 @@ def register(app: typer.Typer) -> None:
             host=host,
             refresh_interval=interval,
             needs_setup=needs_setup,
+            small_caps_titles=not ascii_titles,
         )

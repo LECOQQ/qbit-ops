@@ -29,6 +29,15 @@ class FakeQbitClient:
         all_time_uploaded: int = 0,
         global_ratio: str = "-1",
         connected_peers: int = 0,
+        session_downloaded: int = 0,
+        session_uploaded: int = 0,
+        dht_nodes: int = 0,
+        download_rate_limit: int = 0,
+        upload_rate_limit: int = 0,
+        alt_speed_limits: bool = False,
+        free_space: int = -1,
+        queueing: bool = False,
+        connection_status: str = "connected",
         torrents_add_error: Exception | None = None,
         torrents_delete_error: Exception | None = None,
         categories: dict[str, dict[str, Any]] | None = None,
@@ -43,8 +52,11 @@ class FakeQbitClient:
 
         `tracker_error_hashes` names torrents whose `torrents_trackers()`
         call raises instead of returning data. `global_ratio` defaults
-        to `"-1"`, matching qBittorrent's own "no ratio computed yet"
-        convention -- see `build_instance_stats_from_server_state`.
+        to `"-1"` and `free_space` to `-1`, matching what a freshly
+        started instance actually reports on every captured version --
+        both are markers, not measures, and defaulting them to a real
+        number would make the sentinels invisible to every test that
+        did not ask for them.
         """
         self.torrents = torrents or []
         self.trackers_by_hash = trackers_by_hash or {}
@@ -57,6 +69,15 @@ class FakeQbitClient:
         self.all_time_uploaded = all_time_uploaded
         self.global_ratio = global_ratio
         self.connected_peers = connected_peers
+        self.session_downloaded = session_downloaded
+        self.session_uploaded = session_uploaded
+        self.dht_nodes = dht_nodes
+        self.download_rate_limit = download_rate_limit
+        self.upload_rate_limit = upload_rate_limit
+        self.alt_speed_limits = alt_speed_limits
+        self.free_space = free_space
+        self.queueing = queueing
+        self.connection_status = connection_status
         self.torrents_add_error = torrents_add_error
         self.torrents_delete_error = torrents_delete_error
         self.categories = dict(categories or {})
@@ -124,6 +145,15 @@ class FakeQbitClient:
                 "alltime_ul": self.all_time_uploaded,
                 "global_ratio": self.global_ratio,
                 "total_peer_connections": self.connected_peers,
+                "dl_info_data": self.session_downloaded,
+                "up_info_data": self.session_uploaded,
+                "dht_nodes": self.dht_nodes,
+                "dl_rate_limit": self.download_rate_limit,
+                "up_rate_limit": self.upload_rate_limit,
+                "use_alt_speed_limits": self.alt_speed_limits,
+                "free_space_on_disk": self.free_space,
+                "queueing": self.queueing,
+                "connection_status": self.connection_status,
             }
         }
 

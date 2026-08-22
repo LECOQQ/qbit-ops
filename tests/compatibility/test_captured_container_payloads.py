@@ -12,6 +12,9 @@ import json
 
 import pytest
 
+from qbit_core.features.status import (
+    build_instance_stats_from_server_state,
+)
 from qbit_core.features.trackers import classify_raw_tracker_status
 from qbit_core.qbit.fields import (
     get_active_tracker_urls,
@@ -315,3 +318,77 @@ def test_a_captured_torrent_builds_a_complete_central_model(
         assert snapshot.added_at is None
         assert snapshot.completed_at is None
         assert snapshot.last_activity_at is None
+
+
+# The eight `server_state` fields the Overview's Session window reads,
+# beyond the lifetime totals `InstanceStats` already carried. Listed as
+# a fixed baseline so a capture that stopped reporting one is caught
+# here rather than as a blank cell on screen.
+_SERVER_STATE_SESSION_FIELDS = (
+    "dl_info_data",
+    "up_info_data",
+    "dht_nodes",
+    "dl_rate_limit",
+    "up_rate_limit",
+    "use_alt_speed_limits",
+    "free_space_on_disk",
+    "queueing",
+)
+
+
+@pytest.mark.parametrize("matrix_id", discover_matrix_ids())
+def test_every_captured_version_reports_the_session_fields(
+    matrix_id: str,
+) -> None:
+    found_any = False
+
+    for fixture in load_captured_fixtures(matrix_id):
+        if fixture.name != "sync_maindata_server_state":
+            continue
+        found_any = True
+        for field_name in _SERVER_STATE_SESSION_FIELDS:
+            assert field_name in fixture.payload, (fixture.path, field_name)
+
+    assert found_any, f"no server_state capture for {matrix_id}"
+
+
+@pytest.mark.parametrize("matrix_id", discover_matrix_ids())
+def test_a_captured_server_state_builds_complete_instance_stats(
+    matrix_id: str,
+) -> None:
+    for fixture in load_captured_fixtures(matrix_id):
+        if fixture.name != "sync_maindata_server_state":
+            continue
+        stats = build_instance_stats_from_server_state(fixture.payload)
+
+        assert stats.session_downloaded_bytes == fixture.payload["dl_info_data"]
+        assert stats.session_uploaded_bytes == fixture.payload["up_info_data"]
+        assert stats.dht_nodes == fixture.payload["dht_nodes"]
+        assert stats.download_rate_limit == fixture.payload["dl_rate_limit"]
+        assert stats.upload_rate_limit == fixture.payload["up_rate_limit"]
+        assert (
+            stats.alternative_limits_enabled
+            == fixture.payload["use_alt_speed_limits"]
+        )
+        assert stats.queueing_enabled == fixture.payload["queueing"]
+
+
+@pytest.mark.parametrize("matrix_id", discover_matrix_ids())
+def test_the_three_sentinels_never_become_a_measure(matrix_id: str) -> None:
+    """A fresh instance reports `-1` free space, `'-'` ratio and a
+    `firewalled` connection on every captured version. None of the three
+    may reach a caller as a number it could format."""
+    for fixture in load_captured_fixtures(matrix_id):
+        if fixture.name != "sync_maindata_server_state":
+            continue
+        payload = fixture.payload
+        stats = build_instance_stats_from_server_state(payload)
+
+        assert payload["free_space_on_disk"] < 0, fixture.path
+        assert stats.free_space_bytes is None
+
+        assert isinstance(payload["global_ratio"], str), fixture.path
+        assert stats.all_time_ratio is None
+
+        assert payload["connection_status"] == "firewalled", fixture.path
+        assert stats.connection_status == "firewalled"

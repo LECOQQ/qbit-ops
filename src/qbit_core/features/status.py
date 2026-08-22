@@ -19,6 +19,8 @@ from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_optional_bool,
+    get_optional_int,
     get_transfer_rates,
 )
 from qbit_core.shared.torrent_states import (
@@ -64,17 +66,41 @@ class TransferRates:
 
 @dataclass(frozen=True)
 class InstanceStats:
-    """Lifetime transfer totals ("Statistics" dialog), distinct from
-    `TransferRates` (current speed) -- not derived from `transfer_info()`.
-    `all_time_ratio` is `None`, never a fabricated `0.0`/`-1`, when
-    qBittorrent hasn't computed one yet. `instance_id`: unused hook for
-    a future multi-instance caller."""
+    """One `sync_maindata()['server_state']` reduced to the values a
+    dashboard shows, distinct from `TransferRates` (current speed) --
+    not derived from `transfer_info()`. `instance_id`: unused hook for
+    a future multi-instance caller.
+
+    Three fields carry a value qBittorrent encodes as a marker rather
+    than a measure, and each keeps `None` for "unknown" instead of a
+    fabricated number a formatter would happily print:
+
+    - `all_time_ratio`: `None`, never a fabricated `0.0`/`-1`.
+    - `free_space_bytes`: `None` for any negative value. `-1` is a
+      plain `int` on the wire, so an ordinary byte formatter renders
+      it as "-1 B" without complaint.
+    - `connection_status`: `None` when unreported. `firewalled` is a
+      degraded success, not a failure, and must not read as connected.
+
+    `download_rate_limit`/`upload_rate_limit` stay plain `int`: `0` is
+    qBittorrent's encoding for "no limit", a real value rather than a
+    missing one.
+    """
 
     instance_id: str | None
     all_time_downloaded_bytes: int
     all_time_uploaded_bytes: int
     all_time_ratio: float | None
     connected_peers: int
+    session_downloaded_bytes: int = 0
+    session_uploaded_bytes: int = 0
+    dht_nodes: int = 0
+    download_rate_limit: int = 0
+    upload_rate_limit: int = 0
+    alternative_limits_enabled: bool = False
+    free_space_bytes: int | None = None
+    queueing_enabled: bool = False
+    connection_status: str | None = None
 
 
 def build_instance_stats_from_server_state(
@@ -102,7 +128,33 @@ def build_instance_stats_from_server_state(
         connected_peers=get_field_as_int(
             server_state, "total_peer_connections"
         ),
+        session_downloaded_bytes=get_field_as_int(server_state, "dl_info_data"),
+        session_uploaded_bytes=get_field_as_int(server_state, "up_info_data"),
+        dht_nodes=get_field_as_int(server_state, "dht_nodes"),
+        download_rate_limit=get_field_as_int(server_state, "dl_rate_limit"),
+        upload_rate_limit=get_field_as_int(server_state, "up_rate_limit"),
+        alternative_limits_enabled=bool(
+            get_optional_bool(server_state, "use_alt_speed_limits")
+        ),
+        free_space_bytes=_free_space_or_none(server_state),
+        queueing_enabled=bool(get_optional_bool(server_state, "queueing")),
+        connection_status=(
+            get_field_as_string(server_state, "connection_status") or None
+        ),
     )
+
+
+def _free_space_or_none(server_state: Mapping[str, Any]) -> int | None:
+    """`free_space_on_disk` as a real byte count, or `None` when unknown.
+
+    Negative is qBittorrent's "could not determine" marker, and it is an
+    ordinary `int` on the wire -- so it has to be rejected here rather
+    than left for a byte formatter that would print "-1 B".
+    """
+    free_space = get_optional_int(server_state, "free_space_on_disk")
+    if free_space is None or free_space < 0:
+        return None
+    return free_space
 
 
 def collect_instance_stats(

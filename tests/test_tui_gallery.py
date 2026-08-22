@@ -37,7 +37,10 @@ pytestmark = pytest.mark.tui
 # To regenerate after adding a screen, print the set difference of each
 # screen's rendered vocabulary against the union of the others.
 SCREEN_MARKERS: dict[str, tuple[str, ...]] = {
-    "overview": ("All-time", "Connected"),
+    # Not the connection word: the fixture instance is firewalled, and
+    # that is the whole point of the capture -- a marker naming one
+    # status would go green only while the screen lied.
+    "overview": ("All-time", "announce status not read here"),
     "torrents": ("uncategorized", "cross-seed"),
     "filters": ("Completion", "Errored"),
     "sort": ("high-low", "A-Z"),

@@ -442,6 +442,9 @@ _MONOTONY_CORPUS = (
 _MONOTONY_QUERIES: tuple[str, ...] = ("3f2a1b9c", "amour est dans le pre")
 
 
+_FUZZY_TIER: frozenset[MatchTier] = frozenset({"fuzzy"})
+
+
 def _prefix_journey_violations(
     corpus: Sequence[TorrentSnapshot],
     query: str,
@@ -564,7 +567,7 @@ def test_adding_fuzzy_breaks_forward_typing_monotonicity() -> None:
     with_fuzzy = _prefix_journey_violations(
         _FUZZY_MONOTONY_CORPUS,
         journey,
-        tiers=_MONOTONY_TIERS_0_5 | frozenset({"fuzzy"}),
+        tiers=_MONOTONY_TIERS_0_5 | _FUZZY_TIER,
         hash_min_length=1,
     )
     assert with_fuzzy, (

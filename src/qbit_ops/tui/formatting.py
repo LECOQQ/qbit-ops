@@ -133,24 +133,77 @@ def _format_byte_rate(bytes_per_second: int) -> str:
     return f"{_format_bytes(bytes_per_second)}/s"
 
 
+# The hue names the *direction*; having a hue at all names the
+# activity. Seeding takes the brand orange -- it is what a seedbox does
+# most -- and leeching the restrained blue. An idle direction gets no
+# hue rather than a third one, so the colour never has to answer two
+# questions at once. Read by the three regions that paint a direction:
+# the top-right rate readout, the two halves of the Overview graph, and
+# the Trackers window's `up`/`down` columns.
+UP_RATE_ACCENT = BRAND_ACCENT
+DOWN_RATE_ACCENT = BRAND_SECONDARY
+IDLE_RATE_STYLE = "dim"
+
+
 def _format_global_rate(download_rate: int, upload_rate: int) -> Text:
     """Render the top-right global transfer-rate indicator.
 
-    Per-direction colour, not one shared style: an active direction
-    (rate > 0) gets the brand accent, an inactive one the restrained
-    blue -- both orange when both are active falls directly out of that
+    Per-direction colour, not one shared style: each direction is drawn
+    in its own hue when it is moving and dimmed when it is not -- both
+    directions coloured when both are active falls directly out of that
     rule, no special-cased "both" branch needed. Reuses
     `TuiState.status.rates`, never a second qBittorrent call.
     """
     text = Text()
-    down_color = _BRAND_ACCENT if download_rate > 0 else _INACTIVE_TAB_ACCENT
-    up_color = _BRAND_ACCENT if upload_rate > 0 else _INACTIVE_TAB_ACCENT
+    down_color = DOWN_RATE_ACCENT if download_rate > 0 else IDLE_RATE_STYLE
+    up_color = UP_RATE_ACCENT if upload_rate > 0 else IDLE_RATE_STYLE
     text.append("↓ ", style=down_color)
     text.append(_format_byte_rate(download_rate), style=down_color)
     text.append("   ")
     text.append("↑ ", style=up_color)
     text.append(_format_byte_rate(upload_rate), style=up_color)
     return text
+
+
+# Unicode's small-capital letters, which read as a quieter title than
+# full capitals do. Measured rather than assumed: every one of these 25
+# is `east_asian_width` Neutral and `cell_len` 1, so they are strictly
+# better behaved than the box-drawing and marker glyphs the screen
+# already carries (all Ambiguous, the width class that once misaligned
+# a progress bar).
+_SMALL_CAPS: dict[str, str] = {
+    "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ", "f": "ꜰ", "g": "ɢ",
+    "h": "ʜ", "i": "ɪ", "j": "ᴊ", "k": "ᴋ", "l": "ʟ", "m": "ᴍ", "n": "ɴ",
+    "o": "ᴏ", "p": "ᴘ", "q": "ꞯ", "r": "ʀ", "s": "ꜱ", "t": "ᴛ", "u": "ᴜ",
+    "v": "ᴠ", "w": "ᴡ", "y": "ʏ", "z": "ᴢ",
+}  # fmt: skip
+
+# Unicode has no LATIN LETTER SMALL CAPITAL X. Not a theoretical gap:
+# the `Explain` screen exists, and a half-converted title would read
+# worse than an ordinary one.
+_UNMAPPABLE_LETTERS = frozenset("x")
+
+
+def _small_caps(word: str) -> str:
+    """Render `word` in small capitals, or unchanged when it cannot be.
+
+    All-or-nothing on purpose: one letter without a small capital makes
+    the whole word fall back, rather than shipping a title that is
+    small-caps everywhere except one full-height letter.
+    """
+    if any(char in _UNMAPPABLE_LETTERS for char in word.lower()):
+        return word
+    return "".join(_SMALL_CAPS.get(char, char) for char in word.lower())
+
+
+def _window_title(name: str, *, small_caps: bool) -> str:
+    """A window's border title, in small capitals unless turned off.
+
+    The escape hatch is a setting rather than a probe: font coverage is
+    the one risk here that no measurement lifts, and no terminal query
+    reports it reliably.
+    """
+    return _small_caps(name) if small_caps else name.upper()
 
 
 # User-oriented column order: Name first (always shown, gets the

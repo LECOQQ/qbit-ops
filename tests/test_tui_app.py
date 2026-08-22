@@ -106,6 +106,11 @@ from qbit_ops.tui.widgets.overview import (
     BrandHeader,
     HeaderVariant,
 )
+from qbit_ops.tui.widgets.overview_windows import (
+    SessionWindow,
+    TrackersWindow,
+)
+from qbit_ops.tui.widgets.rate_graph import RateGraph
 from qbit_ops.tui.widgets.status_bar import (
     CommandBar,
     FooterTotal,
@@ -407,30 +412,31 @@ async def test_overview_counters_match_the_shared_snapshot() -> None:
         incomplete = max(status.counts.total - status.counts.completed, 0)
         assert f"{status.counts.total} total" in overview_text
         assert re.search(
-            rf"Downloading\s+{status.counts.downloading}\s+"
-            rf"Seeding\s+{status.counts.seeding}",
+            rf"seeding\s+{status.counts.seeding}\s+"
+            rf"downloading\s+{status.counts.downloading}",
             overview_text,
         )
         assert re.search(
-            rf"Completed\s+{status.counts.completed}\s+"
-            rf"Incomplete\s+{incomplete}",
+            rf"complete\s+{status.counts.completed}\s+"
+            rf"incomplete\s+{incomplete}",
             overview_text,
         )
         assert re.search(
-            rf"Stopped\s+{app.controller.state.stopped_count}\s+"
-            rf"Checking\s+{status.counts.checking}",
+            rf"stopped\s+{app.controller.state.stopped_count}\s+"
+            rf"checking\s+{status.counts.checking}",
             overview_text,
         )
-        assert f"{status.counts.errored} errored" in overview_text
-        assert f"{status.counts.stalled} stalled" in overview_text
+        assert re.search(
+            rf"errored\s+{status.counts.errored}\s+"
+            rf"stalled\s+{status.counts.stalled}",
+            overview_text,
+        )
 
 
-async def test_overview_shows_grounded_warning_reasons_not_just_the_label() -> (
-    None
-):
-    """The compact Health section grounds its label in the counts line
-    (e.g. "N stalled") rather than the full alert-message text -- that
-    detail belongs to doctor/trackers status/explain instead."""
+async def test_overview_keeps_errored_and_stalled_as_counters() -> None:
+    """The health verdict left the Overview; the two counts that fed it
+    did not. "Should I intervene" is answered by `doctor` now, but "how
+    many are stuck" still has to be readable here."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", state="stalledDL"),
@@ -447,26 +453,13 @@ async def test_overview_shows_grounded_warning_reasons_not_just_the_label() -> (
         )
         status = app.controller.state.status
         assert status is not None
-        assert len(status.alerts) > 0
-        # Never just the bare health word with no reasons attached.
-        assert f"{status.counts.stalled} stalled" in overview_text
-        assert f"{len(status.alerts)} finding" in overview_text
+        assert re.search(rf"stalled\s+{status.counts.stalled}", overview_text)
+        assert re.search(rf"errored\s+{status.counts.errored}", overview_text)
 
 
-async def test_overview_shows_zero_findings_when_healthy() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(state="uploading")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-
-        overview_text = _static_text(
-            app.query_one("#overview-workspace", OverviewPanel)
-        )
-        assert "0 findings" in overview_text
-
-
-async def test_overview_shows_connection_and_nav_hint() -> None:
+async def test_overview_status_line_names_the_instance_and_its_freshness() -> (
+    None
+):
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -478,7 +471,6 @@ async def test_overview_shows_connection_and_nav_hint() -> None:
         )
         assert "Connected" in overview_text
         assert "Refreshed" in overview_text
-        assert "Browse torrents" in overview_text
 
 
 async def test_overview_never_calls_torrents_trackers() -> None:
@@ -514,14 +506,31 @@ async def test_overview_mounts_exactly_one_brand_header() -> None:
         assert len(app.query(BrandHeader)) == 1
 
 
-async def test_brand_header_shows_the_installed_version() -> None:
+async def test_the_installed_version_is_named_exactly_once_on_the_page() -> (
+    None
+):
+    """The wordmark no longer restates it: the app frame's border title
+    carries the version, and the text-only variant carries it because
+    it has no wordmark to identify the application with."""
+    import qbit_ops
+
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        header_text = _brand_header_text(app.query_one(BrandHeader))
-        assert f"v{qbit_ops.__version__}" in header_text
+        version = f"v{qbit_ops.__version__}"
+
+        assert version in str(app.screen.border_title)
+        assert version not in _brand_header_text(app.query_one(BrandHeader))
+
+    app = _app(client)
+    async with app.run_test(size=BRAND_TEXT_ONLY_SIZE) as pilot:
+        await _settle(app, pilot)
+        header = app.query_one(BrandHeader)
+
+        assert header.variant is HeaderVariant.TEXT_ONLY
+        assert version in _brand_header_text(header)
 
 
 async def test_brand_header_uses_full_logo_at_wide_size() -> None:
@@ -637,10 +646,9 @@ async def test_brand_header_no_overflow_at_boundary_widths() -> None:
             assert widest <= header.size.width
 
 
-async def test_overview_no_longer_uses_six_equal_bordered_cards() -> None:
-    """Item 11.1: the old six-card equal grid is no longer the rendered
-    hierarchy -- there is no `.ov-card` class left, and exactly one
-    primary (Torrents) and one secondary (Health) content section."""
+async def test_overview_mounts_its_four_regions_once_each() -> None:
+    """The page is a masthead (wordmark + status line), a graph, and two
+    windows -- no card grid, and no health verdict."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -648,9 +656,12 @@ async def test_overview_no_longer_uses_six_equal_bordered_cards() -> None:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
         assert len(overview.query(".ov-card")) == 0
-        assert len(overview.query(".ov-torrents")) == 1
-        assert len(overview.query(".ov-health")) == 1
+        assert len(overview.query(".ov-health")) == 0
         assert len(overview.query(BrandHeader)) == 1
+        assert len(overview.query(".ov-rail")) == 1
+        assert len(overview.query(RateGraph)) == 1
+        assert len(overview.query(TrackersWindow)) == 1
+        assert len(overview.query(SessionWindow)) == 1
 
 
 async def test_overview_sections_remain_mounted_at_every_brand_variant() -> (
@@ -662,87 +673,77 @@ async def test_overview_sections_remain_mounted_at_every_brand_variant() -> (
         async with app.run_test(size=size) as pilot:
             await _settle(app, pilot)
             overview = app.query_one("#overview-workspace", OverviewPanel)
-            assert len(overview.query(".ov-torrents")) == 1
-            assert len(overview.query(".ov-health")) == 1
-            assert len(overview.query(".ov-instance")) == 1
+            assert len(overview.query(RateGraph)) == 1
+            assert len(overview.query(TrackersWindow)) == 1
+            assert len(overview.query(SessionWindow)) == 1
             assert len(overview.query(BrandHeader)) == 1
 
 
-async def test_overview_instance_card_shows_lifetime_totals_and_peers() -> None:
+async def test_session_window_shows_lifetime_totals_and_peers() -> None:
     client = FakeQbitClient(
         torrents=[make_torrent()],
         all_time_downloaded=1024**3,  # 1 GiB
         all_time_uploaded=2 * 1024**3,  # 2 GiB
         global_ratio="1.75",
         connected_peers=9,
+        dht_nodes=387,
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        instance_section = overview.query_one(".ov-instance", Static)
-        content = str(instance_section.content)
+        content = str(overview.query_one(SessionWindow).content)
         assert "1.0 GiB" in content
         assert "2.0 GiB" in content
         assert "1.75" in content
-        assert "9" in content
+        assert "9 · DHT 387 nodes" in content
 
 
-async def test_overview_instance_card_shows_dash_when_no_ratio_yet() -> None:
+async def test_the_session_window_refuses_all_three_sentinels() -> None:
+    """A fresh instance reports `'-'` for ratio, `-1` for free space and
+    `firewalled` for its connection. None of the three may reach the
+    screen as a number or as a success -- see `wireframes/states.txt`."""
     client = FakeQbitClient(
         torrents=[make_torrent()],
-        global_ratio="-1",
+        global_ratio="-",
+        free_space=-1,
+        connection_status="firewalled",
     )
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        instance_section = overview.query_one(".ov-instance", Static)
-        assert "–" in str(instance_section.content)
+        session = str(overview.query_one(SessionWindow).content)
+        rail = str(overview.query_one("#overview-rail", Static).content)
+
+        # `'-'` on the wire renders as an en dash, never as a number.
+        assert "–" in session  # ai-hygiene: allow-em-dash
+        assert "-1.00" not in session and "0.00" not in session
+        # `-1` bytes renders as a word, never as a size.
+        assert "Free space   unavailable" in session
+        assert "-1 B" not in session and "0 B/s" not in session
+        # `firewalled` gets its own glyph and its own word.
+        assert "◐" in rail and "Firewalled" in rail
+        assert "Connected" not in rail
 
 
-async def test_overview_torrents_section_does_not_pad_beyond_its_content() -> (
-    None
-):
-    """The Torrents section must stay content-driven height, not
-    stretched by an oversized fixed row/`min-height` the old card grid
-    used."""
+async def test_the_two_windows_share_the_row_they_sit_in() -> None:
+    """The tracker table gets the wider share -- it has six columns to
+    fit against the Session window's label and value."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        torrents_section = overview.query_one(".ov-torrents", Static)
-        expected_lines = str(torrents_section.content).count("\n") + 1
-        assert torrents_section.outer_size.height == expected_lines
+        trackers = overview.query_one(TrackersWindow)
+        session = overview.query_one(SessionWindow)
 
-
-async def test_overview_nav_hint_stays_reachable_below_header() -> None:
-    """Nesting the cards one level deeper (under `BrandHeader`, inside
-    `#overview-cards`) must not strand the last card/nav hint outside
-    the scrollable region -- the header adds height, but the panel is
-    still a `VerticalScroll` and must still reach its own bottom."""
-    client = FakeQbitClient(torrents=[make_torrent()])
-    app = _app(client)
-
-    async with app.run_test(size=NARROW_SIZE) as pilot:
-        await _settle(app, pilot)
-        overview = app.query_one("#overview-workspace", OverviewPanel)
-        overview.scroll_end(animate=False)
-        await pilot.pause()
-
-        nav_hint = next(
-            widget
-            for widget in overview.query(Static)
-            if "ov-nav" in widget.classes
-        )
-        visible = overview.region
-        nav_region = nav_hint.region
-        assert nav_region.y < visible.y + visible.height
-        assert nav_region.y + nav_region.height > visible.y
+        assert trackers.region.width > session.region.width
+        assert trackers.region.y == session.region.y
+        assert trackers.region.right <= session.region.x
 
 
 async def test_brand_header_survives_a_workspace_round_trip() -> None:
@@ -1931,95 +1932,53 @@ async def test_overview_remains_readable_at_80x24() -> None:
         overview = app.query_one("#overview-workspace", OverviewPanel)
         overview_text = _static_text(overview)
         assert "Torrents" in overview_text
-        assert "Health" in overview_text
-        assert "finding" in overview_text
-        # Item 11.9: narrow stacks without horizontal overflow.
+        assert "stalled" in overview_text
+        # Narrow stacks without horizontal overflow.
         assert overview.region.width <= 80
 
 
-async def test_overview_wide_layout_is_asymmetric_torrents_dominant() -> None:
-    """Item 11.7/§4: at wide size Torrents (primary) must be visually
-    larger than Health (secondary), not two equal-width cards."""
+async def test_the_graph_fills_the_band_beside_the_wordmark() -> None:
+    """The graph costs the page no line: it occupies columns the
+    wordmark reserved and left blank, on the same rows."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        torrents_section = overview.query_one(".ov-torrents", Static)
-        health_section = overview.query_one(".ov-health", Static)
-        assert torrents_section.region.width > health_section.region.width
+        header = overview.query_one(BrandHeader)
+        graph = overview.query_one(RateGraph)
+
+        assert graph.region.x >= header.region.right
+        assert graph.region.y == header.region.y
+        assert graph.region.width > 0
 
 
 async def test_overview_medium_layout_stays_readable() -> None:
-    """Item 11.8: the medium layout keeps both sections comfortably
-    two-column, with no horizontal overflow."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=MEDIUM_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        torrents_section = overview.query_one(".ov-torrents", Static)
-        health_section = overview.query_one(".ov-health", Static)
-        assert torrents_section.region.width > 0
-        assert health_section.region.width > 0
+        assert overview.query_one(TrackersWindow).region.width > 0
+        assert overview.query_one(SessionWindow).region.width > 0
         assert overview.region.width <= MEDIUM_SIZE[0]
 
 
-async def test_overview_narrow_layout_stacks_sections_without_overflow() -> (
-    None
-):
-    """Item 11.9: narrow stacks status rail / Torrents / Health / Browse
-    action -- Torrents sits above Health, both full-width, no scroll."""
+async def test_overview_narrow_layout_stacks_windows_without_overflow() -> None:
+    """Narrow stacks the two windows instead of squeezing the tracker
+    table below the width its six columns need."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=NARROW_SIZE) as pilot:
         await _settle(app, pilot)
         overview = app.query_one("#overview-workspace", OverviewPanel)
-        torrents_section = overview.query_one(".ov-torrents", Static)
-        health_section = overview.query_one(".ov-health", Static)
-        assert torrents_section.region.y < health_section.region.y
+        trackers = overview.query_one(TrackersWindow)
+        session = overview.query_one(SessionWindow)
+        assert trackers.region.y < session.region.y
         assert overview.region.width <= NARROW_SIZE[0]
-
-
-async def test_overview_health_color_reflects_state_not_brand_gradient() -> (
-    None
-):
-    """Regression guard for the prior phase's dropped-border lesson:
-    a warning-health snapshot must still carry a distinguishable
-    semantic style, and it must never be the brand orange/coral."""
-    client = FakeQbitClient(
-        torrents=[
-            make_torrent(hash="a" * 40, name="Alpha", state="stalledDL"),
-        ]
-    )
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        overview = app.query_one("#overview-workspace", OverviewPanel)
-        health_section = overview.query_one(".ov-health", Static)
-        content = str(health_section.content)
-        assert "bold yellow" in content
-        assert "ov-health-warning" in health_section.classes
-        # The brand accents, resolved -- a stale literal here would
-        # be an assertion that can no longer fail.
-        assert _BRAND_ACCENT not in content
-        assert "#{:02x}{:02x}{:02x}".format(*_GRADIENT_END) not in content
-
-
-async def test_overview_health_color_is_green_when_healthy() -> None:
-    client = FakeQbitClient(torrents=[make_torrent(state="uploading")])
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        overview = app.query_one("#overview-workspace", OverviewPanel)
-        health_section = overview.query_one(".ov-health", Static)
-        assert "bold green" in str(health_section.content)
-        assert "ov-health-healthy" in health_section.classes
 
 
 async def test_overview_rail_shows_connection_identity_not_transfer_rates() -> (
@@ -2645,11 +2604,11 @@ async def test_overview_conceptual_groups_are_distinct() -> None:
             app.query_one("#overview-workspace", OverviewPanel)
         )
         # Seeding-by-direction (paused* + UP suffix folds into "seeding").
-        assert re.search(r"Seeding\s+1", overview_text)
+        assert re.search(r"seeding\s+1", overview_text)
         # Also 1 stopped (Activity's own, separate line).
-        assert re.search(r"Stopped\s+1", overview_text)
-        # Also 1 completed (Completion's own, separate dimension).
-        assert re.search(r"Completed\s+1", overview_text)
+        assert re.search(r"stopped\s+1", overview_text)
+        # Also 1 complete (Completion's own, separate dimension).
+        assert re.search(r"complete\s+1", overview_text)
 
 
 async def test_no_tracker_endpoint_shows_duplicated_disabled_word() -> None:
@@ -5206,28 +5165,35 @@ async def test_app_frame_shows_the_runtime_version_as_a_floating_title() -> (
         assert str(app.screen.border_title) == expected
 
 
-def test_format_global_rate_colours_each_direction_independently() -> None:
+def test_global_rate_hue_names_the_direction_not_the_activity() -> None:
+    """The hue says *which way* traffic is moving; having a hue at all
+    says it is moving. Download and upload must therefore never share a
+    colour while both are active -- which is what would happen if the
+    hue still encoded activity."""
     from qbit_ops.tui.formatting import (
-        _BRAND_ACCENT,
-        _INACTIVE_TAB_ACCENT,
+        DOWN_RATE_ACCENT,
+        IDLE_RATE_STYLE,
+        UP_RATE_ACCENT,
         _format_global_rate,
     )
 
+    assert DOWN_RATE_ACCENT != UP_RATE_ACCENT
+
     idle = _format_global_rate(0, 0)
-    assert idle.spans[0].style == _INACTIVE_TAB_ACCENT
-    assert idle.spans[-1].style == _INACTIVE_TAB_ACCENT
+    assert idle.spans[0].style == IDLE_RATE_STYLE
+    assert idle.spans[-1].style == IDLE_RATE_STYLE
 
     down_only = _format_global_rate(2_500_000, 0)
-    assert down_only.spans[0].style == _BRAND_ACCENT
-    assert down_only.spans[-1].style == _INACTIVE_TAB_ACCENT
+    assert down_only.spans[0].style == DOWN_RATE_ACCENT
+    assert down_only.spans[-1].style == IDLE_RATE_STYLE
 
     up_only = _format_global_rate(0, 2_500_000)
-    assert up_only.spans[0].style == _INACTIVE_TAB_ACCENT
-    assert up_only.spans[-1].style == _BRAND_ACCENT
+    assert up_only.spans[0].style == IDLE_RATE_STYLE
+    assert up_only.spans[-1].style == UP_RATE_ACCENT
 
     both = _format_global_rate(2_500_000, 2_500_000)
-    assert both.spans[0].style == _BRAND_ACCENT
-    assert both.spans[-1].style == _BRAND_ACCENT
+    assert both.spans[0].style == DOWN_RATE_ACCENT
+    assert both.spans[-1].style == UP_RATE_ACCENT
 
 
 def test_details_trackers_section_distinguishes_loading_from_failed() -> None:
@@ -5246,7 +5212,7 @@ def test_details_trackers_section_distinguishes_loading_from_failed() -> None:
 
 
 async def test_top_right_global_rate_display_shows_live_status_rates() -> None:
-    from qbit_ops.tui.formatting import _BRAND_ACCENT, _INACTIVE_TAB_ACCENT
+    from qbit_ops.tui.formatting import IDLE_RATE_STYLE, UP_RATE_ACCENT
 
     client = FakeQbitClient(
         torrents=[make_torrent()], download_speed=0, upload_speed=2_500_000
@@ -5261,10 +5227,10 @@ async def test_top_right_global_rate_display_shows_live_status_rates() -> None:
         assert "↓" in str(content) and "↑" in str(content)
         assert "2.4 MiB/s" in str(content)
         styles = {span.style for span in cast(Text, content).spans}
-        # Inactive download (blue), active upload (orange) -- both
+        # Idle download (no hue), seeding upload (brand orange) -- both
         # present, never one colour for the whole indicator.
-        assert _INACTIVE_TAB_ACCENT in styles
-        assert _BRAND_ACCENT in styles
+        assert IDLE_RATE_STYLE in styles
+        assert UP_RATE_ACCENT in styles
 
 
 async def test_app_frame_is_removed_at_narrow_width() -> None:
@@ -6394,3 +6360,278 @@ async def test_the_command_bar_still_fits_the_page_it_describes() -> None:
         ), f"{rendered.cell_len} cells of {budget}: {rendered.plain}"
         # Non-vacuous: the bar is genuinely populated.
         assert rendered.plain.count("[") >= 6, rendered.plain
+
+
+# `.qbit-dialog` names its width in absolute columns, so the widest
+# word (`-large`, 100) outgrows any terminal narrower than that. These
+# two sizes bracket the break: 100 is the last width that fits exactly,
+# 96 and 90 are ordinary terminals that did not.
+DIALOG_OVERFLOW_SIZES = ((96, 30), (90, 30))
+
+
+@pytest.mark.parametrize("size", DIALOG_OVERFLOW_SIZES)
+async def test_no_modal_dialog_runs_off_a_narrow_terminal(
+    size: tuple[int, int],
+) -> None:
+    """A dialog wider than the screen puts its right border off-screen.
+    Geometry is measured, not judged, so this is checked against each
+    dialog's computed region rather than its declared width."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=size) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        checked = 0
+        for key, screen_class in (*_MODAL_ENTRY_KEYS, ("e", ExplainScreen)):
+            await pilot.press(key)
+            await _settle(app, pilot)
+            assert isinstance(app.screen, screen_class)
+
+            dialog = app.screen.query_one(f"#{screen_class.DIALOG_ID}")
+            region = dialog.region
+            assert region.x >= 0, (screen_class.__name__, size, region)
+            assert region.x + region.width <= size[0], (
+                f"{screen_class.__name__} at width {size[0]}: dialog spans "
+                f"x={region.x} w={region.width}, past the screen edge"
+            )
+            checked += 1
+            await pilot.press("escape")
+            await _settle(app, pilot)
+
+        assert checked == len(_MODAL_ENTRY_KEYS) + 1
+
+
+# --- The graph's own clock, and the window titles --------------------------
+
+
+async def test_the_graph_samples_on_its_own_clock_not_the_refresh_one() -> None:
+    """`--interval` moves the refresh, never the graph's window. Twelve
+    slots of five seconds is sixty seconds at any interval, which is the
+    only reason the `-60s` label can be trusted."""
+    from qbit_ops.tui.state import (
+        GRAPH_SAMPLE_INTERVAL_SECONDS,
+        GRAPH_SLOTS,
+        GRAPH_WINDOW_SECONDS,
+    )
+
+    client = FakeQbitClient(torrents=[make_torrent()], download_speed=1_000)
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        history = app.controller.state.rate_history
+
+        assert history.slots == GRAPH_SLOTS
+        assert (
+            GRAPH_SLOTS * GRAPH_SAMPLE_INTERVAL_SECONDS == GRAPH_WINDOW_SECONDS
+        )
+        # The interval is nearly a thousand times the sample period, and
+        # the sampler still fills its own window.
+        assert LARGE_INTERVAL != GRAPH_SAMPLE_INTERVAL_SECONDS
+        before = history.measured
+        for _ in range(3):
+            app._sample_rates()
+        assert history.measured == before + 3
+
+        graph = str(app.query_one(RateGraph).content)
+        assert f"-{GRAPH_WINDOW_SECONDS}s" in graph
+        assert "now" in graph
+
+
+async def test_the_graph_starts_empty_rather_than_flat_at_zero() -> None:
+    """No sample is not a sample of zero: before the first tick the
+    window says it has nothing, instead of drawing a still library."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        graph = str(app.query_one(RateGraph).content)
+
+        assert app.controller.state.rate_history.measured == 0
+        assert "no samples yet" in graph
+        assert "peak" not in graph
+
+
+async def test_window_titles_render_in_small_capitals_by_default() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        trackers = app.query_one(TrackersWindow)
+        session = app.query_one(SessionWindow)
+
+        assert str(trackers.border_title).startswith("ᴛʀᴀᴄᴋᴇʀꜱ")
+        assert str(session.border_title) == "ꜱᴇꜱꜱɪᴏɴ"
+
+
+async def test_the_ascii_setting_turns_every_window_title_plain() -> None:
+    """Font coverage is the one risk here no measurement lifts, so it
+    gets a setting rather than a probe."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        small_caps_titles=False,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        trackers = str(app.query_one(TrackersWindow).border_title)
+        session = str(app.query_one(SessionWindow).border_title)
+
+        assert trackers.startswith("TRACKERS")
+        assert session == "SESSION"
+        assert "ᴛ" not in trackers and "ꜱ" not in session
+
+
+async def test_the_overview_still_never_scans_trackers() -> None:
+    """The Trackers window attributes torrents by the `tracker` field
+    the refresh already carries. A per-torrent announce scan here would
+    grow with the library, which is exactly what the Trackers page is
+    for."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=f"{i:040x}", tracker=f"http://t{i}.tld/a")
+            for i in range(20)
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        app._sample_rates()
+
+        assert client.torrents_trackers_calls <= 1
+        breakdown = app.controller.state.tracker_breakdown
+        assert breakdown is not None
+        assert len(breakdown.rows) == 20
+
+
+# A gesture announced on screen has to exist, and has to do what the
+# announcement says. Two earlier passes found this defect by hand
+# (`enter select` on a screen `enter` did not close, `↑/↓ move` on a
+# text field); this is the mechanical version.
+_KEYED_PAGE_TOKEN = re.compile(r"\(([0-9])/([a-z])\)")
+
+
+async def test_the_overview_announces_no_page_it_cannot_open() -> None:
+    """Every `(n/k)` token on the page must name a workspace that
+    exists, reachable by both keys it advertises."""
+    from qbit_ops.tui.state import Workspace
+
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=f"{i:040x}", tracker=f"http://t{i}.tld/a")
+            for i in range(30)
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        page = _static_text(app.query_one("#overview-workspace", OverviewPanel))
+        page += str(app.query_one("#workspace-tabs", WorkspaceTabs).content)
+
+        tokens = _KEYED_PAGE_TOKEN.findall(page)
+        assert tokens, "no page-switch token found -- the scan proves nothing"
+        assert len(tokens) == len(Workspace)
+
+        bound = {binding.key for _, binding in app._bindings}
+        for digit, letter in tokens:
+            assert digit in bound, digit
+            assert letter in bound, letter
+
+
+async def test_the_overview_never_offers_a_key_that_does_something_else() -> (
+    None
+):
+    """`k` moves a table cursor. A window that told an operator to press
+    it "for the full list" was not merely pointing at a missing page --
+    it was handing out an unrelated gesture."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=f"{i:040x}", tracker=f"http://t{i}.tld/a")
+            for i in range(30)
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        trackers = str(app.query_one(TrackersWindow).content)
+
+        # Non-vacuous: the window really is showing fewer rows than it has.
+        assert "more" in trackers
+        assert "k for the full list" not in trackers
+        assert "Trackers (3/k)" not in trackers
+        # `k` is bound, and it is bound to moving a cursor.
+        actions = {binding.key: binding.action for _, binding in app._bindings}
+        assert actions["k"] == "cursor_up"
+
+
+@pytest.mark.parametrize("size", RESPONSIVE_SIZES)
+async def test_the_graph_ink_reaches_the_edge_of_its_panel(
+    size: tuple[int, int],
+) -> None:
+    """A floor division left the block short and hard against the left,
+    so the page's right edge stepped between the masthead band and the
+    windows band, and `now` fell short of the real right edge."""
+    from qbit_ops.tui.state import GRAPH_SLOTS
+
+    client = FakeQbitClient(
+        torrents=[make_torrent()], download_speed=4_000_000, upload_speed=1
+    )
+    app = _app(client)
+
+    async with app.run_test(size=size) as pilot:
+        await _settle(app, pilot)
+        for _ in range(GRAPH_SLOTS):
+            app._sample_rates()
+        await pilot.pause()
+
+        graph = app.query_one(RateGraph)
+        panel = graph.size.width
+        lines = str(graph.content).splitlines()
+        axis = next(line for line in lines if "-60s" in line)
+
+        assert panel > 0
+        assert (
+            len(axis) == panel
+        ), f"axis spans {len(axis)} of {panel} columns at {size}"
+        assert axis.rstrip().endswith("now")
+        # Non-vacuous: bars were actually drawn, and they end flush too.
+        drawn = [line for line in lines if "⣿" in line]
+        assert drawn, lines
+        assert all(len(line) == panel for line in drawn)
+
+
+async def test_each_window_wears_a_one_word_title() -> None:
+    """The Trackers border used to add "derived from torrent activity",
+    which restated the window's own last line eleven rows below -- and
+    less precisely, since that line names what is *not* read."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        trackers = str(app.query_one(TrackersWindow).border_title)
+        session = str(app.query_one(SessionWindow).border_title)
+
+        assert trackers == "ᴛʀᴀᴄᴋᴇʀꜱ"
+        assert session == "ꜱᴇꜱꜱɪᴏɴ"
+        assert "derived" not in trackers
+        # The caveat still exists -- once, against the data it qualifies.
+        assert "announce status not read here" in str(
+            app.query_one(TrackersWindow).content
+        )
