@@ -120,6 +120,8 @@ qbit-ops tui
 
 ## 🎸 Greatest hits
 
+### 🧹 Reclaiming space
+
 **Reclaim disk without touching what matters.**
 
 ```bash
@@ -134,6 +136,19 @@ status    PREVIEW (dry-run)
 
 Nothing is deleted: review it, add `--no-dry-run`, and *that exact
 selection* is what will run.
+
+**Know what your library actually weighs.**
+
+```bash
+qbit-ops torrents stats
+qbit-ops torrents stats --category sonarr
+```
+
+Size, transfer and seeding time over exactly the torrents you filter
+for. How qBittorrent's all-time counters are handled is in
+[docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
+
+### 🩺 Finding out what hurts
 
 **Find out which tracker is hurting you.**
 
@@ -170,34 +185,11 @@ the real answer to "what would I lose by leaving?". The columns
 deliberately do not sum to your library total; the reason is in
 [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
-**Know what your library actually weighs.**
+### 🔀 Surviving a tracker that moved, or died
 
-```bash
-qbit-ops torrents stats
-qbit-ops torrents stats --category sonarr
-```
-
-Size, transfer and seeding time over exactly the torrents you filter
-for. How qBittorrent's all-time counters are handled is in
-[docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
-
-**Find a torrent without remembering its exact name.**
-
-```bash
-qbit-ops torrents search "amour est dnas le pre"   # typos, accents, word order
-qbit-ops torrents pause --hash 3f2a1b               # copy the hash, then act
-```
-
-Ranked, tolerant, and read-only by construction: a search result is
-never a mutation target. `--name-contains`/`--name-regex` stay the
-exact, deterministic option for that.
-
-**Unstick a queue that stopped moving.**
-
-```bash
-qbit-ops torrents list --stalled
-qbit-ops torrents reannounce --stalled --no-dry-run
-```
+Four commands, one shape: name the tracker, preview what it would touch,
+then apply. Each one walks your whole library so you never have to open
+a torrent to fix it.
 
 **Rotate a leaked passkey everywhere at once.**
 
@@ -208,6 +200,59 @@ qbit-ops trackers replace-passkey \
 ```
 
 `{passkey}` is a template: it never prints anything that can harm you.
+
+**Follow a tracker that changed address.**
+
+```bash
+qbit-ops trackers replace \
+  --source "https://old.example/announce" \
+  --target "https://new.example/announce"
+```
+
+Every torrent announcing to the old one swaps to the new one. Torrents
+that never used it are not touched.
+
+**Keep a dying tracker while you move off it.**
+
+```bash
+qbit-ops trackers add-if-present \
+  --source "https://dying.example/announce" \
+  --target "https://backup.example/announce"
+```
+
+Adds the second tracker *next to* the first, on the torrents that carry
+the first and only those. Both announce, so nothing stops seeding while
+the old host makes up its mind. Torrent filters narrow the scan further
+if you only want part of the library.
+
+**Retire a tracker for good.**
+
+```bash
+qbit-ops trackers remove --tracker "https://dead.example/announce"
+```
+
+Drops it from every torrent that still lists it.
+
+### 🔎 Finding it, and unsticking it
+
+**Find a torrent without remembering its exact name.**
+
+```bash
+qbit-ops torrents search "iso ubunutu desktp"       # typos, word order
+qbit-ops torrents pause --hash 3f2a1b               # copy the hash, then act
+```
+
+Ranked, tolerant, and read-only by construction: a search result is
+never a mutation target. Accents and case are folded before anything is
+compared. `--name-contains`/`--name-regex` stay the exact, deterministic
+option for that.
+
+**Unstick a queue that stopped moving.**
+
+```bash
+qbit-ops torrents list --stalled
+qbit-ops torrents reannounce --stalled --no-dry-run
+```
 
 ## 🛡️ Safety by default
 
