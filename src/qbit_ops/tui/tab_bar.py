@@ -11,7 +11,7 @@ widening degrees of abbreviation, so the active tab is the last thing
 ever cut -- never the reverse.
 
 Degrading a *string*, not a layout: the four levels mirror
-`.agents/specs/tui-filters.wireframes/filters_modal.py`'s `tab_strip`
+`.agents/features/tui-filters/wireframes/filters_modal.py`'s `tab_strip`
 exactly (title kept?, inactive tabs abbreviated?, only the active tab
 left?), transcribed here because `.agents/` is not part of the
 repository a test can read.
@@ -78,7 +78,7 @@ def render_tab_strip(
     tabs: tuple[TabSpec, ...],
     active: int,
     *,
-    title: str = "FILTERS",
+    title: str = "Filters",
 ) -> tuple[str, int]:
     """The one `border_title` string, degraded until it fits `width`.
 

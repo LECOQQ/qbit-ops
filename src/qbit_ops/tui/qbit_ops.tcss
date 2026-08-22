@@ -379,14 +379,27 @@ QbitModal {
 .qbit-dialog Input {
     background: transparent;
 }
+/* A left accent bar, not a full `border`: every field this app styles
+   at `height: 1` (`.f-field`, `.v-field`) has no row to spare for a
+   top+bottom border. Measured (`export_screenshot`, then read back the
+   `<text>` nodes): `border: tall $primary` here left typed text absent
+   from the render entirely -- the single content row *is* the border's
+   top edge, filled corner-to-corner with its "-" fill glyph, and the
+   widget's own region grows to fit the border regardless of the fixed
+   `height: 1` (measured via `.region`: 1 -> 2 while focused, springing
+   back on blur -- the whole dialog reflowed under the cursor). A
+   left-only edge costs one column, not one row: `_styles_cache.py`
+   only takes the destructive top/bottom branch when top or bottom is
+   set, and only touches this line's two end cells otherwise. */
 .qbit-dialog Input:focus {
-    border: tall $primary;
+    border-left: heavy $primary;
 }
 .qbit-dialog Checkbox {
     background: transparent;
 }
+/* Same reasoning and same measurement as `Input:focus` above. */
 .qbit-dialog Checkbox:focus {
-    border: tall $primary;
+    border-left: heavy $primary;
 }
 /* Flat, single-row buttons -- Textual's default `Button` is 3 rows
    tall (a raised, "3D" shadow look) and pulls in `$surface`; both are
@@ -433,6 +446,21 @@ QbitModal {
     margin-bottom: 1;
 }
 
+/* -- sort -- */
+/* Measured (`scripts/tui_wireframe.py --inventory`): 48x20 for 14
+   one-line options, of which 6 rows were pure chrome -- the dialog's
+   own round `$primary` border plus a *second*, near-identical round
+   border drawn by the `RadioSet` immediately inside it (the generic
+   `.qbit-dialog RadioSet` rule above). One frame already says "this is
+   the Sort dialog"; a second one in the same colour repeats it rather
+   than adding information. Dropped the same way `.f-tristate` already
+   drops it for filters' own `RadioSet`s -- an id selector so it wins
+   outright, focused or not, rather than re-fighting the specificity
+   tie `.f-tristate` had to. */
+#sort-dialog RadioSet {
+    border: none;
+}
+
 /* -- filters -- */
 /* Same reason as `DetailsPanel` below: a panel that fills its dialog
    pins the dialog's virtual size to its own and kills the scrolling.
@@ -447,9 +475,17 @@ FiltersPanel {
     height: 1;
     background: transparent;
 }
+/* Bold and `$text` (87% opacity), not `$text-muted` (60%): two
+   distinct levels -- the label names the filter, the field beside it
+   carries the value the operator typed, and the two read as one grey
+   smear at `$text-muted`'s weight (measured against the field's own
+   `color: $foreground` from Textual's `Input` default, brighter still).
+   Bold is the reliable half of the split: a colour-only distinction
+   this close survives inspection but not a glance. */
 .f-label {
     width: 12;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 .f-hint {
     width: auto;
@@ -469,11 +505,9 @@ FiltersPanel {
    background invariant (`test_modal_dialog_background_matches_the_
    app_uniform_background`) covers every state, not just blurred, so
    the fill never changes -- but a focused field still needs a signal,
-   and the shared `.qbit-dialog Input:focus { border: tall $primary; }`
-   rule already supplies the brand-accent one every other Input in the
-   app uses (confirmed not to grow past one row: `border: tall` on
-   `Input` renders inline -- cursor + underline -- not as boxed top/
-   bottom lines the way `RadioSet`/`Checkbox` draw it). */
+   and the shared `.qbit-dialog Input:focus { border-left: heavy
+   $primary; }` rule already supplies the brand-accent one every other
+   Input in the app uses. */
 .f-field:focus {
     background: transparent;
 }
@@ -506,12 +540,11 @@ FiltersPanel {
 /* `.qbit-dialog Checkbox:focus` above ties this rule's specificity
    (two classes vs one class + one type), so source order alone would
    decide it -- named explicitly instead, to keep the focus signal
-   every other Input/Checkbox in the app already carries. Safe to
-   restore at `height: 1`: unlike `RadioSet`'s "round" border, an
-   Checkbox's "tall" one renders inline (confirmed empirically), never
-   claiming a second row. */
+   every other Input/Checkbox in the app already carries. `border-left`,
+   not a full border: see the measurement at `Input:focus` above --
+   the same destructive-at-`height:1` defect applied here too. */
 .qbit-dialog Checkbox.f-check:focus {
-    border: tall $primary;
+    border-left: heavy $primary;
 }
 .f-spacer,
 .f-pending,
@@ -540,9 +573,12 @@ FiltersPanel {
 .v-row {
     height: 1;
 }
+/* Same reasoning as `.f-label` above -- the label names the field,
+   never the value beside it. */
 .v-label {
     width: 13;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 .v-field {
     height: 1;
@@ -573,10 +609,22 @@ FiltersPanel {
     margin-top: 1;
     color: $text-error;
 }
+/* The "contexte" slot as a labelled block, not a flat `Label   value ·
+   value` line: the label owns the blank line above (separating it from
+   the field the operator is editing) and reads bold/`$text`, same
+   grammar as `.v-label`; the values below it are `.v-source`'s own
+   `$text-muted`, one visual step down. Two `Static`s, not one --
+   `Content` has no cross-line style boundary to split "Existing" from
+   what follows it without one. */
+.v-source-label {
+    height: 1;
+    margin-top: 1;
+    color: $text;
+    text-style: bold;
+}
 .v-source {
     height: auto;
     color: $text-muted;
-    margin-top: 1;
 }
 
 /* -- details -- */

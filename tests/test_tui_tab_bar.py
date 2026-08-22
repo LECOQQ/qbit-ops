@@ -1,7 +1,7 @@
 """`qbit_ops.tui.tab_bar` -- the filters modal's `border_title` strip.
 
 The seven widths below are transcribed from
-`.agents/specs/tui-filters.wireframes/filters-border-ladder.txt`
+`.agents/features/tui-filters/wireframes/filters-border-ladder.txt`
 (measured against the running wireframe generator) rather than read
 from it: `.agents/` is gitignored, so a test cannot open that file.
 """

@@ -1,7 +1,7 @@
 """`FiltersDraft` -- the filters modal's model, entirely free of Textual.
 
 The modal commits on `Apply` rather than filtering live (see
-`.agents/specs/tui-filters.md`, "Le filtrage n'est plus en direct"), so
+`.agents/features/tui-filters/SPEC.md`, "Le filtrage n'est plus en direct"), so
 what a user has typed and what is actually applied are two different
 values that must be able to disagree -- a plain dataclass of strings
 compared against another is what makes that comparison possible without
@@ -311,10 +311,10 @@ TRACKERS_FIELDS: tuple[str, ...] = ("no_trackers",)
 
 PANE_NAMES: tuple[str, ...] = ("Organisation", "State", "Measures", "Trackers")
 PANE_ABBREVIATIONS: dict[str, str] = {
-    "Organisation": "ORG",
-    "State": "STA",
-    "Measures": "MEA",
-    "Trackers": "TRK",
+    "Organisation": "Org",
+    "State": "Sta",
+    "Measures": "Mea",
+    "Trackers": "Trk",
 }
 PANE_FIELDS: dict[str, tuple[str, ...]] = {
     "Organisation": ORGANISATION_FIELDS,

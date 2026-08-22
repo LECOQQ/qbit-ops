@@ -38,7 +38,7 @@ class FiltersScreen(QbitModal):
     either way -- this whole screen is in-memory). `⏎` applies the
     draft and *stays open*; `esc` closes without undoing anything
     already applied; `ctrl+r` empties the draft without applying. See
-    `.agents/specs/tui-filters.md`, "Les trois gestes, tranchés".
+    `.agents/features/tui-filters/SPEC.md`, "Les trois gestes, tranchés".
 
     `enter`/`escape` are not bound here: both are `priority=True` on
     `QbitOpsTuiApp`, which always wins over a same-key Screen binding,
@@ -123,7 +123,7 @@ class FiltersScreen(QbitModal):
             pending = pane_has_pending_edits(name, draft, self._applied)
             digits = str(count) if count else ""
             badge = digits + ("*" if pending else "")
-            specs.append(TabSpec(name.upper(), PANE_ABBREVIATIONS[name], badge))
+            specs.append(TabSpec(name, PANE_ABBREVIATIONS[name], badge))
         return tuple(specs)
 
     def _render_tab_strip(self) -> None:

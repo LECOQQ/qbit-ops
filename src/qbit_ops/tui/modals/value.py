@@ -1,7 +1,7 @@
 """Value-action modals -- one patron, four instantiations.
 
 `category set`/`tag add`/`tag remove`/`throttle` all fill the same
-four slots, in the same order (see `.agents/specs/tui-filters.md`,
+four slots, in the same order (see `.agents/features/tui-filters/SPEC.md`,
 "Les actions à valeur -- un seul patron, quatre instanciations"):
 scope, input, consequence, context. `enter` goes to `PreviewScreen`
 without mutating anything -- the CLI's own `--dry-run` default has the
@@ -70,6 +70,7 @@ class ValueActionScreen(QbitModal):
         yield Static(format_scope(self._names), classes="v-scope")
         yield from self.compose_fields()
         yield Static("", classes="v-verdict")
+        yield Static(id="v-source-label", classes="v-source-label")
         yield Static(id="v-source", classes="v-source")
 
     def compose_fields(self) -> ComposeResult:
@@ -83,9 +84,16 @@ class ValueActionScreen(QbitModal):
         self.query(Input).first().focus()
 
     def _render_source(self) -> None:
-        self.query_one("#v-source", Static).update(self.source_text())
+        label, value = self.source_text()
+        self.query_one("#v-source-label", Static).update(label)
+        self.query_one("#v-source", Static).update(value)
 
-    def source_text(self) -> str:
+    def source_text(self) -> tuple[str, str]:
+        """The "contexte" slot: a `(label, value)` pair, styled as two
+        distinct levels (`.v-source-label` bold, `.v-source` muted) --
+        the same "label names it, value is the content" split
+        `.v-label`/`.v-field` use for what the operator types, applied
+        to what already exists on the instance."""
         raise NotImplementedError
 
     def _render_verdict(self) -> None:
@@ -158,9 +166,9 @@ class CategorySetScreen(ValueActionScreen):
         checkbox.value = not checkbox.value
         self._render_verdict()
 
-    def source_text(self) -> str:
+    def source_text(self) -> tuple[str, str]:
         existing = " · ".join(self._known) if self._known else "(none)"
-        return f"Existing       {existing}"
+        return "Existing", existing
 
     def verdict_text(self) -> str:
         name = self.query_one("#v-category", Input).value.strip()
@@ -221,9 +229,9 @@ class TagAddScreen(_TagsScreen):
         super().__init__(selected, names)
         self._known = known_tags
 
-    def source_text(self) -> str:
+    def source_text(self) -> tuple[str, str]:
         existing = " · ".join(self._known) if self._known else "(none)"
-        return f"Existing       {existing}"
+        return "Existing", existing
 
     def verdict_text(self) -> str:
         tags = self._typed_tags()
@@ -236,17 +244,17 @@ class TagRemoveScreen(_TagsScreen):
     MODAL_TITLE = "Remove tags"
     bulk_action: ClassVar[TorrentBulkAction] = "tag_remove"
 
-    def source_text(self) -> str:
+    def source_text(self) -> tuple[str, str]:
         counts = Counter(
             tag for torrent in self.selected for tag in torrent.tags
         )
         if not counts:
-            return "On selection  (none)"
+            return "On selection", "(none)"
         parts = [
             f"{tag} ({count})"
             for tag, count in sorted(counts.items(), key=lambda i: -i[1])
         ]
-        return "On selection  " + " · ".join(parts)
+        return "On selection", " · ".join(parts)
 
     def verdict_text(self) -> str:
         tags = self._typed_tags()
@@ -282,8 +290,8 @@ class ThrottleScreen(ValueActionScreen):
             classes="v-hint",
         )
 
-    def source_text(self) -> str:
-        return "Current        " + throttle_current(self.selected)
+    def source_text(self) -> tuple[str, str]:
+        return "Current", throttle_current(self.selected)
 
     def verdict_text(self) -> str:
         upload = self.query_one("#v-upload", Input).value

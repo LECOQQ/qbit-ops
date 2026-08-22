@@ -82,7 +82,7 @@ class TagsDraft:
 @dataclass
 class ThrottleDraft:
     """`throttle`'s two independent fields -- never a selector (see
-    `.agents/specs/tui-filters.md`, "throttle porte les deux
+    `.agents/features/tui-filters/SPEC.md`, "throttle porte les deux
     directions"): the CLI already lets `--up`/`--down` differ, and a
     radio would say less than the command it represents."""
 

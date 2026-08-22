@@ -369,6 +369,7 @@ def _append_library(
         return
 
     _row(text, "Size", f"{_format_bytes(library.total_size_bytes)} on disk")
+    text.append("\n")
     _wrapped_row(text, "Categories", library.categories, width)
     tags = list(library.tags)
     if library.untagged:

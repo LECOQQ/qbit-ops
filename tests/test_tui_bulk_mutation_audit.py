@@ -371,7 +371,7 @@ async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
     `apply_refresh_success` used to take `reconcile=False` while a
     `FiltersScreen` held an uncommitted draft, because filtering was
     live and a half-typed "f" transiently matched nothing. Filtering
-    is commit-on-`Apply` now (`.agents/specs/tui-filters.md`, "Le
+    is commit-on-`Apply` now (`.agents/features/tui-filters/SPEC.md`, "Le
     filtrage n'est plus en direct"): a draft never reaches
     `state.filters` until `enter`, so `apply_refresh_success`
     reconciles unconditionally and a tick mid-typing has nothing to

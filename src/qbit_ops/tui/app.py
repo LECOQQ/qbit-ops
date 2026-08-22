@@ -1335,7 +1335,7 @@ class QbitOpsTuiApp(App[None]):
         fetched raw listing (`TuiController.snapshots_for`), and
         `categories_available`/`tags_available` are the cached
         instance-wide lists `collect_instance_lists` last read (see
-        `.agents/specs/tui-filters.md`, "Ce que ça coûte en appels").
+        `.agents/features/tui-filters/SPEC.md`, "Ce que ça coûte en appels").
         """
         selected = self.controller.snapshots_for(hashes)
         state = self.controller.state
@@ -1543,7 +1543,7 @@ class QbitOpsTuiApp(App[None]):
             if plan.action in ("category_set", "tag_add"):
                 # The only two actions that can *widen*
                 # categories_available/tags_available -- see
-                # `.agents/specs/tui-filters.md`, "réinvalidées par nos
+                # `.agents/features/tui-filters/SPEC.md`, "réinvalidées par nos
                 # propres mutations". tag_remove/category_clear only
                 # narrow usage, never the instance's declared set.
                 self._start_instance_lists_refresh()

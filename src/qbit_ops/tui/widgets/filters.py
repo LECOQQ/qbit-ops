@@ -9,7 +9,7 @@ only ever toggles `display` -- never remounts. Two things this buys:
   there is only ever one row container, not one per pane;
 - each pane always contributes exactly `PANE_HEIGHT` rows (padded with
   blank spacer rows the same way
-  `.agents/specs/tui-filters.wireframes/filters_modal.py`'s `build()`
+  `.agents/features/tui-filters/wireframes/filters_modal.py`'s `build()`
   centres a short pane), so the dialog never resizes when `alt+left`/
   `alt+right` changes the active pane.
 

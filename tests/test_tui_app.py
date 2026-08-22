@@ -5896,7 +5896,7 @@ async def test_modal_dialogs_expose_expected_border_titles() -> None:
         # dialog name at the widest ladder rung.
         assert str(
             app.screen.query_one("#filters-dialog").border_title
-        ).startswith("FILTERS ")
+        ).startswith("Filters ")
         await pilot.press("escape")
         await pilot.pause()
 
@@ -6468,7 +6468,10 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.pause()
-        assert category_input.styles.border.top[1].rgb == orange
+        # `border-left`, not `border` (all four edges): a full top+bottom
+        # border on a `height: 1` field leaves no row for its own
+        # content -- see `qbit_ops.tcss`'s `Input:focus` comment.
+        assert category_input.styles.border.left[1].rgb == orange
 
         # Stalled/Errored live on the State pane -- switch to it first,
         # or the checkbox is focused while `display: none`.
@@ -6477,7 +6480,7 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         checkbox = app.screen.query_one("#f-stalled", Checkbox)
         checkbox.focus()
         await pilot.pause()
-        assert checkbox.styles.border.top[1].rgb == orange
+        assert checkbox.styles.border.left[1].rgb == orange
         checkbox_label = checkbox.get_component_styles("toggle--label")
         assert checkbox_label.background.rgb == orange
         assert checkbox_label.color.rgb == dark
@@ -6512,6 +6515,53 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         pause_button.focus()
         await pilot.pause()
         assert pause_button.styles.color.rgb == orange
+
+
+async def test_a_focused_height_one_field_keeps_its_own_row_and_its_text() -> (
+    None
+):
+    """Human feedback on the delivered `tui-filters`: typing into a
+    focused field showed no text -- "une sorte de boite noire". Measured
+    cause: `border: tall` on a `height: 1` `Input`/`Checkbox` has no row
+    to spare for the border it draws. Textual grows the widget's own
+    region past its declared height to fit it (measured via `.region`:
+    1 -> 2 while focused, springing back on blur -- the whole dialog
+    reflowed under the cursor), and the one row that remains renders the
+    border's own fill glyph, never the typed text.
+
+    A colour-only assertion cannot catch this: `border: tall $primary`
+    sets the left edge too, so a check scoped to `border.left` alone
+    stays green even with the destructive rule back in place (confirmed
+    by reintroducing it: see the report). This test checks the actual
+    symptom instead -- the region's height, and the text surviving into
+    the exported render."""
+    from textual.widgets import Checkbox
+
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one("#f-categories", Input)
+        category_input.focus()
+        category_input.value = "films"
+        await pilot.pause()
+        assert category_input.region.height == 1
+        assert "films" in app.export_screenshot()
+
+        await pilot.press("alt+right")
+        await pilot.pause()
+        checkbox = app.screen.query_one("#f-stalled", Checkbox)
+        checkbox.focus()
+        await pilot.pause()
+        assert checkbox.region.height == 1
+        assert "Stalled" in app.export_screenshot()
 
 
 # --- The style system, seen from a running app ----------------------------
@@ -6595,7 +6645,7 @@ async def test_every_modal_titles_itself_in_its_border() -> None:
                 # Its border_title is the tab strip, not a plain
                 # title -- see `qbit_ops.tui.tab_bar`.
                 assert str(dialog.border_title).startswith(
-                    screen_class.MODAL_TITLE.upper()
+                    screen_class.MODAL_TITLE
                 )
             else:
                 assert str(dialog.border_title) == screen_class.MODAL_TITLE

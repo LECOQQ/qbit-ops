@@ -650,7 +650,7 @@ class TuiState:
     torrent currently carries -- read once (`TuiController.
     collect_instance_lists`) and reinvalidated only by our own
     category-creating/tag-adding mutations, never by a TTL (see
-    `.agents/specs/tui-filters.md`, "un cache a durée de vie est la
+    `.agents/features/tui-filters/SPEC.md`, "un cache a durée de vie est la
     mauvaise forme")."""
 
     def focused_torrent(self) -> TorrentSnapshot | None:
@@ -774,7 +774,7 @@ class TuiController:
 
         Reconciles the selection unconditionally: filters now commit
         only on `FiltersScreen`'s `Apply` (see
-        `.agents/specs/tui-filters.md`, "Le filtrage n'est plus en
+        `.agents/features/tui-filters/SPEC.md`, "Le filtrage n'est plus en
         direct"), so a draft being edited never touches
         `self.state.filters` in the first place -- there is nothing
         for a periodic tick landing mid-edit to disturb.
