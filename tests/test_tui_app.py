@@ -6515,11 +6515,10 @@ async def test_the_graph_draws_its_whole_axis_on_the_very_first_frame() -> None:
 
 
 async def test_window_titles_ask_nothing_of_the_terminal_font() -> None:
-    """The default is letter-spaced ordinary capitals. Unicode small
-    capitals cannot be made font-independent -- their 25 letters sit in
-    three unrelated blocks and no terminal font covers them evenly, so a
-    title mixes sizes on the reader's machine however it is composed
-    here."""
+    """The default is ordinary capitals. Unicode small capitals cannot
+    be made font-independent -- their 25 letters sit in three unrelated
+    blocks and no terminal font covers them evenly, so a title mixes
+    sizes on the reader's machine however it is composed here."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -6531,11 +6530,7 @@ async def test_window_titles_ask_nothing_of_the_terminal_font() -> None:
             str(app.query_one(SessionWindow).border_title),
         ]
 
-        assert titles == [
-            "T R A N S F E R",
-            "T R A C K E R S",
-            "S E S S I O N",
-        ]
+        assert titles == ["TRANSFER", "TRACKERS", "SESSION"]
         for title in titles:
             assert title.isascii(), title
 
@@ -6568,9 +6563,8 @@ async def test_the_small_caps_setting_is_opt_in_and_reaches_every_title() -> (
 async def test_no_window_title_ever_outgrows_its_own_border(
     small_caps: bool,
 ) -> None:
-    """Letter spacing costs `2n - 1` cells for `n` letters. A title
-    wider than the border it sits in is silently clipped, so both modes
-    are measured against the box that carries them."""
+    """A title wider than the border it sits in is silently clipped,
+    so both modes are measured against the box that carries them."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = QbitOpsTuiApp(
         client_factory=lambda: client,
@@ -6733,8 +6727,8 @@ async def test_each_window_wears_a_one_word_title() -> None:
         trackers = str(app.query_one(TrackersWindow).border_title)
         session = str(app.query_one(SessionWindow).border_title)
 
-        assert trackers == "T R A C K E R S"
-        assert session == "S E S S I O N"
+        assert trackers == "TRACKERS"
+        assert session == "SESSION"
         assert "derived" not in trackers
         # The caveat still exists -- once, against the data it qualifies.
         assert "announce status not read here" in str(
@@ -6762,7 +6756,7 @@ async def test_the_overview_is_three_bordered_windows() -> None:
             assert window.styles.border != ((None, None),) * 4
             assert str(window.border_title)
 
-        assert str(masthead.border_title) == "T R A N S F E R"
+        assert str(masthead.border_title) == "TRANSFER"
         # The wordmark and the graph live inside that frame.
         assert overview.query_one(BrandHeader).region in masthead.region
         assert overview.query_one(RateGraph).region in masthead.region

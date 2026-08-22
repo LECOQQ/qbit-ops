@@ -221,8 +221,8 @@ class QbitOpsTuiApp(App[None]):
         )
         self.refresh_interval = refresh_interval
         self.needs_setup = needs_setup
-        # Off by default: window titles are letter-spaced ordinary
-        # capitals, which need no glyph a terminal font might not have.
+        # Off by default: window titles are ordinary capitals, which
+        # need no glyph a terminal font might not have.
         # The Unicode small capitals stay available for whoever has a
         # font that covers all three of their blocks.
         self.small_caps_titles = small_caps_titles

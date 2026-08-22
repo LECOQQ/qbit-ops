@@ -205,11 +205,13 @@ def test_no_word_is_ever_converted_only_in_part() -> None:
 
 
 def test_the_default_title_reaches_for_no_exotic_glyph() -> None:
-    """Letter-spaced ordinary capitals give the same wide-set title the
-    small capitals were chosen for, out of ASCII a font cannot miss."""
-    spaced = _window_title("Trackers", small_caps=False)
+    """Ordinary capitals read as a title out of ASCII a font cannot
+    miss, and cost one cell per letter -- letter spacing was tried and
+    rejected: it reads as one word per letter, and its `2n - 1` cells
+    are more than a four-tab strip can carry."""
+    plain = _window_title("Trackers", small_caps=False)
 
-    assert spaced == "T R A C K E R S"
-    assert spaced.isascii()
-    assert cell_len(spaced) == 2 * len("Trackers") - 1
+    assert plain == "TRACKERS"
+    assert plain.isascii()
+    assert cell_len(plain) == len("Trackers")
     assert _window_title("Trackers", small_caps=True) == "ᴛʀᴀᴄᴋᴇʀꜱ"
