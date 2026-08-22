@@ -18,7 +18,7 @@ from qbit_core.features.connection_setup import (
 )
 
 PROJECT_ENV_FILE = ".env"
-ASCII_TITLES_VARIABLE = "QBIT_OPS_ASCII_TITLES"
+SMALL_CAPS_TITLES_VARIABLE = "QBIT_OPS_SMALL_CAPS_TITLES"
 APP_ENV_FILE_VARIABLE = "QBIT_OPS_ENV_FILE"
 APP_CONFIG_DIR = "qbit-ops"
 
@@ -28,7 +28,7 @@ __all__ = [
     "load_qbit_config",
     "get_user_env_file",
     "collect_masking_sources",
-    "load_ascii_titles_preference",
+    "load_small_caps_titles_preference",
 ]
 
 
@@ -56,16 +56,16 @@ def load_qbit_config() -> QbitConfig:
     return QbitConfig(host=host, username=username, password=password)
 
 
-def load_ascii_titles_preference() -> bool:
-    """Whether TUI window titles should skip Unicode small capitals.
+def load_small_caps_titles_preference() -> bool:
+    """Whether TUI window titles should use Unicode small capitals.
 
     A setting, not a probe: no process can read the terminal's font, so
     the only honest switch is one the operator throws. Off by default --
-    the small capitals are the intended look, and `qbit-ops doctor`
-    explains when to turn them off.
+    the letter-spaced capitals need no glyph a font might be missing,
+    and `qbit-ops doctor` explains what opting in requires.
     """
     _load_env_files()
-    value = os.getenv(ASCII_TITLES_VARIABLE, "").strip().lower()
+    value = os.getenv(SMALL_CAPS_TITLES_VARIABLE, "").strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 

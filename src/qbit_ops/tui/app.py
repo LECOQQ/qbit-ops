@@ -213,7 +213,7 @@ class QbitOpsTuiApp(App[None]):
         host: str | None = None,
         refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
         needs_setup: bool = False,
-        small_caps_titles: bool = True,
+        small_caps_titles: bool = False,
     ) -> None:
         super().__init__()
         self.controller = TuiController(
@@ -221,9 +221,10 @@ class QbitOpsTuiApp(App[None]):
         )
         self.refresh_interval = refresh_interval
         self.needs_setup = needs_setup
-        # Font coverage for the small-capital block is the one risk here
-        # that no measurement lifts and no terminal query reports, so it
-        # gets an explicit setting rather than a probe.
+        # Off by default: window titles are letter-spaced ordinary
+        # capitals, which need no glyph a terminal font might not have.
+        # The Unicode small capitals stay available for whoever has a
+        # font that covers all three of their blocks.
         self.small_caps_titles = small_caps_titles
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
@@ -247,6 +248,7 @@ class QbitOpsTuiApp(App[None]):
         self._last_mutation_result: MutationUiResult | None = None
         self._setup_worker: Worker[Any] | None = None
         self._sample_worker: Worker[Any] | None = None
+        self._sample_tick: int | None = None
         self._sample_timer: Timer | None = None
         self._sampling_stopped_at: float | None = None
         # Nothing may reach qBittorrent before the first-run form is
@@ -345,13 +347,22 @@ class QbitOpsTuiApp(App[None]):
         an instance slower than a second must not accumulate a backlog
         of workers.
         """
-        if self._sample_worker is not None and self._sample_worker.is_running:
-            return
         if self.controller.state.connection in (
             ConnectionState.AUTH_FAILED,
             ConnectionState.CONFIG_FAILED,
         ):
             return
+
+        # The column is opened first, on the clock, whatever happens
+        # next: a second that passed is a second the trace has to
+        # account for, even if nothing is asked of qBittorrent for it.
+        tick = self.controller.open_rate_slot()
+        self._render_overview()
+        if self._sample_worker is not None and self._sample_worker.is_running:
+            # An instance slower than a second: this tick asks nothing
+            # and its slot stays unmeasured, which is the truth.
+            return
+        self._sample_tick = tick
         self._sample_worker = self.run_worker(
             self.controller.collect_transfer_rates,
             group=SAMPLE_WORKER_GROUP,
@@ -368,9 +379,10 @@ class QbitOpsTuiApp(App[None]):
             # unmeasured like any other second nobody watched.
             return
         rates = event.worker.result
-        if rates is None:
+        if rates is None or self._sample_tick is None:
             return
-        self.controller.apply_rate_sample(rates)
+        self.controller.settle_rate_sample(self._sample_tick, rates)
+        self._sample_tick = None
         self._render_overview()
 
     # -- refresh -----------------------------------------------------
@@ -1736,7 +1748,7 @@ def run_tui(
     host: str | None = None,
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
     needs_setup: bool = False,
-    small_caps_titles: bool = True,
+    small_caps_titles: bool = False,
 ) -> None:
     """Run the TUI application (blocking until the user quits)."""
     app = QbitOpsTuiApp(

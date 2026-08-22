@@ -184,14 +184,29 @@ _UNMAPPABLE_LETTERS = UNMAPPABLE_LETTERS
 _small_caps = to_small_caps
 
 
+# Letter-spaced ordinary capitals: the same quieted, wide-set title the
+# small capitals were chosen for, built from ASCII only. It is the
+# default because the Unicode alphabet cannot be made font-independent
+# -- its 25 letters sit in three unrelated blocks and no terminal font
+# covers them evenly, so a title mixes sizes on the reader's machine
+# however carefully it is composed here.
+#
+# The trade is columns: spacing costs `2n - 1` cells for `n` letters
+# against `n`. Every title the TUI draws is checked against its own
+# border in `tests/test_tui_app.py`.
+_TITLE_LETTER_GAP = " "
+
+
 def _window_title(name: str, *, small_caps: bool) -> str:
-    """A window's border title, in small capitals unless turned off.
+    """A window's border title, letter-spaced unless small caps are on.
 
     The escape hatch is a setting rather than a probe: font coverage is
     the one risk here that no measurement lifts, and no terminal query
     reports it reliably.
     """
-    return _small_caps(name) if small_caps else name.upper()
+    if small_caps:
+        return _small_caps(name)
+    return _TITLE_LETTER_GAP.join(name.upper())
 
 
 # User-oriented column order: Name first (always shown, gets the

@@ -204,6 +204,12 @@ def test_no_word_is_ever_converted_only_in_part() -> None:
         assert all(in_small_caps) or not any(in_small_caps), word
 
 
-def test_the_ascii_setting_falls_back_without_reaching_for_small_caps() -> None:
-    assert _window_title("Trackers", small_caps=False) == "TRACKERS"
+def test_the_default_title_reaches_for_no_exotic_glyph() -> None:
+    """Letter-spaced ordinary capitals give the same wide-set title the
+    small capitals were chosen for, out of ASCII a font cannot miss."""
+    spaced = _window_title("Trackers", small_caps=False)
+
+    assert spaced == "T R A C K E R S"
+    assert spaced.isascii()
+    assert cell_len(spaced) == 2 * len("Trackers") - 1
     assert _window_title("Trackers", small_caps=True) == "ᴛʀᴀᴄᴋᴇʀꜱ"

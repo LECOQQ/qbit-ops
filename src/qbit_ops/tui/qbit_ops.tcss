@@ -92,8 +92,11 @@ MainScreen.narrow {
     width: 9fr;
     height: 1fr;
 }
+/* `1fr`, so the wordmark absorbs the slack and the status rail lands on
+   the column's last row -- level with the graph's own bottom legend, so
+   both halves of the window end on the same line. */
 #brand-header {
-    height: auto;
+    height: 1fr;
 }
 /* One line, and one line only: the status word changes length with the
    connection, and `overflow: hidden` is what stops a longer word from

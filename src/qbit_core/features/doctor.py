@@ -236,7 +236,7 @@ def _compute_overall_status(checks: list[DoctorCheck]) -> CheckStatus:
     return CheckStatus.PASS
 
 
-# The window titles the TUI draws in small capitals. `Session` is the
+# The window titles the TUI can draw in small capitals. `Session` is the
 # worst case in the whole interface and is listed first for that reason:
 # it needs all three blocks at once, three of its letters from Latin
 # Extended-D (the least covered by terminal fonts) and one from IPA.
@@ -244,7 +244,7 @@ _SMALL_CAPS_TITLES: tuple[str, ...] = ("Session", "Trackers", "Transfer")
 
 
 def _small_caps_coverage_check() -> DoctorCheck:
-    """Report what the TUI's small-capital titles need from a font.
+    """State what opting into Unicode small-capital titles requires.
 
     `SKIPPED`, and that is the accurate status rather than a softened
     one: **no process can read the terminal's font.** Whether a glyph
@@ -253,8 +253,9 @@ def _small_caps_coverage_check() -> DoctorCheck:
     A permanent `WARNING` would have been a lie of a different kind --
     it would have put every healthy instance on exit code 1 forever.
 
-    So the check states what to look at and how to switch it off, and
-    leaves the judgement where the only working instrument is.
+    The default needs none of this: window titles are letter-spaced
+    ordinary capitals, which ask nothing of a font. This check exists
+    for the operator considering the opt-in.
     """
     worst = _SMALL_CAPS_TITLES[0]
     blocks = blocks_used(worst)
@@ -263,9 +264,10 @@ def _small_caps_coverage_check() -> DoctorCheck:
         section="terminal",
         status=CheckStatus.SKIPPED,
         message=(
-            "TUI window titles use Unicode small capitals, which live in "
-            f"{len(BLOCK_ORDER)} unrelated blocks. A font covering only "
-            "some of them renders the rest at a different size."
+            "TUI window titles are letter-spaced capitals by default. "
+            "The optional Unicode small capitals need glyphs from "
+            f"{len(BLOCK_ORDER)} unrelated blocks, and a font covering "
+            "only some of them renders the rest at a different size."
         ),
         detail=(
             f"{describe_coverage(_SMALL_CAPS_TITLES)}. "
@@ -273,11 +275,11 @@ def _small_caps_coverage_check() -> DoctorCheck:
             f"{len(blocks)} blocks at once."
         ),
         remediation=(
-            "Compare the title bars in 'qbit-ops tui' against each "
-            "other. If one letter sits taller or shorter than its "
-            "neighbours, the font is substituting: run "
-            "'qbit-ops tui --ascii-titles', or set "
-            "QBIT_OPS_ASCII_TITLES=1 to make it the default."
+            "Nothing to do unless you want them: 'qbit-ops tui "
+            "--small-caps-titles', or QBIT_OPS_SMALL_CAPS_TITLES=1, "
+            "turns them on. If a letter then sits taller or shorter "
+            "than its neighbours, the font is substituting and the "
+            "default is the better look on this terminal."
         ),
     )
 

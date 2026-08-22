@@ -87,6 +87,14 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 # lies. Nothing here is rounded to a nicer number for that reason.
 GRAPH_SAMPLE_INTERVAL_SECONDS = 1.0
 
+# The window is sixty seconds, and *that* is what fixes the plot at
+# sixty columns -- the dependency runs window -> width, never the other
+# way. Letting the width decide gave an exact but ugly label ("-62s");
+# the leftover columns now widen the left gutter instead, so `now` still
+# ends flush right and the marks read -60s and -30s.
+GRAPH_WINDOW_SECONDS = 60
+GRAPH_WINDOW_SLOTS = int(GRAPH_WINDOW_SECONDS / GRAPH_SAMPLE_INTERVAL_SECONDS)
+
 # Enough history for a very wide terminal without unbounded growth; a
 # sample is two integers, so this costs nothing worth measuring.
 GRAPH_MAX_SLOTS = 600
@@ -315,9 +323,18 @@ class RateHistory:
 
     Samples are `int | None`, and the difference is load-bearing:
     `None` means *not measured*, which is never the same claim as a
-    measured zero. Two things produce it -- the first minute after
-    launch, and the stretch while the operator was on another page and
-    the sampler was deliberately not running.
+    measured zero. Three things produce it -- the first minute after
+    launch, the stretch while the operator was on another page and the
+    sampler was deliberately not running, and a second whose reading
+    never came back.
+
+    **A slot belongs to the second that asked for it, not to the second
+    its answer arrived in.** `open_slot()` advances the window on the
+    clock and `settle()` fills the slot afterwards, so a reply that took
+    900 ms and one that took 50 ms still land one column apart. Writing
+    the sample on arrival instead put network jitter straight into the
+    time axis: measured spacing between recorded samples ran from 0.05 s
+    to 1.94 s while the timer itself never left 1.00 s.
 
     Nothing is persisted; the window dies with the process.
     """
@@ -327,6 +344,9 @@ class RateHistory:
         self._download: deque[int | None] = deque(maxlen=slots)
         self._upload: deque[int | None] = deque(maxlen=slots)
         self._by_tracker: dict[str, deque[int]] = {}
+        # Seconds elapsed since the window opened. Only ever increases,
+        # so a slot's identity survives the deque discarding it.
+        self._ticks = 0
 
     @property
     def slots(self) -> int:
@@ -377,21 +397,41 @@ class RateHistory:
             default=0,
         )
 
+    def open_slot(self) -> int:
+        """Advance the window by one second and return that slot's tick.
+
+        Called the moment the timer fires, before anything is asked of
+        qBittorrent: the column exists because the second passed, not
+        because a reading came back for it.
+        """
+        self._download.append(None)
+        self._upload.append(None)
+        self._ticks += 1
+        return self._ticks - 1
+
+    def settle(self, tick: int, *, download: int, upload: int) -> bool:
+        """Fill the slot `tick` owns. `False` once it has scrolled away."""
+        oldest = self._ticks - len(self._download)
+        index = tick - oldest
+        if not 0 <= index < len(self._download):
+            return False
+        self._download[index] = max(download, 0)
+        self._upload[index] = max(upload, 0)
+        return True
+
     def record_transfer(self, *, download: int, upload: int) -> None:
-        """Append one measured second to the two global series."""
-        self._download.append(max(download, 0))
-        self._upload.append(max(upload, 0))
+        """Open a slot and settle it at once -- for tests and fixtures."""
+        self.settle(self.open_slot(), download=download, upload=upload)
 
     def skip(self, samples: int) -> None:
-        """Append `samples` unmeasured seconds.
+        """Advance the window by `samples` unmeasured seconds.
 
         Called when the sampler was not running -- the operator was on
         another page. Drawing those seconds as zero would report a still
         library where the truth is that nobody was looking.
         """
         for _ in range(min(max(samples, 0), self._slots)):
-            self._download.append(None)
-            self._upload.append(None)
+            self.open_slot()
 
     def record_trackers(self, by_tracker: Mapping[str, int]) -> None:
         """Append one refresh tick to every per-tracker series."""
@@ -775,9 +815,18 @@ class TuiController:
             upload_bytes_per_second=upload,
         )
 
-    def apply_rate_sample(self, rates: TransferRates) -> None:
-        """Record one measured second. UI-thread only, zero API calls."""
-        self.state.rate_history.record_transfer(
+    def open_rate_slot(self) -> int:
+        """Advance the graph one second. UI-thread only, zero API calls.
+
+        Called on the timer tick itself, so the column belongs to the
+        second that asked for it however long the answer takes.
+        """
+        return self.state.rate_history.open_slot()
+
+    def settle_rate_sample(self, tick: int, rates: TransferRates) -> bool:
+        """Fill the slot `tick` owns. UI-thread only, zero API calls."""
+        return self.state.rate_history.settle(
+            tick,
             download=rates.download_bytes_per_second,
             upload=rates.upload_bytes_per_second,
         )

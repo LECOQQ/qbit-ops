@@ -40,6 +40,7 @@ from qbit_ops.tui.formatting import (
 from qbit_ops.tui.state import (
     GRAPH_MIN_SLOTS,
     GRAPH_SAMPLE_INTERVAL_SECONDS,
+    GRAPH_WINDOW_SLOTS,
     RateHistory,
 )
 
@@ -48,9 +49,12 @@ from qbit_ops.tui.state import (
 # the wordmark frees is only nine lines tall.
 GRAPH_ROWS_PER_DIRECTION = 3
 
-# `NNNN` plus one space, then the axis character itself.
+# `NNNN`, one space, then the axis character itself. This is the
+# *minimum* gutter: whatever the panel has over the sixty columns the
+# window needs is added to it, so the plot stays sixty wide and still
+# reaches the right edge.
 _SCALE_LABEL_WIDTH = 4
-_AXIS_GUTTER = _SCALE_LABEL_WIDTH + 2
+_MIN_AXIS_GUTTER = _SCALE_LABEL_WIDTH + 2  # label, space, axis
 
 _AXIS_TICK = "┤"
 _AXIS_ORIGIN = "┼"
@@ -93,8 +97,8 @@ class RateGraph(Static):
 
 def build_rate_graph(history: RateHistory, *, width: int) -> Text:
     """Render one rate window as coloured text, top line first."""
-    plot_width = max(width - _AXIS_GUTTER, 0)
-    slots = plot_width if plot_width >= GRAPH_MIN_SLOTS else 0
+    slots = plot_slots(width)
+    gutter = max(width - slots, _MIN_AXIS_GUTTER) if slots else _MIN_AXIS_GUTTER
     downloads, uploads = history.window(slots)
     peak_down = max(
         (value for value in downloads if value is not None), default=0
@@ -103,19 +107,36 @@ def build_rate_graph(history: RateHistory, *, width: int) -> Text:
 
     text = Text()
     _append_line(
-        text, _summary_line("↓", downloads, peak_down, DOWN_RATE_ACCENT)
+        text, gutter, _summary_line("↓", downloads, peak_down, DOWN_RATE_ACCENT)
     )
     if slots:
         _append_plot(
             text,
             downloads=downloads,
             uploads=uploads,
-            layout=fit_bars(plot_width, slots, max_bar_width=1, min_gap=0),
+            gutter=gutter,
+            layout=fit_bars(slots, slots, max_bar_width=1, min_gap=0),
             peak_down=peak_down,
             peak_up=peak_up,
         )
-    _append_line(text, _summary_line("↑", uploads, peak_up, UP_RATE_ACCENT))
+    _append_line(
+        text, gutter, _summary_line("↑", uploads, peak_up, UP_RATE_ACCENT)
+    )
     return text
+
+
+def plot_slots(width: int) -> int:
+    """Seconds the plot shows at `width`, or 0 when it is dropped.
+
+    Normally `GRAPH_WINDOW_SLOTS` -- the window fixes the plot, not the
+    panel. A panel too narrow for the whole window shows the trailing
+    seconds that do fit, and the axis label then says *that* number:
+    the label never stops being the truth, it just has less to tell.
+    """
+    room = max(width - _MIN_AXIS_GUTTER, 0)
+    if room < GRAPH_MIN_SLOTS:
+        return 0
+    return min(GRAPH_WINDOW_SLOTS, room)
 
 
 def _append_plot(
@@ -123,6 +144,7 @@ def _append_plot(
     *,
     downloads: list[int | None],
     uploads: list[int | None],
+    gutter: int,
     layout: BarLayout,
     peak_down: int,
     peak_up: int,
@@ -149,25 +171,25 @@ def _append_plot(
         label = _scale_label(peak_down) if index == 0 else ""
         if index == len(down_rows) - 1:
             label = _DOWN_ARROW
-        _append_row(text, label, _AXIS_TICK, row, down_style)
+        _append_row(text, gutter, label, _AXIS_TICK, row, down_style)
 
-    _append_axis(text, downloads, layout)
+    _append_axis(text, downloads, gutter, layout)
 
     for index, row in enumerate(up_rows):
         label = _UP_ARROW if index == 0 else ""
         if index == len(up_rows) - 1:
             label = _scale_label(peak_up)
-        _append_row(text, label, _AXIS_TICK, row, up_style)
+        _append_row(text, gutter, label, _AXIS_TICK, row, up_style)
 
 
 def _append_axis(
-    text: Text, samples: list[int | None], layout: BarLayout
+    text: Text, samples: list[int | None], gutter: int, layout: BarLayout
 ) -> None:
     """The axis: complete from the first frame, dimmed where unmeasured."""
     rule = list(_with_ticks(dot_axis(layout), layout.span))
     measured = [value is not None for value in samples]
 
-    text.append(f"{'0':>{_SCALE_LABEL_WIDTH}} ", style=IDLE_RATE_STYLE)
+    text.append(f"{'0':>{gutter - 2}} ", style=IDLE_RATE_STYLE)
     text.append(_AXIS_ORIGIN, style=IDLE_RATE_STYLE)
     for start, end, is_measured in measured_runs(measured, layout):
         text.append(
@@ -210,9 +232,14 @@ def _bracket(label: str) -> str:
 
 
 def _append_row(
-    text: Text, label: str, axis_char: str, body: str, style: str | None
+    text: Text,
+    gutter: int,
+    label: str,
+    axis_char: str,
+    body: str,
+    style: str | None,
 ) -> None:
-    text.append(f"{label:>{_SCALE_LABEL_WIDTH}} ", style=IDLE_RATE_STYLE)
+    text.append(f"{label:>{gutter - 2}} ", style=IDLE_RATE_STYLE)
     text.append(axis_char, style=IDLE_RATE_STYLE)
     if style is None:
         text.append(body)
@@ -221,8 +248,8 @@ def _append_row(
     text.append("\n")
 
 
-def _append_line(text: Text, line: Text) -> None:
-    text.append(" " * _AXIS_GUTTER)
+def _append_line(text: Text, gutter: int, line: Text) -> None:
+    text.append(" " * gutter)
     text.append_text(line)
     text.append("\n")
 
@@ -276,10 +303,5 @@ def _scale_label(peak: int) -> str:
 
 
 def graph_span(width: int) -> int:
-    """Columns the plot occupies at `width`, or 0 when it is dropped.
-
-    Equal to the panel's own plot area whenever a plot is drawn at all:
-    one column per second, and the window is as long as that comes to.
-    """
-    plot_width = max(width - _AXIS_GUTTER, 0)
-    return plot_width if plot_width >= GRAPH_MIN_SLOTS else 0
+    """Columns the plot occupies at `width`, or 0 when it is dropped."""
+    return plot_slots(width)

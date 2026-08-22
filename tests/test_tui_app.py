@@ -35,6 +35,7 @@ import asyncio
 import re
 import threading
 from pathlib import Path
+from time import sleep
 from typing import Any, cast
 
 import pytest
@@ -59,6 +60,7 @@ from textual.worker import Worker, WorkerState
 import qbit_ops
 import qbit_ops.tui.app
 import qbit_ops.tui.formatting
+from qbit_core.features.status import TransferRates
 from qbit_core.shared.selection import TorrentFilter
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.app import (
@@ -181,6 +183,19 @@ def _app(client: FakeQbitClient) -> QbitOpsTuiApp:
         client_factory=lambda: client,
         host="http://localhost:8080",
         refresh_interval=LARGE_INTERVAL,
+    )
+
+
+def _sample_once(app: QbitOpsTuiApp) -> None:
+    """One synthetic second of the graph's clock, start to finish.
+
+    The slot is opened on the tick and settled when the reading lands,
+    which is the whole point of the split -- so a test that wants a
+    measured second has to do both.
+    """
+    tick = app.controller.open_rate_slot()
+    app.controller.settle_rate_sample(
+        tick, app.controller.collect_transfer_rates()
     )
 
 
@@ -6454,9 +6469,7 @@ async def test_the_graph_samples_on_its_own_clock_not_the_refresh_one() -> None:
 
         before = history.measured
         for _ in range(3):
-            app.controller.apply_rate_sample(
-                app.controller.collect_transfer_rates()
-            )
+            _sample_once(app)
         assert history.measured == before + 3
 
         app._render_overview()
@@ -6501,38 +6514,91 @@ async def test_the_graph_draws_its_whole_axis_on_the_very_first_frame() -> None:
         assert re.search(r"\|-\d+s\|", axis)
 
 
-async def test_window_titles_render_in_small_capitals_by_default() -> None:
+async def test_window_titles_ask_nothing_of_the_terminal_font() -> None:
+    """The default is letter-spaced ordinary capitals. Unicode small
+    capitals cannot be made font-independent -- their 25 letters sit in
+    three unrelated blocks and no terminal font covers them evenly, so a
+    title mixes sizes on the reader's machine however it is composed
+    here."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        trackers = app.query_one(TrackersWindow)
-        session = app.query_one(SessionWindow)
+        titles = [
+            str(app.query_one("#overview-masthead").border_title),
+            str(app.query_one(TrackersWindow).border_title),
+            str(app.query_one(SessionWindow).border_title),
+        ]
 
-        assert str(trackers.border_title).startswith("ᴛʀᴀᴄᴋᴇʀꜱ")
-        assert str(session.border_title) == "ꜱᴇꜱꜱɪᴏɴ"
+        assert titles == [
+            "T R A N S F E R",
+            "T R A C K E R S",
+            "S E S S I O N",
+        ]
+        for title in titles:
+            assert title.isascii(), title
 
 
-async def test_the_ascii_setting_turns_every_window_title_plain() -> None:
-    """Font coverage is the one risk here no measurement lifts, so it
-    gets a setting rather than a probe."""
+async def test_the_small_caps_setting_is_opt_in_and_reaches_every_title() -> (
+    None
+):
+    """Available for whoever has a font that covers all three blocks --
+    behind a switch, never as the default."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = QbitOpsTuiApp(
         client_factory=lambda: client,
         host="http://localhost:8080",
         refresh_interval=LARGE_INTERVAL,
-        small_caps_titles=False,
+        small_caps_titles=True,
     )
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        trackers = str(app.query_one(TrackersWindow).border_title)
-        session = str(app.query_one(SessionWindow).border_title)
+        titles = [
+            str(app.query_one("#overview-masthead").border_title),
+            str(app.query_one(TrackersWindow).border_title),
+            str(app.query_one(SessionWindow).border_title),
+        ]
 
-        assert trackers.startswith("TRACKERS")
-        assert session == "SESSION"
-        assert "ᴛ" not in trackers and "ꜱ" not in session
+        assert titles == ["ᴛʀᴀɴꜱꜰᴇʀ", "ᴛʀᴀᴄᴋᴇʀꜱ", "ꜱᴇꜱꜱɪᴏɴ"]
+
+
+@pytest.mark.parametrize("small_caps", [False, True])
+async def test_no_window_title_ever_outgrows_its_own_border(
+    small_caps: bool,
+) -> None:
+    """Letter spacing costs `2n - 1` cells for `n` letters. A title
+    wider than the border it sits in is silently clipped, so both modes
+    are measured against the box that carries them."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        small_caps_titles=small_caps,
+    )
+
+    async with app.run_test(size=NARROW_SIZE) as pilot:
+        await _settle(app, pilot)
+        checked = 0
+        for selector in (
+            "#overview-masthead",
+            "#trackers-window",
+            "#session-window",
+        ):
+            window = app.query_one(selector)
+            title = str(window.border_title)
+            # Two corners plus one dash of border on each side.
+            budget = window.outer_size.width - 4
+
+            assert title, selector
+            assert cell_len(title) <= budget, (
+                f"{selector}: title is {cell_len(title)} cells, "
+                f"border allows {budget}"
+            )
+            checked += 1
+        assert checked == 3
 
 
 async def test_the_overview_still_never_scans_trackers() -> None:
@@ -6550,9 +6616,7 @@ async def test_the_overview_still_never_scans_trackers() -> None:
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        app.controller.apply_rate_sample(
-            app.controller.collect_transfer_rates()
-        )
+        _sample_once(app)
 
         assert client.torrents_trackers_calls <= 1
         breakdown = app.controller.state.tracker_breakdown
@@ -6637,9 +6701,7 @@ async def test_the_graph_ink_reaches_the_edge_of_its_panel(
     async with app.run_test(size=size) as pilot:
         await _settle(app, pilot)
         for _ in range(80):
-            app.controller.apply_rate_sample(
-                app.controller.collect_transfer_rates()
-            )
+            _sample_once(app)
         app._render_overview()
         await pilot.pause()
 
@@ -6671,8 +6733,8 @@ async def test_each_window_wears_a_one_word_title() -> None:
         trackers = str(app.query_one(TrackersWindow).border_title)
         session = str(app.query_one(SessionWindow).border_title)
 
-        assert trackers == "ᴛʀᴀᴄᴋᴇʀꜱ"
-        assert session == "ꜱᴇꜱꜱɪᴏɴ"
+        assert trackers == "T R A C K E R S"
+        assert session == "S E S S I O N"
         assert "derived" not in trackers
         # The caveat still exists -- once, against the data it qualifies.
         assert "announce status not read here" in str(
@@ -6700,7 +6762,7 @@ async def test_the_overview_is_three_bordered_windows() -> None:
             assert window.styles.border != ((None, None),) * 4
             assert str(window.border_title)
 
-        assert str(masthead.border_title) == "ᴛʀᴀɴꜱꜰᴇʀ"
+        assert str(masthead.border_title) == "T R A N S F E R"
         # The wordmark and the graph live inside that frame.
         assert overview.query_one(BrandHeader).region in masthead.region
         assert overview.query_one(RateGraph).region in masthead.region
@@ -6737,9 +6799,7 @@ async def test_the_page_never_moves_when_the_trackers_go_quiet(
     async with app.run_test(size=size) as pilot:
         await _settle(app, pilot)
         for _ in range(40):
-            app.controller.apply_rate_sample(
-                app.controller.collect_transfer_rates()
-            )
+            _sample_once(app)
         app._render_overview()
         await pilot.pause()
         busy = regions(app)
@@ -6785,9 +6845,7 @@ async def test_the_seconds_nobody_watched_are_not_drawn_as_zero() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         for _ in range(5):
-            app.controller.apply_rate_sample(
-                app.controller.collect_transfer_rates()
-            )
+            _sample_once(app)
         measured_before = app.controller.state.rate_history.measured
 
         app.controller.skip_rate_samples(30)
@@ -6797,3 +6855,240 @@ async def test_the_seconds_nobody_watched_are_not_drawn_as_zero() -> None:
         downloads, _ = history.window(40)
         assert downloads[-1] is None
         assert any(value is not None for value in downloads)
+
+
+# --- The window commands the width, and the clock commands the column ------
+
+
+@pytest.mark.parametrize("size", RESPONSIVE_SIZES)
+async def test_the_window_commands_the_plot_and_the_label_says_which(
+    size: tuple[int, int],
+) -> None:
+    """The dependency runs window -> width, never the other way. Letting
+    the panel decide gave an exact but ugly label ("-62s"); the leftover
+    columns widen the left gutter instead, so `now` still ends flush and
+    the marks read -60s and -30s wherever the whole window fits."""
+    from qbit_ops.tui.state import GRAPH_WINDOW_SLOTS
+    from qbit_ops.tui.widgets.rate_graph import plot_slots
+
+    client = FakeQbitClient(
+        torrents=[make_torrent()], download_speed=4_000_000, upload_speed=1
+    )
+    app = _app(client)
+
+    async with app.run_test(size=size) as pilot:
+        await _settle(app, pilot)
+        for _ in range(80):
+            _sample_once(app)
+        app._render_overview()
+        await pilot.pause()
+
+        graph = app.query_one(RateGraph)
+        panel = graph.size.width
+        lines = str(graph.content).splitlines()
+        axis = next(line for line in lines if "|now|" in line)
+        slots = plot_slots(panel)
+
+        # Never more than the window, and never a label that outruns the
+        # trace under it.
+        assert 0 < slots <= GRAPH_WINDOW_SLOTS
+        assert f"|-{slots}s|" in axis
+        assert f"|-{slots // 2}s|" in axis
+        # Flush right, and every plotted row exactly as wide as the panel.
+        assert len(axis) == panel
+        assert axis.rstrip().endswith("|now|")
+        drawn = [line for line in lines if "⣿" in line]
+        assert drawn, lines
+        assert all(len(line) == panel for line in drawn)
+
+
+async def test_a_panel_with_room_shows_the_whole_sixty_second_window() -> None:
+    """Non-vacuous companion: the degraded case above must not be the
+    only one this suite ever exercises."""
+    from qbit_ops.tui.state import GRAPH_WINDOW_SECONDS, GRAPH_WINDOW_SLOTS
+    from qbit_ops.tui.widgets.rate_graph import plot_slots
+
+    client = FakeQbitClient(
+        torrents=[make_torrent()], download_speed=4_000_000, upload_speed=1
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        for _ in range(80):
+            _sample_once(app)
+        app._render_overview()
+        await pilot.pause()
+
+        graph = app.query_one(RateGraph)
+        axis = next(
+            line for line in str(graph.content).splitlines() if "|now|" in line
+        )
+
+        assert plot_slots(graph.size.width) == GRAPH_WINDOW_SLOTS
+        assert f"|-{GRAPH_WINDOW_SECONDS}s|" in axis
+        assert f"|-{GRAPH_WINDOW_SECONDS // 2}s|" in axis
+        assert len(axis) == graph.size.width
+
+
+async def test_a_panel_too_narrow_for_the_window_still_tells_the_truth() -> (
+    None
+):
+    """Sixty columns do not always fit. What shrinks is the window, and
+    the label says the number it actually shows -- it never keeps
+    claiming sixty seconds over a shorter trace."""
+    from qbit_ops.tui.state import GRAPH_WINDOW_SLOTS, RateHistory
+    from qbit_ops.tui.widgets.rate_graph import build_rate_graph, plot_slots
+
+    history = RateHistory()
+    for _ in range(GRAPH_WINDOW_SLOTS + 20):
+        history.record_transfer(download=4_000_000, upload=1_000_000)
+
+    narrow = 40
+    slots = plot_slots(narrow)
+    axis = next(
+        line
+        for line in build_rate_graph(history, width=narrow).plain.splitlines()
+        if "|now|" in line
+    )
+
+    assert 0 < slots < GRAPH_WINDOW_SLOTS
+    assert f"|-{slots}s|" in axis
+    assert "|-60s|" not in axis
+    assert len(axis) == narrow
+
+
+async def test_a_column_belongs_to_the_second_that_asked_for_it() -> None:
+    """Measured before it was fixed: writing the sample on arrival put
+    network jitter straight into the time axis -- recorded spacing ran
+    0.05s to 1.94s while the timer never left 1.00s. The slot is opened
+    on the tick and settled afterwards, so a slow reply and a fast one
+    still land one column apart."""
+    client = FakeQbitClient(torrents=[make_torrent()], download_speed=7)
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        history = app.controller.state.rate_history
+
+        first = app.controller.open_rate_slot()
+        second = app.controller.open_rate_slot()
+        third = app.controller.open_rate_slot()
+
+        # Three seconds passed, so three columns exist -- before a single
+        # answer has come back.
+        downloads, _ = history.window(3)
+        assert downloads == [None, None, None]
+
+        # The answers land out of order, as a jittery link delivers them.
+        app.controller.settle_rate_sample(third, TransferRates(30, 3))
+        app.controller.settle_rate_sample(first, TransferRates(10, 1))
+
+        downloads, uploads = history.window(3)
+        assert downloads == [10, None, 30]
+        assert uploads == [1, None, 3]
+        # The unanswered second stays unmeasured rather than borrowing a
+        # neighbour's reading. Counted inside the three slots under
+        # test: the app's own sampler has already filled earlier ones.
+        assert sum(1 for value in downloads if value is not None) == 2
+        assert second not in (first, third)
+
+
+async def test_a_tick_that_asks_nothing_still_advances_the_trace() -> None:
+    """An instance slower than a second: the tick is coalesced away, but
+    the second still passed and the column has to account for it."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        history = app.controller.state.rate_history
+        before = len(history.downloads)
+
+        # A worker is still in flight, so this tick dispatches nothing.
+        app._sample_worker = app.run_worker(
+            lambda: sleep(0.4) or TransferRates(0, 0),
+            group="qbit-sample",
+            thread=True,
+            exit_on_error=False,
+        )
+        app._start_rate_sample()
+
+        assert len(history.downloads) == before + 1
+        assert history.downloads[-1] is None
+        await _settle(app, pilot)
+
+
+async def test_the_status_line_ends_level_with_the_graph_legend() -> None:
+    """Both halves of the ᴛʀᴀɴꜱꜰᴇʀ window finish on the same row."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        rail = app.query_one("#overview-rail", Static).region
+        graph = app.query_one(RateGraph).region
+
+        assert rail.height == 1
+        assert rail.y == graph.y + graph.height - 1
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [(1147, 1061, 86, 0, 3, 0, 2, 3), (12, 5, 4, 3, 2, 0, 2, 3)],
+    ids=["four-digit", "single-digit"],
+)
+async def test_the_counter_grid_holds_when_a_number_gains_a_digit(
+    counts: tuple[int, ...],
+) -> None:
+    """On a 1147-torrent library `incomplete` sat a column off from the
+    three labels under it: the value field was sized per row, so a
+    four-digit count overflowed it and shoved its neighbour sideways."""
+    (
+        total,
+        completed,
+        seeding,
+        downloading,
+        stopped,
+        checking,
+        errored,
+        stalled,
+    ) = counts
+    torrents = (
+        [
+            make_torrent(hash=f"{i:040x}", state="uploading", progress=1.0)
+            for i in range(completed)
+        ]
+        + [
+            make_torrent(
+                hash=f"{i + completed:040x}", state="downloading", progress=0.5
+            )
+            for i in range(downloading)
+        ]
+        + [
+            make_torrent(
+                hash=f"{i + completed + downloading:040x}",
+                state="error",
+                progress=0.5,
+            )
+            for i in range(errored)
+        ]
+    )
+    client = FakeQbitClient(torrents=torrents)
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        body = str(app.query_one(SessionWindow).content)
+        rows = [line for line in body.splitlines() if line.startswith("   ")]
+
+        assert len(rows) == 4, rows
+        labels = {
+            tuple(m.start() for m in re.finditer(r"[a-z]+", row))
+            for row in rows
+        }
+        ends = {
+            tuple(m.end() for m in re.finditer(r"\d+", row)) for row in rows
+        }
+        assert len(labels) == 1, rows
+        assert len(ends) == 1, rows

@@ -276,15 +276,17 @@ qbit-ops tui
 ```
 
 The trace samples once a second, one column per second, and only while
-the overview is on screen -- it costs nothing on the torrents page.
-Its axis label states the window it actually shows, which is as many
-seconds as the panel is columns wide.
+the overview is on screen -- it costs nothing on the torrents page. Its
+window is sixty seconds wide, and its axis label always states the
+window it actually shows: a terminal too narrow for sixty columns gets
+a shorter window and says so.
 
-Window titles are set in Unicode small capitals. Those letters live in
-three unrelated Unicode blocks, and a font covering only some of them
-renders the rest at a different size. Run `qbit-ops doctor` to see what
-a font needs; `qbit-ops tui --ascii-titles`, or `QBIT_OPS_ASCII_TITLES=1`,
-renders plain capitals instead.
+Window titles are letter-spaced capitals, which ask nothing of your
+terminal font. Unicode small capitals are available with
+`qbit-ops tui --small-caps-titles` or `QBIT_OPS_SMALL_CAPS_TITLES=1`;
+those letters live in three unrelated Unicode blocks, so a font
+covering only some of them renders the rest at a different size. Run
+`qbit-ops doctor` to see which blocks a font would need.
 
 | Overview | Torrents |
 |---|---|

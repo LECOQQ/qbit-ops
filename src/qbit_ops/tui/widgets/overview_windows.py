@@ -126,6 +126,9 @@ _TRACKER_CHROME_ROWS = 6
 
 _LABEL_WIDTH = 13
 
+# The widest word in either counter column ("downloading", 11).
+_COUNT_LABEL_WIDTH = 11
+
 # Two lines per list. The window's other fourteen rows are worth more
 # than a complete inventory of category names.
 _MAX_VALUE_LINES = 2
@@ -333,15 +336,25 @@ def _append_torrent_counts(text: Text, state: TuiState) -> None:
 
     incomplete = max(counts.total - counts.completed, 0)
     _row(text, "Torrents", f"{counts.total} total")
-    for left, left_value, right, right_value in (
+
+    rows = (
         ("complete", counts.completed, "incomplete", incomplete),
         ("seeding", counts.seeding, "downloading", counts.downloading),
         ("stopped", state.stopped_count, "checking", counts.checking),
         ("errored", counts.errored, "stalled", counts.stalled),
-    ):
+    )
+    # One width for every number in the block, not three columns each
+    # sized to their own row. A per-row width let a four-digit count
+    # overflow its field and shove the right-hand label sideways, so on
+    # a 1147-torrent library `incomplete` sat a column off from the
+    # three labels under it.
+    value_width = max(
+        len(str(value)) for row in rows for value in (row[1], row[3])
+    )
+    for left, left_value, right, right_value in rows:
         text.append(
-            f"   {left:<10} {left_value:>3}   "
-            f"{right:<12} {right_value:>3}\n"
+            f"   {left:<{_COUNT_LABEL_WIDTH}} {left_value:>{value_width}}"
+            f"   {right:<{_COUNT_LABEL_WIDTH}} {right_value:>{value_width}}\n"
         )
 
 
