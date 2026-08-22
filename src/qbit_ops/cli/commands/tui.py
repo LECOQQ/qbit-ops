@@ -12,7 +12,7 @@ import typer
 from qbit_core.errors import ErrorCategory
 from qbit_ops.cli import error_boundary
 from qbit_ops.cli.commands.status import DEFAULT_STATUS_WATCH_INTERVAL_SECONDS
-from qbit_ops.config import ConfigError
+from qbit_ops.config import ConfigError, load_ascii_titles_preference
 
 
 def register(app: typer.Typer) -> None:
@@ -36,7 +36,9 @@ def register(app: typer.Typer) -> None:
                 help=(
                     "Render window titles in plain capitals instead of "
                     "Unicode small capitals, for a terminal font that "
-                    "does not carry them."
+                    "does not carry all three blocks they live in. "
+                    "Also settable as QBIT_OPS_ASCII_TITLES; run "
+                    "'qbit-ops doctor' to see what a font needs."
                 ),
             ),
         ] = False,
@@ -104,5 +106,10 @@ def register(app: typer.Typer) -> None:
             host=host,
             refresh_interval=interval,
             needs_setup=needs_setup,
-            small_caps_titles=not ascii_titles,
+            # The flag only ever turns them *off*: a configured
+            # preference is an operator's standing answer, and a bare
+            # `qbit-ops tui` must not silently overrule it.
+            small_caps_titles=not (
+                ascii_titles or load_ascii_titles_preference()
+            ),
         )

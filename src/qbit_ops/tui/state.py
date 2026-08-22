@@ -28,7 +28,11 @@ from qbit_core.features.explain import (
     ExplanationReport,
     build_torrent_explanation,
 )
-from qbit_core.features.status import InstanceStats, StatusSnapshot
+from qbit_core.features.status import (
+    InstanceStats,
+    StatusSnapshot,
+    TransferRates,
+)
 from qbit_core.features.torrents import (
     BulkTorrentActionPlan,
     TorrentBulkAction,
@@ -46,6 +50,7 @@ from qbit_core.qbit.fields import (
     get_field_as_int,
     get_field_as_string,
     get_field_as_tag_list,
+    get_transfer_rates,
 )
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.search import search_snapshots
@@ -71,16 +76,29 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
 # The rate graph keeps a clock of its own, deliberately not
 # `--interval`. Sampling on the refresh tick would make the window
-# `slots x interval` seconds wide, so the `-60s` axis label would become
-# a false claim the moment an operator changed the interval. Fixed here
-# instead, and the label is then true *by construction* rather than by
-# arithmetic -- the assertion below is what keeps the three constants
-# from drifting apart.
-GRAPH_SAMPLE_INTERVAL_SECONDS = 5.0
-GRAPH_WINDOW_SECONDS = 60
-GRAPH_SLOTS = 12
+# `slots x interval` seconds wide, so its axis label would become a
+# false claim the moment an operator changed the interval.
+#
+# One second per sample, and one *column* per sample: at five seconds
+# the trace was a staircase of blocks rather than a shape. The window is
+# therefore as many seconds wide as the panel is columns wide, and the
+# label is read back off that -- the width decides the window, the
+# window decides the label, and the label can never be the thing that
+# lies. Nothing here is rounded to a nicer number for that reason.
+GRAPH_SAMPLE_INTERVAL_SECONDS = 1.0
 
-assert GRAPH_SLOTS * GRAPH_SAMPLE_INTERVAL_SECONDS == GRAPH_WINDOW_SECONDS
+# Enough history for a very wide terminal without unbounded growth; a
+# sample is two integers, so this costs nothing worth measuring.
+GRAPH_MAX_SLOTS = 600
+
+# Below this a trace reports a shape it does not have, so the plot is
+# dropped and only its summary lines are kept.
+GRAPH_MIN_SLOTS = 20
+
+# The per-tracker sparklines ride the *refresh* tick, not this one: they
+# are derived from the torrent list, and re-fetching that every second
+# to move twelve cells would be a real cost for no reading.
+TRACKER_SPARKLINE_SLOTS = 12
 
 # The bucket every torrent whose `tracker` field names no host falls
 # into: a DHT/PeX/LSD marker, an empty value on a torrent that has not
@@ -293,19 +311,21 @@ def _ranked(counts: dict[str, int]) -> tuple[tuple[str, int], ...]:
 
 
 class RateHistory:
-    """A rolling window of transfer samples, on the graph's own clock.
+    """A rolling second-by-second window of transfer samples.
 
-    Holds `GRAPH_SLOTS` samples, oldest first. Nothing is persisted --
-    the window dies with the process, so a freshly started TUI has *no*
-    samples rather than a row of zeros. `measured` is what lets a caller
-    keep those two apart: an unmeasured slot is not a slot that measured
-    nothing.
+    Samples are `int | None`, and the difference is load-bearing:
+    `None` means *not measured*, which is never the same claim as a
+    measured zero. Two things produce it -- the first minute after
+    launch, and the stretch while the operator was on another page and
+    the sampler was deliberately not running.
+
+    Nothing is persisted; the window dies with the process.
     """
 
-    def __init__(self, slots: int = GRAPH_SLOTS) -> None:
+    def __init__(self, slots: int = GRAPH_MAX_SLOTS) -> None:
         self._slots = slots
-        self._download: deque[int] = deque(maxlen=slots)
-        self._upload: deque[int] = deque(maxlen=slots)
+        self._download: deque[int | None] = deque(maxlen=slots)
+        self._upload: deque[int | None] = deque(maxlen=slots)
         self._by_tracker: dict[str, deque[int]] = {}
 
     @property
@@ -314,16 +334,28 @@ class RateHistory:
 
     @property
     def measured(self) -> int:
-        """How many of the window's slots hold a real sample."""
-        return len(self._download)
+        """How many of the held slots carry a real measurement."""
+        return sum(1 for value in self._download if value is not None)
 
     @property
-    def downloads(self) -> tuple[int, ...]:
+    def downloads(self) -> tuple[int | None, ...]:
         return tuple(self._download)
 
     @property
-    def uploads(self) -> tuple[int, ...]:
+    def uploads(self) -> tuple[int | None, ...]:
         return tuple(self._upload)
+
+    def window(self, slots: int) -> tuple[list[int | None], list[int | None]]:
+        """The newest `slots` samples of each series, oldest first.
+
+        Left-padded with `None` when the history is shorter: the plot is
+        always as wide as the panel, so a short history shows as unmeasured
+        ground rather than as a narrower chart.
+        """
+        return (
+            _padded(self._download, slots),
+            _padded(self._upload, slots),
+        )
 
     @property
     def tracker_keys(self) -> tuple[str, ...]:
@@ -345,18 +377,25 @@ class RateHistory:
             default=0,
         )
 
-    def record(
-        self,
-        *,
-        download: int,
-        upload: int,
-        by_tracker: Mapping[str, int] | None = None,
-    ) -> None:
-        """Append one sample to every series the window tracks."""
+    def record_transfer(self, *, download: int, upload: int) -> None:
+        """Append one measured second to the two global series."""
         self._download.append(max(download, 0))
         self._upload.append(max(upload, 0))
 
-        seen = dict(by_tracker or {})
+    def skip(self, samples: int) -> None:
+        """Append `samples` unmeasured seconds.
+
+        Called when the sampler was not running -- the operator was on
+        another page. Drawing those seconds as zero would report a still
+        library where the truth is that nobody was looking.
+        """
+        for _ in range(min(max(samples, 0), self._slots)):
+            self._download.append(None)
+            self._upload.append(None)
+
+    def record_trackers(self, by_tracker: Mapping[str, int]) -> None:
+        """Append one refresh tick to every per-tracker series."""
+        seen = dict(by_tracker)
         for key in list(self._by_tracker):
             samples = self._by_tracker[key]
             samples.append(max(seen.pop(key, 0), 0))
@@ -365,9 +404,14 @@ class RateHistory:
             if not any(samples):
                 del self._by_tracker[key]
         for key, value in seen.items():
-            samples = deque(maxlen=self._slots)
+            samples = deque(maxlen=TRACKER_SPARKLINE_SLOTS)
             samples.append(max(value, 0))
             self._by_tracker[key] = samples
+
+
+def _padded(samples: deque[int | None], slots: int) -> list[int | None]:
+    held = list(samples)[-slots:]
+    return [None] * (slots - len(held)) + held
 
 
 # Downloading/seeding are the two "active" groups a torrent spends most
@@ -700,6 +744,12 @@ class TuiController:
         self.state.library_breakdown = build_library_breakdown(
             result.raw_torrents
         )
+        # The sparklines ride this tick, not the graph's: they are
+        # derived from the torrent list, which only changes here.
+        breakdown = self.state.tracker_breakdown
+        self.state.rate_history.record_trackers(
+            {row.key: row.total_rate for row in breakdown.rows}
+        )
         self.state.connection = ConnectionState.CONNECTED
         self.state.stale = False
         self.state.last_error = None
@@ -710,32 +760,31 @@ class TuiController:
         if reconcile:
             self.reconcile_selection()
 
-    def sample_rates(self) -> None:
-        """Record one graph sample. UI-thread only, zero API calls.
+    def collect_transfer_rates(self) -> TransferRates:
+        """One `transfer_info()` call, and nothing else. Worker threads only.
 
-        Driven by the graph's own timer, not the refresh: the window has
-        to be a fixed span of wall-clock time for its axis label to mean
-        anything. The values come from the last successful refresh, so
-        at the default interval every slot is a distinct measurement,
-        and at a longer one the newest reading repeats -- exactly what
-        every other region of the screen is already showing. A refresh
-        that has never landed records nothing at all rather than a zero.
+        The graph's own second-by-second sample. Deliberately *not* the
+        five-call refresh: a torrent list per second to move a trace
+        would be an absurd price, and the two numbers this needs are the
+        cheapest call qBittorrent offers.
         """
-        status = self.state.status
-        if status is None:
-            return
+        with self._remote_operation() as client:
+            download, upload = get_transfer_rates(client.transfer_info())
+        return TransferRates(
+            download_bytes_per_second=download,
+            upload_bytes_per_second=upload,
+        )
 
-        breakdown = self.state.tracker_breakdown
-        by_tracker = (
-            {row.key: row.total_rate for row in breakdown.rows}
-            if breakdown is not None
-            else {}
+    def apply_rate_sample(self, rates: TransferRates) -> None:
+        """Record one measured second. UI-thread only, zero API calls."""
+        self.state.rate_history.record_transfer(
+            download=rates.download_bytes_per_second,
+            upload=rates.upload_bytes_per_second,
         )
-        self.state.rate_history.record(
-            download=status.rates.download_bytes_per_second,
-            upload=status.rates.upload_bytes_per_second,
-            by_tracker=by_tracker,
-        )
+
+    def skip_rate_samples(self, seconds: int) -> None:
+        """Record `seconds` the sampler was not running. UI-thread only."""
+        self.state.rate_history.skip(seconds)
 
     def apply_refresh_failure(self, error: Exception) -> None:
         """Classify and apply a failed periodic refresh. UI-thread only.

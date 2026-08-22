@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -188,34 +189,28 @@ def build_app(name: str) -> QbitOpsTuiApp:
     )
 
 
-# One synthetic minute of transfer, so the Overview capture shows the
-# braille alphabet, the floored row sitting on the axis, and the
+# A synthetic couple of minutes of transfer, so the Overview capture
+# shows the braille alphabet, the row floored against the axis, and the
 # per-tracker sparklines. Left empty, the graph would photograph its
 # warm-up state -- honest, and useless for judging what it draws.
-_SEEDED_DOWNLOAD = (
-    1_900_000, 3_400_000, 5_100_000, 4_200_000, 6_100_000, 5_800_000,
-    2_600_000, 900_000, 3_100_000, 4_700_000, 6_100_000, 4_000_000,
-)  # fmt: skip
-_SEEDED_UPLOAD = (
-    260_000, 410_000, 900_000, 1_200_000, 700_000, 520_000,
-    880_000, 1_200_000, 340_000, 180_000, 760_000, 900_000,
-)  # fmt: skip
+_SEEDED_SAMPLES = 200
 
 
 def _seed_rate_history(app: QbitOpsTuiApp) -> None:
     history = app.controller.state.rate_history
     breakdown = app.controller.state.tracker_breakdown
     rows = breakdown.rows if breakdown is not None else ()
-    for index, (down, up) in enumerate(
-        zip(_SEEDED_DOWNLOAD, _SEEDED_UPLOAD, strict=True)
-    ):
-        history.record(
-            download=down,
-            upload=up,
-            by_tracker={
+    for index in range(_SEEDED_SAMPLES):
+        history.record_transfer(
+            download=int(3_000_000 * (1 + math.sin(index / 11)) + 200_000),
+            upload=int(430_000 * (1 + math.cos(index / 7))),
+        )
+    for index in range(12):
+        history.record_trackers(
+            {
                 row.key: row.total_rate * (1 + (index + position) % 4) // 4
                 for position, row in enumerate(rows)
-            },
+            }
         )
 
 

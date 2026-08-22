@@ -29,6 +29,7 @@ EXPECTED_CHECK_ORDER = (
     "CFG001",
     "CFG002",
     "CFG003",
+    "TUI001",
     "CONN001",
     "CONN002",
     "CONN003",
@@ -77,7 +78,13 @@ def test_all_pass_report_is_healthy() -> None:
     )
 
     assert report.overall_status == CheckStatus.PASS
-    assert all(check.status == CheckStatus.PASS for check in report.checks)
+    # TUI001 is `SKIPPED` on every run: no process can read the
+    # terminal's font, so it reports rather than judges -- and a check
+    # that could never pass must not hold the exit code hostage.
+    assert all(
+        check.status in (CheckStatus.PASS, CheckStatus.SKIPPED)
+        for check in report.checks
+    )
     assert doctor_exit_code(report.overall_status) == 0
 
 
@@ -440,7 +447,11 @@ def test_overall_status_ignores_skipped_severity() -> None:
         client=_healthy_client(),
     )
 
-    assert CheckStatus.SKIPPED not in {c.status for c in report.checks}
+    skipped = {c.code for c in report.checks if c.status is CheckStatus.SKIPPED}
+    # TUI001 is the one check that is always skipped -- it reports what a
+    # terminal font would need and cannot verify it. A second one here
+    # would mean a real check stopped running.
+    assert skipped == {"TUI001"}
     assert report.overall_status == CheckStatus.PASS
 
 

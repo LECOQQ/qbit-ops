@@ -13,6 +13,7 @@ UI thread.
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any, cast
 
 from textual import events
@@ -21,6 +22,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import (
     Button,
     Checkbox,
@@ -115,6 +117,7 @@ REFRESH_WORKER_GROUP = "qbit-refresh"
 DETAIL_WORKER_GROUP = "qbit-detail"
 MUTATION_WORKER_GROUP = "qbit-mutation"
 SETUP_WORKER_GROUP = "qbit-setup"
+SAMPLE_WORKER_GROUP = "qbit-sample"
 
 # The horizontal half of the keyboard grammar: `up`/`down` move within
 # a surface, `left`/`right` between the two pages. Advertised in the
@@ -243,6 +246,14 @@ class QbitOpsTuiApp(App[None]):
         self._last_operation_id = 0
         self._last_mutation_result: MutationUiResult | None = None
         self._setup_worker: Worker[Any] | None = None
+        self._sample_worker: Worker[Any] | None = None
+        self._sample_timer: Timer | None = None
+        self._sampling_stopped_at: float | None = None
+        # Nothing may reach qBittorrent before the first-run form is
+        # answered, and `_render_workspace_visibility()` runs before it.
+        # Sampling therefore stays shut until `_begin_refreshing()` has
+        # opened it, rather than relying on call order.
+        self._refreshing_started = False
         self._setup_config: QbitConfig | None = None
 
     def get_default_screen(self) -> Screen[None]:
@@ -289,18 +300,77 @@ class QbitOpsTuiApp(App[None]):
         self._begin_refreshing()
 
     def _begin_refreshing(self) -> None:
+        self._refreshing_started = True
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
-        # A second timer, deliberately not `refresh_interval`: the graph
-        # window has to be a fixed span of wall-clock time or its `-60s`
-        # axis label stops being true the moment an operator passes
-        # `--interval`. At the default interval the two coincide, so the
-        # common case pays nothing for the guarantee.
-        self.set_interval(GRAPH_SAMPLE_INTERVAL_SECONDS, self._sample_rates)
         self._start_periodic_refresh()
+        self._resume_sampling()
 
-    def _sample_rates(self) -> None:
-        """Record one graph sample and repaint. Zero API calls."""
-        self.controller.sample_rates()
+    # -- the graph's own clock ----------------------------------------
+    #
+    # A second timer, deliberately not `refresh_interval`: the graph
+    # window is a span of wall-clock time, so its axis label would stop
+    # being true the moment an operator passed `--interval`.
+    #
+    # It costs one `transfer_info()` per second, which is why it runs
+    # *only while the Overview is on screen*. On the Torrents page it is
+    # stopped outright, and the seconds it did not watch are recorded as
+    # unmeasured rather than back-filled with zeroes -- nobody was
+    # looking, and the graph says so instead of drawing a still library.
+
+    def _resume_sampling(self) -> None:
+        if not self._refreshing_started or self._sample_timer is not None:
+            return
+        if self._sampling_stopped_at is not None:
+            elapsed = monotonic() - self._sampling_stopped_at
+            self.controller.skip_rate_samples(
+                int(elapsed // GRAPH_SAMPLE_INTERVAL_SECONDS)
+            )
+            self._sampling_stopped_at = None
+        self._sample_timer = self.set_interval(
+            GRAPH_SAMPLE_INTERVAL_SECONDS, self._start_rate_sample
+        )
+        self._start_rate_sample()
+
+    def _pause_sampling(self) -> None:
+        if self._sample_timer is None:
+            return
+        self._sample_timer.stop()
+        self._sample_timer = None
+        self._sampling_stopped_at = monotonic()
+
+    def _start_rate_sample(self) -> None:
+        """Start one rate sample, unless one is still in flight.
+
+        Coalesces rather than queues, exactly like the periodic refresh:
+        an instance slower than a second must not accumulate a backlog
+        of workers.
+        """
+        if self._sample_worker is not None and self._sample_worker.is_running:
+            return
+        if self.controller.state.connection in (
+            ConnectionState.AUTH_FAILED,
+            ConnectionState.CONFIG_FAILED,
+        ):
+            return
+        self._sample_worker = self.run_worker(
+            self.controller.collect_transfer_rates,
+            group=SAMPLE_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _on_sample_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS:
+            # A failed sample is not an incident: the periodic refresh
+            # owns connection state, and this second simply goes
+            # unmeasured like any other second nobody watched.
+            return
+        rates = event.worker.result
+        if rates is None:
+            return
+        self.controller.apply_rate_sample(rates)
         self._render_overview()
 
     # -- refresh -----------------------------------------------------
@@ -353,6 +423,8 @@ class QbitOpsTuiApp(App[None]):
             self._on_detail_worker_state_changed(event)
         elif event.worker.group == MUTATION_WORKER_GROUP:
             self._on_mutation_worker_state_changed(event)
+        elif event.worker.group == SAMPLE_WORKER_GROUP:
+            self._on_sample_worker_state_changed(event)
         elif event.worker.group == SETUP_WORKER_GROUP:
             self._on_setup_worker_state_changed(event)
 
@@ -457,18 +529,17 @@ class QbitOpsTuiApp(App[None]):
         banner.add_class("visible")
 
     def _render_filter_summary(self) -> None:
-        """Two compact lines: shown/total (+ selected), then active
-        criteria (or "No filters") plus the active local sort -- the
-        latter always present now that sorting exists."""
+        """One line: active criteria and sort on the left, the count
+        flushed right -- a row saved, and a right edge that lines up."""
         summary = self.query_one("#filter-summary", FilterSummary)
         state = self.controller.state
         visible = state.visible
         total = state.total_torrents or 0
         shown = len(visible.matched) if visible is not None else 0
 
-        counts_line = f"{shown:,} shown / {total:,}"
+        counts = f"{shown:,} shown / {total:,}"
         if state.selected_hashes:
-            counts_line += f" · {len(state.selected_hashes):,} selected"
+            counts += f" · {len(state.selected_hashes):,} selected"
 
         criteria = []
         description = describe_torrent_filter(state.filters)
@@ -478,8 +549,10 @@ class QbitOpsTuiApp(App[None]):
             criteria.append(f"search: {state.search}")
 
         criteria_text = " · ".join(criteria) if criteria else "No filters"
-        second_line = f"{criteria_text} · Sorted by {state.sort.label}"
-        summary.update(f"{counts_line}\n{second_line}")
+        summary.render_state(
+            criteria=f"{criteria_text} · Sorted by {state.sort.label}",
+            counts=counts,
+        )
 
         self.query_one("#torrents", DataTable).border_title = (
             _format_torrents_title(
@@ -783,6 +856,12 @@ class QbitOpsTuiApp(App[None]):
 
     def _render_workspace_visibility(self) -> None:
         workspace = self.controller.state.workspace
+        # The per-second sampler exists for the graph, and the graph is
+        # only on this page.
+        if workspace is Workspace.OVERVIEW:
+            self._resume_sampling()
+        else:
+            self._pause_sampling()
         self.query_one("#overview-workspace", OverviewPanel).display = (
             workspace is Workspace.OVERVIEW
         )

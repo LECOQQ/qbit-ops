@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from rich.cells import cell_len
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -92,6 +93,7 @@ from qbit_ops.tui.formatting import (
 from qbit_ops.tui.modals.base import MODAL_WIDTHS, QbitModal
 from qbit_ops.tui.state import (
     ConnectionState,
+    RateHistory,
     SortDirection,
     SortField,
     SortOrder,
@@ -465,12 +467,14 @@ async def test_overview_status_line_names_the_instance_and_its_freshness() -> (
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        overview = app.query_one("#overview-workspace", OverviewPanel)
 
-        overview_text = _static_text(
-            app.query_one("#overview-workspace", OverviewPanel)
-        )
-        assert "Connected" in overview_text
-        assert "Refreshed" in overview_text
+        assert "Connected" in _static_text(overview)
+        # The refresh moment rides the window's border, not the rail:
+        # the rail is one fixed line, and a second clause there was the
+        # first thing a longer status word truncated away.
+        masthead = overview.query_one("#overview-masthead")
+        assert "Refreshed" in str(masthead.border_subtitle)
 
 
 async def test_overview_never_calls_torrents_trackers() -> None:
@@ -904,19 +908,47 @@ async def test_workspace_tabs_underline_hugs_the_page_name_only() -> None:
         assert plain[start:end] == "Torrents"
 
 
-async def test_switching_workspaces_performs_zero_api_calls() -> None:
+async def test_leaving_the_overview_stops_the_per_second_sampler() -> None:
+    """The graph costs one `transfer_info()` a second, so it runs only
+    while the page that shows it is on screen. Switching *away* must
+    cost nothing at all, and must not leave the timer running."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        calls_before = len(client.calls)
+
+        await _goto_torrents(app, pilot)
+        await _settle(app, pilot)
+        assert app._sample_timer is None
+
+        calls_on_torrents = len(client.calls)
+        await pilot.pause()
+        await _settle(app, pilot)
+        assert len(client.calls) == calls_on_torrents
+
+        await _goto_overview(app, pilot)
+        await _settle(app, pilot)
+        assert app._sample_timer is not None
+
+
+async def test_switching_workspaces_fetches_nothing_but_the_graph() -> None:
+    """No refresh, no torrent list, no tracker scan on a page switch --
+    only the sampler the Overview owns."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        before = [name for name, _, _ in client.calls]
 
         await _goto_torrents(app, pilot)
         await _goto_overview(app, pilot)
         await _goto_torrents(app, pilot)
+        await _settle(app, pilot)
 
-        assert len(client.calls) == calls_before
+        added = [name for name, _, _ in client.calls[len(before) :]]
+        assert set(added) <= {"transfer_info"}, added
 
 
 async def test_switching_workspaces_preserves_search_and_filter_state() -> None:
@@ -1984,8 +2016,8 @@ async def test_overview_narrow_layout_stacks_windows_without_overflow() -> None:
 async def test_overview_rail_shows_connection_identity_not_transfer_rates() -> (
     None
 ):
-    """Connection/version/refresh are one status rail; transfer rates
-    live only in the top-right `GlobalRateDisplay` now, never
+    """Connection and version are one status rail; transfer rates live
+    in the top-right `GlobalRateDisplay` and in the graph, never
     duplicated here."""
     client = FakeQbitClient(
         torrents=[make_torrent()], download_speed=0, upload_speed=2_500_000
@@ -1996,10 +2028,8 @@ async def test_overview_rail_shows_connection_identity_not_transfer_rates() -> (
         await _settle(app, pilot)
         status = app.controller.state.status
         assert status is not None
-        rail = app.query_one("#overview-rail", Static)
-        rail_text = str(rail.content)
+        rail_text = str(app.query_one("#overview-rail", Static).content)
         assert "Connected" in rail_text
-        assert "Refreshed" in rail_text
         up = _format_byte_rate(status.rates.upload_bytes_per_second)
         assert up not in rail_text
 
@@ -2012,12 +2042,15 @@ async def test_overview_rail_shows_connection_identity_not_transfer_rates() -> (
         ConnectionState.AUTH_FAILED,
         ConnectionState.CONFIG_FAILED,
     ],
+    ids=["connected", "reconnecting", "auth_failed", "config_failed"],
 )
 async def test_overview_rail_stays_readable_across_connection_states(
     connection: ConnectionState,
 ) -> None:
-    """Item §1: the rail must remain readable in every connection
-    state, including a stale reconnect."""
+    """The rail must remain readable in every connection state, and the
+    staleness banner must never be part of it: folding it in made the
+    rail two lines tall and pushed every window below it down a row the
+    moment a refresh went stale."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -2026,12 +2059,17 @@ async def test_overview_rail_stays_readable_across_connection_states(
         app.controller.state.connection = connection
         app.controller.state.stale = True
         app._render_overview()
+        await pilot.pause()
 
         rail = app.query_one("#overview-rail", Static)
         rail_text = str(rail.content)
         assert rail_text
-        if connection is not ConnectionState.CONNECTED:
-            assert "STALE" in rail_text
+        assert "\n" not in rail_text
+        assert rail.size.height == 1
+
+        stale = app.query_one("#overview-stale", Static)
+        assert stale.display is True
+        assert "STALE" in str(stale.content)
 
 
 async def test_torrents_workspace_is_full_width_table_at_every_size() -> None:
@@ -3391,18 +3429,16 @@ async def test_overview_connection_uses_injected_timezone() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
 
-        # Patched at `qbit_ops.tui.widgets.overview`: the rail formats
-        # its refresh time via its own local `_format_rail_time`, not
-        # the shared `qbit_ops.tui.formatting._format_local_time`.
+        # Patched at `qbit_ops.tui.widgets.overview`: the refresh moment
+        # is formatted by its own local `_format_rail_time`, not the
+        # shared `qbit_ops.tui.formatting._format_local_time`.
         with patch("qbit_ops.tui.widgets.overview._format_rail_time") as mocked:
             mocked.side_effect = lambda moment, tz=None: (
                 f"stub-time {fixed_tz.tzname(moment)}"
             )
             app._render_overview()
-            overview_text = _static_text(
-                app.query_one("#overview-workspace", OverviewPanel)
-            )
-            assert "stub-time JST" in overview_text
+            masthead = app.query_one("#overview-masthead")
+            assert "stub-time JST" in str(masthead.border_subtitle)
 
 
 # --- Explain rendering polish ---------------------------------------------
@@ -4431,13 +4467,13 @@ async def test_ctrl_d_with_no_selection_is_a_safe_noop() -> None:
 # --- Torrent workspace redesign: summary, indicator, state, progress -------
 
 
-async def test_summary_shows_selected_count_and_criteria_on_a_second_line() -> (
-    None
-):
+async def test_summary_puts_criteria_left_and_the_count_hard_right() -> None:
+    """One row, not two, and a right edge that lines up with the rest of
+    the page."""
     client = FakeQbitClient(
         torrents=[
-            make_torrent(hash="a" * 40, name="Documentary", category="sonarr"),
-            make_torrent(hash="b" * 40, name="Ubuntu ISO", category="films"),
+            make_torrent(hash="a" * 40, name="Alpha"),
+            make_torrent(hash="b" * 40, name="Beta"),
         ]
     )
     app = _app(client)
@@ -4449,25 +4485,13 @@ async def test_summary_shows_selected_count_and_criteria_on_a_second_line() -> (
         await pilot.pause()
 
         summary = app.query_one("#filter-summary", FilterSummary)
-        text = str(summary.content)
-        lines = text.splitlines()
-        assert lines[0] == "2 shown / 2 · 1 selected"
-        # No criteria are active, so the second line reads "No filters"
-        # -- combined with the always-present local sort state, never
-        # an empty trailing line.
-        assert len(lines) == 2
-        assert lines[1] == "No filters · Sorted by Name ↑"
+        line = str(summary.content)
 
-        await pilot.press("slash")
-        await pilot.pause()
-        for char in "documentary":
-            await pilot.press(char)
-        await pilot.pause()
-
-        text = str(summary.content)
-        lines = text.splitlines()
-        assert lines[0] == "1 shown / 2 · 1 selected"
-        assert lines[1] == "search: documentary · Sorted by Name ↑"
+        assert "\n" not in line
+        assert summary.size.height == 1
+        assert line.startswith("No filters · Sorted by")
+        assert line.rstrip().endswith("2 shown / 2 · 1 selected")
+        assert cell_len(line) == summary.size.width
 
 
 async def test_focus_and_selection_render_as_independent_glyphs() -> None:
@@ -6409,14 +6433,10 @@ async def test_no_modal_dialog_runs_off_a_narrow_terminal(
 
 
 async def test_the_graph_samples_on_its_own_clock_not_the_refresh_one() -> None:
-    """`--interval` moves the refresh, never the graph's window. Twelve
-    slots of five seconds is sixty seconds at any interval, which is the
-    only reason the `-60s` label can be trusted."""
-    from qbit_ops.tui.state import (
-        GRAPH_SAMPLE_INTERVAL_SECONDS,
-        GRAPH_SLOTS,
-        GRAPH_WINDOW_SECONDS,
-    )
+    """`--interval` moves the refresh, never the graph's window. One
+    second per sample and one column per sample, so the axis label is
+    read back off the width rather than written beside it."""
+    from qbit_ops.tui.state import GRAPH_SAMPLE_INTERVAL_SECONDS
 
     client = FakeQbitClient(torrents=[make_torrent()], download_speed=1_000)
     app = QbitOpsTuiApp(
@@ -6429,36 +6449,56 @@ async def test_the_graph_samples_on_its_own_clock_not_the_refresh_one() -> None:
         await _settle(app, pilot)
         history = app.controller.state.rate_history
 
-        assert history.slots == GRAPH_SLOTS
-        assert (
-            GRAPH_SLOTS * GRAPH_SAMPLE_INTERVAL_SECONDS == GRAPH_WINDOW_SECONDS
-        )
-        # The interval is nearly a thousand times the sample period, and
-        # the sampler still fills its own window.
+        assert GRAPH_SAMPLE_INTERVAL_SECONDS == 1.0
         assert LARGE_INTERVAL != GRAPH_SAMPLE_INTERVAL_SECONDS
+
         before = history.measured
         for _ in range(3):
-            app._sample_rates()
+            app.controller.apply_rate_sample(
+                app.controller.collect_transfer_rates()
+            )
         assert history.measured == before + 3
 
-        graph = str(app.query_one(RateGraph).content)
-        assert f"-{GRAPH_WINDOW_SECONDS}s" in graph
-        assert "now" in graph
+        app._render_overview()
+        graph = app.query_one(RateGraph)
+        axis = next(
+            line for line in str(graph.content).splitlines() if "|now|" in line
+        )
+        # The window is exactly as many seconds as the plot is columns.
+        plot_columns = len(axis) - (len(axis) - len(axis.lstrip(" ")))
+        window = re.search(r"\|-(\d+)s\|", axis)
+        assert window is not None, axis
+        seconds = int(window.group(1))
+        assert seconds > 0
+        assert abs(seconds - plot_columns) <= 6, (seconds, plot_columns, axis)
 
 
-async def test_the_graph_starts_empty_rather_than_flat_at_zero() -> None:
-    """No sample is not a sample of zero: before the first tick the
-    window says it has nothing, instead of drawing a still library."""
+async def test_the_graph_draws_its_whole_axis_on_the_very_first_frame() -> None:
+    """An axis that built itself up as samples arrived made a freshly
+    opened page look broken for a whole minute. Only the trace fills
+    in; the rule, its ticks and its labels are there from frame one."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        graph = str(app.query_one(RateGraph).content)
+        # The sampler fires the moment the page appears, so an honest
+        # "first frame" has to be asked for: a fresh window, rendered.
+        app.controller.state.rate_history = RateHistory()
+        app._render_overview()
+        await pilot.pause()
 
+        graph = app.query_one(RateGraph)
+        lines = str(graph.content).splitlines()
+        axis = next(line for line in lines if "|now|" in line)
+
+        # Nothing has been plotted, and the axis is already complete.
         assert app.controller.state.rate_history.measured == 0
-        assert "no samples yet" in graph
-        assert "peak" not in graph
+        assert "no samples yet" in str(graph.content)
+        assert len(axis) == graph.size.width
+        assert axis.count("─") > graph.size.width // 2
+        assert "|now|" in axis
+        assert re.search(r"\|-\d+s\|", axis)
 
 
 async def test_window_titles_render_in_small_capitals_by_default() -> None:
@@ -6510,7 +6550,9 @@ async def test_the_overview_still_never_scans_trackers() -> None:
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        app._sample_rates()
+        app.controller.apply_rate_sample(
+            app.controller.collect_transfer_rates()
+        )
 
         assert client.torrents_trackers_calls <= 1
         breakdown = app.controller.state.tracker_breakdown
@@ -6587,8 +6629,6 @@ async def test_the_graph_ink_reaches_the_edge_of_its_panel(
     """A floor division left the block short and hard against the left,
     so the page's right edge stepped between the masthead band and the
     windows band, and `now` fell short of the real right edge."""
-    from qbit_ops.tui.state import GRAPH_SLOTS
-
     client = FakeQbitClient(
         torrents=[make_torrent()], download_speed=4_000_000, upload_speed=1
     )
@@ -6596,21 +6636,24 @@ async def test_the_graph_ink_reaches_the_edge_of_its_panel(
 
     async with app.run_test(size=size) as pilot:
         await _settle(app, pilot)
-        for _ in range(GRAPH_SLOTS):
-            app._sample_rates()
+        for _ in range(80):
+            app.controller.apply_rate_sample(
+                app.controller.collect_transfer_rates()
+            )
+        app._render_overview()
         await pilot.pause()
 
         graph = app.query_one(RateGraph)
         panel = graph.size.width
         lines = str(graph.content).splitlines()
-        axis = next(line for line in lines if "-60s" in line)
+        axis = next(line for line in lines if "|now|" in line)
 
         assert panel > 0
         assert (
             len(axis) == panel
         ), f"axis spans {len(axis)} of {panel} columns at {size}"
-        assert axis.rstrip().endswith("now")
-        # Non-vacuous: bars were actually drawn, and they end flush too.
+        assert axis.rstrip().endswith("|now|")
+        # Non-vacuous: the trace was actually drawn, and ends flush too.
         drawn = [line for line in lines if "⣿" in line]
         assert drawn, lines
         assert all(len(line) == panel for line in drawn)
@@ -6635,3 +6678,122 @@ async def test_each_window_wears_a_one_word_title() -> None:
         assert "announce status not read here" in str(
             app.query_one(TrackersWindow).content
         )
+
+
+# --- Three windows, and a page that does not shuffle -----------------------
+
+
+async def test_the_overview_is_three_bordered_windows() -> None:
+    """One grammar: the wordmark and the graph get a frame of their own,
+    the same way the two windows below already had one."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        masthead = overview.query_one("#overview-masthead")
+        trackers = overview.query_one(TrackersWindow)
+        session = overview.query_one(SessionWindow)
+
+        for window in (masthead, trackers, session):
+            assert window.styles.border != ((None, None),) * 4
+            assert str(window.border_title)
+
+        assert str(masthead.border_title) == "ᴛʀᴀɴꜱꜰᴇʀ"
+        # The wordmark and the graph live inside that frame.
+        assert overview.query_one(BrandHeader).region in masthead.region
+        assert overview.query_one(RateGraph).region in masthead.region
+
+
+@pytest.mark.parametrize("size", RESPONSIVE_SIZES)
+async def test_the_page_never_moves_when_the_trackers_go_quiet(
+    size: tuple[int, int],
+) -> None:
+    """A window that shrank when its trackers stopped emitting moved the
+    whole page. Page movement that carries no information is noise."""
+
+    def regions(app: QbitOpsTuiApp) -> dict[str, Any]:
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        return {
+            "masthead": overview.query_one("#overview-masthead").region,
+            "graph": overview.query_one(RateGraph).region,
+            "trackers": overview.query_one(TrackersWindow).region,
+            "session": overview.query_one(SessionWindow).region,
+        }
+
+    torrents = [
+        make_torrent(
+            hash=f"{i:040x}",
+            tracker=f"http://t{i}.tld/a",
+            dlspeed=900_000,
+            upspeed=400_000,
+        )
+        for i in range(6)
+    ]
+    client = FakeQbitClient(torrents=torrents, upload_speed=2_000_000)
+    app = _app(client)
+
+    async with app.run_test(size=size) as pilot:
+        await _settle(app, pilot)
+        for _ in range(40):
+            app.controller.apply_rate_sample(
+                app.controller.collect_transfer_rates()
+            )
+        app._render_overview()
+        await pilot.pause()
+        busy = regions(app)
+
+        for torrent in torrents:
+            torrent["dlspeed"] = 0
+            torrent["upspeed"] = 0
+        client.upload_speed = 0
+        app.controller.apply_refresh_success(app.controller.collect_refresh())
+        app._render_all()
+        await pilot.pause()
+
+        assert regions(app) == busy
+
+
+async def test_going_stale_never_pushes_a_window_down_a_row() -> None:
+    """The staleness banner has a widget of its own, outside the
+    fixed-height masthead, for exactly this reason."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        overview = app.query_one("#overview-workspace", OverviewPanel)
+        before = overview.query_one("#overview-masthead").region
+
+        app.controller.state.stale = True
+        app._render_overview()
+        await pilot.pause()
+
+        assert overview.query_one("#overview-masthead").region == before
+        assert "STALE" in str(
+            overview.query_one("#overview-stale", Static).content
+        )
+
+
+async def test_the_seconds_nobody_watched_are_not_drawn_as_zero() -> None:
+    """Leaving the page stops the sampler. Coming back records the gap
+    as unmeasured rather than back-filling a still library."""
+    client = FakeQbitClient(torrents=[make_torrent()], download_speed=5_000)
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        for _ in range(5):
+            app.controller.apply_rate_sample(
+                app.controller.collect_transfer_rates()
+            )
+        measured_before = app.controller.state.rate_history.measured
+
+        app.controller.skip_rate_samples(30)
+        history = app.controller.state.rate_history
+
+        assert history.measured == measured_before
+        downloads, _ = history.window(40)
+        assert downloads[-1] is None
+        assert any(value is not None for value in downloads)

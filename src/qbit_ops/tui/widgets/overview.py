@@ -25,6 +25,7 @@ from qbit_ops.tui.state import ConnectionState, TuiState, Workspace
 from qbit_ops.tui.widgets.overview_windows import (
     SESSION_TITLE,
     TRACKERS_TITLE,
+    TRANSFER_TITLE,
     SessionWindow,
     TrackersWindow,
     connection_marker,
@@ -77,13 +78,13 @@ _LOGO_COMPACT: tuple[str, ...] = (
 # the general card-layout breakpoints in `formatting.py` -- reusing those
 # made the compact wordmark disappear far before it needed to.
 #
-# The margins are one and two columns, not five and six: the wordmark no
-# longer owns the full width, it owns the identity column beside the
-# graph, and the old margins dropped the full wordmark at 140 columns --
-# the very width the design is drawn at.
+# The margins are one column each, not five and six: the wordmark no
+# longer owns the full width, it owns the identity column inside the
+# ᴛʀᴀɴꜱꜰᴇʀ window's border, beside the graph. A wider margin dropped the
+# full wordmark at 140 columns -- the very width the design is drawn at.
 _FULL_LOGO_WIDTH = max(len(line) for line in _LOGO_FULL)
 _COMPACT_LOGO_WIDTH = max(len(line) for line in _LOGO_COMPACT)
-_BRAND_FULL_MIN_WIDTH = _FULL_LOGO_WIDTH + 2  # 59
+_BRAND_FULL_MIN_WIDTH = _FULL_LOGO_WIDTH + 1  # 58
 _BRAND_COMPACT_MIN_WIDTH = _COMPACT_LOGO_WIDTH + 1  # 46
 
 # Kept only for the variant that has no wordmark to identify the app
@@ -247,11 +248,16 @@ class OverviewPanel(VerticalScroll):
                 yield BrandHeader(id="brand-header")
                 yield Static(id="overview-rail", classes="ov-rail")
             yield RateGraph(id="rate-graph")
+        yield Static(id="overview-stale", classes="ov-stale")
         with Horizontal(id="overview-windows"):
             yield TrackersWindow(id="trackers-window")
             yield SessionWindow(id="session-window")
 
     def on_mount(self) -> None:
+        masthead = self.query_one("#overview-masthead", Horizontal)
+        masthead.border_title = _window_title(
+            TRANSFER_TITLE, small_caps=self._small_caps
+        )
         trackers = self.query_one("#trackers-window", TrackersWindow)
         trackers.border_title = _window_title(
             TRACKERS_TITLE, small_caps=self._small_caps
@@ -267,6 +273,22 @@ class OverviewPanel(VerticalScroll):
             rail.update("Connecting to qBittorrent...")
         else:
             rail.update(_overview_rail_text(state))
+
+        # The refresh moment rides the window's own border, not the rail:
+        # the rail is one fixed line and the status word already varies
+        # in length, so an extra clause there would be the first thing
+        # truncated away.
+        masthead = self.query_one("#overview-masthead", Horizontal)
+        masthead.border_subtitle = _refresh_subtitle(state)
+
+        # Its own widget, outside the fixed-height masthead: folding it
+        # into the rail made every window below move a row the moment a
+        # refresh went stale.
+        stale = self.query_one("#overview-stale", Static)
+        stale.display = state.stale
+        stale.update(
+            "[bold yellow]STALE[/bold yellow] -- showing last-good data"
+        )
 
         self.query_one("#rate-graph", RateGraph).render_state(
             state.rate_history
@@ -316,15 +338,10 @@ def _overview_rail_text(state: TuiState) -> str:
     if status.api_version:
         parts.append(f"API {status.api_version}")
 
-    if state.last_successful_refresh is not None:
-        refresh_time = _format_rail_time(state.last_successful_refresh)
-        parts.append(f"Refreshed {refresh_time}")
-    else:
-        parts.append("Refreshed never")
+    return " · ".join(parts)
 
-    lines = [" · ".join(parts)]
-    if state.stale:
-        lines.append(
-            "[bold yellow]STALE[/bold yellow] -- showing last-good data"
-        )
-    return "\n".join(lines)
+
+def _refresh_subtitle(state: TuiState) -> str:
+    if state.last_successful_refresh is None:
+        return "Refreshed never"
+    return f"Refreshed {_format_rail_time(state.last_successful_refresh)}"

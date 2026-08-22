@@ -19,7 +19,6 @@ from qbit_ops.tui.formatting import (
     _format_global_rate,
 )
 from qbit_ops.tui.state import (
-    GRAPH_SLOTS,
     RateHistory,
     TrackerActivityKind,
     build_tracker_breakdown,
@@ -115,11 +114,11 @@ def test_the_rate_readout_paints_each_direction_in_its_own_hue() -> None:
 
 def test_the_graph_paints_each_half_in_its_own_hue() -> None:
     history = RateHistory()
-    for _ in range(GRAPH_SLOTS):
-        history.record(download=4_000_000, upload=1_000_000)
+    for _ in range(80):
+        history.record_transfer(download=4_000_000, upload=1_000_000)
     graph = build_rate_graph(history, width=76)
 
-    down_half, _, up_half = graph.plain.partition("-60s")
+    down_half, _, up_half = graph.plain.partition("|now|")
     assert DOWN_RATE_ACCENT in {str(s.style) for s in graph.spans}
     assert UP_RATE_ACCENT in {str(s.style) for s in graph.spans}
     # The two halves are drawn, and drawn apart.
@@ -128,8 +127,8 @@ def test_the_graph_paints_each_half_in_its_own_hue() -> None:
 
 def test_an_idle_direction_gets_no_hue_rather_than_a_third_one() -> None:
     history = RateHistory()
-    for _ in range(GRAPH_SLOTS):
-        history.record(download=0, upload=1_000_000)
+    for _ in range(80):
+        history.record_transfer(download=0, upload=1_000_000)
     graph = build_rate_graph(history, width=76)
     styles = {str(span.style) for span in graph.spans}
 
@@ -241,15 +240,15 @@ def test_the_arrow_carries_direction_and_the_word_carries_state() -> None:
 def test_the_direction_is_readable_against_the_axis() -> None:
     """The peak labels sit four rows away from the axis. The eye reading
     a bar is at the axis, so the direction has to be legible there."""
-    from qbit_ops.tui.state import GRAPH_SLOTS, RateHistory
+    from qbit_ops.tui.state import RateHistory
     from qbit_ops.tui.widgets.rate_graph import build_rate_graph
 
     history = RateHistory()
-    for _ in range(GRAPH_SLOTS):
-        history.record(download=4_000_000, upload=1_000_000)
+    for _ in range(80):
+        history.record_transfer(download=4_000_000, upload=1_000_000)
     lines = build_rate_graph(history, width=76).plain.splitlines()
 
-    axis = next(i for i, line in enumerate(lines) if "-60s" in line)
+    axis = next(i for i, line in enumerate(lines) if "|now|" in line)
     above, below = lines[axis - 1], lines[axis + 1]
 
     assert "↓" in above.split("┤")[0]

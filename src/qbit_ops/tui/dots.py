@@ -32,7 +32,9 @@ BLANK = " "
 AXIS_RULE = "─"
 
 
-def dot_column(value: float, rows: int, *, from_top: bool = False) -> list[str]:
+def dot_column(
+    value: float | None, rows: int, *, from_top: bool = False
+) -> list[str]:
     """Render one bar as `rows` glyphs, top row first.
 
     `value` is already normalized to `0.0..1.0`. Any non-zero value
@@ -40,7 +42,12 @@ def dot_column(value: float, rows: int, *, from_top: bool = False) -> list[str]:
     beside one moving 3 MiB/s would draw the identical blank column a
     stopped tracker draws, and "slow" would be indistinguishable from
     "off".
+
+    `None` is a second nobody measured. It draws blank, exactly like a
+    measured zero: the two are told apart on the axis, not in the plot.
     """
+    if value is None:
+        return [BLANK] * rows
     total = rows * DOT_ROWS_PER_CELL
     filled = int(round(value * total))
     if value > 0:
@@ -93,19 +100,25 @@ class BarLayout:
         return kept * self.bar_width + sum(self.gaps[self.slots - kept :])
 
 
-def fit_bars(width: int, slots: int, *, max_bar_width: int) -> BarLayout:
+def fit_bars(
+    width: int, slots: int, *, max_bar_width: int, min_gap: int = 1
+) -> BarLayout:
     """Lay `slots` bars out across exactly `width` columns.
 
     The bar is made as wide as the width allows (capped, or a very wide
     panel would draw blocks instead of a trace), and every leftover
     column goes into the gaps, spread as evenly as they divide.
+
+    `min_gap=0` is what turns discrete bars into a continuous trace: one
+    column per sample with nothing between them, which is the only shape
+    that reads as a curve rather than as a staircase.
     """
     if slots <= 0 or width <= 0:
         return BarLayout(bar_width=max(width, 0), gaps=())
 
-    minimum_gaps = slots - 1
+    minimum_gaps = (slots - 1) * min_gap
     bar_width = max(1, min(max_bar_width, (width - minimum_gaps) // slots))
-    gaps = [1] * minimum_gaps
+    gaps = [min_gap] * (slots - 1)
     slack = width - (slots * bar_width + sum(gaps))
     if slack > 0 and gaps:
         # Centred, not front-loaded: the gaps can rarely absorb the
@@ -117,7 +130,7 @@ def fit_bars(width: int, slots: int, *, max_bar_width: int) -> BarLayout:
 
 
 def dot_bars(
-    values: Sequence[float],
+    values: Sequence[float | None],
     rows: int,
     layout: BarLayout,
     *,
@@ -136,25 +149,48 @@ def dot_bars(
     return lines
 
 
-def dot_axis(measured: int, layout: BarLayout) -> str:
-    """The axis rule under a plot, ruled only where the window measured.
+def dot_axis(layout: BarLayout) -> str:
+    """The axis rule, always drawn end to end.
 
-    The window is always `layout.slots` wide -- it is a fixed span of
-    time, not a count of samples -- but the rule is drawn only beneath
-    the newest `measured` slots. An absent slot therefore leaves bare
-    ground under it, which a recorded zero (blank bar, ruled ground)
-    never does.
+    Complete from the very first frame, before a single sample exists:
+    an axis that built itself up as samples arrived made a freshly
+    opened page look broken for a whole minute.
+
+    What was carried by *whether* the rule was drawn is carried by
+    `measured_runs` and the style a caller applies to it instead -- an
+    unmeasured stretch is dimmed, never blank, so "not measured" still
+    reads apart from "measured zero" without the axis ever being a
+    partial line.
     """
-    span = layout.span
-    if measured <= 0:
-        return BLANK * span
-    if measured >= layout.slots:
-        return AXIS_RULE * span
-    drawn = layout.trailing_span(measured)
-    return (BLANK * (span - drawn)) + (AXIS_RULE * drawn)
+    return AXIS_RULE * layout.span
 
 
-def dot_sparkline(values: Sequence[float], cells: int) -> str:
+def measured_runs(
+    measured: Sequence[bool], layout: BarLayout
+) -> list[tuple[int, int, bool]]:
+    """`(start, end, measured)` column runs across the axis.
+
+    One entry per run of like slots, so a caller styles the axis in as
+    few pieces as the window actually has.
+    """
+    runs: list[tuple[int, int, bool]] = []
+    column = 0
+    for index, is_measured in enumerate(measured[: layout.slots]):
+        end = column + layout.bar_width
+        if index < len(layout.gaps):
+            end += layout.gaps[index]
+        end = min(end, layout.span)
+        if runs and runs[-1][2] is is_measured:
+            runs[-1] = (runs[-1][0], end, is_measured)
+        else:
+            runs.append((column, end, is_measured))
+        column = end
+    if runs and runs[-1][1] < layout.span:
+        runs[-1] = (runs[-1][0], layout.span, runs[-1][2])
+    return runs
+
+
+def dot_sparkline(values: Sequence[float | None], cells: int) -> str:
     """One-row dot sparkline, the same alphabet and the same floor.
 
     Right-aligned and padded to `cells`: the newest sample is always the
@@ -164,6 +200,9 @@ def dot_sparkline(values: Sequence[float], cells: int) -> str:
     recent = list(values)[-cells:]
     glyphs = []
     for value in recent:
+        if value is None:
+            glyphs.append(BLANK)
+            continue
         level = int(round(value * DOT_ROWS_PER_CELL))
         if value > 0:
             level = max(1, level)
@@ -172,7 +211,7 @@ def dot_sparkline(values: Sequence[float], cells: int) -> str:
     return "".join(glyphs).rjust(cells)
 
 
-def normalize(values: Sequence[int], peak: int) -> list[float]:
+def normalize(values: Sequence[int | None], peak: int) -> list[float | None]:
     """Scale absolute measures against `peak`, the window's own maximum.
 
     A relative scale is what keeps the panel from being a flat line on a
@@ -181,5 +220,8 @@ def normalize(values: Sequence[int], peak: int) -> list[float]:
     identical picture.
     """
     if peak <= 0:
-        return [0.0 for _ in values]
-    return [max(0.0, min(1.0, value / peak)) for value in values]
+        return [None if value is None else 0.0 for value in values]
+    return [
+        None if value is None else max(0.0, min(1.0, value / peak))
+        for value in values
+    ]

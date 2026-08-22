@@ -137,6 +137,11 @@ async def test_an_unconfigured_tui_shows_the_form_and_contacts_nothing(
 
         assert isinstance(app._setup_screen(), SetupScreen)
         assert clients == [], "nothing may be contacted before setup"
+        # The per-second rate sampler is the one timer that reaches
+        # qBittorrent on its own, and workspace visibility is rendered
+        # before the form is pushed -- so it is gated on the refresh
+        # having started, not on the order those two happen in.
+        assert app._sample_timer is None
 
 
 async def test_escape_does_not_dismiss_the_form(isolated_target: Path) -> None:

@@ -27,7 +27,7 @@ from qbit_ops.tui.formatting import (
     _format_bytes,
 )
 from qbit_ops.tui.state import (
-    GRAPH_SLOTS,
+    TRACKER_SPARKLINE_SLOTS,
     LibraryBreakdown,
     RateHistory,
     TrackerActivity,
@@ -77,6 +77,10 @@ _LEGEND_ORDER: tuple[tuple[TrackerActivityKind, str], ...] = (
 # torrent activity", which said the same thing as the window's own last
 # line eleven rows below -- and said it less precisely, since the last
 # line names what is *not* read and sits against the data it qualifies.
+# qBittorrent's own word for what the graph plots, and unique on the
+# page: `activity` was rejected because the Trackers window already
+# spends it on a column of its own.
+TRANSFER_TITLE = "Transfer"
 TRACKERS_TITLE = "Trackers"
 # The window names what it does not know, on its own last line: "idle"
 # here means "moving nothing", never "not announcing".
@@ -114,7 +118,7 @@ _FIXED_ROW_WIDTH = (
     + 1
     + _ERR_WIDTH
     + 1
-    + GRAPH_SLOTS
+    + TRACKER_SPARKLINE_SLOTS
 )
 
 # Header, blank, then the four footer lines the window always keeps.
@@ -222,10 +226,13 @@ def build_trackers_window(
 
 
 def _header_row(name_width: int) -> str:
+    # `recent`, never a number of seconds: these sparklines ride the
+    # refresh tick, so their span is `--interval` times their cell count
+    # and a fixed "60s" would be false at any other interval.
     return (
         f"   {'tracker':<{name_width}} {'activity':<{_ACTIVITY_WIDTH}} "
         f"{'up':>{_RATE_WIDTH}} {'down':>{_RATE_WIDTH}} "
-        f"{'err':>{_ERR_WIDTH}} 60s"
+        f"{'err':>{_ERR_WIDTH}} recent"
     )
 
 
@@ -254,7 +261,8 @@ def _append_tracker_row(
     )
     samples = history.tracker(row.key)
     text.append(
-        dot_sparkline(_normalized(samples, peak), GRAPH_SLOTS), style=style
+        dot_sparkline(_normalized(samples, peak), TRACKER_SPARKLINE_SLOTS),
+        style=style,
     )
     text.append("\n")
 

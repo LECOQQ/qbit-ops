@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.cells import cell_len
+from textual import events
 from textual.widgets import Input, Static
 
 from qbit_core.features.status import StatusSnapshot
@@ -40,13 +42,34 @@ class LastActionBar(Static):
 
 
 class FilterSummary(Static):
-    """A concise, always-visible line describing the active filter/search.
+    """One line: what is being shown, and how much of it.
 
-    e.g. "146 shown / 1,105 · stalled" or
-    "24 shown / 1,105 · category: films · stalled · search: ubuntu".
-    Purely presentational: derived from `TuiState`, never fetched. Only
-    shown in the Torrents workspace.
+    Criteria and sort sit on the left, the count is flushed right --
+    one row instead of two, and a right edge that lines up with every
+    other region of the page. Purely presentational: derived from
+    `TuiState`, never fetched. Only shown in the Torrents workspace.
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._criteria = ""
+        self._counts = ""
+
+    def render_state(self, *, criteria: str, counts: str) -> None:
+        self._criteria = criteria
+        self._counts = counts
+        self._repaint()
+
+    def _on_resize(self, event: events.Resize) -> None:
+        self._repaint()
+
+    def _repaint(self) -> None:
+        # Measured in cells, not characters: the sort label carries an
+        # arrow, and a character count would misplace the right edge.
+        gap = (
+            self.size.width - cell_len(self._criteria) - cell_len(self._counts)
+        )
+        self.update(f"{self._criteria}{' ' * max(gap, 1)}{self._counts}")
 
 
 class CommandBar(Static):

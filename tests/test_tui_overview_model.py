@@ -11,10 +11,9 @@ import pytest
 
 from qbit_ops.tui.state import (
     GRAPH_SAMPLE_INTERVAL_SECONDS,
-    GRAPH_SLOTS,
-    GRAPH_WINDOW_SECONDS,
     NO_TRACKER_KEY,
     NO_TRACKER_LABEL,
+    TRACKER_SPARKLINE_SLOTS,
     RateHistory,
     TrackerActivityKind,
     build_library_breakdown,
@@ -32,11 +31,10 @@ def _torrent(index: int, **overrides: object) -> dict[str, object]:
 # --- the window is a span of time, not a count of refreshes --------------
 
 
-def test_the_axis_label_is_true_by_construction() -> None:
-    """Twelve slots of five seconds is sixty seconds whatever
-    `--interval` is set to -- the label is arithmetic that cannot come
-    apart, not a number written beside one."""
-    assert GRAPH_SLOTS * GRAPH_SAMPLE_INTERVAL_SECONDS == GRAPH_WINDOW_SECONDS
+def test_the_sampler_runs_on_its_own_second() -> None:
+    """One sample per second and one column per sample: the panel's
+    width decides the window, and the label is read back off it."""
+    assert GRAPH_SAMPLE_INTERVAL_SECONDS == 1.0
 
 
 def test_a_fresh_window_has_measured_nothing_rather_than_measured_zero() -> (
@@ -46,31 +44,54 @@ def test_a_fresh_window_has_measured_nothing_rather_than_measured_zero() -> (
 
     assert history.measured == 0
     assert history.downloads == ()
-    assert history.uploads == ()
+    # Asked for a window, it pads with unmeasured slots rather than
+    # returning a shorter one: the plot is always as wide as the panel.
+    downloads, uploads = history.window(10)
+    assert downloads == [None] * 10
+    assert uploads == [None] * 10
 
 
 def test_a_recorded_zero_counts_as_a_measurement() -> None:
     history = RateHistory()
-    history.record(download=0, upload=0)
+    history.record_transfer(download=0, upload=0)
 
     assert history.measured == 1
     assert history.downloads == (0,)
 
 
-def test_the_window_never_grows_past_its_slots() -> None:
+def test_seconds_nobody_watched_are_recorded_as_unmeasured() -> None:
+    """The operator was on the Torrents page and the sampler was
+    stopped. Those seconds are not zero traffic -- nobody looked."""
     history = RateHistory()
-    for value in range(GRAPH_SLOTS + 5):
-        history.record(download=value, upload=0)
+    history.record_transfer(download=5, upload=5)
+    history.skip(4)
+    history.record_transfer(download=7, upload=7)
 
-    assert history.measured == GRAPH_SLOTS
-    assert len(history.downloads) == GRAPH_SLOTS
-    # Oldest dropped, newest kept.
-    assert history.downloads[-1] == GRAPH_SLOTS + 4
+    downloads, _ = history.window(6)
+    assert downloads == [5, None, None, None, None, 7]
+    assert history.measured == 2
+
+
+def test_a_skip_can_never_outgrow_the_window() -> None:
+    history = RateHistory(slots=8)
+    history.skip(10_000)
+
+    assert len(history.downloads) == 8
+    assert history.measured == 0
+
+
+def test_the_window_never_grows_past_its_slots() -> None:
+    history = RateHistory(slots=8)
+    for value in range(20):
+        history.record_transfer(download=value, upload=0)
+
+    assert history.measured == 8
+    assert history.downloads[-1] == 19
 
 
 def test_a_negative_reading_never_enters_the_window() -> None:
     history = RateHistory()
-    history.record(download=-1, upload=-5)
+    history.record_transfer(download=-1, upload=-5)
 
     assert history.downloads == (0,)
     assert history.uploads == (0,)
@@ -78,7 +99,7 @@ def test_a_negative_reading_never_enters_the_window() -> None:
 
 def test_every_tracker_sparkline_shares_one_peak() -> None:
     history = RateHistory()
-    history.record(download=0, upload=0, by_tracker={"a": 100, "b": 4_000})
+    history.record_trackers({"a": 100, "b": 4_000})
 
     assert history.tracker_peak == 4_000
     assert history.tracker("a") == (100,)
@@ -87,11 +108,11 @@ def test_every_tracker_sparkline_shares_one_peak() -> None:
 
 def test_a_tracker_quiet_for_a_whole_window_stops_costing_a_series() -> None:
     history = RateHistory()
-    history.record(download=0, upload=0, by_tracker={"gone": 500})
+    history.record_trackers({"gone": 500})
     assert history.tracker_keys == ("gone",)
 
-    for _ in range(GRAPH_SLOTS):
-        history.record(download=0, upload=0, by_tracker={})
+    for _ in range(TRACKER_SPARKLINE_SLOTS):
+        history.record_trackers({})
 
     assert history.tracker_keys == ()
 

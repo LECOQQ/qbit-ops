@@ -25,6 +25,11 @@ from qbit_core.features.torrents import BulkTorrentActionPlan
 from qbit_core.features.trackers import TrackerHealth
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import format_category_label
+from qbit_core.shared.small_caps import (
+    SMALL_CAPS,
+    UNMAPPABLE_LETTERS,
+    to_small_caps,
+)
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.state import (
     MutationUiResult,
@@ -165,35 +170,18 @@ def _format_global_rate(download_rate: int, upload_rate: int) -> Text:
     return text
 
 
-# Unicode's small-capital letters, which read as a quieter title than
-# full capitals do. Measured rather than assumed: every one of these 25
-# is `east_asian_width` Neutral and `cell_len` 1, so they are strictly
+# The alphabet itself lives in `qbit_core.shared.small_caps`, with the
+# three Unicode blocks it is scattered across: `qbit-ops doctor` reads
+# the same table to explain a terminal that renders it unevenly.
+#
+# Measured rather than assumed: every one of the 25 is
+# `east_asian_width` Neutral and `cell_len` 1, so they are strictly
 # better behaved than the box-drawing and marker glyphs the screen
 # already carries (all Ambiguous, the width class that once misaligned
 # a progress bar).
-_SMALL_CAPS: dict[str, str] = {
-    "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ", "f": "ꜰ", "g": "ɢ",
-    "h": "ʜ", "i": "ɪ", "j": "ᴊ", "k": "ᴋ", "l": "ʟ", "m": "ᴍ", "n": "ɴ",
-    "o": "ᴏ", "p": "ᴘ", "q": "ꞯ", "r": "ʀ", "s": "ꜱ", "t": "ᴛ", "u": "ᴜ",
-    "v": "ᴠ", "w": "ᴡ", "y": "ʏ", "z": "ᴢ",
-}  # fmt: skip
-
-# Unicode has no LATIN LETTER SMALL CAPITAL X. Not a theoretical gap:
-# the `Explain` screen exists, and a half-converted title would read
-# worse than an ordinary one.
-_UNMAPPABLE_LETTERS = frozenset("x")
-
-
-def _small_caps(word: str) -> str:
-    """Render `word` in small capitals, or unchanged when it cannot be.
-
-    All-or-nothing on purpose: one letter without a small capital makes
-    the whole word fall back, rather than shipping a title that is
-    small-caps everywhere except one full-height letter.
-    """
-    if any(char in _UNMAPPABLE_LETTERS for char in word.lower()):
-        return word
-    return "".join(_SMALL_CAPS.get(char, char) for char in word.lower())
+_SMALL_CAPS = SMALL_CAPS
+_UNMAPPABLE_LETTERS = UNMAPPABLE_LETTERS
+_small_caps = to_small_caps
 
 
 def _window_title(name: str, *, small_caps: bool) -> str:

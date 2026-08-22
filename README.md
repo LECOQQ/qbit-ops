@@ -268,16 +268,23 @@ See [PHILOSOPHY.md](https://github.com/LECOQQ/qbit-ops/blob/main/PHILOSOPHY.md) 
 The optional Textual interface provides an operational overview, torrent browsing, filters, details, explanations, and previewed low-risk bulk actions.
 
 The overview answers "what is this machine doing" without reading a
-number: sixty seconds of transfer drawn in both directions, per-tracker
+number: a live trace of transfer in both directions, per-tracker
 activity, and the instance's own counters.
 
 ```bash
 qbit-ops tui
 ```
 
-Window titles are set in Unicode small capitals. If your terminal font
-does not carry them, `qbit-ops tui --ascii-titles` renders plain
-capitals instead.
+The trace samples once a second, one column per second, and only while
+the overview is on screen -- it costs nothing on the torrents page.
+Its axis label states the window it actually shows, which is as many
+seconds as the panel is columns wide.
+
+Window titles are set in Unicode small capitals. Those letters live in
+three unrelated Unicode blocks, and a font covering only some of them
+renders the rest at a different size. Run `qbit-ops doctor` to see what
+a font needs; `qbit-ops tui --ascii-titles`, or `QBIT_OPS_ASCII_TITLES=1`,
+renders plain capitals instead.
 
 | Overview | Torrents |
 |---|---|

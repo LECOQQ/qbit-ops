@@ -22,6 +22,7 @@ from qbit_ops.tui.dots import (
     dot_column,
     dot_sparkline,
     fit_bars,
+    measured_runs,
     normalize,
 )
 from qbit_ops.tui.formatting import _SMALL_CAPS, _small_caps, _window_title
@@ -65,7 +66,7 @@ def test_a_non_zero_value_always_inks_at_least_one_dot_row() -> None:
     that rounds to nothing -- and must still be visible, or "slow" and
     "stopped" draw the same picture."""
     tiny = normalize([26_000], peak=3_100_000)[0]
-    assert tiny > 0
+    assert tiny is not None and tiny > 0
     assert round(tiny * 3 * DOT_ROWS_PER_CELL) == 0
     assert dot_column(tiny, 3, from_top=False)[2] == UP_RAMP[0]
 
@@ -82,25 +83,50 @@ def test_a_sparkline_floors_every_non_zero_sample_too() -> None:
 # --- absent is not zero --------------------------------------------------
 
 
-def test_an_unmeasured_slot_leaves_the_axis_bare() -> None:
-    """A recorded zero draws a blank bar over ruled ground; a slot that
-    was never measured draws a blank bar over bare ground. Without the
-    difference the first twelve seconds would announce "no traffic"."""
-    layout = fit_bars(70, 12, max_bar_width=6)
-    partial = dot_axis(2, layout)
-    full = dot_axis(12, layout)
+def test_the_axis_is_complete_before_a_single_sample_exists() -> None:
+    """An axis that built itself up as samples arrived made a freshly
+    opened page look broken for a whole minute."""
+    layout = fit_bars(70, 70, max_bar_width=1, min_gap=0)
 
-    assert len(partial) == len(full) == layout.span
-    assert full == AXIS_RULE * len(full)
-    assert partial != full
-    assert partial.endswith(AXIS_RULE)
-    assert partial.startswith(" ")
-    assert partial.count(AXIS_RULE) == layout.trailing_span(2)
+    assert dot_axis(layout) == AXIS_RULE * 70
 
 
-def test_nothing_measured_yet_rules_no_axis_at_all() -> None:
-    layout = fit_bars(70, 12, max_bar_width=6)
-    assert dot_axis(0, layout) == " " * layout.span
+def test_an_unmeasured_stretch_is_still_told_apart_from_a_measured_zero() -> (
+    None
+):
+    """The distinction moved from *whether* the rule is drawn to *how*
+    it is drawn -- a caller dims the unmeasured run. The runs are what
+    carry it, and they must not collapse into one."""
+    layout = fit_bars(70, 70, max_bar_width=1, min_gap=0)
+    warming = measured_runs([False] * 40 + [True] * 30, layout)
+    full = measured_runs([True] * 70, layout)
+    empty = measured_runs([False] * 70, layout)
+
+    assert warming == [(0, 40, False), (40, 70, True)]
+    assert full == [(0, 70, True)]
+    assert empty == [(0, 70, False)]
+    # Every run together always spans the whole axis, at any fill.
+    for runs in (warming, full, empty):
+        assert runs[0][0] == 0
+        assert runs[-1][1] == layout.span
+
+
+def test_a_gap_in_the_middle_of_the_window_survives_as_its_own_run() -> None:
+    """The operator was on another page for a while: that stretch is
+    unmeasured, and it sits in the middle rather than at the start."""
+    layout = fit_bars(70, 70, max_bar_width=1, min_gap=0)
+    mask = [True] * 20 + [False] * 15 + [True] * 35
+
+    assert measured_runs(mask, layout) == [
+        (0, 20, True),
+        (20, 35, False),
+        (35, 70, True),
+    ]
+
+
+def test_an_unmeasured_sample_draws_nothing_at_all() -> None:
+    assert dot_column(None, 3) == [" ", " ", " "]
+    assert normalize([None, 100], peak=100) == [None, 1.0]
 
 
 # --- the relative scale --------------------------------------------------

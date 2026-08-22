@@ -66,36 +66,48 @@ MainScreen.narrow {
     height: 1fr;
     padding: 0 1;
 }
-/* The masthead: the wordmark and the instance's status line on the
-   left, the sixty-second graph filling the band to their right. The
-   graph takes no line of its own -- it occupies cells the wordmark was
-   already reserving and leaving blank. */
+/* Three windows, one grammar. The top one holds the wordmark, the
+   instance's status line and the graph; the two below split the rest.
+   Every one of them has a fixed or fractional size, never a size read
+   off its own content: a window that shrank when its trackers went
+   quiet moved the whole page, and page movement that carries no
+   information is noise. */
 #overview-masthead {
-    height: auto;
+    height: 11;
+    border: round $panel-lighten-2;
+    border-title-color: $primary;
+    border-title-align: left;
+    border-subtitle-color: $text-muted;
+    border-subtitle-align: right;
+    padding: 0 1;
     margin-bottom: 1;
 }
 /* A fraction, not `auto`. `auto` looked right and was circular:
    `BrandHeader` picks its variant from the width it is *given*, so an
    auto column sized itself from the smallest variant, which then kept
-   the header small. Four to five leaves the wordmark its full form and
-   the plot the wider half. */
+   the header small. Nine to ten leaves the wordmark its full form at
+   140 columns and its compact one down to 110, and still gives the plot
+   the wider half. */
 #overview-identity {
-    width: 4fr;
-    height: auto;
+    width: 9fr;
+    height: 1fr;
 }
 #brand-header {
     height: auto;
 }
+/* One line, and one line only: the status word changes length with the
+   connection, and `overflow: hidden` is what stops a longer word from
+   wrapping and pushing every window below it down a row. */
 .ov-rail {
-    height: auto;
-    padding: 1 0 0 0;
+    height: 1;
+    padding: 0;
+    overflow: hidden;
 }
-/* `1fr`, so the plot gets every column the identity column leaves.
-   The separator is a border rather than a drawn character: one rule
+/* The separator is a border rather than a drawn character: one rule
    instead of a column of `│` appended to nine strings. */
 #rate-graph {
-    width: 5fr;
-    height: auto;
+    width: 10fr;
+    height: 1fr;
     padding: 0 0 0 1;
     border-left: solid $panel-lighten-2;
     margin-left: 1;
@@ -126,35 +138,51 @@ MainScreen.narrow {
     margin-left: 1;
 }
 /* Narrow terminals stack the two windows instead of squeezing the
-   tracker table below the width its columns need. */
+   tracker table below the width its columns need. Heights stay fixed
+   here too -- the page may scroll, but it may not shuffle. */
 MainScreen.narrow #overview-windows {
     layout: vertical;
     height: auto;
 }
-MainScreen.narrow #trackers-window,
+MainScreen.narrow #trackers-window {
+    width: 1fr;
+    height: 16;
+    margin-left: 0;
+}
 MainScreen.narrow #session-window {
     width: 1fr;
-    height: auto;
+    height: 22;
     margin-left: 0;
 }
 MainScreen.narrow #overview-masthead {
     layout: vertical;
-    height: auto;
+    height: 20;
 }
 /* A cross-axis `fr` in a vertical container does not mean "share of the
    row" -- measured at 96 columns, `4fr` resolved to 372. Pinned back to
    the full width once the masthead stops being a row. */
 MainScreen.narrow #overview-identity {
     width: 1fr;
+    height: auto;
 }
 MainScreen.narrow #rate-graph {
     width: 1fr;
+    height: 9;
     border-left: none;
     margin-left: 0;
     padding: 0;
 }
-#filter-summary {
+.ov-stale {
     height: auto;
+    color: $warning;
+    padding: 0 1;
+    display: none;
+}
+.ov-stale.visible {
+    display: block;
+}
+#filter-summary {
+    height: 1;
     padding: 0 1;
     color: $text-muted;
 }
