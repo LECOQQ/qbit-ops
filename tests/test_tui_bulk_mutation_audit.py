@@ -313,6 +313,13 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
     invisible to it. This checks the shape of every imported name
     instead: anything that looks like a planner or an applier must be
     one of the two sanctioned LOW-risk functions.
+
+    The module filter is `qbit_core`, the layer where mutation lives.
+    It read `app.` until `tui-filters`, which matched nothing at all --
+    no module in this repository is named that way -- so the loop body
+    never ran and the assertion could not fail. `inspected` is counted
+    and asserted for exactly that reason: a guard that cannot bite is
+    worse than an absent one, because it reassures.
     """
     allowed = {
         "apply_bulk_torrent_action",
@@ -320,6 +327,7 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
     }
     prefixes = ("plan_", "apply_", "delete_", "remove_", "edit_", "set_")
     offenders: set[str] = set()
+    inspected = 0
 
     tui_files = sorted(
         path
@@ -333,15 +341,21 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or not node.module:
                 continue
-            if not node.module.startswith("app."):
+            if not node.module.startswith("qbit_core"):
                 continue
             for alias in node.names:
+                inspected += 1
                 name = alias.name
                 if name in allowed:
                     continue
                 if name.startswith(prefixes):
                     offenders.add(f"{node.module}.{name}")
 
+    assert inspected, (
+        "no `from qbit_core... import ...` was inspected at all -- the "
+        "module filter no longer matches anything, so this guard is "
+        "vacuous and would pass whatever the TUI imports"
+    )
     assert not offenders, (
         "TUI modules import mutation-shaped names beyond the two "
         f"sanctioned LOW-risk functions: {sorted(offenders)}"
