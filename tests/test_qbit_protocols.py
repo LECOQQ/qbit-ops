@@ -127,9 +127,13 @@ def test_torrents_start_is_deliberately_absent_from_the_mutator_protocol() -> (
 
 
 def test_torrents_delete_stays_out_of_the_tui_reachable_mutator() -> None:
-    """`QbitTorrentMutator` documents itself as the only mutation surface
-    the TUI may reach, and the TUI is restricted to LOW-risk actions.
-    Deleting torrents is HIGH risk, so it lives in its own protocol --
+    """`QbitTorrentMutator` types pause/resume/reannounce -- the TUI's
+    other LOW-risk actions (category/tags/throttle, since `tui-filters`)
+    reach the client through `apply_bulk_torrent_action`'s untyped
+    `client: Any` instead, so this Protocol is no longer the TUI's
+    *entire* mutation surface, only its typed slice. What still holds,
+    and what this test actually checks: deleting torrents is HIGH risk,
+    so it lives in its own protocol, separate from every LOW-risk one --
     moving it back would silently widen what a TUI-typed consumer can do.
     """
     assert "torrents_delete" not in vars(QbitTorrentMutator)

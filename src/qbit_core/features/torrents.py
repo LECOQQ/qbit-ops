@@ -787,6 +787,20 @@ def resolve_category_availability(
     return True
 
 
+def known_tags(client: Any) -> tuple[str, ...]:
+    """Every tag declared on the instance, including one no torrent
+    currently carries -- what `TorrentSnapshot.tags` cannot give, since
+    it only ever reports a torrent's own tags. One `torrents_tags()`
+    call; qBittorrent has exposed it since Web API 2.3.0.
+
+    The tag counterpart of `client.torrents_categories()` (called
+    directly, with no wrapper, at every existing call site) -- given a
+    name here because unlike categories, `qbit_core` had no read
+    primitive for it at all before `tui-filters` needed one.
+    """
+    return tuple(sorted(client.torrents_tags()))
+
+
 def _category_not_found_message(
     category: str, existing: Mapping[str, Any]
 ) -> str:

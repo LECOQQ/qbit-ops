@@ -5,10 +5,13 @@ guarantee, not just a runtime test, that TUI modules never import a
 raw-secret-producing helper, an out-of-scope mutation function, or the
 CLI module. The boundary is stated in `qbit_ops.tui.app`'s module docstring.
 
-TUI 2 narrowed, not removed, this boundary: the TUI may now import
+TUI 2 narrowed, not removed, this boundary: the TUI may import
 exactly `qbit_core.features.torrents.apply_bulk_torrent_action`/
-`build_bulk_action_plan_from_snapshot` (Pause/Resume/Reannounce only,
-frozen-plan-in, frozen-plan-out, never a rescan, never `--all`).
+`build_bulk_action_plan_from_snapshot` -- frozen-plan-in, frozen-plan-
+out, never a rescan, never `--all`. `tui-filters` widened the *actions*
+those two functions cover from Pause/Resume/Reannounce to seven
+(category/tags/throttle too, all still `MutationRisk.LOW`); the two
+function names allowed through this boundary did not change.
 `plan_bulk_torrent_action` (always rescans and accepts an unbounded
 `--all` selector -- neither fits the frozen-plan model) and every
 tracker mutation function remain fully forbidden, same as before.
@@ -134,8 +137,9 @@ def test_tui_may_only_import_the_two_low_risk_bulk_mutation_functions() -> None:
 
 def test_tui_modules_never_import_tracker_mutation_functions() -> None:
     """Tracker add/remove/replace/passkey-replace remain fully out of
-    scope for the TUI -- TUI 2 only ever reaches LOW-risk *torrent*
-    bulk actions (Pause/Resume/Reannounce), never a tracker mutation.
+    scope for the TUI -- it only ever reaches LOW-risk *torrent* bulk
+    actions (pause/resume/reannounce/category/tags/throttle), never a
+    tracker mutation.
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))

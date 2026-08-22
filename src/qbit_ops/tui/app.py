@@ -1,8 +1,13 @@
 """Textual application for `qbit-ops tui` (LOW-risk bulk actions only).
 
-Security boundary -- only imports the
-LOW-risk, frozen-plan Pause/Resume/Reannounce functions -- never a
-rescanning or deletion function, or `qbit_ops.cli`. Enforced by
+Security boundary -- only imports the two LOW-risk, frozen-plan
+functions (`apply_bulk_torrent_action`, `build_bulk_action_plan_from_
+snapshot`) -- never a rescanning or deletion function, or
+`qbit_ops.cli`. `tui-filters` widened the *actions* those two
+functions build/apply plans for from Pause/Resume/Reannounce to seven
+(`category_set`/`category_clear`/`tag_add`/`tag_remove`/`throttle`
+too, all still `MutationRisk.LOW`) -- the import boundary itself did
+not move, and is still exactly these two names. Enforced by
 `tests/test_tui_security.py`.
 
 Every qBittorrent API call runs on a Textual thread worker, never on
@@ -13,6 +18,7 @@ UI thread.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from time import monotonic
 from typing import Any, cast
 
@@ -81,6 +87,13 @@ from qbit_ops.tui.modals.preview import PreviewScreen
 from qbit_ops.tui.modals.result import ResultScreen
 from qbit_ops.tui.modals.setup import SetupScreen
 from qbit_ops.tui.modals.sort import SortScreen
+from qbit_ops.tui.modals.value import (
+    CategorySetScreen,
+    TagAddScreen,
+    TagRemoveScreen,
+    ThrottleScreen,
+    ValueActionScreen,
+)
 from qbit_ops.tui.state import (
     DEFAULT_REFRESH_INTERVAL_SECONDS,
     GRAPH_SAMPLE_INTERVAL_SECONDS,
@@ -114,6 +127,7 @@ DETAIL_WORKER_GROUP = "qbit-detail"
 MUTATION_WORKER_GROUP = "qbit-mutation"
 SETUP_WORKER_GROUP = "qbit-setup"
 SAMPLE_WORKER_GROUP = "qbit-sample"
+INSTANCE_LISTS_WORKER_GROUP = "qbit-instance-lists"
 
 # The horizontal half of the keyboard grammar: `up`/`down` move within
 # a surface, `left`/`right` between the two pages. Advertised in the
@@ -245,6 +259,11 @@ class QbitOpsTuiApp(App[None]):
         self._setup_worker: Worker[Any] | None = None
         self._sample_worker: Worker[Any] | None = None
         self._sample_tick: int | None = None
+        self._instance_lists_requested = False
+        """One-shot latch: `collect_instance_lists` runs once, right
+        after the first successful refresh, and again only after a
+        mutation that can widen it (see `_on_mutation_worker_state_
+        changed`) -- never on the periodic refresh timer."""
         self._sample_timer: Timer | None = None
         self._sampling_stopped_at: float | None = None
         # Nothing may reach qBittorrent before the first-run form is
@@ -435,6 +454,8 @@ class QbitOpsTuiApp(App[None]):
             self._on_sample_worker_state_changed(event)
         elif event.worker.group == SETUP_WORKER_GROUP:
             self._on_setup_worker_state_changed(event)
+        elif event.worker.group == INSTANCE_LISTS_WORKER_GROUP:
+            self._on_instance_lists_worker_state_changed(event)
 
     def _on_refresh_worker_state_changed(
         self, event: Worker.StateChanged
@@ -460,9 +481,36 @@ class QbitOpsTuiApp(App[None]):
             else:
                 assert result is not None
                 self.controller.apply_refresh_success(result)
+                if not self._instance_lists_requested:
+                    self._instance_lists_requested = True
+                    self._start_instance_lists_refresh()
             self._render_all()
         finally:
             self._refresh_preview_freshness(refresh_failed=error is not None)
+
+    def _start_instance_lists_refresh(self) -> None:
+        """Dispatch one `collect_instance_lists()` -- see
+        `_instance_lists_requested`'s docstring for when this runs."""
+        self.run_worker(
+            self.controller.collect_instance_lists,
+            group=INSTANCE_LISTS_WORKER_GROUP,
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _on_instance_lists_worker_state_changed(
+        self, event: Worker.StateChanged
+    ) -> None:
+        if event.state is not WorkerState.SUCCESS:
+            # Best-effort: a failed read leaves categories_available/
+            # tags_available exactly as they were (empty at startup) --
+            # never fatal, never retried on a timer.
+            return
+        if not self.is_running:
+            return
+        assert event.worker.result is not None
+        categories, tags = event.worker.result
+        self.controller.apply_instance_lists_success(categories, tags)
 
     def _show_fatal(self, error: Exception) -> None:
         banner = self.query_one("#banner", ConnectionBanner)
@@ -1107,12 +1155,18 @@ class QbitOpsTuiApp(App[None]):
         `#search-input`'s native submit and a focused modal `Button`'s
         native click, which this dispatches manually via `Button.press()`.
         On `FiltersScreen`, `enter` commits the draft and *stays open*
-        (see its class docstring); every other modal dispatches by
-        active workspace instead.
+        (see its class docstring). On a value-action modal (`category
+        set`/`tag add`/`tag remove`/`throttle`), `enter` collects the
+        argument and opens `PreviewScreen` -- there is no `Button` to
+        press there either. Every other modal dispatches by active
+        workspace instead.
         """
         if len(self.screen_stack) > 1:
             if isinstance(self.screen, FiltersScreen):
                 self.screen.apply_draft()
+                return
+            if isinstance(self.screen, ValueActionScreen):
+                self.screen.action_preview()
                 return
             focused = self.focused
             if isinstance(focused, Button):
@@ -1263,8 +1317,52 @@ class QbitOpsTuiApp(App[None]):
         self.push_screen(ActionsScreen(snapshot, names))
         self.refresh_bindings()
 
+    _NO_LIST_VALUE_SCREEN_BY_ACTION: dict[str, type[ValueActionScreen]] = {
+        "tag_remove": TagRemoveScreen,
+        "throttle": ThrottleScreen,
+    }
+
+    def _open_value_screen(
+        self,
+        action: TorrentBulkAction,
+        hashes: tuple[str, ...],
+        names: tuple[str, ...],
+    ) -> None:
+        """Open the value-action modal that collects `action`'s
+        argument -- `category_set`/`tag_add`/`tag_remove`/`throttle`.
+
+        Zero API calls: `TorrentSnapshot`s come from the already-
+        fetched raw listing (`TuiController.snapshots_for`), and
+        `categories_available`/`tags_available` are the cached
+        instance-wide lists `collect_instance_lists` last read (see
+        `.agents/specs/tui-filters.md`, "Ce que ça coûte en appels").
+        """
+        selected = self.controller.snapshots_for(hashes)
+        state = self.controller.state
+        screen: ValueActionScreen
+        if action == "category_set":
+            screen = CategorySetScreen(
+                selected, names, state.categories_available
+            )
+        elif action == "tag_add":
+            screen = TagAddScreen(selected, names, state.tags_available)
+        else:
+            screen = self._NO_LIST_VALUE_SCREEN_BY_ACTION[action](
+                selected, names
+            )
+        self.push_screen(screen)
+        self.refresh_bindings()
+
     def _open_preview_for_action(
-        self, action: TorrentBulkAction, hashes: tuple[str, ...]
+        self,
+        action: TorrentBulkAction,
+        hashes: tuple[str, ...],
+        *,
+        category: str | None = None,
+        tags: Sequence[str] = (),
+        category_needs_creation: bool = False,
+        download_limit: int | None = None,
+        upload_limit: int | None = None,
     ) -> None:
         """Build a frozen plan from `hashes` (already a snapshot taken
         at Actions-selection time) and open its Preview.
@@ -1272,8 +1370,19 @@ class QbitOpsTuiApp(App[None]):
         Zero API calls: `TuiController.build_bulk_plan` is pure, built
         entirely from the current in-memory torrent snapshot -- no
         `torrents_info()` rescan is needed merely to preview a plan.
+        The keyword-only arguments are the value-action modals'
+        collected input (`category_set`/`tag_add`/`tag_remove`/
+        `throttle`); every other action ignores them.
         """
-        plan = self.controller.build_bulk_plan(action, hashes)
+        plan = self.controller.build_bulk_plan(
+            action,
+            hashes,
+            category=category,
+            tags=tags,
+            category_needs_creation=category_needs_creation,
+            download_limit=download_limit,
+            upload_limit=upload_limit,
+        )
         self._last_operation_id += 1
         preview = PreviewScreen(
             plan,
@@ -1431,6 +1540,13 @@ class QbitOpsTuiApp(App[None]):
             # Never scheduled for a cancelled-before-dispatch outcome:
             # nothing was sent, so there is nothing new to observe.
             self._start_periodic_refresh()
+            if plan.action in ("category_set", "tag_add"):
+                # The only two actions that can *widen*
+                # categories_available/tags_available -- see
+                # `.agents/specs/tui-filters.md`, "réinvalidées par nos
+                # propres mutations". tag_remove/category_clear only
+                # narrow usage, never the instance's declared set.
+                self._start_instance_lists_refresh()
 
         if preview_is_active:
             self._push_result_screen(outcome)

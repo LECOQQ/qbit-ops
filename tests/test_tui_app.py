@@ -92,6 +92,12 @@ from qbit_ops.tui.formatting import (
     _truncate,
 )
 from qbit_ops.tui.modals.base import MODAL_WIDTHS, QbitModal
+from qbit_ops.tui.modals.value import (
+    CategorySetScreen,
+    TagAddScreen,
+    TagRemoveScreen,
+    ThrottleScreen,
+)
 from qbit_ops.tui.state import (
     ConnectionState,
     RateHistory,
@@ -4237,6 +4243,279 @@ async def test_each_low_risk_action_opens_a_preview() -> None:
             assert isinstance(app.screen, PreviewScreen)
             await pilot.press("escape")
             await pilot.pause()
+
+
+async def test_each_value_action_button_opens_its_own_modal() -> None:
+    """The four new `ActionsScreen` buttons each open the modal that
+    collects their argument, never straight to `PreviewScreen` (see
+    `qbit_ops.tui.modals.value`)."""
+    cases = (
+        ("actions-category-set", CategorySetScreen),
+        ("actions-tag-add", TagAddScreen),
+        ("actions-tag-remove", TagRemoveScreen),
+        ("actions-throttle", ThrottleScreen),
+    )
+    for button_id, screen_class in cases:
+        client = FakeQbitClient(
+            torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+        )
+        app = _app(client)
+        async with app.run_test(size=WIDE_SIZE) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            await pilot.press("space")
+            await pilot.press("a")
+            await pilot.pause()
+
+            button = app.screen.query_one(f"#{button_id}", Button)
+            await pilot.click(button)
+            await pilot.pause()
+
+            assert isinstance(app.screen, screen_class), (
+                button_id,
+                app.screen,
+            )
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+
+
+async def test_category_set_flow_reaches_preview_with_the_typed_category() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="tv")],
+        categories={"tv": {"name": "tv"}, "films": {"name": "films"}},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-category-set", Button).press()
+        await pilot.pause()
+
+        input_ = app.screen.query_one("#v-category", Input)
+        input_.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        assert app.screen.plan.category == "films"
+        assert app.screen.plan.category_needs_creation is False
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_throttle_plan_can_carry_either_direction_alone() -> None:
+    """Criterion 9: `throttle` exposes both directions independently --
+    a plan built from only one typed field carries only that limit,
+    never a forced value on the other."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-throttle", Button).press()
+        await pilot.pause()
+
+        app.screen.query_one("#v-upload", Input).focus()
+        await pilot.press(*"2MiB/s")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        assert app.screen.plan.upload_limit == 2 * 1024 * 1024
+        assert app.screen.plan.download_limit is None
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_category_set_from_snapshot_skips_already_set_torrents() -> None:
+    """The plumbing gap the planner named twice: without the target
+    category reaching `_bulk_action_skip_reason`,
+    `build_bulk_action_plan_from_snapshot` cannot tell "already this
+    category" from "needs changing" -- it either always reports a
+    change (missing the skip) or, if the reversion happens to leave
+    both `current_category` and `target_category` at their shared ""/
+    `None` default, always reports a skip regardless of the real
+    values. This test uses categories that genuinely differ, so only
+    the second, more misleading failure mode is distinguished from
+    correct behaviour: a torrent in "tv" targeted at "films" must
+    report as a real change, not as "already_set"."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=f"{i:040x}", name=f"T{i}", category="tv")
+            for i in range(3)
+        ],
+        categories={"tv": {"name": "tv"}, "films": {"name": "films"}},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-category-set", Button).press()
+        await pilot.pause()
+
+        app.screen.query_one("#v-category", Input).focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        plan = app.screen.plan
+        assert len(plan.changes) == 3, plan.skipped
+        assert len(plan.skipped) == 0
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_category_set_from_snapshot_also_skips_when_already_set() -> None:
+    """Complement to the test above: a torrent genuinely already in
+    the target category is skipped, not reported as a change."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=f"{i:040x}", name=f"T{i}", category="films")
+            for i in range(3)
+        ],
+        categories={"films": {"name": "films"}},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-category-set", Button).press()
+        await pilot.pause()
+
+        app.screen.query_one("#v-category", Input).focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PreviewScreen)
+        plan = app.screen.plan
+        assert len(plan.changes) == 0
+        assert len(plan.skipped) == 3
+        assert all(skip.reason == "already_set" for skip in plan.skipped)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_opening_modals_costs_zero_calls_after_startup() -> None:
+    """Criterion 9ter: filters and every value-action modal are built
+    entirely from the already-fetched snapshot and the cached instance
+    lists -- opening any of them issues no further qBittorrent call."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="tv")],
+        categories={"tv": {"name": "tv"}},
+        tags=["stale"],
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        calls_before = len(client.calls)
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        for button_id in (
+            "actions-category-set",
+            "actions-tag-add",
+            "actions-tag-remove",
+            "actions-throttle",
+        ):
+            await pilot.press("a")
+            await pilot.pause()
+            app.screen.query_one(f"#{button_id}", Button).press()
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+        assert len(client.calls) == calls_before, client.calls[calls_before:]
+
+
+async def test_throttle_with_neither_direction_disarms_preview() -> None:
+    """Criterion 9bis's disarm shape, for `throttle`: pressing `enter`
+    with both fields blank shows the "at least one direction" error
+    and never opens `PreviewScreen`."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-throttle", Button).press()
+        await pilot.pause()
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ThrottleScreen)
+        verdict = str(app.screen.query_one(".v-verdict", Static).content)
+        assert verdict.startswith("✕")
+        assert "at least one direction" in verdict
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_escape_closes_a_value_action_modal_without_opening_preview() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-tag-add", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, TagAddScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert len(app.screen_stack) == 1
 
 
 async def test_preview_list_matches_selected_rows() -> None:

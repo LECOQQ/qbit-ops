@@ -50,7 +50,17 @@ class ActionsScreen(QbitModal):
         "actions-pause": "pause",
         "actions-resume": "resume",
         "actions-reannounce": "reannounce",
+        "actions-category-set": "category_set",
+        "actions-tag-add": "tag_add",
+        "actions-tag-remove": "tag_remove",
+        "actions-throttle": "throttle",
     }
+    # The four that collect an argument first: routed to their own
+    # modal instead of straight to Preview (see `_VALUE_ACTIONS` in
+    # `on_button_pressed`).
+    _VALUE_ACTIONS: frozenset[TorrentBulkAction] = frozenset(
+        {"category_set", "tag_add", "tag_remove", "throttle"}
+    )
 
     def __init__(
         self, selected_hashes: tuple[str, ...], names: tuple[str, ...]
@@ -69,6 +79,10 @@ class ActionsScreen(QbitModal):
         yield Button("Pause", id="actions-pause")
         yield Button("Resume", id="actions-resume")
         yield Button("Reannounce", id="actions-reannounce")
+        yield Button("Set category", id="actions-category-set")
+        yield Button("Add tags", id="actions-tag-add")
+        yield Button("Remove tags", id="actions-tag-remove")
+        yield Button("Set limits", id="actions-throttle")
         yield Button("Cancel", id="actions-cancel")
 
     def on_mount(self) -> None:
@@ -84,8 +98,12 @@ class ActionsScreen(QbitModal):
         if action is None:
             return
         hashes = self.selected_hashes
+        names = self._names
         self.dismiss()
-        app._open_preview_for_action(action, hashes)
+        if action in self._VALUE_ACTIONS:
+            app._open_value_screen(action, hashes, names)
+        else:
+            app._open_preview_for_action(action, hashes)
 
     def action_dismiss(self, result: None = None) -> None:  # type: ignore[override]
         self.dismiss()

@@ -145,9 +145,14 @@ class _GalleryClient:
     def torrents_categories(self) -> dict[str, dict[str, Any]]:
         return {name: {"name": name} for name in ("sonarr", "radarr")}
 
-    # The three LOW-risk bulk actions the TUI can reach. Accepted and
-    # discarded: without them the `result` capture photographs a client
-    # defect rather than the screen the gallery claims to show.
+    def torrents_tags(self) -> list[str]:
+        return ["stale", "keep"]
+
+    # The seven LOW-risk bulk actions the TUI can reach (see
+    # `qbit_ops.tui.app`'s security-boundary docstring). Accepted and
+    # discarded: without them the `result`/value-modal captures
+    # photograph a client defect rather than the screen the gallery
+    # claims to show.
     def torrents_pause(self, torrent_hashes: Any = None) -> None:
         return None
 
@@ -155,6 +160,34 @@ class _GalleryClient:
         return None
 
     def torrents_reannounce(self, torrent_hashes: Any = None) -> None:
+        return None
+
+    def torrents_create_category(self, name: str, **kwargs: Any) -> None:
+        return None
+
+    def torrents_set_category(
+        self, torrent_hashes: Any = None, category: str = ""
+    ) -> None:
+        return None
+
+    def torrents_add_tags(
+        self, torrent_hashes: Any = None, tags: Any = None
+    ) -> None:
+        return None
+
+    def torrents_remove_tags(
+        self, torrent_hashes: Any = None, tags: Any = None
+    ) -> None:
+        return None
+
+    def torrents_set_download_limit(
+        self, torrent_hashes: Any = None, limit: int = 0
+    ) -> None:
+        return None
+
+    def torrents_set_upload_limit(
+        self, torrent_hashes: Any = None, limit: int = 0
+    ) -> None:
         return None
 
 
@@ -173,6 +206,43 @@ SCREENS: dict[str, list[str]] = {
     "preview": ["t", "space", "a", "enter"],
     "result": ["t", "space", "a", "enter", "enter"],
     "setup": [],
+    # ActionsScreen's button order: Pause, Resume, Reannounce, Set
+    # category, Add tags, Remove tags, Set limits, Cancel -- "down"
+    # N times reaches the Nth value-action button from Pause.
+    "value-category": ["t", "space", "a", "down", "down", "down", "enter"],
+    "value-tag-add": [
+        "t",
+        "space",
+        "a",
+        "down",
+        "down",
+        "down",
+        "down",
+        "enter",
+    ],
+    "value-tag-remove": [
+        "t",
+        "space",
+        "a",
+        "down",
+        "down",
+        "down",
+        "down",
+        "down",
+        "enter",
+    ],
+    "value-throttle": [
+        "t",
+        "space",
+        "a",
+        "down",
+        "down",
+        "down",
+        "down",
+        "down",
+        "down",
+        "enter",
+    ],
 }
 
 # The one screen no key sequence can reach: it is shown *instead of*

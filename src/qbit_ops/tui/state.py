@@ -40,6 +40,7 @@ from qbit_core.features.torrents import (
     build_bulk_action_plan_from_snapshot,
     get_peer_discovery_details,
     get_safe_tracker_details,
+    known_tags,
     select_torrents_from_items,
 )
 from qbit_core.features.trackers import (
@@ -61,6 +62,7 @@ from qbit_core.shared.selection import (
 )
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
+    build_torrent_snapshot,
     classify_torrent_state,
     is_stopped_state,
 )
@@ -642,6 +644,14 @@ class TuiState:
     "nothing selected", never "every torrent" -- see
     `TuiController.select_all_visible`/`reconcile_selection`.
     """
+    categories_available: tuple[str, ...] = ()
+    tags_available: tuple[str, ...] = ()
+    """Every category/tag declared on the instance, including one no
+    torrent currently carries -- read once (`TuiController.
+    collect_instance_lists`) and reinvalidated only by our own
+    category-creating/tag-adding mutations, never by a TTL (see
+    `.agents/specs/tui-filters.md`, "un cache a durée de vie est la
+    mauvaise forme")."""
 
     def focused_torrent(self) -> TorrentSnapshot | None:
         """Look up the focused torrent's live fields from `visible`.
@@ -794,6 +804,29 @@ class TuiController:
         self._recompute_visible()
         self._reconcile_focus()
         self.reconcile_selection()
+
+    def collect_instance_lists(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Read the instance-wide category and tag sets. Worker threads
+        only, two calls (`torrents_categories()`, `torrents_tags()`).
+
+        Called once at startup and once more after a mutation that can
+        widen either set (`category_set` with creation, `tag_add`) --
+        never on a timer. `torrents_categories()` is called directly,
+        with no wrapper, matching every other call site in `qbit_core`;
+        `known_tags()` exists because unlike categories, there was no
+        read primitive for tags at all before this needed one.
+        """
+        with self._remote_operation() as client:
+            categories = tuple(sorted(client.torrents_categories()))
+            tags = known_tags(client)
+        return categories, tags
+
+    def apply_instance_lists_success(
+        self, categories: tuple[str, ...], tags: tuple[str, ...]
+    ) -> None:
+        """Apply a successful `collect_instance_lists()`. UI thread only."""
+        self.state.categories_available = categories
+        self.state.tags_available = tags
 
     def collect_transfer_rates(self) -> TransferRates:
         """One `transfer_info()` call, and nothing else. Worker threads only.
@@ -1178,6 +1211,21 @@ class TuiController:
             ):
                 return item
         return None
+
+    def snapshots_for(
+        self, hashes: Sequence[str]
+    ) -> tuple[TorrentSnapshot, ...]:
+        """Build `TorrentSnapshot`s for exactly `hashes`, from the
+        already-fetched raw listing -- zero API calls, and independent
+        of `state.visible` (a selected torrent the current filter now
+        hides must still be found here). A hash no longer present is
+        silently dropped, not fabricated."""
+        wanted = {h.lower() for h in hashes}
+        return tuple(
+            build_torrent_snapshot(item)
+            for item in self._raw_torrents
+            if get_field_as_string(item, "hash").lower() in wanted
+        )
 
     def build_explanation(self) -> ExplanationReport | None:
         """Build an `ExplanationReport` for the focused torrent -- zero

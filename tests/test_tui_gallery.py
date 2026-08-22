@@ -51,6 +51,10 @@ SCREEN_MARKERS: dict[str, tuple[str, ...]] = {
     "preview": ("Affected", "Snapshot"),
     "result": ("Submitted", "observable"),
     "setup": ("Password", "Host"),
+    "value-category": ("Set category", "create it as well"),
+    "value-tag-add": ("Add tags", "Existing"),
+    "value-tag-remove": ("Remove tags", "On selection"),
+    "value-throttle": ("Set transfer limits", "leaves it"),
 }
 
 

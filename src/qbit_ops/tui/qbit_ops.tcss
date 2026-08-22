@@ -528,6 +528,57 @@ FiltersPanel {
     color: $text-error;
 }
 
+/* -- value-action modals (category set / tag add / tag remove /
+   throttle) -- one patron, four instantiations. Same row/field/label
+   vocabulary as filters (`.f-row`-style), scoped under `.v-` so the
+   two never fight over a shared class name. */
+.v-scope {
+    color: $text-muted;
+    height: 1;
+    margin-bottom: 1;
+}
+.v-row {
+    height: 1;
+}
+.v-label {
+    width: 13;
+    color: $text-muted;
+}
+.v-field {
+    height: 1;
+    width: 1fr;
+    border: none;
+    padding: 0 1;
+    background: transparent;
+}
+.v-field:focus {
+    background: transparent;
+}
+.v-hint {
+    height: 1;
+    color: $text-muted;
+    margin-left: 13;
+}
+.v-create {
+    height: 1;
+    width: auto;
+    border: none;
+    padding: 0 1;
+    background: transparent;
+    margin-top: 1;
+}
+.v-verdict {
+    height: auto;
+    min-height: 1;
+    margin-top: 1;
+    color: $text-error;
+}
+.v-source {
+    height: auto;
+    color: $text-muted;
+    margin-top: 1;
+}
+
 /* -- details -- */
 /* `height: auto`, not the container default `1fr`: filling the dialog
    would make the dialog's virtual size equal its own, and the modal

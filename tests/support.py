@@ -1,5 +1,6 @@
 """Shared test doubles and factories for CLI-level tests."""
 
+from collections.abc import Iterable
 from typing import Any
 
 from qbit_ops.config import QbitConfig
@@ -41,6 +42,7 @@ class FakeQbitClient:
         torrents_add_error: Exception | None = None,
         torrents_delete_error: Exception | None = None,
         categories: dict[str, dict[str, Any]] | None = None,
+        tags: Iterable[str] | None = None,
         create_category_error: Exception | None = None,
         set_category_error: Exception | None = None,
         add_tags_error: Exception | None = None,
@@ -81,6 +83,7 @@ class FakeQbitClient:
         self.torrents_add_error = torrents_add_error
         self.torrents_delete_error = torrents_delete_error
         self.categories = dict(categories or {})
+        self.tags: set[str] = set(tags or ())
         self.create_category_error = create_category_error
         self.set_category_error = set_category_error
         self.add_tags_error = add_tags_error
@@ -253,6 +256,12 @@ class FakeQbitClient:
         self._record("torrents_categories")
         return dict(self.categories)
 
+    def torrents_tags(self) -> list[str]:
+        """Return every fake declared tag, including ones no torrent
+        carries -- mirrors `torrents_categories` for tags."""
+        self._record("torrents_tags")
+        return sorted(self.tags)
+
     def torrents_create_category(self, name: str, **kwargs: Any) -> None:
         """Record a fake category creation; raise `create_category_error`."""
         self._record("torrents_create_category", name, **kwargs)
@@ -285,6 +294,7 @@ class FakeQbitClient:
             raise self.add_tags_error
         tag_list = [tags] if isinstance(tags, str) else list(tags)
         self.added_tags.append((torrent_hashes, tag_list))
+        self.tags.update(tag_list)
 
     def torrents_remove_tags(
         self, torrent_hashes: str | list[str], tags: str | list[str]
