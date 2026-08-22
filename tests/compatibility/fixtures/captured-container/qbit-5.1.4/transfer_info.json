@@ -1,20 +1,23 @@
 {
   "_meta": {
     "architecture": "amd64",
-    "capture_date": "2026-07-27",
+    "capture_date": "2026-08-22",
     "description": "Real `transfer_info()` snapshot from the disposable instance.",
     "expected_architecture": "amd64",
     "expected_qbittorrent_version": "v5.1.4",
     "expected_web_api_version": "2.11.4",
     "fields_normalized": [],
-    "fields_removed": [],
+    "fields_removed": [
+      "last_external_address_v4",
+      "last_external_address_v6"
+    ],
     "image_digest": "sha256:c9990949e968e99333f47f49da7d16e81ba6e1469c8c46807a65b984c9e8b6ff",
     "image_reference": "linuxserver/qbittorrent:5.1.4",
     "limitations": "Rates reflect the disposable instance's idle synthetic corpus, not a real download/upload workload.",
     "matrix_id": "qbit-5.1.4",
-    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_api_version": "2026.8.0",
     "qbittorrent_version": "v5.1.4",
-    "sanitization": "n/a -- no host/credential fields present in this payload shape.",
+    "sanitization": "The instance's own public address is dropped by key; no other host/credential field exists in this payload shape.",
     "trust": "captured-container",
     "web_api_version": "2.11.4"
   },
@@ -24,8 +27,6 @@
     "dl_info_data": 0,
     "dl_info_speed": 0,
     "dl_rate_limit": 0,
-    "last_external_address_v4": "",
-    "last_external_address_v6": "",
     "up_info_data": 0,
     "up_info_speed": 0,
     "up_rate_limit": 0

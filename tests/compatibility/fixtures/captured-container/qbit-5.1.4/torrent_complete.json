@@ -1,7 +1,7 @@
 {
   "_meta": {
     "architecture": "amd64",
-    "capture_date": "2026-07-27",
+    "capture_date": "2026-08-22",
     "description": "A real `torrents_info()` entry captured from a disposable linuxserver/qbittorrent:5.1.4 container -- a fully seeded synthetic torrent.",
     "expected_architecture": "amd64",
     "expected_qbittorrent_version": "v5.1.4",
@@ -17,7 +17,7 @@
     "image_reference": "linuxserver/qbittorrent:5.1.4",
     "limitations": "One captured instance; does not prove every field shape across all real-world usage. Timestamp/duration fields (added_on, completion_on, last_activity, seeding_time) are normalized to 0 -- present and typed correctly, but not evidence of real elapsed time.",
     "matrix_id": "qbit-5.1.4",
-    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_api_version": "2026.8.0",
     "qbittorrent_version": "v5.1.4",
     "sanitization": "Tracker hostname 'qbit-ops-tracker' replaced with the allowlisted placeholder 'tracker.example'. Torrent name, hash, and content are already synthetic (see tests/integration/_torrent_corpus.py).",
     "trust": "captured-container",

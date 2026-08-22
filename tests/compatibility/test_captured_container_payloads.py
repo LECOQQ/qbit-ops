@@ -8,6 +8,8 @@ no Docker is required to run this file.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from qbit_core.features.trackers import classify_raw_tracker_status
@@ -26,6 +28,7 @@ from qbit_core.shared.torrent_states import (
     classify_torrent_state,
 )
 from tests.compatibility._captured_loader import (
+    CAPTURED_FIXTURES_ROOT,
     discover_matrix_ids,
     load_all_captured_fixtures,
     load_captured_fixtures,
@@ -195,6 +198,29 @@ def test_captured_application_version_strings_are_read_correctly() -> None:
             assert check.status is CheckStatus.PASS
 
     assert found_any, "expected at least one app_version capture"
+
+
+def test_no_captured_payload_carries_the_instance_public_address() -> None:
+    """qBittorrent 5.1 added `last_external_address_v4`/`_v6` to
+    `server_state`: the operator's own public IP.
+
+    The capture drops them by key (`tests/integration/_capture.py`),
+    which is exact. The text scan deliberately does **not** look for
+    bare addresses: `2.0.10.0` is a real Qt version string in
+    `app_build_info`, and nothing in text distinguishes a four-part
+    version from an IPv4. An ambiguous pattern stays out of a blocking
+    gate -- see AGENTS.md, "rien de probabiliste".
+    """
+    offenders = []
+    for path in sorted(CAPTURED_FIXTURES_ROOT.rglob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8")).get("payload")
+        if not isinstance(payload, dict):
+            continue
+        leaked = [key for key in payload if "external_address" in key]
+        if leaked:
+            offenders.append((path.name, leaked))
+
+    assert not offenders, f"captured payload(s) carry an address: {offenders}"
 
 
 def test_no_captured_fixture_leaks_a_real_secret() -> None:

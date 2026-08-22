@@ -62,6 +62,31 @@ class CapturedFixtureSet:
     written_files: tuple[Path, ...]
 
 
+def _without_external_address(payload: dict[str, Any]) -> tuple[
+    dict[str, Any], list[str]
+]:
+    """Strip the instance's own public address from a payload.
+
+    qBittorrent 5.1 added `last_external_address_v4`/`_v6`, and returns
+    them from **both** `transfer_info()` and `sync_maindata()`. Empty on
+    a disposable container; on a real instance they are the operator's
+    IPv4/IPv6, and `_security_scan` cannot catch them -- a bare address
+    is neither a URL, nor a path, nor an environment fragment, and
+    `2.0.10.0` is a genuine Qt version string in `app_build_info`.
+    Nothing in text separates the two.
+
+    So they are dropped by **key**, which is exact, rather than matched
+    by shape, which is not. Nothing in qbit-ops reads them.
+    """
+    stripped = dict(payload)
+    removed = [
+        key for key in stripped if key.startswith("last_external_address")
+    ]
+    for key in removed:
+        del stripped[key]
+    return stripped, removed
+
+
 def _sanitize(value: Any) -> Any:
     """Recursively substitute the disposable tracker hostname."""
     if isinstance(value, str):
@@ -230,7 +255,9 @@ def capture_matrix_fixtures(
         )
     )
 
-    transfer_info = dict(client.transfer_info())
+    transfer_info, transfer_addresses = _without_external_address(
+        dict(client.transfer_info())
+    )
     written.append(
         _write_fixture(
             directory,
@@ -241,14 +268,55 @@ def capture_matrix_fixtures(
             ),
             container=container,
             sanitization=(
-                "n/a -- no host/credential fields present in this payload "
-                "shape."
+                "The instance's own public address is dropped by key; no "
+                "other host/credential field exists in this payload shape."
             ),
-            fields_removed=[],
+            fields_removed=transfer_addresses,
             fields_normalized=[],
             limitations=(
                 "Rates reflect the disposable instance's idle synthetic "
                 "corpus, not a real download/upload workload."
+            ),
+        )
+    )
+
+    # `server_state` is where the instance-wide totals live -- the only
+    # source for all-time transfer, global ratio and peer count. It was
+    # the one call `build_instance_stats_from_server_state` consumes
+    # without a captured payload to check itself against, so what the
+    # instance really returns there was never verified against a real
+    # qBittorrent.
+    sync_maindata = dict(client.sync_maindata())
+    server_state, external_address_fields = _without_external_address(
+        dict(sync_maindata.get("server_state") or {})
+    )
+    written.append(
+        _write_fixture(
+            directory,
+            "sync_maindata_server_state",
+            payload=server_state,
+            description=(
+                "Real `sync_maindata()['server_state']` from the disposable "
+                "instance. Only `server_state` is kept: the rest of the "
+                "payload is a full torrent/category dump this project never "
+                "reads, and it would carry paths and tracker URLs."
+            ),
+            container=container,
+            sanitization=(
+                "The `torrents`, `categories`, `tags` and `trackers` keys "
+                "are dropped whole rather than scrubbed -- none is read by "
+                "qbit-ops, and dropping beats redacting."
+            ),
+            fields_removed=[
+                key for key in sync_maindata if key != "server_state"
+            ]
+            + external_address_fields,
+            fields_normalized=[],
+            limitations=(
+                "Counters reflect a freshly started disposable instance: "
+                "all-time totals are near zero and no ratio has been "
+                "computed yet, which is itself the `None` case the model "
+                "must handle."
             ),
         )
     )

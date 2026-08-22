@@ -1,7 +1,7 @@
 {
   "_meta": {
     "architecture": "amd64",
-    "capture_date": "2026-07-27",
+    "capture_date": "2026-08-22",
     "description": "Real `torrents_trackers()` entries (DHT/PeX/LSD pseudo-trackers plus the disposable in-network tracker) for the tracked synthetic torrent.",
     "expected_architecture": "amd64",
     "expected_qbittorrent_version": "v5.1.4",
@@ -12,7 +12,7 @@
     "image_reference": "linuxserver/qbittorrent:5.1.4",
     "limitations": "The disposable tracker returns a minimal bencode response; real-world tracker messages may vary.",
     "matrix_id": "qbit-5.1.4",
-    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_api_version": "2026.8.0",
     "qbittorrent_version": "v5.1.4",
     "sanitization": "Tracker hostname replaced with 'tracker.example'; no passkey was ever present.",
     "trust": "captured-container",

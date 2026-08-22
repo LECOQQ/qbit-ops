@@ -1,7 +1,7 @@
 {
   "_meta": {
     "architecture": "amd64",
-    "capture_date": "2026-07-27",
+    "capture_date": "2026-08-22",
     "description": "Real `app_web_api_version()` string.",
     "expected_architecture": "amd64",
     "expected_qbittorrent_version": "v5.0.0",
@@ -12,7 +12,7 @@
     "image_reference": "linuxserver/qbittorrent:5.0.0",
     "limitations": "n/a",
     "matrix_id": "qbit-5.0.0",
-    "qbittorrent_api_version": "2026.7.0",
+    "qbittorrent_api_version": "2026.8.0",
     "qbittorrent_version": "v5.0.0",
     "sanitization": "n/a",
     "trust": "captured-container",

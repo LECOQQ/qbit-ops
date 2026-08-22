@@ -1,0 +1,1 @@
+app/buildInfo unavailable for qbit-5.1.4: CaptureSecurityError
