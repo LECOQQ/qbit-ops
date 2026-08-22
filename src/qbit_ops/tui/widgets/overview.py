@@ -200,24 +200,36 @@ class WorkspaceTabs(Static):
         self.update(f"{overview}[dim]│[/dim]{torrents}")
 
 
-def _tab_label(name: str, keys: str, active: bool) -> str:
-    """Style one workspace tab: the active page in brand orange, the
-    other in a restrained blue (`_INACTIVE_TAB_ACCENT`) -- a real,
-    deliberate exception to "no colour-block decoration" (see
-    `qbit_ops.tcss`'s `#workspace-tabs` rule): which page you're on
-    is meaningful information, not decoration, so it stays legible
-    without leaning on a background panel.
+def _tab_label(
+    name: str, keys: str | None = None, active: bool = False, *, badge: str = ""
+) -> str:
+    """Style one tab shared by the workspace strip and the filters
+    modal's `border_title` (see `qbit_ops.tui.tab_bar`): the active tab
+    in brand orange, the others in a restrained blue
+    (`_INACTIVE_TAB_ACCENT`) -- a real, deliberate exception to "no
+    colour-block decoration" (see `qbit_ops.tcss`'s `#workspace-tabs`
+    rule): which tab you're on is meaningful information, not
+    decoration, so it stays legible without leaning on a background
+    panel.
 
-    The underline is scoped to `name` alone: the surrounding padding
-    and the `(key)` hint keep the plain bold accent, so the underline
-    reads as hugging the page name rather than the whole tab block."""
+    The underline is scoped to `name` alone: the surrounding padding,
+    the optional `(key)` hint and the optional `badge` keep the plain
+    bold accent, so the underline reads as hugging the tab name rather
+    than the whole tab block.
+
+    `keys` (a workspace tab's `(1/g)` hint) and `badge` (a filters tab's
+    pending count/marker) are mutually exclusive in practice, but both
+    default to absent so a caller only ever states what it has -- one
+    rendering, not a second one bolted on for the modal.
+    """
     color = _BRAND_ACCENT if active else _INACTIVE_TAB_ACCENT
     plain_style = f"bold {color}"
     name_style = f"bold underline {color}" if active else plain_style
+    trailer = (f" {badge}" if badge else "") + (f" ({keys})" if keys else "")
     return (
         f"[{plain_style}] [/{plain_style}]"
         f"[{name_style}]{name}[/{name_style}]"
-        f"[{plain_style}] ({keys}) [/{plain_style}]"
+        f"[{plain_style}]{trailer} [/{plain_style}]"
     )
 
 

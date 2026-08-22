@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -759,19 +759,15 @@ class TuiController:
         with self._remote_operation() as client:
             return collect_tui_refresh(client, host=self._host)
 
-    def apply_refresh_success(
-        self, result: TuiRefreshResult, *, reconcile: bool = True
-    ) -> None:
+    def apply_refresh_success(self, result: TuiRefreshResult) -> None:
         """Apply a successful periodic refresh. UI-thread only.
 
-        `reconcile=False` suppresses only the *selection*
-        reconciliation -- snapshot, status, counts, visible set, and
-        focus are always updated. The caller passes `False` while a
-        `FiltersScreen` holds an uncommitted draft: a category filter
-        is exact-match, so a half-typed "films" transiently matches
-        nothing and would otherwise wipe out a selection the operator
-        is still building. The existing commit points (Apply/Clear/
-        Cancel) reconcile instead.
+        Reconciles the selection unconditionally: filters now commit
+        only on `FiltersScreen`'s `Apply` (see
+        `.agents/specs/tui-filters.md`, "Le filtrage n'est plus en
+        direct"), so a draft being edited never touches
+        `self.state.filters` in the first place -- there is nothing
+        for a periodic tick landing mid-edit to disturb.
         """
         self._raw_torrents = result.raw_torrents
         self.state.status = result.status
@@ -797,8 +793,7 @@ class TuiController:
         self.state.refreshing = False
         self._recompute_visible()
         self._reconcile_focus()
-        if reconcile:
-            self.reconcile_selection()
+        self.reconcile_selection()
 
     def collect_transfer_rates(self) -> TransferRates:
         """One `transfer_info()` call, and nothing else. Worker threads only.
@@ -939,11 +934,12 @@ class TuiController:
         """Apply a new `TorrentFilter`. Zero qBittorrent API calls.
 
         Deliberately does *not* reconcile the selection itself: the
-        Filters modal applies live on every keystroke, and a category
-        filter is exact-match, so a half-typed "films" would otherwise
-        wipe the selection before the user finishes typing. The caller
-        reconciles once, explicitly, at each real commit point instead
-        (`reconcile_selection()`).
+        Filters modal only ever calls this once per commit
+        (`FiltersScreen.apply_draft`, on `Apply`), but a category
+        filter is exact-match, and reconciling before the caller has
+        re-rendered would report a hidden selection against a table
+        that still shows the old rows. The caller reconciles once,
+        explicitly, right after (`reconcile_selection()`).
         """
         self.state.filters = filters
         self._recompute_visible()
@@ -1029,12 +1025,18 @@ class TuiController:
         """
         self.state.selected_hashes -= set(hashes)
 
-    # -- bulk actions (LOW-risk only: pause / resume / reannounce) ----------
+    # -- bulk actions ---------------------------------------------------
 
     def build_bulk_plan(
         self,
         action: TorrentBulkAction,
         torrent_hashes: tuple[str, ...],
+        *,
+        category: str | None = None,
+        tags: Sequence[str] = (),
+        category_needs_creation: bool = False,
+        download_limit: int | None = None,
+        upload_limit: int | None = None,
     ) -> BulkTorrentActionPlan:
         """Build a frozen bulk-action plan -- pure, zero API calls.
 
@@ -1043,10 +1045,20 @@ class TuiController:
         later selection change can't affect an already-built plan.
         Delegates all skip-reason logic to
         `build_bulk_action_plan_from_snapshot` (the same rule the CLI
-        uses) against the current `_raw_torrents` -- no rescan.
+        uses) against the current `_raw_torrents` -- no rescan. The
+        keyword-only arguments are the value-action's collected input
+        (`category_set`/`tag_add`/`tag_remove`/`throttle`); every other
+        action ignores them.
         """
         return build_bulk_action_plan_from_snapshot(
-            self._raw_torrents, action, torrent_hashes
+            self._raw_torrents,
+            action,
+            torrent_hashes,
+            category=category,
+            tags=tags,
+            category_needs_creation=category_needs_creation,
+            download_limit=download_limit,
+            upload_limit=upload_limit,
         )
 
     def classify_plan_status(

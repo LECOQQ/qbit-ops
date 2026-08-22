@@ -708,12 +708,10 @@ def plan_bulk_torrent_action(
     creating a category nothing ends up wearing is out of scope.
 
     For `"tag_add"`/`"tag_remove"`, current tag membership is read from
-    each matched torrent's raw payload, narrowed to the matched hashes --
-    `TorrentSnapshot` deliberately does not carry `tags` (see
-    `.agents/MEMORY.md`, "Pipeline SELECT -> INSPECT -> PLAN -> APPLY").
-    `"throttle"` needs no such second read: `TorrentSnapshot` carries
-    the current limits, so planning costs the one scan every other
-    action costs.
+    `TorrentSnapshot.tags` -- the same bulk listing SELECT already
+    fetched, no second scan. `"throttle"` was the first action to make
+    this move: `TorrentSnapshot` already carries the current limits, so
+    planning costs the one scan every action costs.
 
     `download_limit`/`upload_limit` are only meaningful for
     `"throttle"`, in bytes per second, `0` being unlimited and `None`
@@ -728,12 +726,6 @@ def plan_bulk_torrent_action(
     )
 
     normalized_tags = _normalize_tokens(tags)
-    matched_hashes = [torrent.hash for torrent in selection.matched]
-    current_tags_by_hash = (
-        _tags_by_hash(client, matched_hashes)
-        if action in ("tag_add", "tag_remove")
-        else {}
-    )
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
 
@@ -743,7 +735,7 @@ def plan_bulk_torrent_action(
             torrent.state,
             current_category=torrent.category,
             target_category=category,
-            current_tags=current_tags_by_hash.get(torrent.hash.lower(), ()),
+            current_tags=torrent.tags,
             target_tags=normalized_tags,
             current_limits=(torrent.download_limit, torrent.upload_limit),
             target_download_limit=download_limit,
@@ -775,26 +767,6 @@ def plan_bulk_torrent_action(
         download_limit=download_limit,
         upload_limit=upload_limit,
     )
-
-
-def _tags_by_hash(
-    client: Any, hashes: Sequence[str]
-) -> dict[str, tuple[str, ...]]:
-    """Read current tags for exactly `hashes`, keyed by lowercased hash.
-
-    A second, bounded `torrents_info()` call, narrowed the same way
-    `list_torrent_snapshots` narrows one -- used only by `"tag_add"`/
-    `"tag_remove"` planning, never by the other bulk actions.
-    """
-    if not hashes:
-        return {}
-    raw_torrents = client.torrents_info(torrent_hashes=list(hashes))
-    return {
-        get_field_as_string(item, "hash").lower(): tuple(
-            get_field_as_tag_list(item)
-        )
-        for item in raw_torrents
-    }
 
 
 def resolve_category_availability(
@@ -830,6 +802,12 @@ def build_bulk_action_plan_from_snapshot(
     raw_torrents: Sequence[Any],
     action: TorrentBulkAction,
     selected_hashes: Sequence[str],
+    *,
+    category: str | None = None,
+    tags: Sequence[str] = (),
+    category_needs_creation: bool = False,
+    download_limit: int | None = None,
+    upload_limit: int | None = None,
 ) -> BulkTorrentActionPlan:
     """Build a `BulkTorrentActionPlan` from an explicit hash selection
     against an already-fetched torrent snapshot -- zero API calls.
@@ -841,10 +819,20 @@ def build_bulk_action_plan_from_snapshot(
     or substituted. `torrent_hash`/`select_all`/`filters` on the result
     are placeholders -- they describe a CLI selector, which doesn't
     apply to an explicit hash set.
+
+    `category`/`tags`/`download_limit`/`upload_limit` are the same
+    "target value" arguments `plan_bulk_torrent_action` takes, read
+    from `raw_torrents` here instead of a second `torrents_info()`
+    call. Without them, `_bulk_action_skip_reason` never sees a target
+    to compare against, so a `category_set`/`tag_add`/`tag_remove`/
+    `throttle` plan built here could never report `already_set` /
+    `already_tagged` / `not_tagged` / `already_at_limit` -- an
+    already-satisfied torrent would look like a real change.
     """
     by_hash: dict[str, Any] = {
         get_field_as_string(item, "hash").lower(): item for item in raw_torrents
     }
+    normalized_tags = _normalize_tokens(tags)
 
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
@@ -861,7 +849,20 @@ def build_bulk_action_plan_from_snapshot(
 
         name = get_field_as_string(torrent, "name")
         state = get_field_as_string(torrent, "state")
-        skip_reason = _bulk_action_skip_reason(action, state)
+        skip_reason = _bulk_action_skip_reason(
+            action,
+            state,
+            current_category=get_field_as_string(torrent, "category"),
+            target_category=category,
+            current_tags=tuple(get_field_as_tag_list(torrent)),
+            target_tags=normalized_tags,
+            current_limits=(
+                get_field_as_int(torrent, "dl_limit"),
+                get_field_as_int(torrent, "up_limit"),
+            ),
+            target_download_limit=download_limit,
+            target_upload_limit=upload_limit,
+        )
         if skip_reason is not None:
             skips.append(
                 BulkTorrentSkip(
@@ -881,6 +882,11 @@ def build_bulk_action_plan_from_snapshot(
         matched=len(changes) + len(skips),
         changes=tuple(changes),
         skipped=tuple(skips),
+        category=category,
+        tags=normalized_tags,
+        category_needs_creation=category_needs_creation and bool(changes),
+        download_limit=download_limit,
+        upload_limit=upload_limit,
     )
 
 

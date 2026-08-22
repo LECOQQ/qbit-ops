@@ -873,6 +873,33 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def _fold(
+    items: list[str], budget: int, *, max_lines: int = 2
+) -> list[str] | None:
+    """`items` joined with " · " into at most `max_lines` lines of at
+    most `budget` cells each, or `None` if it does not fit at all.
+
+    Shared by `overview_windows`'s Session window (`+ N more`, capped
+    at its own `_MAX_VALUE_LINES`) and the value-action modals' scope/
+    source lines, which need the same fold at `max_lines=1` -- one
+    algorithm, not two copies re-deciding the same wrap.
+    """
+    lines: list[str] = []
+    current = ""
+    for item in items:
+        candidate = item if not current else f"{current} · {item}"
+        if len(candidate) > budget and current:
+            lines.append(current)
+            current = item
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) > max_lines or any(len(line) > budget for line in lines):
+        return None
+    return lines
+
+
 _MAX_PREVIEW_ROWS = 50
 _MAX_SKIPPED_ROWS = 20
 

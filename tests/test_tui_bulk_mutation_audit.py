@@ -352,9 +352,16 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
 
 
 async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
-    """`apply_refresh_success(reconcile=False)` while a `FiltersScreen`
-    holds an uncommitted draft, so a periodic tick can no longer erase a
-    selection mid-typing."""
+    """A periodic tick landing mid-edit cannot erase a selection, for a
+    more fundamental reason than the one this test used to check:
+    `apply_refresh_success` used to take `reconcile=False` while a
+    `FiltersScreen` held an uncommitted draft, because filtering was
+    live and a half-typed "f" transiently matched nothing. Filtering
+    is commit-on-`Apply` now (`.agents/specs/tui-filters.md`, "Le
+    filtrage n'est plus en direct"): a draft never reaches
+    `state.filters` until `enter`, so `apply_refresh_success`
+    reconciles unconditionally and a tick mid-typing has nothing to
+    react to in the first place."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -372,12 +379,13 @@ async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        app.screen.query_one(".f-category", Input).focus()
-        await pilot.press("f")  # incomplete draft of "films": matches nothing
+        app.screen.query_one("#f-categories", Input).focus()
+        await pilot.press("f")  # incomplete draft of "films", never applied
         await pilot.pause()
 
         app._start_periodic_refresh()  # one ordinary tick
         await _settle(app, pilot)
+        assert len(app.controller.state.selected_hashes) == 2
 
         await pilot.press(*"ilms")
         await pilot.pause()
@@ -1170,7 +1178,11 @@ async def test_recovery_does_not_reactivate_a_stale_preview() -> None:
 
 async def test_cancel_after_refreshes_preserves_filter_and_selection() -> None:
     """Several ticks landing while a draft is open leave both the
-    committed filter and the selection untouched."""
+    applied filter and the selection untouched -- trivially so, now:
+    the draft never reaches `state.filters` until `enter` (see
+    `test_refresh_during_a_filter_draft_preserves_the_selection`), so
+    there is nothing for a tick to react to, and `esc` closing without
+    applying it changes nothing further."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -1189,7 +1201,7 @@ async def test_cancel_after_refreshes_preserves_filter_and_selection() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        app.screen.query_one(".f-category", Input).focus()
+        app.screen.query_one("#f-categories", Input).focus()
         await pilot.press(*"fil")
         await pilot.pause()
 

@@ -20,15 +20,12 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import (
     Button,
-    Checkbox,
     DataTable,
     Input,
-    RadioSet,
 )
 from textual.widgets.data_table import (
     CellDoesNotExist,
@@ -100,7 +97,6 @@ from qbit_ops.tui.theme import (
     THEME_NAME,
 )
 from qbit_ops.tui.widgets.details import DetailsPanel
-from qbit_ops.tui.widgets.filters import FiltersPanel
 from qbit_ops.tui.widgets.overview import OverviewPanel, WorkspaceTabs
 from qbit_ops.tui.widgets.status_bar import (
     CommandBar,
@@ -463,21 +459,10 @@ class QbitOpsTuiApp(App[None]):
                     return
             else:
                 assert result is not None
-                # Never reconcile the selection out from under an
-                # uncommitted Filters draft: a half-typed exact-match
-                # category transiently matches nothing, which would
-                # erase the selection before the user finishes typing.
-                self.controller.apply_refresh_success(
-                    result, reconcile=not self._filters_draft_is_open()
-                )
+                self.controller.apply_refresh_success(result)
             self._render_all()
         finally:
             self._refresh_preview_freshness(refresh_failed=error is not None)
-
-    def _filters_draft_is_open(self) -> bool:
-        return any(
-            isinstance(screen, FiltersScreen) for screen in self.screen_stack
-        )
 
     def _show_fatal(self, error: Exception) -> None:
         banner = self.query_one("#banner", ConnectionBanner)
@@ -1013,12 +998,6 @@ class QbitOpsTuiApp(App[None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search-input":
             self._apply_search(event.value)
-            return
-        try:
-            panel = event.input.query_ancestor(FiltersPanel)
-        except NoMatches:
-            return
-        self._apply_filters_from_panel(panel)
 
     def _apply_search(self, text: str) -> None:
         """Apply search text live, as it's typed -- no I/O or debounce
@@ -1033,38 +1012,6 @@ class QbitOpsTuiApp(App[None]):
         self._render_filter_summary()
         self._render_table()
         self._render_details_panels()
-
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        try:
-            panel = event.checkbox.query_ancestor(FiltersPanel)
-        except NoMatches:
-            return
-        self._apply_filters_from_panel(panel)
-
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        try:
-            panel = event.radio_set.query_ancestor(FiltersPanel)
-        except NoMatches:
-            return
-        self._apply_filters_from_panel(panel)
-
-    def _apply_filters_from_panel(self, panel: FiltersPanel) -> None:
-        try:
-            filters = panel.build_filter()
-        except ValueError as error:
-            panel.show_error(str(error))
-            return
-
-        panel.show_error("")
-        self.controller.set_filters(filters)
-        self._render_filter_summary()
-        self._render_table()
-        self._render_details_panels()
-        # No selection reconciliation here: this fires on every
-        # keystroke, and a category filter is exact-match, so
-        # reconciling mid-typing would wipe a selection before the
-        # user finishes the filter that would have kept it visible.
-        # The Filters Apply/Clear/Cancel commit points reconcile instead.
 
     def _reconcile_selection_and_notify(self) -> None:
         removed = self.controller.reconcile_selection()
@@ -1159,14 +1106,13 @@ class QbitOpsTuiApp(App[None]):
         before a focused widget's own `enter` binding -- including
         `#search-input`'s native submit and a focused modal `Button`'s
         native click, which this dispatches manually via `Button.press()`.
-        `FiltersScreen` applies its edits live, so `enter` there only
-        closes the modal. Otherwise dispatches by active workspace.
+        On `FiltersScreen`, `enter` commits the draft and *stays open*
+        (see its class docstring); every other modal dispatches by
+        active workspace instead.
         """
         if len(self.screen_stack) > 1:
             if isinstance(self.screen, FiltersScreen):
-                self.pop_screen()
-                self._reconcile_selection_and_notify()
-                self.refresh_bindings()
+                self.screen.apply_draft()
                 return
             focused = self.focused
             if isinstance(focused, Button):
@@ -1689,13 +1635,16 @@ class QbitOpsTuiApp(App[None]):
         """Close a modal, return focus from a text input to the table,
         or clear a non-empty selection.
 
-        On `FiltersScreen`, escape means *cancel* -- revert to
-        `original_filters` before closing. Refuses to close
-        `PreviewScreen` while `applying=True`, so an already-dispatched
-        Apply always has something to observe its result. On
-        `ResultScreen`, this priority binding pre-empts the screen's
-        own `action_dismiss`, so its selection-clearing policy is
-        triggered explicitly here instead.
+        On `FiltersScreen`, escape means *cancel*: it closes without
+        undoing anything already `Apply`-ed (see the class docstring --
+        `esc` no longer reverts to the filter that was in effect when
+        the screen opened, since re-filtering is no longer live and
+        undoing an explicit commit would violate least-surprise).
+        Refuses to close `PreviewScreen` while `applying=True`, so an
+        already-dispatched Apply always has something to observe its
+        result. On `ResultScreen`, this priority binding pre-empts the
+        screen's own `action_dismiss`, so its selection-clearing policy
+        is triggered explicitly here instead.
         """
         if len(self.screen_stack) > 1:
             screen = self.screen
@@ -1705,12 +1654,6 @@ class QbitOpsTuiApp(App[None]):
                 # Nothing behind it to go back to -- leaving is the
                 # form's own Quit button, never a dismissal.
                 return
-            if isinstance(screen, FiltersScreen):
-                self.controller.set_filters(screen.original_filters)
-                self._render_filter_summary()
-                self._render_table()
-                self._render_details_panels()
-                self._reconcile_selection_and_notify()
             if isinstance(screen, ResultScreen):
                 outcome = screen.outcome
                 self.pop_screen()

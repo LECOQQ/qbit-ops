@@ -16,6 +16,7 @@ from qbit_ops.tui.formatting import (
     DOWN_RATE_ACCENT,
     IDLE_RATE_STYLE,
     UP_RATE_ACCENT,
+    _fold,
     _format_global_rate,
 )
 from qbit_ops.tui.state import (
@@ -334,3 +335,28 @@ def test_a_short_list_is_never_capped_at_all() -> None:
     assert "more" not in rendered
     assert "category-00" in rendered and "category-01" in rendered
     assert "Free space" in rendered and "Queueing" in rendered
+
+
+# --- _fold -------------------------------------------------------------
+
+
+def test_fold_joins_short_items_onto_one_line() -> None:
+    assert _fold(["a 1", "b 2"], budget=40) == ["a 1 · b 2"]
+
+
+def test_fold_wraps_onto_a_second_line_once_the_budget_is_exceeded() -> None:
+    lines = _fold(["a 1", "b 2", "c 3"], budget=9)
+    assert lines == ["a 1 · b 2", "c 3"]
+
+
+def test_fold_returns_none_past_max_lines() -> None:
+    assert _fold(["a", "b", "c"], budget=1, max_lines=2) is None
+
+
+def test_fold_max_lines_is_configurable() -> None:
+    """The parameter `tui-filters`'s value-action modals need: a
+    one-line scope/source row folds at `max_lines=1`, not the Session
+    window's `_MAX_VALUE_LINES` of 2."""
+    items = ["a 1", "b 2"]
+    assert _fold(items, budget=6, max_lines=1) is None
+    assert _fold(items, budget=6, max_lines=2) == ["a 1", "b 2"]

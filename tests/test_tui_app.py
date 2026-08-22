@@ -69,7 +69,6 @@ from qbit_ops.tui.app import (
     DetailsPanel,
     DetailsScreen,
     ExplainScreen,
-    FiltersPanel,
     FiltersScreen,
     FilterSummary,
     HelpScreen,
@@ -102,6 +101,7 @@ from qbit_ops.tui.state import (
     Workspace,
 )
 from qbit_ops.tui.theme import QBIT_OPS_THEME
+from qbit_ops.tui.widgets.filters import FiltersPanel
 from qbit_ops.tui.widgets.overview import (
     _BRAND_COMPACT_MIN_WIDTH,
     _BRAND_FULL_MIN_WIDTH,
@@ -257,6 +257,17 @@ async def _goto_torrents(app: QbitOpsTuiApp, pilot: Pilot) -> None:
     """Switch to the Torrents workspace and pump one message cycle."""
     await pilot.press("t")
     await pilot.pause()
+
+
+async def _apply_filters_and_close(app: QbitOpsTuiApp, pilot: Pilot) -> None:
+    """`enter` commits the draft and stays open (see `FiltersScreen`'s
+    class docstring); `escape` then closes without undoing it. The
+    net effect most tests actually want -- a filter now in effect,
+    the modal gone."""
+    await pilot.press("enter")
+    await pilot.pause()
+    await pilot.press("escape")
+    await _settle(app, pilot)
 
 
 async def _goto_overview(app: QbitOpsTuiApp, pilot: Pilot) -> None:
@@ -1177,7 +1188,7 @@ async def test_filter_summary_reflects_active_filter_and_search() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1242,12 +1253,11 @@ async def test_filtering_to_zero_rows_clears_focus_and_details() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"radarr")
         await pilot.pause()
-        await pilot.press("enter")
-        await _settle(app, pilot)
+        await _apply_filters_and_close(app, pilot)
 
         assert app.controller.state.focused_hash is None
         details = await _open_details(app, pilot)
@@ -1269,7 +1279,7 @@ async def test_clearing_filters_repopulates_table_safely() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1411,7 +1421,7 @@ async def test_search_and_filters_combine_with_and_semantics() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1640,22 +1650,24 @@ async def test_filter_modal_exposes_current_values() -> None:
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
+        await _apply_filters_and_close(app, pilot)
 
         await pilot.press("f")
         await pilot.pause()
-        reopened_input = app.screen.query_one(".f-category", Input)
+        reopened_input = app.screen.query_one("#f-categories", Input)
         assert reopened_input.value == "films"
         await pilot.press("escape")
         await pilot.pause()
 
 
-async def test_filter_apply_with_enter_closes_and_keeps_filter() -> None:
+async def test_filter_apply_with_enter_applies_and_stays_open() -> None:
+    """Criterion 9bis: `enter` applies the draft and leaves the modal
+    open -- the one gesture that commits, unlike every other modal's
+    `Apply`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -1669,7 +1681,7 @@ async def test_filter_apply_with_enter_closes_and_keeps_filter() -> None:
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1677,12 +1689,17 @@ async def test_filter_apply_with_enter_closes_and_keeps_filter() -> None:
         await pilot.press("enter")
         await pilot.pause()
 
-        assert len(app.screen_stack) == 1
+        assert len(app.screen_stack) > 1
+        assert isinstance(app.screen, FiltersScreen)
         assert app.controller.state.filters.categories == ("films",)
         assert _visible_names(app) == ["Alpha"]
 
 
-async def test_filter_cancel_with_escape_retains_previous_filter() -> None:
+async def test_filter_cancel_with_escape_never_applies_the_draft() -> None:
+    """Criterion 9bis: `esc` closes without undoing anything already
+    applied -- and a draft that was never `Apply`-ed was never in
+    effect to begin with, so editing it and pressing `esc` changes
+    nothing about `state.filters`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -1698,7 +1715,7 @@ async def test_filter_cancel_with_escape_retains_previous_filter() -> None:
         # Apply "films" first.
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1706,15 +1723,16 @@ async def test_filter_cancel_with_escape_retains_previous_filter() -> None:
         await pilot.pause()
         assert app.controller.state.filters.categories == ("films",)
 
-        # Reopen, edit, then cancel -- must revert to "films".
+        # Reopen, edit the draft, never apply it -- state stays "films"
+        # throughout, since typing no longer filters live.
         await pilot.press("f")
         await pilot.pause()
-        category_input2 = app.screen.query_one(".f-category", Input)
+        category_input2 = app.screen.query_one("#f-categories", Input)
         category_input2.focus()
         await pilot.press("ctrl+u")
         await pilot.press(*"tv")
         await pilot.pause()
-        assert app.controller.state.filters.categories == ("tv",)
+        assert app.controller.state.filters.categories == ("films",)
 
         await pilot.press("escape")
         await pilot.pause()
@@ -1724,9 +1742,10 @@ async def test_filter_cancel_with_escape_retains_previous_filter() -> None:
         assert _visible_names(app) == ["Alpha"]
 
 
-async def test_filter_clear_restores_the_unfiltered_list_and_stays_open() -> (
-    None
-):
+async def test_filter_clear_empties_draft_keeps_table_filtered() -> None:
+    """`^r` never applies anything (see `test_filter_clear_key_empties_
+    the_draft_without_applying`): the table stays exactly as filtered
+    by the last real `Apply`, not reset to the unfiltered list."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -1740,7 +1759,7 @@ async def test_filter_clear_restores_the_unfiltered_list_and_stays_open() -> (
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1748,18 +1767,15 @@ async def test_filter_clear_restores_the_unfiltered_list_and_stays_open() -> (
         await pilot.pause()
         assert _visible_names(app) == ["Alpha"]
 
-        await pilot.press("f")
+        await pilot.press(*"tv")
         await pilot.pause()
         await pilot.press("ctrl+r")
         await pilot.pause()
 
         assert len(app.screen_stack) > 1  # clear keeps the modal open
-        assert (
-            app.controller.state.filters
-            == app.controller.state.filters.__class__()
-        )
-        assert sorted(_visible_names(app)) == ["Alpha", "Beta"]
-        cleared_input = app.screen.query_one(".f-category", Input)
+        assert app.controller.state.filters.categories == ("films",)
+        assert _visible_names(app) == ["Alpha"]
+        cleared_input = app.screen.query_one("#f-categories", Input)
         assert cleared_input.value == ""
 
         await pilot.press("escape")
@@ -1787,7 +1803,7 @@ async def test_filter_apply_performs_zero_api_calls() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -1801,6 +1817,90 @@ async def test_filter_apply_performs_zero_api_calls() -> None:
             client.app_web_api_version_calls,
         )
         assert scans_after == scans_before
+
+
+async def test_no_keystroke_ever_calls_set_filters_before_apply() -> None:
+    """Criterion 6: filtering is commit-on-`Apply`, not live -- typing
+    across every field in the draft calls `TuiController.set_filters`
+    zero times, and `enter` calls it exactly once."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+    calls = 0
+    real_set_filters = app.controller.set_filters
+
+    def _counting_set_filters(filters: TorrentFilter) -> None:
+        nonlocal calls
+        calls += 1
+        real_set_filters(filters)
+
+    app.controller.set_filters = _counting_set_filters  # type: ignore[method-assign]
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one("#f-categories", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        assert calls == 0
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert calls == 1
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_no_dot_glyph_appears_in_the_filters_modal() -> None:
+    """Criterion 5bis: `*` is the only "pending"/"in attention" marker
+    in this modal -- `●` is already a state lamp elsewhere in the
+    product (tracker health, connection status), where colour carries
+    the meaning; reusing it here would be a second, unrelated subject
+    for the same glyph. Checked on the rendered screen, not the
+    source, with a state that actually has something to mark (a
+    pending edit and an applied filter) so the absence is not merely
+    because nothing was ever drawn."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one("#f-categories", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        await pilot.press("enter")  # one filter applied
+        await pilot.pause()
+        await pilot.press(*"tv")  # a pending, un-applied edit
+        await pilot.pause()
+
+        dialog = app.screen.query_one("#filters-dialog")
+        strips = app.screen._compositor.render_strips()
+        region = dialog.region
+        rendered = "\n".join(
+            "".join(segment.text for segment in strips[y])[
+                region.x : region.x + region.width
+            ]
+            for y in range(region.y, region.y + region.height)
+        )
+        assert "*" in rendered, "fixture produced no pending marker to check"
+        assert "●" not in rendered
+
+        await pilot.press("escape")
+        await pilot.pause()
 
 
 # --- 6. Details --------------------------------------------------------------
@@ -2286,7 +2386,7 @@ async def test_search_and_filter_remain_local_during_slow_refresh() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -2776,9 +2876,11 @@ async def test_filter_modal_completion_radio_maps_exclusively() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        completion = app.screen.query_one(".f-completion", RadioSet)
+        completion = app.screen.query_one("#f-completed", RadioSet)
         buttons = list(completion.query(RadioButton))
         buttons[1].value = True  # "Completed"
+        await pilot.pause()
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.controller.state.filters.completed is True
@@ -2786,11 +2888,15 @@ async def test_filter_modal_completion_radio_maps_exclusively() -> None:
 
         buttons[2].value = True  # "Incomplete"
         await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
 
         assert app.controller.state.filters.completed is False
         assert _visible_names(app) == ["Beta"]
 
         buttons[0].value = True  # "Any"
+        await pilot.pause()
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.controller.state.filters.completed is None
@@ -2812,9 +2918,11 @@ async def test_filter_modal_activity_radio_maps_exclusively() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        activity = app.screen.query_one(".f-activity", RadioSet)
+        activity = app.screen.query_one("#f-active", RadioSet)
         buttons = list(activity.query(RadioButton))
         buttons[1].value = True  # "Active"
+        await pilot.pause()
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.controller.state.filters.active is True
@@ -2822,12 +2930,16 @@ async def test_filter_modal_activity_radio_maps_exclusively() -> None:
 
         buttons[2].value = True  # "Inactive"
         await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
 
         assert app.controller.state.filters.active is False
         assert _visible_names(app) == ["Beta"]
 
 
-async def test_filter_modal_apply_button_applies_and_closes() -> None:
+async def test_filter_apply_key_applies_and_stays_open() -> None:
+    """`enter` commits the draft -- and, unlike every other modal's
+    `Apply`, does not close (see `FiltersScreen`'s class docstring)."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -2841,20 +2953,22 @@ async def test_filter_modal_apply_button_applies_and_closes() -> None:
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
 
-        apply_button = app.screen.query_one("#filters-apply", Button)
-        await pilot.click(apply_button)
+        await pilot.press("enter")
         await pilot.pause()
 
-        assert len(app.screen_stack) == 1
+        assert len(app.screen_stack) > 1
         assert app.controller.state.filters.categories == ("films",)
 
 
-async def test_filter_modal_cancel_button_reverts_and_closes() -> None:
+async def test_the_footer_count_describes_the_list_not_the_draft() -> None:
+    """Criterion 8: the footer's count line reads off the *applied*
+    filter and the table's own visible count, never the draft -- an
+    un-applied edit changes what the `*` line says, never this one."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -2868,20 +2982,116 @@ async def test_filter_modal_cancel_button_reverts_and_closes() -> None:
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+
+        count = app.screen.query_one(".f-count", Static)
+        assert str(count.content) == "0 filters applied · showing 2 of 2"
+
+        category_input = app.screen.query_one("#f-categories", Input)
+        category_input.focus()
+        await pilot.press(*"films")
+        await pilot.pause()
+        # Typed, not applied -- the list line does not move yet.
+        assert str(count.content) == "0 filters applied · showing 2 of 2"
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert str(count.content) == "1 filters applied · showing 1 of 2"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_an_impossible_range_disarms_apply_and_shows_the_error() -> None:
+    """Criterion 7: `min > max` never reaches `state.filters` -- `enter`
+    is answered (it re-renders the error), but it does not apply, and
+    the modal stays open with `✕ ...` explaining why."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", size=1_000_000)]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("alt+right", "alt+right")  # Organisation -> Measures
+        await pilot.pause()
+
+        size_min = app.screen.query_one("#f-size_min", Input)
+        size_max = app.screen.query_one("#f-size_max", Input)
+        size_min.focus()
+        await pilot.press(*"50GiB")
+        await pilot.pause()
+        size_max.focus()
+        await pilot.press(*"1GiB")
+        await pilot.pause()
+
+        error = app.screen.query_one(".f-error", Static)
+        assert str(error.content).startswith("✕")
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert len(app.screen_stack) > 1  # never closed either
+        assert app.controller.state.filters.size.is_unset
+        assert str(error.content).startswith("✕")
+
+        # Fixing the range arms Apply for real.
+        size_max.focus()
+        await pilot.press("ctrl+u")
+        await pilot.press(*"2TiB")
+        await pilot.pause()
+        assert str(app.screen.query_one(".f-error", Static).content) == ""
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.controller.state.filters.size.min == 50 * 1024**3
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+def test_filters_draft_is_open_no_longer_exists() -> None:
+    """Criterion 9bis's fourth test: `_filters_draft_is_open` existed
+    only to suppress reconciliation while a live-applying draft was
+    open. There is no such draft state to protect any more (see
+    `TuiController.apply_refresh_success`), and a helper nobody calls
+    is exactly the kind of stale escape hatch that gets rediscovered
+    and reused for the wrong reason."""
+    assert not hasattr(QbitOpsTuiApp, "_filters_draft_is_open")
+
+
+async def test_filter_cancel_key_closes_without_applying_the_draft() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="tv"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
 
-        cancel_button = app.screen.query_one("#filters-cancel", Button)
-        await pilot.click(cancel_button)
+        await pilot.press("escape")
         await pilot.pause()
 
         assert len(app.screen_stack) == 1
         assert app.controller.state.filters.categories == ()
 
 
-async def test_filter_modal_clear_button_resets_and_stays_open() -> None:
+async def test_filter_clear_key_empties_the_draft_without_applying() -> None:
+    """`^r` clears the *draft*, never the applied filter: a category
+    already `Apply`-ed stays in effect through a `Clear` that only
+    touches what has not been committed yet."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -2895,17 +3105,23 @@ async def test_filter_modal_clear_button_resets_and_stays_open() -> None:
         await _goto_torrents(app, pilot)
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.controller.state.filters.categories == ("films",)
 
-        clear_button = app.screen.query_one("#filters-clear", Button)
-        await pilot.click(clear_button)
+        await pilot.press(*"tv")
+        await pilot.pause()
+
+        await pilot.press("ctrl+r")
         await pilot.pause()
 
         assert len(app.screen_stack) > 1
-        assert app.controller.state.filters == TorrentFilter()
+        assert category_input.value == ""
+        assert app.controller.state.filters.categories == ("films",)
         await pilot.press("escape")
         await pilot.pause()
 
@@ -2920,15 +3136,49 @@ async def test_filter_modal_visible_and_actionable_at_every_width() -> None:
             await pilot.press("f")
             await pilot.pause()
 
-            assert app.screen.query_one("#filters-apply", Button) is not None
-            assert app.screen.query_one("#filters-clear", Button) is not None
-            assert app.screen.query_one("#filters-cancel", Button) is not None
-            assert app.screen.query_one(".f-completion", RadioSet) is not None
-            assert app.screen.query_one(".f-activity", RadioSet) is not None
+            assert app.screen.query_one("#f-categories", Input) is not None
+            assert app.screen.query_one("#f-completed", RadioSet) is not None
+            assert app.screen.query_one("#f-active", RadioSet) is not None
 
             await pilot.press("escape")
             await pilot.pause()
             assert len(app.screen_stack) == 1
+
+
+async def test_the_dialog_keeps_two_columns_of_floor_at_every_width() -> None:
+    """Criterion 10: `.qbit-dialog` gains `max-width: 100%` *and*
+    `margin: 0 2` -- the geometry itself is asserted (`x=2, w=92` at
+    96 columns), not merely the absence of overflow, since
+    `max-width: 100%` alone already does not overflow and gives a
+    dialog flush against both edges, which the wireframe does not
+    show. Measured (see the handoff): `100%` alone gives `x=0 w=96`;
+    `100% + margin: 0 2` gives `x=2 w=92`."""
+    cases = [
+        (90, 2, 86),
+        (96, 2, 92),
+        (140, 20, 100),
+    ]
+    for width, expected_x, expected_w in cases:
+        client = FakeQbitClient(torrents=[make_torrent()])
+        app = _app(client)
+        async with app.run_test(size=(width, 40)) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            await pilot.press("f")
+            await pilot.pause()
+
+            region = app.screen.query_one("#filters-dialog").region
+            assert region.x == expected_x, (width, region)
+            assert region.width == expected_w, (width, region)
+            assert region.x + region.width <= width, (width, region)
+            # Two columns of floor on the right too, not just the left.
+            assert width - (region.x + region.width) == expected_x, (
+                width,
+                region,
+            )
+
+            await pilot.press("escape")
+            await pilot.pause()
 
 
 # --- Explain ---------------------------------------------------------------
@@ -3560,7 +3810,7 @@ async def test_radio_selected_and_focused_states_are_distinguishable() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        completion = app.screen.query_one(".f-completion", RadioSet)
+        completion = app.screen.query_one("#f-completed", RadioSet)
         buttons = list(completion.query(RadioButton))
 
         # Selection state (on/off) is glyph-based, not color-only --
@@ -3589,14 +3839,16 @@ async def test_completion_and_activity_each_have_one_semantic_value() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        completion = app.screen.query_one(".f-completion", RadioSet)
-        activity = app.screen.query_one(".f-activity", RadioSet)
+        completion = app.screen.query_one("#f-completed", RadioSet)
+        activity = app.screen.query_one("#f-active", RadioSet)
 
         assert completion.pressed_index is not None
         assert activity.pressed_index is not None
 
         completion_buttons = list(completion.query(RadioButton))
         completion_buttons[1].value = True
+        await pilot.pause()
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.controller.state.filters.completed is True
@@ -3656,22 +3908,26 @@ async def test_all_modal_bindings_still_dispatch_correctly() -> None:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
 
-        # FiltersScreen: Enter applies and closes.
+        # FiltersScreen: Enter applies, stays open; Escape then closes.
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert len(app.screen_stack) == 1
+        assert len(app.screen_stack) > 1
         assert app.controller.state.filters.categories == ("films",)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
 
-        # FiltersScreen: Escape cancels.
+        # FiltersScreen: an un-applied edit never reaches state.filters,
+        # so Escape leaves it exactly as it was.
         await pilot.press("f")
         await pilot.pause()
-        cat2 = app.screen.query_one(".f-category", Input)
+        cat2 = app.screen.query_one("#f-categories", Input)
         cat2.focus()
         await pilot.press("ctrl+u")
         await pilot.press(*"tv")
@@ -3736,13 +3992,15 @@ async def test_filters_modal_is_keyboard_interactive_immediately_on_open() -> (
         await pilot.press("f")
         await pilot.pause()
 
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         assert category_input.has_focus
 
         await pilot.press(*"films")
         await pilot.pause()
 
         assert category_input.value == "films"
+        await pilot.press("enter")
+        await pilot.pause()
         assert app.controller.state.filters.categories == ("films",)
         assert _visible_names(app) == ["Alpha"]
 
@@ -3755,9 +4013,13 @@ async def test_tab_navigates_between_filter_fields() -> None:
     was open, including `app.focus_next`/`app.focus_previous` -- the
     actions behind Textual's own `Screen`-level `tab`/`shift+tab`
     bindings. That silently broke Tab navigation between fields inside
-    any modal (category -> state -> checkboxes -> radio sets -> Apply/
-    Clear/Cancel buttons in Filters), even though typing into the
-    already-focused first field worked fine."""
+    any modal, even though typing into the already-focused first field
+    worked fine.
+
+    Tab only ever reaches the *active* pane's fields -- the other three
+    panes' rows are mounted but `display: none` (see `FiltersPanel`),
+    so `alt+right` is what reaches a field in a different pane, not
+    Tab."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -3767,17 +4029,22 @@ async def test_tab_navigates_between_filter_fields() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         assert category_input.has_focus
 
         await pilot.press("tab")
         await pilot.pause()
-        state_input = app.screen.query_one(".f-state", Input)
-        assert state_input.has_focus
+        excluded_input = app.screen.query_one("#f-categories_excluded", Input)
+        assert excluded_input.has_focus
 
         await pilot.press("shift+tab")
         await pilot.pause()
         assert category_input.has_focus
+
+        await pilot.press("alt+right")
+        await pilot.pause()
+        state_input = app.screen.query_one("#f-states", Input)
+        assert state_input.has_focus
 
         await pilot.press("escape")
         await pilot.pause()
@@ -3904,7 +4171,7 @@ async def test_changing_filters_clears_hidden_selections() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.pause()
@@ -4427,13 +4694,13 @@ async def test_up_down_navigate_filters_modal() -> None:
         await pilot.press("f")
         await pilot.pause()
 
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         assert category_input.has_focus
 
         await pilot.press("down")
         await pilot.pause()
-        state_input = app.screen.query_one(".f-state", Input)
-        assert state_input.has_focus
+        excluded_input = app.screen.query_one("#f-categories_excluded", Input)
+        assert excluded_input.has_focus
 
         await pilot.press("up")
         await pilot.pause()
@@ -4967,7 +5234,7 @@ async def test_active_sort_survives_refresh_filter_search_and_resize() -> None:
         # Filter.
         await pilot.press("f")
         await pilot.pause()
-        category_input = app.screen.query_one(".f-category", Input)
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.press(*"films")
         await pilot.press("enter")
@@ -5345,10 +5612,12 @@ async def test_modal_dialogs_expose_expected_border_titles() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        assert (
-            str(app.screen.query_one("#filters-dialog").border_title)
-            == "Filters"
-        )
+        # Not a plain title: `border_title` is the tab strip itself
+        # (see `qbit_ops.tui.tab_bar`), which always starts with the
+        # dialog name at the widest ladder rung.
+        assert str(
+            app.screen.query_one("#filters-dialog").border_title
+        ).startswith("FILTERS ")
         await pilot.press("escape")
         await pilot.pause()
 
@@ -5737,14 +6006,16 @@ async def test_filters_and_sort_modals_still_expose_all_options() -> None:
 
         await pilot.press("f")
         await pilot.pause()
-        assert app.screen.query_one(".f-category", Input) is not None
-        assert app.screen.query_one(".f-state", Input) is not None
-        assert app.screen.query_one(".f-stalled", Checkbox) is not None
-        assert app.screen.query_one(".f-errored", Checkbox) is not None
-        assert app.screen.query_one(".f-completion", RadioSet) is not None
-        assert app.screen.query_one(".f-activity", RadioSet) is not None
-        for button_id in ("filters-apply", "filters-clear", "filters-cancel"):
-            assert app.screen.query_one(f"#{button_id}", Button) is not None
+        assert app.screen.query_one("#f-categories", Input) is not None
+        assert app.screen.query_one("#f-states", Input) is not None
+        assert app.screen.query_one("#f-stalled", Checkbox) is not None
+        assert app.screen.query_one("#f-errored", Checkbox) is not None
+        assert app.screen.query_one("#f-completed", RadioSet) is not None
+        assert app.screen.query_one("#f-active", RadioSet) is not None
+        assert app.screen.query_one("#f-private", RadioSet) is not None
+        # Buttons are gone: Apply/Clear/Cancel are the bottom-border
+        # gestures now (see `FiltersScreen`'s class docstring).
+        assert not app.screen.query(Button)
         await pilot.press("escape")
         await pilot.pause()
 
@@ -5851,15 +6122,11 @@ async def test_modal_dialog_background_matches_the_app_uniform_background() -> (
         dialog = app.screen.query_one("#filters-dialog")
         assert dialog.background_colors == screen_bg
         assert (
-            app.screen.query_one(".f-category", Input).background_colors
+            app.screen.query_one("#f-categories", Input).background_colors
             == screen_bg
         )
         assert (
-            app.screen.query_one(".f-completion", RadioSet).background_colors
-            == screen_bg
-        )
-        assert (
-            app.screen.query_one("#filters-clear", Button).background_colors
+            app.screen.query_one("#f-completed", RadioSet).background_colors
             == screen_bg
         )
         await pilot.press("escape")
@@ -5916,22 +6183,19 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
 
         await pilot.press("f")
         await pilot.pause()
-        # Flat buttons: unfocused `-primary` shows orange *text* on a
-        # transparent fill; focus flips to a solid orange fill with
-        # dark text -- either way, never Textual's default blue.
-        apply_button = app.screen.query_one("#filters-apply", Button)
-        assert apply_button.styles.color.rgb == orange
-        apply_button.focus()
-        await pilot.pause()
-        assert apply_button.styles.background.rgb == orange
-        assert apply_button.styles.color.rgb == dark
-
-        category_input = app.screen.query_one(".f-category", Input)
+        # No buttons in this modal any more (see `FiltersScreen`'s
+        # class docstring) -- Input/Checkbox/RadioSet focus below cover
+        # the same claim for the widgets it still has.
+        category_input = app.screen.query_one("#f-categories", Input)
         category_input.focus()
         await pilot.pause()
         assert category_input.styles.border.top[1].rgb == orange
 
-        checkbox = app.screen.query_one(".f-stalled", Checkbox)
+        # Stalled/Errored live on the State pane -- switch to it first,
+        # or the checkbox is focused while `display: none`.
+        await pilot.press("alt+right")
+        await pilot.pause()
+        checkbox = app.screen.query_one("#f-stalled", Checkbox)
         checkbox.focus()
         await pilot.pause()
         assert checkbox.styles.border.top[1].rgb == orange
@@ -5939,7 +6203,7 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         assert checkbox_label.background.rgb == orange
         assert checkbox_label.color.rgb == dark
 
-        completion = app.screen.query_one(".f-completion", RadioSet)
+        completion = app.screen.query_one("#f-completed", RadioSet)
         completion.focus()
         await pilot.pause()
         selected = completion.query(RadioButton).first()
@@ -6048,7 +6312,14 @@ async def test_every_modal_titles_itself_in_its_border() -> None:
             assert isinstance(screen, screen_class)
             dialog = screen.query_one(f"#{screen_class.DIALOG_ID}")
 
-            assert str(dialog.border_title) == screen_class.MODAL_TITLE
+            if screen_class is FiltersScreen:
+                # Its border_title is the tab strip, not a plain
+                # title -- see `qbit_ops.tui.tab_bar`.
+                assert str(dialog.border_title).startswith(
+                    screen_class.MODAL_TITLE.upper()
+                )
+            else:
+                assert str(dialog.border_title) == screen_class.MODAL_TITLE
             assert dialog.styles.border_title_color == accent
             await pilot.press("escape")
             await _settle(app, pilot)
@@ -6176,7 +6447,12 @@ def _keys_the_screen_answers(app: QbitOpsTuiApp) -> set[str]:
 
 # Labels that promise the operator leaves this modal. `Save` is not
 # one: setup validates first and stays open to report what it found.
-_LABELS_THAT_LEAVE = frozenset({"Cancel", "Close", "Select", "Apply", "Run"})
+# `Apply` is not one either, as of `tui-filters`: `FiltersScreen`'s
+# `Apply` commits the draft and *stays open* (see its class docstring)
+# -- the label still means "this key does something real", just not
+# "this key closes the modal" any more, which is the narrower promise
+# this set checks.
+_LABELS_THAT_LEAVE = frozenset({"Cancel", "Close", "Select", "Run"})
 
 
 async def test_every_announced_key_is_a_binding_that_is_actually_active() -> (
@@ -6271,7 +6547,7 @@ async def test_a_key_announced_as_leaving_the_modal_actually_leaves_it() -> (
                         await pilot.press("escape")
                         await _settle(app, pilot)
 
-    assert checked >= 6, checked
+    assert checked >= 5, checked
 
 
 async def test_border_hints_and_the_command_bar_share_one_grammar() -> None:

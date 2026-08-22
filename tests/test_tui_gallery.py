@@ -42,7 +42,7 @@ SCREEN_MARKERS: dict[str, tuple[str, ...]] = {
     # status would go green only while the screen lied.
     "overview": ("All-time", "announce status not read here"),
     "torrents": ("uncategorized", "cross-seed"),
-    "filters": ("Completion", "Errored"),
+    "filters": ("Tag any", "Name re"),
     "sort": ("high-low", "A-Z"),
     "help": ("Navigate", "Deselect"),
     "details": ("Hash", "Size"),
@@ -199,20 +199,29 @@ async def test_every_modal_is_measured_on_the_width_scale() -> None:
         )
 
 
-async def test_every_modal_shares_container_origin_and_height() -> None:
+async def test_every_modal_is_centred_on_its_own_footprint() -> None:
     """`details` used to be the outlier on all three axes at once --
     a `Vertical` at `20,4`, 32 rows tall while every sibling was a
-    `VerticalScroll` at y=2, 36 rows tall."""
+    `VerticalScroll` at y=2, 36 rows tall.
+
+    That shared origin is gone by design as of `tui-filters`: a modal
+    now takes the height its own content needs (`.agents/specs/
+    tui-filters.md`, "Les modales prennent la hauteur de leur
+    contenu") rather than a fixed full-screen one, so `y`/`height` are
+    no longer expected to match across modals. What survives is the
+    weaker, still-real invariant this replaces them with: every modal
+    is centred on its own measured footprint, never placed by hand,
+    at whatever width/height that footprint turns out to be.
+    """
     surfaces = await _modal_surfaces()
 
     assert {s.container for s in surfaces} == {"VerticalScroll"}
-    assert len({s.y for s in surfaces}) == 1, [
-        (s.screen, s.y) for s in surfaces
-    ]
-    assert len({s.height for s in surfaces}) == 1, [
-        (s.screen, s.height) for s in surfaces
-    ]
-    # Centred horizontally at the character: the one convention that
-    # already held before this system, and must survive it.
     for surface in surfaces:
-        assert surface.x == (GALLERY_SIZE[0] - surface.width) // 2
+        assert surface.x == (GALLERY_SIZE[0] - surface.width) // 2, (
+            surface.screen,
+            surface.x,
+        )
+        assert surface.y == (GALLERY_SIZE[1] - surface.height) // 2, (
+            surface.screen,
+            surface.y,
+        )

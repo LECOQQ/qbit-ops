@@ -17,6 +17,7 @@ from qbit_core.qbit.fields import (
     get_field_as_float,
     get_field_as_int,
     get_field_as_string,
+    get_field_as_tag_list,
     get_optional_int,
 )
 
@@ -158,6 +159,10 @@ class TorrentSnapshot:
     qBittorrent's encoding for "no limit", a real value rather than a
     missing one, so there is no unknown to distinguish here.
 
+    `tags` is the raw membership list, so a caller that already holds a
+    snapshot (a bulk-action plan, a periodic refresh) never needs a
+    second `torrents_info()` just to read it.
+
     An optional measure is `None` when qBittorrent reported nothing
     usable -- absent, null, or one of its "unset" markers (see
     `qbit_core.qbit.fields.UNSET_NUMERIC`/`UNSET_TIMESTAMP`). Never `0`
@@ -179,6 +184,7 @@ class TorrentSnapshot:
     upload_rate: int
     download_limit: int
     upload_limit: int
+    tags: tuple[str, ...]
     downloaded: int | None
     uploaded: int | None
     seeding_time: int | None
@@ -227,6 +233,7 @@ def build_torrent_snapshot(torrent: Any) -> TorrentSnapshot:
         upload_rate=get_field_as_int(torrent, "upspeed"),
         download_limit=get_field_as_int(torrent, "dl_limit"),
         upload_limit=get_field_as_int(torrent, "up_limit"),
+        tags=tuple(get_field_as_tag_list(torrent)),
         downloaded=get_optional_int(
             torrent, "downloaded", sentinels=UNSET_NUMERIC
         ),

@@ -23,6 +23,7 @@ from qbit_ops.tui.formatting import (
     DOWN_RATE_ACCENT,
     IDLE_RATE_STYLE,
     UP_RATE_ACCENT,
+    _fold,
     _format_byte_rate,
     _format_bytes,
 )
@@ -407,7 +408,7 @@ def _wrapped_row(
         items = entries[:shown]
         if hidden:
             items = [*items, f"+ {hidden} more"]
-        folded = _fold(items, budget)
+        folded = _fold(items, budget, max_lines=_MAX_VALUE_LINES)
         if folded is not None:
             lines = folded
             break
@@ -415,26 +416,6 @@ def _wrapped_row(
     _row(text, label, lines[0] if lines else _NOT_COMPUTED)
     for continuation in lines[1:]:
         _row(text, "", continuation)
-
-
-def _fold(items: list[str], budget: int) -> list[str] | None:
-    """`items` joined into at most `_MAX_VALUE_LINES` lines, or `None`."""
-    lines: list[str] = []
-    current = ""
-    for item in items:
-        candidate = item if not current else f"{current} · {item}"
-        if len(candidate) > budget and current:
-            lines.append(current)
-            current = item
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    if len(lines) > _MAX_VALUE_LINES or any(
-        len(line) > budget for line in lines
-    ):
-        return None
-    return lines
 
 
 def _append_instance(text: Text, stats: InstanceStats | None) -> None:

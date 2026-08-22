@@ -303,11 +303,23 @@ QbitModal {
     align: center middle;
 }
 .qbit-dialog {
+    /* Sized to its own content, not to a shared full-screen height --
+       centred vertically (`QbitModal { align: center middle; }`)
+       rather than pinned to one shared origin. A dialog taller than
+       the cap below still scrolls; it just no longer *starts* at
+       full height regardless of how little it has to show. */
+    height: auto;
     max-height: 90%;
     /* The exact counterpart of `max-height`, and it was missing: the
        three width words below are absolute columns, so `-large`'s 100
        ran its right border off a 96-column terminal. */
     max-width: 100%;
+    /* Two columns of sol on either side, even flush against
+       `max-width: 100%` -- the reason lives here, not in a percentage
+       that happens not to touch either edge (measured: `96%` alone
+       gives the same `x=2 w=92` at 96 columns, but says nothing about
+       why). */
+    margin: 0 2;
     border: round $primary;
     border-title-color: $primary;
     border-title-align: left;
@@ -423,27 +435,97 @@ QbitModal {
 
 /* -- filters -- */
 /* Same reason as `DetailsPanel` below: a panel that fills its dialog
-   pins the dialog's virtual size to its own and kills the scrolling. */
+   pins the dialog's virtual size to its own and kills the scrolling.
+   Every pane's rows are mounted at once (see `FiltersPanel`); only the
+   active pane's are `display`ed, so `height: auto` here always sums to
+   exactly `PANE_HEIGHT` rows -- the invariant the modal never resizes
+   changing section relies on. */
 FiltersPanel {
     height: auto;
 }
-.f-columns {
-    height: auto;
+.f-row {
+    height: 1;
+    background: transparent;
 }
-.f-col {
-    width: 1fr;
-    height: auto;
+.f-label {
+    width: 12;
+    color: $text-muted;
+}
+.f-hint {
+    width: auto;
+    color: $text-muted;
+}
+/* Textual's `Input` default is 3 rows (a `border: tall` box); this
+   modal is a dense grid of them, so every one collapses to the single
+   row the wireframe budgets -- a focus ring replaces the border. */
+.f-field {
+    height: 1;
+    width: 18;
+    border: none;
     padding: 0 1;
+    background: transparent;
 }
-.f-actions {
-    height: auto;
-    margin-top: 1;
+/* Border only, no background tint: `.qbit-dialog`'s own uniform-
+   background invariant (`test_modal_dialog_background_matches_the_
+   app_uniform_background`) covers every state, not just blurred, so
+   the fill never changes -- but a focused field still needs a signal,
+   and the shared `.qbit-dialog Input:focus { border: tall $primary; }`
+   rule already supplies the brand-accent one every other Input in the
+   app uses (confirmed not to grow past one row: `border: tall` on
+   `Input` renders inline -- cursor + underline -- not as boxed top/
+   bottom lines the way `RadioSet`/`Checkbox` draw it). */
+.f-field:focus {
+    background: transparent;
 }
-/* Full-width, stacked one per row -- the same component used the same
-   way as in `actions`, rather than a narrow horizontal row here alone. */
-.f-actions Button {
-    width: 100%;
-    margin-bottom: 0;
+/* Completion/Activity/Private: three mutually exclusive options that
+   read as one line, not a three-row stack -- `RadioSet`'s own default
+   layout is vertical. Selector qualified to `.qbit-dialog RadioSet`'s
+   own specificity (a descendant rule above, in "Fields and buttons,
+   once for every dialog"): a bare `.f-tristate` loses the border/
+   height fight to it and renders a round box clipped to one row,
+   hiding every option inside it. */
+.qbit-dialog RadioSet.f-tristate {
+    layout: horizontal;
+    height: 1;
+    width: auto;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+.f-tristate > RadioButton {
+    width: auto;
+    margin-right: 1;
+}
+.qbit-dialog Checkbox.f-check {
+    height: 1;
+    width: auto;
+    border: none;
+    padding: 0 1;
+    background: transparent;
+}
+/* `.qbit-dialog Checkbox:focus` above ties this rule's specificity
+   (two classes vs one class + one type), so source order alone would
+   decide it -- named explicitly instead, to keep the focus signal
+   every other Input/Checkbox in the app already carries. Safe to
+   restore at `height: 1`: unlike `RadioSet`'s "round" border, an
+   Checkbox's "tall" one renders inline (confirmed empirically), never
+   claiming a second row. */
+.qbit-dialog Checkbox.f-check:focus {
+    border: tall $primary;
+}
+.f-spacer,
+.f-pending,
+.f-error,
+.f-count {
+    height: 1;
+}
+.f-rule {
+    height: 1;
+    margin: 0;
+    color: $panel-lighten-2;
+}
+.f-error {
+    color: $text-error;
 }
 
 /* -- details -- */

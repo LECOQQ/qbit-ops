@@ -43,11 +43,8 @@ PLANNING_SCAN_BUDGET: dict[TorrentBulkAction, int] = {
     "delete": 1,
     "category_set": 1,
     "category_clear": 1,
-    # 2: tag membership is not on `TorrentSnapshot`, and deliberately so
-    # -- see `.agents/MEMORY.md`, "Pipeline SELECT -> INSPECT -> PLAN ->
-    # APPLY". Planning narrows a second read to the matched hashes.
-    "tag_add": 2,
-    "tag_remove": 2,
+    "tag_add": 1,
+    "tag_remove": 1,
     "throttle": 1,
 }
 
