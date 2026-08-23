@@ -53,7 +53,6 @@ HASH_B = "b" * 40
 async def _select_all_and_open_preview(
     app: Any, pilot: Any, button_id: str = "actions-pause"
 ) -> None:
-    """Select every visible row, choose an action, and land on Preview."""
     await pilot.press("ctrl+a")
     await pilot.press("a")
     await pilot.pause()
@@ -63,14 +62,12 @@ async def _select_all_and_open_preview(
 
 
 def _current_plan(app: Any) -> Any:
-    """The plan owned by the `PreviewScreen` currently on top."""
     screen = app.screen
     assert isinstance(screen, PreviewScreen)
     return screen.plan
 
 
 async def _pump_until(pilot: Any, predicate: Any, limit: int = 200) -> None:
-    """Pump the message loop until `predicate()` is true, or give up."""
     for _ in range(limit):
         if predicate():
             return
@@ -156,14 +153,10 @@ class _AuthorityProbe:
 
 
 async def test_apply_sends_frozen_plan_despite_refresh_and_reorder() -> None:
-    """The central invariant, attacked from three sides at once.
-
-    While the Preview is open, a periodic refresh (a) renames the
-    torrents so the table's name-sorted order flips, (b) makes one
-    selected torrent invisible to the active search so
-    `reconcile_selection` drops it from `selected_hashes`. Apply must
-    still send exactly the two hashes the frozen preview displayed.
-    """
+    """While the Preview is open, a refresh renames the torrents (flipping
+    the table's sort order) and drops one selected torrent from view via
+    `reconcile_selection`; Apply must still send exactly the two hashes
+    the frozen preview displayed."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", state="downloading"),
@@ -278,7 +271,6 @@ async def test_ctrl_a_and_ctrl_d_in_a_text_input_never_touch_selection() -> (
 async def test_late_mutation_result_after_shutdown_never_touches_the_ui() -> (
     None
 ):
-    """A mutation worker resolving after `q` is dropped, not applied."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -305,22 +297,13 @@ async def test_late_mutation_result_after_shutdown_never_touches_the_ui() -> (
 
 
 def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
-    """Rule-based companion to `tests/test_tui_security.py`.
-
-    That module intersects the TUI's imports with a *fixed* forbidden
-    list, so a mutation function that does not yet exist (a future
-    `apply_torrent_deletion`, `plan_torrent_removal`, ...) would be
-    invisible to it. This checks the shape of every imported name
-    instead: anything that looks like a planner or an applier must be
-    one of the two sanctioned LOW-risk functions.
-
-    The module filter is `qbit_core`, the layer where mutation lives.
-    It read `app.` until `tui-filters`, which matched nothing at all --
-    no module in this repository is named that way -- so the loop body
-    never ran and the assertion could not fail. `inspected` is counted
-    and asserted for exactly that reason: a guard that cannot bite is
-    worse than an absent one, because it reassures.
-    """
+    """Rule-based companion to `tests/test_tui_security.py`: that module
+    intersects imports with a *fixed* forbidden list, so a mutation
+    function that does not exist yet would be invisible to it. This
+    checks the *shape* of every imported name instead -- anything that
+    looks like a planner or an applier must be one of the two sanctioned
+    LOW-risk functions. `inspected` is asserted non-zero so a module
+    filter that stops matching anything cannot pass this vacuously."""
     allowed = {
         "apply_bulk_torrent_action",
         "build_bulk_action_plan_from_snapshot",
@@ -366,16 +349,10 @@ def test_tui_imports_no_mutation_surface_beyond_the_two_allowed_names() -> None:
 
 
 async def test_refresh_during_a_filter_draft_preserves_the_selection() -> None:
-    """A periodic tick landing mid-edit cannot erase a selection, for a
-    more fundamental reason than the one this test used to check:
-    `apply_refresh_success` used to take `reconcile=False` while a
-    `FiltersScreen` held an uncommitted draft, because filtering was
-    live and a half-typed "f" transiently matched nothing. Filtering
-    is commit-on-`Apply` now (`.agents/features/tui-filters/SPEC.md`, "Le
-    filtrage n'est plus en direct"): a draft never reaches
-    `state.filters` until `enter`, so `apply_refresh_success`
-    reconciles unconditionally and a tick mid-typing has nothing to
-    react to in the first place."""
+    """A periodic tick landing mid-edit cannot erase a selection: a filter
+    draft never reaches `state.filters` until `enter`, so
+    `apply_refresh_success` reconciles unconditionally and has nothing
+    to react to while the draft is still open."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -413,10 +390,9 @@ class _CallLogClient(FakeQbitClient):
     """Records an ordered `+name` / `-name` log of every remote call.
 
     Proving "no overlap" alone is vacuous: a mutation that never
-    happened also never overlaps anything (closure review, §3 "Qualité
-    de preuve"). Asserting the *order* of entries and exits, plus the
-    exact hashes finally sent, makes the serialization tests fail if
-    Apply were silently refused.
+    happened also never overlaps anything. Asserting the *order* of
+    entries and exits, plus the exact hashes finally sent, makes the
+    serialization tests fail if Apply were silently refused.
 
     Reads and tracker fetches can each be blocked on a real
     `threading.Event`. Deliberately one class rather than a subclass
@@ -483,7 +459,6 @@ class _CallLogClient(FakeQbitClient):
 
 
 def _assert_serialized_after(log: list[str], blocker: str) -> None:
-    """Assert the mutation started strictly after `blocker` finished."""
     assert f"+{blocker}" in log, f"the {blocker} never started: {log}"
     assert "+pause" in log, f"the mutation was never dispatched: {log}"
     assert log.index("+pause") > log.index(
@@ -836,15 +811,11 @@ async def test_normal_queue_behind_details_dispatches_exactly_once() -> None:
 
 
 async def test_max_simultaneous_remote_client_operations_is_one() -> None:
-    """Measured directly and non-vacuously.
-
-    A detail fetch, a periodic refresh and a mutation all contend at
-    once. Asserts not only that the controller's high-water mark of
-    concurrent remote operations stays at 1, but that the client itself
-    never saw two overlapping calls *and* that the mutation genuinely
-    happened -- a peak of 1 is otherwise trivially satisfied by a single
-    operation, or by an Apply that was silently refused.
-    """
+    """A detail fetch, a periodic refresh and a mutation all contend at
+    once. Asserts not only that the high-water mark of concurrent remote
+    operations stays at 1, but that the mutation genuinely happened --
+    a peak of 1 is otherwise trivially satisfied by a single operation,
+    or by an Apply that was silently refused."""
     client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         trackers_by_hash={HASH_A: []},
@@ -977,8 +948,6 @@ async def test_unexpected_runtime_defect_is_still_reported_as_internal() -> (
 
 
 async def _apply_failure_result_text(error: BaseException) -> str:
-    """Apply against a client whose mutation raises `error`; return the
-    Result modal's rendered text."""
     client = _RaisingMutationClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")],
         error=error,
@@ -1001,8 +970,6 @@ async def _apply_failure_result_text(error: BaseException) -> str:
 
 
 class _BlockingPauseClient(FakeQbitClient):
-    """Blocks inside `torrents_pause()` until released."""
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.entered = threading.Event()
@@ -1016,14 +983,9 @@ class _BlockingPauseClient(FakeQbitClient):
 
 
 async def test_completion_never_pops_an_unrelated_modal() -> None:
-    """A mutation completing while another modal sits above its Preview
-    must not pop that unrelated modal, and must not strand a
-    `PreviewScreen` stuck in `applying=True`.
-
-    The extra screen is pushed programmatically because no key reaches
+    """The extra screen is pushed programmatically because no key reaches
     it today: the guard must rely on targeting the right screen, not on
-    that unreachability.
-    """
+    that unreachability."""
     client = _BlockingPauseClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1093,8 +1055,6 @@ async def test_old_operation_completion_cannot_replace_a_newer_preview() -> (
 
 
 class _FailAfterFirstReadClient(FakeQbitClient):
-    """Succeeds once, then fails every later `torrents_info()`."""
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.fail_reads = False
@@ -1191,12 +1151,10 @@ async def test_recovery_does_not_reactivate_a_stale_preview() -> None:
 
 
 async def test_cancel_after_refreshes_preserves_filter_and_selection() -> None:
-    """Several ticks landing while a draft is open leave both the
-    applied filter and the selection untouched -- trivially so, now:
-    the draft never reaches `state.filters` until `enter` (see
-    `test_refresh_during_a_filter_draft_preserves_the_selection`), so
-    there is nothing for a tick to react to, and `esc` closing without
-    applying it changes nothing further."""
+    """Same root cause as
+    `test_refresh_during_a_filter_draft_preserves_the_selection`: several
+    ticks land while the draft is still open, so there is nothing for
+    them to react to; `esc` then closes without applying it."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="Alpha", category="films"),
@@ -1282,7 +1240,6 @@ async def test_failure_retains_the_live_selection() -> None:
 
 
 async def test_dismissing_a_result_never_dispatches_again() -> None:
-    """Closing the Result modal must not re-apply, rebuild, or mutate."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1328,16 +1285,10 @@ async def test_one_refresh_follows_a_successful_mutation() -> None:
 
 
 async def test_hidden_preview_is_not_stranded_after_completion() -> None:
-    """
-
-    A mutation completing while an unrelated modal sits above its
+    """A mutation completing while an unrelated modal sits above its
     Preview must (a) leave that unrelated modal completely alone, and
     (b) still terminate the Preview's logical `applying` state -- so
-    that once the overlay is closed, Escape and Cancel can dismiss it.
-    Previously the Preview stayed `applying=True` forever, with both its
-    buttons disabled and every dismissal path refusing: the whole TUI
-    was stuck after a mutation that had really been submitted.
-    """
+    that once the overlay is closed, Escape and Cancel can dismiss it."""
     client = _BlockingPauseClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1554,10 +1505,8 @@ class _UnclassifiableRefreshClient(FakeQbitClient):
 
 
 async def test_unexpected_refresh_exception_invalidates_open_preview() -> None:
-    """An unclassifiable refresh exception used to
-    `return` before freshness invalidation, leaving an open Preview
-    applicable while the TUI had stopped refreshing. Every unsuccessful
-    refresh now fails closed."""
+    """Every unsuccessful refresh fails closed: an unclassifiable
+    exception still invalidates the open Preview."""
     client = _UnclassifiableRefreshClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1608,8 +1557,6 @@ async def test_unexpected_refresh_exception_invalidates_open_preview() -> None:
 
 
 async def test_cancelled_before_dispatch_is_distinct_from_unavailable() -> None:
-    """The queued-then-shutdown outcome must be distinguishable from a
-    remote failure: nothing failed, nothing was sent."""
     client = _CallLogClient(
         torrents=[make_torrent(hash=HASH_A, name="Alpha", state="downloading")]
     )
@@ -1657,7 +1604,6 @@ async def test_cancelled_before_dispatch_is_distinct_from_unavailable() -> None:
 
 
 def _frozen_plan_for(app: Any) -> Any:
-    """The plan of the last preview the app owned, for classification."""
     return app.controller.build_bulk_plan("pause", (HASH_A,))
 
 

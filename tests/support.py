@@ -127,23 +127,19 @@ class FakeQbitClient:
         self.edited_trackers: list[tuple[str, str, str]] = []
 
     def _record(self, name: str, *args: Any, **kwargs: Any) -> None:
-        """Append one call to the generic call log."""
         self.calls.append((name, args, kwargs))
 
     def app_version(self) -> str:
-        """Return the fake qBittorrent version."""
         self.app_version_calls += 1
         self._record("app_version")
         return self.qbittorrent_version
 
     def app_web_api_version(self) -> str:
-        """Return the fake Web API version."""
         self.app_web_api_version_calls += 1
         self._record("app_web_api_version")
         return self.api_version
 
     def transfer_info(self) -> dict[str, int]:
-        """Return fake global transfer speeds."""
         self.transfer_info_calls += 1
         self._record("transfer_info")
         return {
@@ -225,29 +221,24 @@ class FakeQbitClient:
         return self.trackers_by_hash.get(torrent_hash, [])
 
     def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
-        """Record fake torrent pauses."""
         self.paused_hashes.append(torrent_hashes)
         self._record("torrents_pause", torrent_hashes)
 
     def torrents_resume(self, torrent_hashes: str | list[str]) -> None:
-        """Record fake torrent resumes."""
         self.resumed_hashes.append(torrent_hashes)
         self._record("torrents_resume", torrent_hashes)
 
     def torrents_start(self, torrent_hashes: str | list[str]) -> None:
-        """Record fake torrent starts."""
         self.started_hashes.append(torrent_hashes)
         self._record("torrents_start", torrent_hashes)
 
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
-        """Record fake torrent reannouncements."""
         self.reannounced_hashes.append(torrent_hashes)
         self._record("torrents_reannounce", torrent_hashes)
 
     def torrents_delete(
         self, delete_files: bool, torrent_hashes: str | list[str]
     ) -> None:
-        """Record a fake torrent deletion; raise `torrents_delete_error`."""
         self._record(
             "torrents_delete",
             delete_files=delete_files,
@@ -260,7 +251,6 @@ class FakeQbitClient:
     def torrents_add_trackers(
         self, torrent_hash: str, urls: str | list[str]
     ) -> None:
-        """Record fake tracker additions; raise `add_trackers_error` if set."""
         self._record("torrents_add_trackers", torrent_hash, urls)
         if self.add_trackers_error is not None:
             raise self.add_trackers_error
@@ -271,7 +261,6 @@ class FakeQbitClient:
         torrent_hash: str,
         urls: list[str],
     ) -> None:
-        """Record fake tracker removals."""
         self.removed_trackers.append((torrent_hash, urls))
         self._record("torrents_remove_trackers", torrent_hash, tuple(urls))
 
@@ -281,14 +270,12 @@ class FakeQbitClient:
         original_url: str,
         new_url: str,
     ) -> None:
-        """Record fake tracker replacements."""
         self.edited_trackers.append((torrent_hash, original_url, new_url))
         self._record(
             "torrents_edit_tracker", torrent_hash, original_url, new_url
         )
 
     def torrents_categories(self) -> dict[str, dict[str, Any]]:
-        """Return fake registered categories."""
         self._record("torrents_categories")
         return dict(self.categories)
 
@@ -299,7 +286,6 @@ class FakeQbitClient:
         return sorted(self.tags)
 
     def torrents_create_category(self, name: str, **kwargs: Any) -> None:
-        """Record a fake category creation; raise `create_category_error`."""
         self._record("torrents_create_category", name, **kwargs)
         if self.create_category_error is not None:
             raise self.create_category_error
@@ -309,7 +295,6 @@ class FakeQbitClient:
     def torrents_set_category(
         self, torrent_hashes: str | list[str], category: str
     ) -> None:
-        """Record a fake category assignment; raise `set_category_error`."""
         self._record(
             "torrents_set_category",
             torrent_hashes=torrent_hashes,
@@ -322,7 +307,6 @@ class FakeQbitClient:
     def torrents_add_tags(
         self, torrent_hashes: str | list[str], tags: str | list[str]
     ) -> None:
-        """Record a fake tag addition; raise `add_tags_error` if set."""
         self._record(
             "torrents_add_tags", torrent_hashes=torrent_hashes, tags=tags
         )
@@ -335,7 +319,6 @@ class FakeQbitClient:
     def torrents_remove_tags(
         self, torrent_hashes: str | list[str], tags: str | list[str]
     ) -> None:
-        """Record a fake tag removal; raise `remove_tags_error` if set."""
         self._record(
             "torrents_remove_tags", torrent_hashes=torrent_hashes, tags=tags
         )
@@ -347,7 +330,6 @@ class FakeQbitClient:
     def torrents_set_download_limit(
         self, torrent_hashes: str | list[str], limit: int
     ) -> None:
-        """Record a fake download rate limit; raise `set_limit_error`."""
         self._record(
             "torrents_set_download_limit",
             torrent_hashes=torrent_hashes,
@@ -360,7 +342,6 @@ class FakeQbitClient:
     def torrents_set_upload_limit(
         self, torrent_hashes: str | list[str], limit: int
     ) -> None:
-        """Record a fake upload rate limit; raise `set_limit_error`."""
         self._record(
             "torrents_set_upload_limit",
             torrent_hashes=torrent_hashes,
@@ -371,7 +352,6 @@ class FakeQbitClient:
         self.upload_limits.append((torrent_hashes, limit))
 
     def torrents_add(self, **kwargs: Any) -> str:
-        """Record a fake add call; raise `torrents_add_error` if set."""
         self._record("torrents_add", **kwargs)
         if self.torrents_add_error is not None:
             raise self.torrents_add_error
@@ -380,7 +360,6 @@ class FakeQbitClient:
 
 
 def make_config(**overrides: Any) -> QbitConfig:
-    """Build a fake qBittorrent configuration for tests."""
     defaults: dict[str, Any] = {
         "host": "http://admin:secret-password@localhost:8080",
         "username": "admin",
@@ -391,7 +370,6 @@ def make_config(**overrides: Any) -> QbitConfig:
 
 
 def make_torrent(**overrides: Any) -> dict[str, Any]:
-    """Build a fake torrent record for tests."""
     defaults: dict[str, Any] = {
         "hash": "0123456789abcdef0123456789abcdef01234567",
         "name": "Fake Torrent",

@@ -520,15 +520,9 @@ async def test_overview_status_line_names_the_instance_and_its_freshness() -> (
 
 
 async def test_overview_never_calls_torrents_trackers() -> None:
-    """No tracker-wide scan is ever performed to build the Overview.
-
-    `torrents_trackers_calls` may be at most 1 here -- the torrent
-    table's own "cursor starts on row 0" behavior fires one ordinary
-    focus-change detail fetch, completely unrelated to (and not used
-    by) the Overview's own rendering, which reads only `TuiState.status`
-    /`stopped_count`. What this test actually guards against is a scan
-    that scales with torrent count.
-    """
+    """`torrents_trackers_calls` may be at most 1, not 0: the table's own
+    row-0 focus fetch is unrelated to the Overview's own rendering. What
+    this guards against is a scan that scales with torrent count."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash=f"{i:040x}") for i in range(20)]
     )
@@ -910,7 +904,7 @@ async def test_workspace_tabs_indicate_the_active_workspace() -> None:
 
 
 async def test_workspace_tabs_underline_hugs_the_page_name_only() -> None:
-    """Point 2 of the follow-up visual-polish brief: the underline span
+    """The underline span
     on the active tab is tightened to cover just the page name, never
     the surrounding padding or the `(key)` hint -- measured from the
     widget's actual rendered `Content` spans (`tabs.visual`), not the
@@ -975,8 +969,6 @@ async def test_leaving_the_overview_stops_the_per_second_sampler() -> None:
 
 
 async def test_switching_workspaces_fetches_nothing_but_the_graph() -> None:
-    """No refresh, no torrent list, no tracker scan on a page switch --
-    only the sampler the Overview owns."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -1332,12 +1324,11 @@ async def test_no_tracker_secrets_appear_in_details() -> None:
 
 # --- 4. Search -----------------------------------------------------------
 #
-# `/` used to mount a real `Input` but Enter never worked: the App's own
-# `enter` binding (`action_activate`) is `priority=True`, which wins key
-# resolution *before* the focused `Input`'s own declarative `enter` ->
-# `submit` binding is ever considered. Fixed by filtering live on every
-# keystroke (`on_input_changed`) and having `action_activate` special-case
-# the search input's `enter` to simply return focus to the table.
+# The App's own `enter` binding (`action_activate`) is `priority=True`,
+# so it wins key resolution before the focused `Input`'s own declarative
+# `enter` -> `submit` binding is ever considered: `/` filters live on
+# every keystroke (`on_input_changed`) instead, and `action_activate`
+# special-cases the search input's `enter` to return focus to the table.
 
 
 async def test_slash_focuses_a_visible_editable_input_from_the_table() -> None:
@@ -1790,7 +1781,7 @@ async def test_filter_modal_exposes_current_values() -> None:
 
 
 async def test_filter_apply_with_enter_applies_and_stays_open() -> None:
-    """Criterion 9bis: `enter` applies the draft and leaves the modal
+    """`enter` applies the draft and leaves the modal
     open -- the one gesture that commits, unlike every other modal's
     `Apply`."""
     client = FakeQbitClient(
@@ -1821,7 +1812,7 @@ async def test_filter_apply_with_enter_applies_and_stays_open() -> None:
 
 
 async def test_filter_cancel_with_escape_never_applies_the_draft() -> None:
-    """Criterion 9bis: `esc` closes without undoing anything already
+    """`esc` closes without undoing anything already
     applied -- and a draft that was never `Apply`-ed was never in
     effect to begin with, so editing it and pressing `esc` changes
     nothing about `state.filters`."""
@@ -1945,7 +1936,7 @@ async def test_filter_apply_performs_zero_api_calls() -> None:
 
 
 async def test_no_keystroke_ever_calls_set_filters_before_apply() -> None:
-    """Criterion 6: filtering is commit-on-`Apply`, not live -- typing
+    """Filtering is commit-on-`Apply`, not live -- typing
     across every field in the draft calls `TuiController.set_filters`
     zero times, and `enter` calls it exactly once."""
     client = FakeQbitClient(
@@ -1982,7 +1973,7 @@ async def test_no_keystroke_ever_calls_set_filters_before_apply() -> None:
 
 
 async def test_no_dot_glyph_appears_in_the_filters_modal() -> None:
-    """Criterion 5bis: `*` is the only "pending"/"in attention" marker
+    """`*` is the only "pending"/"in attention" marker
     in this modal -- `●` is already a state lamp elsewhere in the
     product (tracker health, connection status), where colour carries
     the meaning; reusing it here would be a second, unrelated subject
@@ -2895,7 +2886,7 @@ async def test_overview_conceptual_groups_are_distinct() -> None:
 
 
 async def test_no_tracker_endpoint_shows_duplicated_disabled_word() -> None:
-    """Regression: a disabled pseudo-tracker (DHT/PeX/LSD) must render
+    """A disabled pseudo-tracker (DHT/PeX/LSD) must render
     its disabled status exactly once, not 'disabled disabled'."""
     torrent_hash = "a" * 40
     client = FakeQbitClient(
@@ -3096,7 +3087,7 @@ async def test_filter_apply_key_applies_and_stays_open() -> None:
 
 
 async def test_the_footer_count_describes_the_list_not_the_draft() -> None:
-    """Criterion 8: the footer's count line reads off the *applied*
+    """The footer's count line reads off the *applied*
     filter and the table's own visible count, never the draft -- an
     un-applied edit changes what the `*` line says, never this one."""
     client = FakeQbitClient(
@@ -3132,7 +3123,7 @@ async def test_the_footer_count_describes_the_list_not_the_draft() -> None:
 
 
 async def test_an_impossible_range_disarms_apply_and_shows_the_error() -> None:
-    """Criterion 7: `min > max` never reaches `state.filters` -- `enter`
+    """`min > max` never reaches `state.filters` -- `enter`
     is answered (it re-renders the error), but it does not apply, and
     the modal stays open with `✕ ...` explaining why."""
     client = FakeQbitClient(
@@ -3183,7 +3174,7 @@ async def test_an_impossible_range_disarms_apply_and_shows_the_error() -> None:
 
 
 async def test_measures_placeholders_never_apply_and_never_pend() -> None:
-    """Point 9 of the third visual pass: every Measures field shows a
+    """Every Measures field shows a
     grayed-out example of the syntax it expects. `Input.placeholder` is
     never `.value` in Textual, but this checks it end to end rather
     than assuming: an untouched placeholder must not count as a pending
@@ -3238,7 +3229,7 @@ async def test_measures_placeholders_never_apply_and_never_pend() -> None:
 
 
 def test_filters_draft_is_open_no_longer_exists() -> None:
-    """Criterion 9bis's fourth test: `_filters_draft_is_open` existed
+    """`_filters_draft_is_open` existed
     only to suppress reconciliation while a live-applying draft was
     open. There is no such draft state to protect any more (see
     `TuiController.apply_refresh_success`), and a helper nobody calls
@@ -3331,18 +3322,13 @@ async def test_filter_modal_visible_and_actionable_at_every_width() -> None:
 
 
 async def test_the_dialog_keeps_two_columns_of_floor_at_every_width() -> None:
-    """Criterion 10: `.qbit-dialog` gains `max-width: 100%` *and*
-    `margin: 0 2` -- the geometry itself is asserted (`x=2, w=92` at
-    96 columns), not merely the absence of overflow, since
-    `max-width: 100%` alone already does not overflow and gives a
-    dialog flush against both edges, which the wireframe does not
-    show. Measured (see the handoff): `100%` alone gives `x=0 w=96`;
-    `100% + margin: 0 2` gives `x=2 w=92`.
-
-    Exercised on `DetailsScreen`, not `FiltersScreen`: this checks the
-    *generic* clamp, and needs a `large` (100) dialog to still be wider
-    than every terminal below -- `FiltersScreen` moved to `wide` (76),
-    which stops overflowing (and clamping) at 90/96 columns."""
+    """Asserts the geometry itself (`x=2, w=92` at 96 columns), not
+    merely the absence of overflow: `max-width: 100%` alone already
+    does not overflow, so only checking for overflow would miss a
+    dialog flush against both edges instead of margined. Exercised on
+    `DetailsScreen`, which stays wide enough to still overflow (and
+    clamp) at every terminal width below -- `FiltersScreen` no longer
+    does."""
     cases = [
         (90, 2, 86),
         (96, 2, 92),
@@ -3647,10 +3633,10 @@ async def test_explain_survives_a_result_before_it_mounts() -> None:
     """`push_screen` adds a screen to `screen_stack` synchronously but
     mounts it -- and composes `#explain-content` -- on a later tick.
     `_maybe_resolve_pending_explain` runs from a worker's completion
-    message, which can be processed before that tick, previously
-    raising `NoMatches` on the still-unmounted screen. This installs
-    that exact ordering -- push, then resolve, no `await` between --
-    instead of relying on real thread/loop timing to hit it.
+    message, which can be processed before that tick and must not raise
+    `NoMatches` on the still-unmounted screen. This installs that exact
+    ordering -- push, then resolve, no `await` between -- instead of
+    relying on real thread/loop timing to hit it.
     """
     torrent_hash = "a" * 40
     client = FakeQbitClient(
@@ -3834,8 +3820,6 @@ async def test_footer_never_shows_workspace_nav_hints_in_either_workspace() -> (
 
 
 async def test_workspace_nav_keys_still_work_without_a_footer_hint() -> None:
-    """`g`/`t`/`1`/`2` keep switching workspaces even though none of
-    them are advertised in the footer any more."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -4199,14 +4183,13 @@ async def test_all_modal_bindings_still_dispatch_correctly() -> None:
 async def test_filters_modal_is_keyboard_interactive_immediately_on_open() -> (
     None
 ):
-    """Regression: Textual's default `AUTO_FOCUS = "*"` auto-focuses the
-    *first* focusable widget in DOM order on a newly pushed screen --
-    which was `#filters-dialog` itself (a `VerticalScroll`, and
-    therefore focusable), not the category `Input` nested inside it.
-    Every keystroke right after pressing `f` went to the scroll
-    container (which only understands up/down/page keys) instead of
-    any actual field, making Filters look entirely unresponsive to the
-    keyboard without an explicit click or Tab press first."""
+    """Textual's default `AUTO_FOCUS = "*"` auto-focuses the *first*
+    focusable widget in DOM order on a newly pushed screen --
+    `#filters-dialog` itself (a `VerticalScroll`, therefore focusable)
+    qualifies before the category `Input` nested inside it. Without an
+    explicit override, every keystroke right after pressing `f` would go
+    to the scroll container (up/down/page keys only) instead of any
+    actual field."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", category="films"),
@@ -4239,17 +4222,12 @@ async def test_filters_modal_is_keyboard_interactive_immediately_on_open() -> (
 
 
 async def test_tab_navigates_between_filter_fields() -> None:
-    """Regression: `check_action` blocked *every* action while a modal
-    was open, including `app.focus_next`/`app.focus_previous` -- the
-    actions behind Textual's own `Screen`-level `tab`/`shift+tab`
-    bindings. That silently broke Tab navigation between fields inside
-    any modal, even though typing into the already-focused first field
-    worked fine.
-
-    Tab only ever reaches the *active* pane's fields -- the other three
-    panes' rows are mounted but `display: none` (see `FiltersPanel`),
-    so `alt+right` is what reaches a field in a different pane, not
-    Tab."""
+    """`check_action` must not block `app.focus_next`/`app.focus_previous`
+    while a modal is open -- Textual's own `Screen`-level `tab`/
+    `shift+tab` bindings depend on them. Tab only ever reaches the
+    *active* pane's fields -- the other three panes' rows are mounted
+    but `display: none` (see `FiltersPanel`), so `alt+right` is what
+    reaches a field in a different pane, not Tab."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -4281,17 +4259,15 @@ async def test_tab_navigates_between_filter_fields() -> None:
 
 
 async def test_section_keys_actually_change_the_active_pane() -> None:
-    """The véracité gap `alt+left`/`alt+right` shipped with: the
-    announcement guard only checks a key is *bound*
+    """The announcement guard only checks a key is *bound*
     (`test_every_announced_key_is_a_binding_that_is_actually_active`),
-    never that pressing it changes anything -- so a real user's
-    `alt+left`/`alt+right`, silently eaten by the window manager before
-    ever reaching the terminal, shipped with nothing catching it.
-    `pageup`/`pagedown` are now the announced gesture and
-    `alt+left`/`alt+right` stay bound for terminals that do deliver
-    them; this presses all four, each direction, and checks the pane
-    actually switched (via which field picks up focus), not just that
-    the key resolves to a binding."""
+    never that pressing it changes anything -- so `alt+left`/`alt+right`,
+    if silently eaten by the window manager before reaching the
+    terminal, would go uncaught. `pageup`/`pagedown` are the announced
+    gesture; `alt+left`/`alt+right` stay bound for terminals that do
+    deliver them. This presses all four, each direction, and checks the
+    pane actually switched (via which field picks up focus), not just
+    that the key resolves to a binding."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -4331,16 +4307,9 @@ async def test_pageup_pagedown_switch_panes_even_when_the_dialog_scrolls() -> (
     None
 ):
     """`priority=True` is what makes this true regardless of window
-    height: every `Widget.action_page_up`/`action_page_down` (`Input`
-    included, through `ScrollView`) raises `SkipAction` unless
-    `allow_vertical_scroll`, so a non-priority `pageup` happens to fall
-    through both the focused `Input` and `#filters-dialog` when the
-    19-line dialog fits without scrolling -- but shrink the terminal
-    enough that `.qbit-dialog`'s `max-height: 90%` actually clips it,
-    and the dialog becomes genuinely scrollable: without `priority=True`
-    a non-priority `pageup` would be consumed by that real scroll
-    instead of switching sections. Verified red without it (pasted in
-    the build report)."""
+    height: shrink the terminal enough that the dialog actually clips
+    and becomes scrollable, and a non-priority `pageup` would be
+    consumed by that real scroll instead of switching sections."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -4597,12 +4566,10 @@ async def test_escape_returns_from_a_value_action_to_actions() -> None:
     action still reachable and the same frozen selection. A second
     `escape`, now on Actions, closes as it always did.
 
-    It replaced an `alt+left` binding that a live terminal proved dead:
-    the window manager takes `alt` plus an arrow for its own workspace
-    switching, so the announced gesture never reached the app. An
-    announced key nobody answers is the exact defect this guards
-    against -- which is why the assertion is that the key *acts*, never
-    that it is bound."""
+    The window manager takes `alt` plus an arrow for its own workspace
+    switching, so an `alt+left` binding here would never reach the app
+    -- which is why the assertion is that the key *acts*, never that it
+    is bound."""
     cases = (
         ("actions-category-set", CategorySetScreen),
         ("actions-tag-add", TagAddScreen),
@@ -4680,7 +4647,7 @@ async def test_category_set_flow_reaches_preview_with_the_typed_category() -> (
 
 
 async def test_throttle_plan_can_carry_either_direction_alone() -> None:
-    """Criterion 9: `throttle` exposes both directions independently --
+    """`throttle` exposes both directions independently --
     a plan built from only one typed field carries only that limit,
     never a forced value on the other."""
     client = FakeQbitClient(
@@ -4711,17 +4678,10 @@ async def test_throttle_plan_can_carry_either_direction_alone() -> None:
 
 
 async def test_category_set_from_snapshot_skips_already_set_torrents() -> None:
-    """The plumbing gap the planner named twice: without the target
-    category reaching `_bulk_action_skip_reason`,
-    `build_bulk_action_plan_from_snapshot` cannot tell "already this
-    category" from "needs changing" -- it either always reports a
-    change (missing the skip) or, if the reversion happens to leave
-    both `current_category` and `target_category` at their shared ""/
-    `None` default, always reports a skip regardless of the real
-    values. This test uses categories that genuinely differ, so only
-    the second, more misleading failure mode is distinguished from
-    correct behaviour: a torrent in "tv" targeted at "films" must
-    report as a real change, not as "already_set"."""
+    """Uses categories that genuinely differ, so a defect that always
+    reports "already_set" regardless of the real values cannot hide
+    behind both sides sharing the same ""/`None` default: a torrent in
+    "tv" targeted at "films" must report as a real change."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=f"{i:040x}", name=f"T{i}", category="tv")
@@ -4793,7 +4753,7 @@ async def test_category_set_from_snapshot_also_skips_when_already_set() -> None:
 
 
 async def test_opening_modals_costs_zero_calls_after_startup() -> None:
-    """Criterion 9ter: filters and every value-action modal are built
+    """Filters and every value-action modal are built
     entirely from the already-fetched snapshot and the cached instance
     lists -- opening any of them issues no further qBittorrent call."""
     client = FakeQbitClient(
@@ -4833,7 +4793,7 @@ async def test_opening_modals_costs_zero_calls_after_startup() -> None:
 
 
 async def test_throttle_with_neither_direction_disarms_preview() -> None:
-    """Criterion 9bis's disarm shape, for `throttle`: pressing `enter`
+    """Pressing `enter`
     with both fields blank shows the "at least one direction" error
     and never opens `PreviewScreen`."""
     client = FakeQbitClient(
@@ -5267,12 +5227,11 @@ async def test_no_tracker_secrets_in_preview_or_result() -> None:
 async def test_enter_presses_the_focused_button_in_actions_and_preview() -> (
     None
 ):
-    """Regression: `action_activate` (bound to `enter` with
-    `priority=True`) only special-cased `FiltersScreen`, so `enter`
-    silently did nothing in `ActionsScreen`/`PreviewScreen`/
-    `ResultScreen` even with a `Button` focused -- the priority binding
-    intercepted the key before the `Button`'s own native
-    enter-activates-click behavior ever ran."""
+    """`action_activate` (bound to `enter` with `priority=True`)
+    intercepts `enter` before a focused `Button`'s own native
+    enter-activates-click behavior ever runs -- it must therefore
+    explicitly press the focused button on `ActionsScreen`/
+    `PreviewScreen`/`ResultScreen` too, not only `FiltersScreen`."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Alpha", state="downloading")
@@ -5538,7 +5497,7 @@ async def test_table_renders_the_uncategorized_label_not_an_empty_cell() -> (
 
 
 async def test_details_modal_renders_the_uncategorized_label() -> None:
-    """Regression guard: the Details grid must not fall back to a second
+    """The Details grid must not fall back to a second
     spelling (`(none)`) for a torrent qBittorrent reports with an empty
     category -- one vocabulary across table, details and `--category`.
     """
@@ -6085,16 +6044,11 @@ async def test_long_name_truncates_and_never_wraps_a_second_table_row() -> None:
 def test_name_column_width_never_overflows_at_the_wide_tiers_own_edge() -> None:
     """A synthetic worst case (every optional column visible, plus a
     single unbreakable 200+ character name) at the Wide tier's own
-    narrowest edge must still fit -- `_name_column_width` prefers a
-    narrower-than-target `Name` column over any horizontal overflow.
-
-    Mirrors `_name_column_width`'s own budget exactly (outer AppFrame
-    border and the `#torrents` table's own titled-region border both
-    subtract from the raw App width -- there is no more permanent side
-    panel to account for) -- see
-    `test_long_name_truncates_and_never_wraps_a_second_table_row` for
-    the real-render, end-to-end proof this unit-level check mirrors.
-    """
+    narrowest edge must still fit: `_name_column_width` prefers a
+    narrower-than-target `Name` column over any horizontal overflow --
+    see `test_long_name_truncates_and_never_wraps_a_second_table_row`
+    for the real-render, end-to-end proof this unit-level check
+    mirrors."""
     from qbit_ops.tui.formatting import (
         _COLUMN_WIDTHS,
         _TORRENTS_BORDER_COLS,
@@ -6594,17 +6548,11 @@ async def test_the_top_and_bottom_strips_carry_no_panel_background() -> None:
 
 
 async def test_search_footer_replaces_search_token_in_same_row() -> None:
-    """No separate `search:`/Total row above the footer -- the
+    """No separate `search:`/Total row above the footer: the
     `[/→Search]` token inside `CommandBar` itself is replaced in place
-    by the pipe-delimited `|search: xxx|` token (distinct from the
-    bracketed `[key→Description]` key hints beside it), restored to
-    `[/→Search]` once search closes. The right-aligned `|Total: y|`
-    token lives in the separate `FooterTotal` sibling, not appended
-    into `CommandBar`'s own string (see `FooterTotal`'s docstring). The
-    underlying `Input` (still the real keystroke sink -- see
-    `CommandBar`'s docstring) keeps the same id/value contract
-    `_type_into_search`/other tests already rely on.
-    """
+    by the pipe-delimited `|search: xxx|` token, restored once search
+    closes -- the right-aligned `|Total: y|` token lives in the
+    separate `FooterTotal` sibling instead."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash="a" * 40, name="Ubuntu ISO"),
@@ -6654,7 +6602,7 @@ async def test_search_footer_replaces_search_token_in_same_row() -> None:
 
 
 async def test_search_matching_is_unaffected_by_the_footer_rework() -> None:
-    """Requirement 2: presentation-only change -- the actual
+    """Presentation-only change -- the actual
     match/filter behaviour driving `_apply_search` is untouched."""
     client = FakeQbitClient(
         torrents=[
@@ -6675,16 +6623,10 @@ async def test_search_matching_is_unaffected_by_the_footer_rework() -> None:
 
 
 async def test_search_input_torn_down_when_leaving_torrents_workspace() -> None:
-    """A live search `Input` now lives in the always-mounted
-    `#footer-row`, not inside `#torrents-workspace` -- it must be torn
-    down explicitly on workspace switch, or it would keep eating
-    keystrokes meant for Overview navigation.
-
-    `g`/`t` can't be pressed to switch workspaces while `#search-input`
-    itself is focused (a single-char binding like `g` is consumed by
-    the focused `Input` as typed text -- Textual's own
-    `check_consume_key`), so this presses Tab first to move focus to
-    the table, exactly as an operator would."""
+    """A live search `Input` lives in the always-mounted
+    `#footer-row`, not inside `#torrents-workspace`, so it must be torn
+    down explicitly on workspace switch or it would keep eating
+    keystrokes meant for Overview navigation."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a" * 40, name="Alpha")]
     )
@@ -6825,7 +6767,7 @@ async def test_footer_never_shows_the_workspace_nav_hint_at_all() -> None:
 async def test_torrents_table_background_matches_app_uniform_background() -> (
     None
 ):
-    """Point 4: `#torrents`' computed background must equal the
+    """`#torrents`' computed background must equal the
     Screen's, in every focus state -- not merely unset in CSS source.
     `DataTable`'s own `DEFAULT_CSS` applies a `background-tint` while
     focused (the Torrents workspace's default focus target), which
@@ -6849,17 +6791,14 @@ async def test_torrents_table_background_matches_app_uniform_background() -> (
 async def test_modal_dialog_background_matches_the_app_uniform_background() -> (
     None
 ):
-    """Point 5: the reported "clash" was `$surface` (a measurably
-    lighter grey, e.g. #1e1e1e) used as the dialog fill against the
-    app's own uniform `$background` (e.g. #121212) -- a visibly
-    distinct box breaking the round border's floating-outline look.
-    Fixed by using `$background` for the three dialogs; regression-
-    tested on the actual computed/composited background, not CSS
-    source text. Also covers each dialog's *children* (`RadioSet`,
-    `Input`, default-variant `Button`): those widgets' own
-    `DEFAULT_CSS` independently fills with `$surface`, so fixing only
-    the outer dialog would just move the same grey-box clash one level
-    in -- reproduced and fixed for real, not merely assumed."""
+    """`$surface` (a measurably lighter grey, e.g. #1e1e1e) as a dialog
+    fill against the app's own uniform `$background` (e.g. #121212)
+    would break the round border's floating-outline look -- checked on
+    the actual computed/composited background, not CSS source text.
+    Also covers each dialog's *children* (`RadioSet`, `Input`,
+    default-variant `Button`): those widgets' own `DEFAULT_CSS`
+    independently fills with `$surface`, so fixing only the outer
+    dialog would leave the same grey-box clash one level in."""
     from textual.widgets import RadioSet
 
     client = FakeQbitClient(
@@ -6910,18 +6849,12 @@ async def test_modal_dialog_background_matches_the_app_uniform_background() -> (
 async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
     None
 ):
-    """Point 6: Textual's own default focus/selection chrome for
-    `Input`, `Checkbox`, `Button` (`-primary` variant), and a
-    `RadioSet`'s highlighted option all draw from `$primary`/
-    `$block-cursor-background` -- a saturated blue (`#0178d4`) -- by
-    default. Every one of those is overridden to the brand orange in
-    `qbit_ops.tcss`'s shared `.qbit-dialog` rules; this checks
-    the actual computed styles a user would see, not the CSS source.
-
-    Also asserts the *foreground* colour on each orange fill: an
-    earlier draft used the dialog's near-white `$text` there, which is
-    only ~2:1 contrast against the brand orange -- barely more legible than
-    the default Textual blue it replaced. The app's own dark
+    """Checks the computed style, not the CSS source: Textual's own
+    default focus/selection chrome draws from a saturated blue, so this
+    proves `.qbit-dialog` actually overrides it to the brand orange at
+    render time. Also checks the foreground on that fill -- the app's
+    near-white `$text` would only reach ~2:1 contrast against the
+    orange, barely better than the blue it replaces; the app's dark
     `$background` tone reused as foreground gives ~9:1."""
     from textual.widgets import Checkbox, RadioSet
 
@@ -6958,10 +6891,8 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         await pilot.pause()
         assert checkbox.styles.border.left[1].rgb == orange
         # A Checkbox's border-left is its *only* focus signal (see
-        # `qbit_ops.tcss`): its label is deliberately left unpainted --
-        # human feedback found the earlier background fill "too strong"
-        # (point 6 of the third visual pass, distinct from this test's
-        # own "point 6").
+        # `qbit_ops.tcss`): its label is deliberately left unpainted, so
+        # a background fill there would compete with it.
         checkbox_label = checkbox.get_component_styles("toggle--label")
         assert checkbox_label.background.rgb != orange
 
@@ -7000,21 +6931,13 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
 async def test_a_focused_height_one_field_keeps_its_own_row_and_its_text() -> (
     None
 ):
-    """Human feedback on the delivered `tui-filters`: typing into a
-    focused field showed no text -- "une sorte de boite noire". Measured
-    cause: `border: tall` on a `height: 1` `Input`/`Checkbox` has no row
-    to spare for the border it draws. Textual grows the widget's own
-    region past its declared height to fit it (measured via `.region`:
-    1 -> 2 while focused, springing back on blur -- the whole dialog
-    reflowed under the cursor), and the one row that remains renders the
-    border's own fill glyph, never the typed text.
-
-    A colour-only assertion cannot catch this: `border: tall $primary`
-    sets the left edge too, so a check scoped to `border.left` alone
-    stays green even with the destructive rule back in place (confirmed
-    by reintroducing it: see the report). This test checks the actual
-    symptom instead -- the region's height, and the text surviving into
-    the exported render."""
+    """`border: tall` on a `height: 1` `Input`/`Checkbox` has no row
+    to spare for the border it draws, so Textual grows the widget's own
+    region past its declared height while focused and the one row that
+    remains renders the border's fill glyph, never the typed text. A
+    colour-only assertion cannot catch this (`border.left` alone stays
+    green), so this checks the region's height and the text surviving
+    into the exported render instead."""
     from textual.widgets import Checkbox
 
     client = FakeQbitClient(
@@ -7057,7 +6980,7 @@ def test_the_stylesheet_is_loaded_from_a_file_next_to_the_app() -> None:
 
 
 def test_formatting_names_no_brand_colour_of_its_own() -> None:
-    """Criterion: `formatting.py` reads the theme, it does not define
+    """`formatting.py` reads the theme, it does not define
     it. Scanned as *code* (string constants only), so a hex mentioned
     in a comment neither passes nor fails this."""
     source = Path(qbit_ops.tui.formatting.__file__).read_text(encoding="utf-8")
@@ -7334,10 +7257,11 @@ async def test_every_announced_key_is_a_binding_that_is_actually_active() -> (
 async def test_a_key_announced_as_leaving_the_modal_actually_leaves_it() -> (
     None
 ):
-    """The sharper half of the same question. `sort` used to announce
-    `enter select`: `enter` is answered -- by the App's priority
-    `activate` binding -- but on that screen it does nothing at all,
-    and the key that selects is `space`. "Is it bound" and "does it do
+    """The sharper half of the same question: a border can announce a key
+    that is bound *somewhere* (`sort`'s `enter select` is answered by the
+    App's priority `activate` binding) without that key doing what the
+    border promises on this specific screen -- here `space`, not
+    `enter`, is what actually selects. "Is it bound" and "does it do
     what the border says" are different questions, and only the second
     one is the promise the operator reads.
     """
@@ -7448,7 +7372,7 @@ async def test_a_modal_border_never_outgrows_its_own_width() -> None:
 
 
 async def test_filters_modal_width_fits_its_own_footer_not_oversized() -> None:
-    """Point 5 of the third visual pass: on `large` (100), this
+    """On `large` (100), this
     dialog's content never exceeded ~59 cells, but the dialog was sized
     for headroom nothing used -- the real floor is the border's own
     footer (68 cells on Linux, `Ctrl+R`), not the fields. `wide` (76)
@@ -7486,10 +7410,7 @@ async def test_filters_modal_width_fits_its_own_footer_not_oversized() -> None:
 async def test_navigation_is_advertised_where_there_is_something_to_move() -> (
     None
 ):
-    """`j`/`k`/`up`/`down` were all `show=False`, so nothing in the app
-    ever told a first-time operator how to move between torrents.
-
-    One visible token, announcing the arrows alone, and only on the
+    """One visible token, announcing the arrows alone, and only on the
     page that has rows: `action_cursor_*` already no-ops on Overview,
     so advertising it there would teach a move that does nothing.
 
@@ -7864,9 +7785,10 @@ async def test_the_graph_ink_reaches_the_edge_of_its_panel(
 
 
 async def test_each_window_wears_a_one_word_title() -> None:
-    """The Trackers border used to add "derived from torrent activity",
-    which restated the window's own last line eleven rows below -- and
-    less precisely, since that line names what is *not* read."""
+    """A descriptive suffix on the border (e.g. "derived from torrent
+    activity") would restate -- less precisely -- the caveat already
+    carried by the window's own last line ("announce status not read
+    here")."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -8162,7 +8084,6 @@ async def test_a_tick_that_asks_nothing_still_advances_the_trace() -> None:
 
 
 async def test_the_status_line_ends_level_with_the_graph_legend() -> None:
-    """Both halves of the ᴛʀᴀɴꜱꜰᴇʀ window finish on the same row."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
@@ -8373,16 +8294,12 @@ async def test_ctrl_r_resets_filters_sort_and_selection() -> None:
 
 
 async def test_ctrl_r_clears_a_checkmark_a_direct_write_left_stale() -> None:
-    """`test_ctrl_r_resets_filters_sort_and_selection` covers the
-    *model*. `action_toggle_selection` only ever writes the `Sel` cell
-    directly (`_refresh_indicator_cell`), bypassing `_render_table()`'s
-    diff cache -- if a later `_render_table()` then diffs against a
-    cached source that predates that write, and the state happens to
-    cycle back to what that stale cache already says (select, then
-    reset), it can wrongly conclude the row is unchanged and leave the
-    glyph exactly as that direct write left it. This asserts on the
-    cell actually painted, not on `selected_hashes`.
-    """
+    """`action_toggle_selection` writes the `Sel` cell directly,
+    bypassing `_render_table()`'s diff cache -- if a later render then
+    diffs against a cache that predates that write and the state cycles
+    back to what the stale cache already says, it can wrongly leave the
+    glyph exactly as that direct write left it. Asserts on the cell
+    actually painted, not on `selected_hashes`."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a" * 40, name="Alpha")]
     )
@@ -8595,14 +8512,13 @@ async def test_no_checkbox_chrome_glyph_reaches_the_rendered_screen() -> None:
 
 
 async def test_no_radio_chrome_glyph_reaches_the_rendered_screen() -> None:
-    """Points 7/8 of the third visual pass: `RadioButton` always
-    rendered `▐●▌`, on or off, a second control grammar beside
-    `QbitCheckbox`'s `✓`/`✗` -- and Textual's own default `.toggle--
-    button` background (`$panel`, this theme's blue-tinted grey) leaked
-    into the `▐`/`▌` glyphs' own colour, read by the human as "du bleu".
-    `QbitRadioButton` unifies both: checked here on the Filters modal's
-    State pane (`f-completed`, a plain tri-state) and on `sort`'s
-    `RadioSet`, mounted exactly as the app opens each."""
+    """`RadioButton` always renders `▐●▌`, on or off, a second control
+    grammar beside `QbitCheckbox`'s `✓`/`✗` -- and Textual's own default
+    `.toggle--button` background (`$panel`, this theme's blue-tinted
+    grey) leaks into the `▐`/`▌` glyphs' own colour. `QbitRadioButton`
+    unifies both: checked here on the Filters modal's State pane
+    (`f-completed`, a plain tri-state) and on `sort`'s `RadioSet`,
+    mounted exactly as the app opens each."""
     from textual.widgets import RadioButton, RadioSet
 
     client = FakeQbitClient(

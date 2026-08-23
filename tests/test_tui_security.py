@@ -5,28 +5,9 @@ guarantee, not just a runtime test, that TUI modules never import a
 raw-secret-producing helper, an out-of-scope mutation function, or the
 CLI module. The boundary is stated in `qbit_ops.tui.app`'s module docstring.
 
-TUI 2 narrowed, not removed, this boundary: the TUI may import
-exactly `qbit_core.features.torrents.apply_bulk_torrent_action`/
-`build_bulk_action_plan_from_snapshot` -- frozen-plan-in, frozen-plan-
-out, never a rescan, never `--all`. `tui-filters` widened the *actions*
-those two functions cover from Pause/Resume/Reannounce to every
-LOW-risk action `TuiBulkAction` names (category/tags/throttle too,
-all still `MutationRisk.LOW`); the two function names allowed through
-this boundary did not change.
-`plan_bulk_torrent_action` (always rescans and accepts an unbounded
-`--all` selector -- neither fits the frozen-plan model) and every
-tracker mutation function remain fully forbidden, same as before.
-
 Every gate below inspects *imported names*, never a call-site value --
 see `test_import_scan_cannot_see_a_delete_value_reaching_build_bulk_plan`
-for the resulting blind spot. `"delete"` is one of the values
-`build_bulk_action_plan_from_snapshot`'s `action` parameter accepts
-(it is `qbit_core`'s shared `TorrentBulkAction`, since the CLI does
-reach it) and no import here would ever change if a caller passed it.
-That value-level barrier is `qbit_ops.tui.state.TuiController
-.build_bulk_plan`'s own job: it is typed `TuiBulkAction` -- the same
-union minus `"delete"` -- and refuses at runtime if that typing is
-ever defeated.
+for the resulting blind spot.
 """
 
 from __future__ import annotations
@@ -69,13 +50,10 @@ _FORBIDDEN_TRACKERS_NAMES = {
 
 
 def _tui_module_files() -> list[Path]:
-    """List every TUI production module, including future subdirectories.
+    """List every TUI module recursively, including future subdirectories.
 
-    Uses `rglob`, not a one-directory `glob`, so a future split of
-    `qbit_ops/tui/app.py` into `qbit_ops/tui/widgets/*.py` and
-    `qbit_ops/tui/screens/*.py` cannot make
-    this security boundary silently vacuous by leaving new files
-    unscanned.
+    Uses `rglob`, not `glob`: a future subdirectory split must not leave
+    files unscanned and silently make this security boundary vacuous.
     """
     files = sorted(
         path
@@ -87,7 +65,6 @@ def _tui_module_files() -> list[Path]:
 
 
 def _imported_names_by_module(source: str) -> dict[str, set[str]]:
-    """Map each imported module to the names imported from it."""
     tree = ast.parse(source)
     imports: dict[str, set[str]] = {}
     for node in ast.walk(tree):
@@ -102,14 +79,6 @@ def _imported_names_by_module(source: str) -> dict[str, set[str]]:
 
 
 def test_tui_modules_never_import_the_cli_package() -> None:
-    """A TUI module must never depend on the CLI layer.
-
-    Updated for the CLI reorganization (see docs/ARCHITECTURE.md):
-    `qbit_ops.main` no longer exists -- the equivalent, and now broader,
-    boundary is that no TUI module may import `qbit_ops.cli` or any of
-    its submodules (`cli.app`, `cli.commands.*`, `cli.rendering`,
-    `cli.error_boundary`, `cli.validation`).
-    """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
         leaked = {
@@ -137,11 +106,8 @@ def test_tui_never_imports_raw_tracker_helpers_or_unbounded_planner() -> None:
 
 
 def test_tui_may_only_import_the_two_low_risk_bulk_mutation_functions() -> None:
-    """Positive companion to the negative test above: confirm the TUI's
-    only reachable torrent-mutation surface is exactly the two LOW-risk,
-    frozen-plan functions TUI 2 needs -- not zero (TUI 1's invariant),
-    and not more than these two.
-    """
+    """Positive companion to the negative test above: also proves the
+    surface is not empty, not just not-too-large."""
     found: set[str] = set()
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
@@ -154,11 +120,6 @@ def test_tui_may_only_import_the_two_low_risk_bulk_mutation_functions() -> None:
 
 
 def test_tui_modules_never_import_tracker_mutation_functions() -> None:
-    """Tracker add/remove/replace/passkey-replace remain fully out of
-    scope for the TUI -- it only ever reaches LOW-risk *torrent* bulk
-    actions (pause/resume/reannounce/category/tags/throttle), never a
-    tracker mutation.
-    """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
         trackers_names = imports.get("qbit_core.features.trackers", set())
@@ -180,16 +141,9 @@ def test_tui_modules_never_import_backup_module() -> None:
 
 
 def test_tui_modules_never_import_ui_module() -> None:
-    """TUI widgets must never import the CLI's Rich rendering helpers.
-
-    `qbit_ops.cli.rendering` (formerly `qbit_ops.ui`) renders for a Rich
-    `Console`/CLI confirmation prompts, not a Textual widget tree -- a
-    TUI consuming it would be "scraping Rich-rendered output" by
-    another name. Pure formatting duplicated locally instead (see
-    `qbit_ops.tui.app._format_byte_rate`). Subsumed by, but kept
-    alongside, the broader `test_tui_modules_never_import_the_cli_package`
-    check above for an explicit, positive pin on this specific module.
-    """
+    """Subsumed by, but kept alongside, the broader
+    `test_tui_modules_never_import_the_cli_package` check above, for an
+    explicit positive pin on this specific module."""
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))
         assert "qbit_ops.cli.rendering" not in imports, (
@@ -208,7 +162,6 @@ _FILE_WRITING_CALLS = {"open", "write_text", "write_bytes", "mkdir"}
 
 
 def _called_names(source: str) -> set[str]:
-    """Every called function/method name, at any nesting."""
     tree = ast.parse(source)
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -224,13 +177,9 @@ def _called_names(source: str) -> set[str]:
 def test_the_tui_writes_its_configuration_only_through_the_shared_domain() -> (
     None
 ):
-    """The TUI's one on-disk write goes through `qbit_core`, never
-    through a file call of its own.
-
-    Non-vacuous by construction: the same scan must also *find* the
-    domain writer imported, so an empty or mis-rooted scan fails here
-    instead of passing quietly.
-    """
+    """Non-vacuous by construction: the scan must also *find* the domain
+    writer imported, so a mis-rooted scan fails here instead of passing
+    quietly."""
     importers: list[Path] = []
     offenders: dict[str, set[str]] = {}
     for path in _tui_module_files():
@@ -254,16 +203,6 @@ def test_the_tui_writes_its_configuration_only_through_the_shared_domain() -> (
 
 
 def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
-    """Prove a nested file survives the same discovery pattern
-    `_tui_module_files` uses.
-
-    Builds a synthetic `tui/` tree with a `screens/` subdirectory --
-    a plausible future shape for `qbit_ops/tui/app.py`'s modal screens.
-    A one-directory
-    `glob("*.py")` would miss `screens/help.py` here and make every
-    security assertion above silently vacuous once that split happens;
-    `rglob` must not.
-    """
     root = tmp_path / "tui"
     (root / "screens").mkdir(parents=True)
     (root / "app.py").write_text("x = 1\n", encoding="utf-8")
@@ -280,20 +219,11 @@ def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
 def test_import_scan_cannot_see_a_delete_value_reaching_build_bulk_plan() -> (
     None
 ):
-    """Every gate above is AST-based *import* scanning -- proof that this
-    approach is structurally blind to a value smuggled past
-    `TuiController.build_bulk_plan`'s own typing (see
-    `tests/test_tui_state.py::
+    """Proof that AST-based import scanning is structurally blind to a
+    value smuggled past `TuiController.build_bulk_plan`'s own typing --
+    see `tests/test_tui_state.py::
     test_build_bulk_plan_refuses_a_delete_action_smuggled_past_typing`
-    for the runtime guard that actually refuses it).
-
-    The source below is a hypothetical TUI module calling
-    `build_bulk_plan("delete", ...)` directly. It imports nothing this
-    file's own `_imported_names_by_module` would ever flag: no forbidden
-    name from `qbit_core.features.torrents` appears, because "delete"
-    is a plain string argument, not an import. A gate that only ever
-    inspects imported names cannot, even in principle, see it.
-    """
+    for the runtime guard that actually refuses it."""
     source = (
         "from qbit_ops.tui.state import TuiController\n\n"
         "def unsafe(controller: TuiController, torrent_hash: str) -> None:\n"
@@ -306,12 +236,8 @@ def test_import_scan_cannot_see_a_delete_value_reaching_build_bulk_plan() -> (
 
 
 def test_tui_state_module_never_imports_textual() -> None:
-    """The pure state/controller layer must stay independently testable.
-
-    `qbit_ops/tui/state.py` (unlike `qbit_ops/tui/app.py`) has no
-    Textual-specific concern and must remain importable/testable
-    without a terminal.
-    """
+    """Must stay importable and testable without a terminal, unlike
+    `app.py`."""
     source = Path(qbit_ops.tui.state.__file__).read_text(encoding="utf-8")
     imports = _imported_names_by_module(source)
     assert not any(
@@ -321,17 +247,8 @@ def test_tui_state_module_never_imports_textual() -> None:
 
 
 def test_every_tui_bulk_action_is_classified_low_risk() -> None:
-    """`TuiBulkAction` is meant to be exactly the LOW-risk torrent
-    mutations (see this file's own module docstring and
-    `qbit_ops.tui.state`'s "Security boundary" docstring) -- but until
-    now nothing checked that against `qbit_core`'s actual classification,
-    so the two could drift the moment either changed independently.
-
-    Each action name maps onto the `MutationOperation` member of the
-    same shape (`"category_set"` -> `TORRENTS_CATEGORY_SET`); a torrent
-    mutation reclassified away from LOW without updating `TuiBulkAction`
-    now fails here instead of silently reaching the TUI unconfirmed.
-    """
+    """Cross-checks `TuiBulkAction` against `qbit_core`'s own
+    `MutationRisk` classification, so the two can't drift independently."""
     for action in get_args(TuiBulkAction):
         operation = MutationOperation[f"TORRENTS_{action.upper()}"]
         assert MUTATION_RISK[operation] is MutationRisk.LOW, (

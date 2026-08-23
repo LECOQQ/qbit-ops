@@ -21,7 +21,6 @@ from qbit_core.shared.torrent_states import build_torrent_snapshot
 
 
 def _torrent(**overrides: Any) -> dict[str, Any]:
-    """Build a raw `torrents_info()`-shaped item with sane defaults."""
     defaults: dict[str, Any] = {
         "hash": "a" * 40,
         "name": "Debian 12 ISO",
@@ -272,11 +271,9 @@ def test_derived_state_aliases_keep_their_existing_reading() -> None:
 
 
 def test_a_missing_progress_matches_neither_completed_nor_incomplete() -> None:
-    """Reversed after review: this used to read a missing `progress` as
-    `0`, so `--incomplete` selected a torrent whose progress qBittorrent
-    never reported. That is M1's exact failure mode -- an unreported
-    value widening a destructive selection -- so both directions now
-    fail closed."""
+    """A missing `progress` must fail closed in both directions -- M1's
+    exact failure mode is an unreported value widening a destructive
+    selection."""
     torrent = _torrent()
     del torrent["progress"]
 
@@ -285,8 +282,8 @@ def test_a_missing_progress_matches_neither_completed_nor_incomplete() -> None:
 
 
 def test_a_missing_state_matches_no_state_criterion() -> None:
-    """`is_stopped_state("")` is False, so an absent state used to read
-    as "not stopped" and satisfy `--active`."""
+    """`is_stopped_state("")` is False, so an absent state must not
+    satisfy `--active`."""
     torrent = _torrent()
     del torrent["state"]
 
@@ -324,7 +321,6 @@ def test_an_excluded_state_does_not_fire_on_an_unknown_state() -> None:
 
 
 def test_a_reported_state_and_progress_still_match_normally() -> None:
-    """Guard against the rule excluding everything."""
     assert _matches(TorrentFilter(active=True), state="uploading")
     assert _matches(TorrentFilter(completed=True), progress=1.0)
     assert _matches(TorrentFilter(completed=False), progress=0.4)
@@ -373,11 +369,7 @@ class _CountingTorrent(dict):
 def test_an_unset_measure_reads_no_field_at_all() -> None:
     """`ratio`/`size`/`uploaded`/`seeding_time`/`progress`/`state` are
     read by nothing in `matches_cheap_filters` unless a criterion needs
-    them -- so with every measure and state criterion left unset, every
-    one of them must be read zero times. Reading a bound that was never
-    posed is the cost this test exists to catch -- paid on every
-    torrent, on every filter pass, when most filters bound none of
-    this family."""
+    them."""
     torrent = _CountingTorrent(_torrent())
 
     assert matches_cheap_filters(torrent, TorrentFilter())
@@ -396,8 +388,6 @@ def test_an_unset_measure_reads_no_field_at_all() -> None:
 
 
 def test_completed_reads_progress_but_never_state() -> None:
-    """`--completed`/`--incomplete` need only `progress`; `state` stays
-    unread since none of the state-group criteria are posed."""
     torrent = _CountingTorrent(_torrent())
 
     assert matches_cheap_filters(torrent, TorrentFilter(completed=True))
@@ -407,8 +397,6 @@ def test_completed_reads_progress_but_never_state() -> None:
 
 
 def test_active_reads_state_but_never_progress() -> None:
-    """`--active`/`--inactive` need only `state`; `progress` stays
-    unread since `--completed` was never posed."""
     torrent = _CountingTorrent(_torrent())
 
     assert matches_cheap_filters(torrent, TorrentFilter(active=True))
@@ -608,9 +596,7 @@ def test_completion_and_age_are_different_questions() -> None:
 
 def test_a_trailing_slash_names_the_same_directory() -> None:
     """`/data` and `/data/` are the same directory, and an operator
-    should not have to guess which form qBittorrent stores. Reported by
-    review: `--exclude-save-path /data/` missed a torrent at `/data`.
-    """
+    should not have to guess which form qBittorrent stores."""
     for prefix in ("/data", "/data/"):
         included = TorrentFilter(save_path_prefixes=(prefix,))
         excluded = TorrentFilter(save_paths_excluded=(prefix,))

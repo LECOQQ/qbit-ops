@@ -75,8 +75,7 @@ def _referenced_names(node: ast.AST) -> set[str]:
 # `apply_bulk_torrent_action`, and no `features/search.py` split is
 # permitted. A module-granular test would go green through S4 and red
 # the moment S5 lands, and the "fix" would be excluding the one module
-# where this boundary actually matters. Reported as a third spec
-# impossibility (see the Builder's report); implemented function-
+# where this boundary actually matters. Implemented function-
 # granular instead, which preserves the real intent: the mutation
 # planning/application functions themselves never reach the search
 # engine, even while their sibling `search_torrents` legitimately does.
@@ -247,16 +246,9 @@ def test_mutating_torrents_command_discovery_is_non_vacuous() -> None:
 
 def test_search_torrents_actually_calls_a_search_function() -> None:
     """Non-vacuity companion (b): proves the `search_*`-call detection
-    the test above relies on actually fires on real code, not only on
-    a name that happens never to occur.
-
-    Re-anchored on the CLI `search` command (`torrents search`, S6) now
-    that it exists -- the contract's own prose asked for this once S6
-    landed. `test_mutating_torrents_commands_never_call_a_search_function`
-    scans exactly this file for the mutating commands; this proves the
-    same `_search_call_names` detector actually fires on a real command
-    in it, not only on a name that happens never to occur there.
-    """
+    `test_mutating_torrents_commands_never_call_a_search_function` relies
+    on actually fires on real code, not only on a name that happens
+    never to occur."""
     tree = ast.parse(TORRENTS_COMMANDS_FILE.read_text(encoding="utf-8"))
     functions = _function_defs_by_name(tree)
     calls = _search_call_names(functions["search_qbit_torrents"])
@@ -290,8 +282,8 @@ def test_search_torrents_uses_the_client_free_selection_helper() -> None:
     `select_torrents_from_items` internally after one `torrents_info()`,
     so swapping the call alone (with `search_torrents`'s own
     `requires_inspection` guard left in place) produces an identical
-    `torrents_info`/`torrents_trackers` call count -- see the Builder's
-    report. This is a static, name-level pin instead.
+    `torrents_info`/`torrents_trackers` call count. This is a static,
+    name-level pin instead.
     """
     tree = ast.parse(FEATURES_TORRENTS_FILE.read_text(encoding="utf-8"))
     functions = _function_defs_by_name(tree)

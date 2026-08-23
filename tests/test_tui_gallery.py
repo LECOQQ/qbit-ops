@@ -26,17 +26,9 @@ pytestmark = pytest.mark.tui
 
 @pytest.fixture(scope="session")
 def _inventory_cache() -> dict[str, Surface]:
-    """One `Surface` per screen name, shared across the whole session.
-
-    `capture_inventory(name, SCREENS[name], max_depth=6)` drives a full
-    headless app per call and is a pure function of `name` here -- every
-    test in this file asks the same question for the same screen. Left
-    unmemoized, the module-level tests below (`_modal_surfaces` and the
-    stylesheet/width/centring checks that share it) each redrove every
-    screen from scratch, on top of what the parametrized test already
-    captured -- the session's single largest cost, well before the
-    gallery/wireframe captures below it.
-    """
+    """One `Surface` per screen name, shared across the whole session:
+    `capture_inventory()` is a pure function of `name`, safe to memoize
+    across every test that asks for the same screen."""
     return {}
 
 
@@ -49,13 +41,9 @@ async def _inventory(name: str, cache: dict[str, Surface]) -> Surface:
 # One marker per screen: text that screen renders and NO other screen
 # in the gallery does.
 #
-# Derived by measurement, not chosen by eye. The first attempt used
-# plausible words -- `Category` for the filters modal, `Sort` for the
-# sort modal -- and both also appear on the screen underneath: a table
-# column, and a footer binding. Removing the keypress that opens the
-# modal then changed nothing, so the test passed on a capture of the
-# wrong screen. It was decorative for exactly as long as nobody tried
-# to break it.
+# Derived by measurement, not chosen by eye: a plausible-looking word
+# (a table column, a footer binding) can still appear on the screen
+# underneath, letting the test pass on a capture of the wrong screen.
 #
 # To regenerate after adding a screen, print the set difference of each
 # screen's rendered vocabulary against the union of the others.
@@ -97,8 +85,6 @@ def _rendered_text(svg: str) -> str:
 
 
 def test_every_gallery_screen_declares_a_marker() -> None:
-    """A screen added to the gallery without one would be captured but
-    never checked -- the exact blind spot this file exists to close."""
     assert set(SCREEN_MARKERS) == set(SCREENS)
 
 
@@ -123,9 +109,9 @@ async def test_the_gallery_reaches_the_screen_it_names(
 
 @pytest.mark.parametrize("name", sorted(SCREENS))
 async def test_the_wireframe_measures_a_real_layout(name: str) -> None:
-    """An empty grid is a valid wireframe of nothing. Without this, a
-    layout pass that never ran would render as a screen with no
-    structure -- and read as a finding rather than a broken tool."""
+    """Guards against a layout pass that silently never ran: an empty
+    grid would otherwise render as a valid-looking wireframe, not an
+    error."""
     frame = await capture_wireframe(name, SCREENS[name], max_depth=6)
 
     assert "LEGEND" in frame
@@ -139,8 +125,6 @@ async def test_the_wireframe_measures_a_real_layout(name: str) -> None:
 
 
 async def test_the_wireframe_and_the_gallery_agree_on_size() -> None:
-    """They describe the same layout. Two sizes would make a screenshot
-    and its wireframe impossible to read against each other."""
     from scripts.tui_gallery import GALLERY_SIZE
     from scripts.tui_wireframe import WIREFRAME_SIZE
 
@@ -173,11 +157,10 @@ async def test_the_inventory_measures_the_surface_not_the_screen(
 async def test_the_inventory_counts_a_one_line_input_as_structural(
     _inventory_cache: dict[str, Surface],
 ) -> None:
-    """`filters` nests `Input` five levels down (`FiltersScreen ->
-    VerticalScroll -> FiltersPanel -> _Row -> Input`), verified by
-    walking `.parent`. A height filter meant to drop decorative one-line
-    text used to also drop this one-line control, undercounting the
-    surface at depth 3."""
+    """A height filter meant to drop decorative one-line text must not
+    also drop a real one-line control: `filters` nests `Input` five
+    levels down (`FiltersScreen -> VerticalScroll -> FiltersPanel ->
+    _Row -> Input`), verified by walking `.parent`."""
     surface = await _inventory("filters", _inventory_cache)
 
     assert surface.depth == 5
@@ -231,8 +214,8 @@ async def _modal_surfaces(cache: dict[str, Surface]) -> list[Surface]:
 async def test_no_surface_declares_a_stylesheet_of_its_own(
     _inventory_cache: dict[str, Surface],
 ) -> None:
-    """One sheet, one file. A class-level `CSS` block is how the frame
-    got re-decided nine times; a tenth would start the drift again."""
+    """One sheet, one file: a class-level `CSS` block would let a
+    screen's style drift out of the shared stylesheet."""
     for name in SCREENS:
         surface = await _inventory(name, _inventory_cache)
         assert surface.css_lines == 0, (
@@ -257,19 +240,9 @@ async def test_every_modal_is_measured_on_the_width_scale(
 async def test_every_modal_is_centred_on_its_own_footprint(
     _inventory_cache: dict[str, Surface],
 ) -> None:
-    """`details` used to be the outlier on all three axes at once --
-    a `Vertical` at `20,4`, 32 rows tall while every sibling was a
-    `VerticalScroll` at y=2, 36 rows tall.
-
-    That shared origin is gone by design as of `tui-filters`: a modal
-    now takes the height its own content needs (`.agents/specs/
-    tui-filters.md`, "Les modales prennent la hauteur de leur
-    contenu") rather than a fixed full-screen one, so `y`/`height` are
-    no longer expected to match across modals. What survives is the
-    weaker, still-real invariant this replaces them with: every modal
-    is centred on its own measured footprint, never placed by hand,
-    at whatever width/height that footprint turns out to be.
-    """
+    """Every modal is centred on its own measured footprint, never
+    placed by hand, at whatever width/height that footprint turns out
+    to be -- `y`/`height` are not expected to match across modals."""
     surfaces = await _modal_surfaces(_inventory_cache)
 
     assert {s.container for s in surfaces} == {"VerticalScroll"}

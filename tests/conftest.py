@@ -50,8 +50,7 @@ def _isolate_qbit_configuration() -> Any:
     `$XDG_CONFIG_HOME|~/.config/qbit-ops/.env`, and a developer machine
     has both. Nothing in the suite is required to opt into isolation, so
     a single test that builds a client without `configure_qbit_backend`
-    would reach the operator's own qBittorrent -- which is exactly how a
-    review agent once read a real library.
+    would reach the operator's own qBittorrent.
 
     Session-scoped and `autouse`, so isolation is the default rather
     than something each test remembers. Four seams, because any one of
@@ -90,7 +89,6 @@ def _isolate_qbit_configuration() -> Any:
 
 @pytest.fixture
 def runner() -> CliRunner:
-    """Provide a Typer CLI test runner."""
     return CliRunner()
 
 

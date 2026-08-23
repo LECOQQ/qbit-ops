@@ -1268,7 +1268,7 @@ def _pseudo_tracker_client() -> FakeQbitClient:
 def test_an_active_pseudo_tracker_does_not_break_a_tracker_filter(
     runner: CliRunner, configure_qbit_backend
 ) -> None:
-    """Reproduces the reviewer's case: `** [PeX] **` with status 2."""
+    """The pseudo-tracker shape under test: `** [PeX] **` with status 2."""
     configure_qbit_backend(client=_pseudo_tracker_client())
 
     assert _names(runner, "--tracker", "old.example") == ["OnOld"]
@@ -1432,11 +1432,7 @@ def test_list_inspect_and_mutation_target_the_same_torrents(
     runner: CliRunner, configure_qbit_backend, options: list[str]
 ) -> None:
     """The invariant the whole pass rests on: the same selector must
-    target the same set regardless of the action consuming it.
-
-    Exercised against active pseudo-trackers, which is where the three
-    paths previously diverged.
-    """
+    target the same set regardless of the action consuming it."""
     configure_qbit_backend(client=_pseudo_tracker_client())
     listed = sorted(_names(runner, *options))
     inspected = sorted(_inspect_names(runner, *options))
