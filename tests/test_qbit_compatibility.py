@@ -103,9 +103,8 @@ def test_entry_for_application_version_returns_none_for_untested_version() -> (
 
 
 def test_entry_for_application_version_does_not_match_a_patch_sibling() -> None:
-    """A patch release adjacent to an exact tested entry must not match
-    -- docs/COMPATIBILITY.md §10 rule 3: one patch release is never
-    evidence for its whole line."""
+    """A patch release adjacent to an exact tested entry must not
+    match: one patch release is never evidence for its whole line."""
     evidence = load_compatibility_evidence()
     assert evidence.entry_for_application_version("5.2.2") is None
     assert evidence.entry_for_application_version("5.2.4") is None

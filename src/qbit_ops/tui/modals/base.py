@@ -35,12 +35,13 @@ from qbit_ops.tui.formatting import _format_command_bar
 # 100 columns its own content -- fields and hint lines -- never exceeds
 # ~59 cells, but its border *footer* does, once every announced key is
 # rendered (68 cells on Linux, `Ctrl+R`; 64 on macOS, `^r`). Textual
-# truncates a border label past `width - 4`, so the real floor is the
-# footer's own worst case plus that same 4-cell margin: 68 + 4 = 72.
-# `large` was never the content's requirement, only headroom nothing
-# used -- `wide` (76) clears the measured floor by the same 4-cell
-# margin the truncation rule itself uses, and leaves `large` for a
-# modal that genuinely needs it (`DetailsScreen`, `ExplainScreen`).
+# truncates a border label past `width - BORDER_LABEL_MARGIN`
+# (`qbit_ops.tui.tab_bar`, measured against Textual's own
+# `render_border_label`), so the real floor is the footer's own worst
+# case plus that margin: 68 + 6 = 74. `large` was never the content's
+# requirement, only headroom nothing used -- `wide` (76) clears that
+# floor, and leaves `large` for a modal that genuinely needs it
+# (`DetailsScreen`, `ExplainScreen`).
 MODAL_WIDTHS: Final[dict[str, int]] = {
     "small": 48,
     "medium": 64,

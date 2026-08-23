@@ -14,6 +14,8 @@ so this file's parametrization cannot drift from the actual CLI surface.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -21,6 +23,40 @@ from qbit_ops.cli.app import app
 from qbit_ops.cli.exit_codes import EXIT_CODE_TABLE
 
 runner = CliRunner()
+
+COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"
+
+# Each level of the ASCII tree under "## Overview" indents by one of
+# these 4-character units before its own branch glyph.
+_INDENT_UNITS = ("│   ", "    ")
+_BRANCHES = ("├── ", "└── ")
+
+
+def _parse_command_tree(doc_text: str) -> set[str]:
+    """Every leaf command path (`"torrents category set"`) drawn in
+    the Overview tree, reconstructed from indentation depth rather
+    than matched as a substring: a leaf's own name can collide with
+    another group's (`list`, `export`...), so only the full path,
+    rebuilt the way the tree nests it, is unambiguous."""
+    block = doc_text.split("## \U0001f5c2️ Overview", 1)[1]
+    block = block.split("```text", 1)[1].split("```", 1)[0]
+    lines = [line for line in block.splitlines() if line.strip()]
+    stack: list[str] = []
+    nodes: list[tuple[int, str]] = []
+    for line in lines[1:]:  # first line is the root, "qbit-ops"
+        remainder, depth = line, 0
+        while remainder[:4] in _INDENT_UNITS:
+            remainder, depth = remainder[4:], depth + 1
+        assert remainder[:4] in _BRANCHES, line
+        label = remainder[4:].split(" [", 1)[0].strip()
+        stack[depth:] = [label]
+        nodes.append((depth, " ".join(stack)))
+    return {
+        path
+        for i, (depth, path) in enumerate(nodes)
+        if i + 1 == len(nodes) or nodes[i + 1][0] <= depth
+    }
+
 
 TOP_LEVEL_COMMAND_NAMES = {
     "init",
@@ -49,6 +85,7 @@ GROUP_SUBCOMMAND_NAMES = {
         "start",
         "reannounce",
         "delete",
+        "throttle",
         "import",
         "category",
         "tag",
@@ -137,6 +174,15 @@ def _assert_clean_help(result) -> None:
 def test_exit_code_table_covers_exactly_thirty_five_commands() -> None:
     """Lock the current command-tree size so a silent drop is visible."""
     assert len(EXIT_CODE_TABLE) == 35
+
+
+def test_docs_command_tree_lists_every_registered_command() -> None:
+    """`docs/COMMANDS.md`'s Overview tree named every command by hand;
+    `torrents throttle` was missing from it while still registered
+    here. Comparing the two catches that class of drift instead of
+    relying on someone re-reading the tree by eye."""
+    documented = _parse_command_tree(COMMANDS_DOC.read_text(encoding="utf-8"))
+    assert documented == set(EXIT_CODE_TABLE)
 
 
 def test_root_help_succeeds_without_traceback() -> None:

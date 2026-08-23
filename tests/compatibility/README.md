@@ -4,19 +4,20 @@ This directory contains **payload fixtures** -- JSON snapshots of the
 shapes qBittorrent's Web API returns (torrents, trackers, transfer
 info, application/version strings) -- plus contract tests that exercise
 qbit-ops's real production boundary functions
-(`qbit_core.qbit.fields`, `qbit_ops.torrent_states`,
-`qbit_ops.trackers`, `qbit_ops.doctor`) against them.
+(`qbit_core.qbit.fields`, `qbit_core.shared.torrent_states`,
+`qbit_core.features.trackers`, `qbit_core.features.doctor`) against
+them.
 
 The goal is **contract testing against payload shapes**. Most fixtures
 here are `synthetic`/`official-example` and prove nothing about a real
 running instance on their own -- but `fixtures/captured-container/`
 (added by the Docker version matrix phase, 2026-07-27) now contains
 authentic payloads captured from real, disposable
-`linuxserver/qbittorrent` containers for the 4.6.x/5.0.x/5.1.x release
-lines. See `tests/compatibility/test_captured_container_payloads.py`
-for the contract tests that exercise them, and
-`docs/COMPATIBILITY.md` §1/§9 for exactly what that does and does not
-justify claiming.
+`linuxserver/qbittorrent` containers for the 4.6.x/5.0.x/5.1.x/5.2.x
+release lines. See
+`tests/compatibility/test_captured_container_payloads.py` for the
+contract tests that exercise them, and `docs/COMPATIBILITY.md` for
+exactly what that does and does not justify claiming.
 
 ## Trust levels
 
@@ -37,12 +38,12 @@ Every fixture's `_meta.trust` field is one of:
   hermetic *configuration* (temporary `HOME`/`.env` discovery, generated
   credentials -- see `tests/integration/README.md` "Hermeticity, in one
   paragraph"). That configuration hermeticity does **not** extend to the
-  network: the container's public egress is not technically blocked (see
-  `docs/COMPATIBILITY.md` §5.2's reserve F-1). Captured via the capture
+  network: the container's public egress is not technically blocked.
+  Captured via the capture
   mechanism described below (`tests/integration/_capture.py`,
   `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`). Now used by
-  `fixtures/captured-container/<matrix-id>/*.json` for each of the
-  four matrix entries in `qbit_core/data/qbittorrent-matrix.toml`.
+  `fixtures/captured-container/<matrix-id>/*.json` for each matrix
+  entry in `qbit_core/data/qbittorrent-matrix.toml`.
 - **`captured-instance`** -- captured from a real qBittorrent instance
   outside of the disposable-container harness. **qbit-ops never
   captures fixtures from a user's homelab instance; this trust level is
@@ -213,7 +214,7 @@ the capture tool, run via `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`
   `synthetic` payloads and real `captured-container` payloads.
 - Tracker messages containing embedded secret-shaped URLs are fully
   sanitized before they could reach rendered output.
-- For the three captured matrix entries: qbit-ops's field-reading
+- For each captured matrix entry: qbit-ops's field-reading
   functions handle a *real* `torrents_info()`/`torrents_trackers()`/
   `transfer_info()`/`app_version()` payload from that exact pinned
   image, not an approximation of one.
@@ -224,11 +225,11 @@ the capture tool, run via `make capture-qbit-fixtures QBIT_MATRIX_ID=<id>`
   instance from bare payload fixtures alone -- that requires the live
   container tests under `tests/integration/` (`make test-qbit-matrix`),
   which exercise real HTTP calls, not just captured snapshots.
-- Broad version-range support (e.g. "4.6–5.1 supported"). Each captured
-  entry is one specific, pinned image digest at one point in time -- see
-  `docs/COMPATIBILITY.md` §9 for the terminology distinguishing
-  `payload fixture tested`/`container integration tested` from
-  `supported`.
+- Broad version-range support (e.g. "4.6-5.2 supported"). Each captured
+  entry is one specific, pinned image digest at one point in time --
+  `payload fixture tested` and `container integration tested` are both
+  narrower claims than `supported`, and `docs/COMPATIBILITY.md` never
+  makes the broader one.
 - That the documented Web API shapes these fixtures encode have not
   drifted from a given qBittorrent release's actual behavior beyond
-  the three pinned digests actually captured.
+  the pinned digests actually captured.

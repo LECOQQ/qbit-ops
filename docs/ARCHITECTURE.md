@@ -112,8 +112,8 @@ client can raise.
 
 ### 🎨 TUI style system
 
-Every TUI surface -- nine modals and two workspaces -- is styled from
-one place:
+Every TUI surface -- every modal and workspace -- is styled from one
+place:
 
 ```text
 qbit_ops/tui/qbit_ops.tcss   # the single stylesheet (App.CSS_PATH)
@@ -121,7 +121,7 @@ qbit_ops/tui/theme.py        # the palette, as a textual.theme.Theme
 qbit_ops/tui/modals/base.py  # QbitModal: the shared modal frame
 ```
 
-A modal declares a title, a width **name** (`small`, `medium`,
+A modal declares a title, a width **name** (`small`, `medium`, `wide`,
 `large`) and the **keys** it advertises; the frame, the border title,
 the border subtitle and the scrolling come from `QbitModal`. Picking a
 word rather than a column count is what keeps the widths on one scale.

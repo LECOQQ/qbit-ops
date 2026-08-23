@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Check that Markdown links and repo-anchored path references resolve.
 
-Two independent checks, both hard failures:
+Three independent checks, all hard failures:
 
 1. Markdown links and reference definitions (`[text](target)`,
    `[id]: target`) whose target is local must resolve relative to the
    file that contains them.
 2. Backtick-quoted paths *anchored at a repository root directory*
    (`docs/...`, `src/...`, `tests/...`) must exist.
+3. A section citation on such a path -- a doc path immediately
+   followed by `§<number>` -- must name a section still present in
+   that file. (1) and (2) only ever proved the *file* resolves. A doc
+   trimmed down to fewer sections left four such citations pointing
+   at nothing, uncaught by either.
 
 The anchoring rule in (2) is what keeps this usable. Documentation is
 full of contextual shorthand -- `shared/selection.py`, `conftest.py`,
@@ -92,6 +97,15 @@ ELLIPSIS = "..."
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 MARKDOWN_REF_DEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s+(\S+)", re.MULTILINE)
 BACKTICK_TOKEN = re.compile(r"`([^`\n]+)`")
+
+# The house citation idiom for pointing at part of a doc rather than
+# the whole file: a doc path immediately followed by one or more
+# section numbers, each led by "§" and optionally chained with "/".
+# A link check confirms the *file* exists; this confirms the *section*
+# still does, which a doc trimmed down to fewer sections can silently
+# break without either half-file-check ever seeing it.
+SECTION_CITATION = re.compile(r"`([\w./-]+\.md)`\s+((?:§[\w.]+/?)+)")
+SECTION_NUMBER = re.compile(r"§([\w.]+)")
 
 # An unquoted repository path in prose. The file extension is what keeps
 # this from matching an ordinary phrase containing a slash.
@@ -351,6 +365,47 @@ def _check_references(
     return findings
 
 
+def _check_section_citations(
+    text: str, source: Path, root: Path, root_dirs: frozenset[str]
+) -> list[Finding]:
+    """Flag `` `doc.md` §N `` when `doc.md` never once spells `§N`.
+
+    A link or reference check only proves the *file* resolves; a
+    citation like `docs/COMPATIBILITY.md §5.2` makes the narrower claim
+    that section still exists inside it. Four such citations survived
+    a doc trimmed down to fewer sections because nothing checked the
+    second half of that claim.
+    """
+    findings: list[Finding] = []
+    skipped = _ignored_lines(text)
+    fenced = _fenced_line_numbers(text)
+
+    for match in SECTION_CITATION.finditer(text):
+        doc_path, citation = match.group(1), match.group(2)
+        if doc_path.split("/")[0] not in root_dirs:
+            continue
+        line = _line_of(text, match.start())
+        if line in skipped or line in fenced:
+            continue
+
+        target = root / doc_path
+        if not target.exists():
+            continue  # already reported as a dead reference
+        contents = target.read_text(encoding="utf-8", errors="replace")
+        for number in SECTION_NUMBER.findall(citation):
+            if f"§{number}" in contents:
+                continue
+            findings.append(
+                Finding(
+                    source,
+                    line,
+                    "dead section citation",
+                    f"{doc_path} §{number}",
+                )
+            )
+    return findings
+
+
 def check(root: Path) -> list[Finding]:
     """Scan Markdown prose and Python prose under `root`.
 
@@ -368,6 +423,7 @@ def check(root: Path) -> list[Finding]:
         text = source.read_text(encoding="utf-8", errors="replace")
         findings.extend(_check_links(text, source, root))
         findings.extend(_check_references(text, source, root, root_dirs))
+        findings.extend(_check_section_citations(text, source, root, root_dirs))
 
     for source in _python_files(root):
         prose = _python_prose(
@@ -375,6 +431,9 @@ def check(root: Path) -> list[Finding]:
         )
         findings.extend(_check_references(prose, source, root, root_dirs))
         findings.extend(_check_bare_references(prose, source, root, root_dirs))
+        findings.extend(
+            _check_section_citations(prose, source, root, root_dirs)
+        )
     return findings
 
 

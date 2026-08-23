@@ -46,8 +46,7 @@ in the ordinary suite.
 ## Hermeticity, in one paragraph
 
 **"Hermetic" here means configuration/test-target hermeticity, not
-network isolation** (see `docs/COMPATIBILITY.md` §5.2's reserve F-1 for
-the full detail) -- every container is disposable, on a per-run
+network isolation** -- every container is disposable, on a per-run
 **dedicated** Docker network, with a uniquely named container and
 loopback-only published ports. `HermeticEnv` fixes `QBIT_OPS_ENV_FILE`
 to a guaranteed-absent path (which alone short-circuits qbit-ops's

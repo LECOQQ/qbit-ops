@@ -89,8 +89,7 @@ def test_tui_modules_never_import_the_cli_package() -> None:
     `qbit_ops.main` no longer exists -- the equivalent, and now broader,
     boundary is that no TUI module may import `qbit_ops.cli` or any of
     its submodules (`cli.app`, `cli.commands.*`, `cli.rendering`,
-    `cli.error_boundary`, `cli.validation`) -- see docs/ARCHITECTURE.md
-    §4.
+    `cli.error_boundary`, `cli.validation`).
     """
     for path in _tui_module_files():
         imports = _imported_names_by_module(path.read_text(encoding="utf-8"))

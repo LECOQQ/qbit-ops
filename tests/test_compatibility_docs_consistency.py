@@ -130,8 +130,7 @@ def test_test_readmes_never_claim_network_egress_is_technically_blocked() -> (
 ):
     """The disposable container's public network egress is NOT technically
     blocked (only application-level DHT/PeX/LSD/UPnP/tracker settings
-    are disabled) -- `docs/COMPATIBILITY.md` §5.2 documents this
-    precisely. Both test READMEs must carry the same qualification:
+    are disabled). Both test READMEs must carry the same qualification:
     every occurrence of "technically blocked" must be part of a
     "not ... technically blocked" qualification (whitespace/markdown-
     tolerant), and neither README may claim the Docker network itself

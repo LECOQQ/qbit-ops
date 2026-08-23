@@ -33,6 +33,7 @@ qbit-ops
 │   ├── start
 │   ├── reannounce
 │   ├── delete
+│   ├── throttle
 │   ├── import
 │   ├── category
 │   │   ├── set
@@ -332,21 +333,23 @@ are both answered from that single pass, never from two.
 
 Everywhere a command acts on a set of torrents: `torrents list`,
 `torrents stats`, `torrents inspect`, `torrents search`,
-`trackers list`, `trackers status`, the five bulk mutations (`pause`,
-`resume`, `start`, `reannounce`, `delete`), and the four tracker
-operations (`add-if-present`, `remove`, `replace`, `replace-passkey`).
+`trackers list`, `trackers status`, the torrent-level mutations
+(`pause`, `resume`, `start`, `reannounce`, `delete`, `throttle`,
+`category set`, `category clear`, `tag add`, `tag remove`), and the
+tracker operations (`add-if-present`, `remove`, `replace`,
+`replace-passkey`).
 
 `--tracker-health` is the one exception to "everywhere": it is offered
-on `torrents list`, `torrents stats`, `trackers list` and the five bulk
-mutations. The four tracker operations do not take it -- selecting
-torrents by the health of their trackers in order to act on those same
-trackers would be circular. `torrents inspect` does not offer it either:
-the filter is honoured if something sets it, but no flag exposes it
-there yet. `torrents search` is a third, different case: `--tracker`,
-`--exclude-tracker` and `--tracker-health` are all three declared
-options there, but every one of them is **refused** before any
-qBittorrent call rather than applied -- see "Finding a torrent by
-name" above.
+on `torrents list`, `torrents stats`, `trackers list` and every
+torrent-level mutation above. The tracker operations do not take it --
+selecting torrents by the health of their trackers in order to act on
+those same trackers would be circular. `torrents inspect` does not
+offer it either: the filter is honoured if something sets it, but no
+flag exposes it there yet. `torrents search` is a third, different
+case: `--tracker`, `--exclude-tracker` and `--tracker-health` are all
+three declared options there, but every one of them is **refused**
+before any qBittorrent call rather than applied -- see "Finding a
+torrent by name" above.
 
 The same filters always select the same torrents, whichever command
 consumes them -- listing, inspecting or mutating.

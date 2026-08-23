@@ -4,7 +4,8 @@
 A redesign judged from source is judged on intent. This drives the real
 app headlessly and exports what a terminal would actually paint --
 colours, borders, spacing, alignment -- which is the whole subject when
-the goal is a uniform style across nine modals.
+the goal is a uniform style across every modal (`len(SCREENS)` below,
+minus the two workspaces).
 
     python3 scripts/tui_gallery.py                  # -> docs/assets/tui/
     python3 scripts/tui_gallery.py --out /tmp/before

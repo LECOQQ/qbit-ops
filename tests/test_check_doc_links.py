@@ -62,6 +62,57 @@ def test_a_dead_repo_anchored_reference_is_reported(repo: Path) -> None:
     ]
 
 
+def test_a_section_citation_matching_a_real_section_passes(repo: Path) -> None:
+    _write(repo, "docs/SECTIONED.md", "# Title\n\n## §5.2 Reserves\n")
+    _write(repo, "README.md", "See `docs/SECTIONED.md` §5.2 for detail.")
+
+    assert cdl.check(repo) == []
+
+
+def test_a_dead_section_citation_is_reported(repo: Path) -> None:
+    """The defect this extension exists for: a doc trimmed down to
+    fewer sections leaves a citation pointing at a section that is no
+    longer there, even though the file itself still resolves."""
+    _write(repo, "docs/SECTIONED.md", "# Title\n\nNo numbered sections.\n")
+    _write(repo, "README.md", "See `docs/SECTIONED.md` §5.2 for detail.")
+
+    findings = cdl.check(repo)
+
+    assert [(f.kind, f.target) for f in findings] == [
+        ("dead section citation", "docs/SECTIONED.md §5.2")
+    ]
+
+
+def test_a_chained_section_citation_flags_only_the_missing_half(
+    repo: Path,
+) -> None:
+    _write(repo, "docs/SECTIONED.md", "# Title\n\n## §1 Kept\n")
+    _write(repo, "README.md", "See `docs/SECTIONED.md` §1/§9 for detail.")
+
+    findings = cdl.check(repo)
+
+    assert [(f.kind, f.target) for f in findings] == [
+        ("dead section citation", "docs/SECTIONED.md §9")
+    ]
+
+
+def test_a_dead_section_citation_in_a_docstring_is_caught(
+    repo: Path,
+) -> None:
+    _write(repo, "docs/SECTIONED.md", "# Title\n\nNo numbered sections.\n")
+    _write(
+        repo,
+        "src/mod.py",
+        '"""See `docs/SECTIONED.md` §9 for the rules."""\n',
+    )
+
+    findings = cdl.check(repo)
+
+    assert [(f.kind, f.target) for f in findings] == [
+        ("dead section citation", "docs/SECTIONED.md §9")
+    ]
+
+
 def test_contextual_shorthand_is_not_a_reference(repo: Path) -> None:
     """`shared/selection.py` names a file without naming a repo path."""
     _write(repo, "README.md", "See `shared/selection.py` and `conftest.py`.")

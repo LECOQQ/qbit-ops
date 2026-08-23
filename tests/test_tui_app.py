@@ -107,6 +107,7 @@ from qbit_ops.tui.state import (
     SortOrder,
     Workspace,
 )
+from qbit_ops.tui.tab_bar import BORDER_LABEL_MARGIN
 from qbit_ops.tui.theme import QBIT_OPS_THEME
 from qbit_ops.tui.widgets.filters import FiltersPanel
 from qbit_ops.tui.widgets.overview import (
@@ -7238,8 +7239,12 @@ async def test_a_modal_border_never_outgrows_its_own_width() -> None:
             await _settle(app, pilot)
             dialog = app.screen.query_one(f"#{screen_class.DIALOG_ID}")
             width = Text.from_markup(str(dialog.border_subtitle)).cell_len
-            # Two corners plus one dash of border on each side.
-            budget = MODAL_WIDTHS[screen_class.MODAL_WIDTH] - 4
+            # `BORDER_LABEL_MARGIN`: what Textual itself reserves
+            # around a border label once both corners are drawn
+            # (`qbit_ops.tui.tab_bar`, measured empirically).
+            budget = (
+                MODAL_WIDTHS[screen_class.MODAL_WIDTH] - BORDER_LABEL_MARGIN
+            )
 
             assert width <= budget, (
                 f"{screen_class.__name__}: subtitle is {width} cells, "
@@ -7254,8 +7259,8 @@ async def test_filters_modal_width_fits_its_own_footer_not_oversized() -> None:
     dialog's content never exceeded ~59 cells, but the dialog was sized
     for headroom nothing used -- the real floor is the border's own
     footer (68 cells on Linux, `Ctrl+R`), not the fields. `wide` (76)
-    clears that floor by a small, bounded margin instead of a ~39-
-    column one."""
+    clears that floor by a small, bounded margin instead of the ~26
+    cells `large` would have left unused."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a" * 40, name="Alpha")]
     )
@@ -7277,11 +7282,11 @@ async def test_filters_modal_width_fits_its_own_footer_not_oversized() -> None:
         assert dialog.outer_size.width == MODAL_WIDTHS["wide"] == 76
 
         footer = Text.from_markup(str(dialog.border_subtitle)).cell_len
-        budget = MODAL_WIDTHS["wide"] - 4
+        budget = MODAL_WIDTHS["wide"] - BORDER_LABEL_MARGIN
         slack = budget - footer
         # Never negative (the footer must still fit -- see
         # `test_a_modal_border_never_outgrows_its_own_width`), and
-        # nowhere near the ~28-cell slack `large` (100) left behind.
+        # nowhere near the ~26-cell slack `large` (100) would leave.
         assert 0 <= slack <= 8, (footer, budget, slack)
 
 
