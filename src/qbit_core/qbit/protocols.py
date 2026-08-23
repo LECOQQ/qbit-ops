@@ -1,17 +1,7 @@
-"""Minimal structural interfaces for the qBittorrent client qbit-ops needs.
-
-Six focused protocols split along read/mutate and
-torrent/tracker/transfer/app-info lines, rather than one large
-`QbitClient` interface. Destructive removal gets its own protocol so a
-consumer restricted to LOW-risk mutations cannot reach it.
-`QbitBulkTorrentMutator` composes two of those six for the one function
-that legitimately needs both -- it is not a seventh independent scope.
-`QbitTorrentMutator` declares `torrents_start`, not `torrents_resume`:
-production calls `torrents_start` directly for the resume/start action
-(see `qbit_core.features.torrents._call_bulk_torrent_action`), and
-`tests/test_qbit_library_http_boundary.py` proves the installed
-qbittorrent-api client aliases the two to the same bound method, so
-nothing is lost by typing the name actually called.
+"""The structural surface of a real qBittorrent client, split into
+narrow read/mutate protocols composed into `QbitClient`. Destructive
+removal gets its own protocol so a consumer restricted to LOW-risk
+mutations cannot reach it.
 """
 
 from __future__ import annotations
@@ -28,9 +18,7 @@ __all__ = [
 class QbitTorrentReader(Protocol):
     """Read-only torrent, category and tag introspection."""
 
-    def torrents_info(self) -> Iterable[Any]:
-        """Return every torrent qBittorrent currently tracks."""
-        ...
+    def torrents_info(self) -> Iterable[Any]: ...
 
     def torrents_trackers(self, torrent_hash: str) -> Iterable[Any]:
         """Return one torrent's tracker endpoints."""
@@ -64,44 +52,34 @@ class QbitTransferReader(Protocol):
 class QbitAppInfoReader(Protocol):
     """Read-only application/Web API version introspection."""
 
-    def app_version(self) -> str:
-        """Return the qBittorrent application version string."""
-        ...
+    def app_version(self) -> str: ...
 
-    def app_web_api_version(self) -> str:
-        """Return the qBittorrent Web API version string."""
-        ...
+    def app_web_api_version(self) -> str: ...
 
 
 @runtime_checkable
 class QbitTorrentMutator(Protocol):
     """LOW-risk torrent state mutations (see `shared.execution.MutationRisk`).
 
-    The only mutation surface the TUI is allowed to reach. Covers
-    every action `apply_bulk_torrent_action` can apply except
-    `torrents_delete` -- the one HIGH-risk exception, deliberately
-    kept out; see `QbitDestructiveMutator`.
+    The only mutation surface the TUI is allowed to reach. Excludes
+    `torrents_delete`, the one HIGH-risk exception -- see
+    `QbitDestructiveMutator`.
     """
 
-    def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
-        """Pause the given torrents."""
-        ...
+    def torrents_pause(self, torrent_hashes: str | list[str]) -> None: ...
 
     def torrents_start(self, torrent_hashes: str | list[str]) -> None:
         """Resume the given torrents.
 
         Named for the method production actually calls, not the
-        `torrents_resume` alias -- see the module docstring.
+        `torrents_resume` alias -- see
+        `qbit_core.features.torrents._call_bulk_torrent_action`.
         """
         ...
 
-    def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
-        """Reannounce the given torrents to their trackers."""
-        ...
+    def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None: ...
 
-    def torrents_create_category(self, name: str) -> None:
-        """Create a new category, by name."""
-        ...
+    def torrents_create_category(self, name: str) -> None: ...
 
     def torrents_set_category(
         self, torrent_hashes: str | list[str], category: str
@@ -111,15 +89,11 @@ class QbitTorrentMutator(Protocol):
 
     def torrents_add_tags(
         self, torrent_hashes: str | list[str], tags: str | list[str]
-    ) -> None:
-        """Add one or more tags to the given torrents."""
-        ...
+    ) -> None: ...
 
     def torrents_remove_tags(
         self, torrent_hashes: str | list[str], tags: str | list[str]
-    ) -> None:
-        """Remove one or more tags from the given torrents."""
-        ...
+    ) -> None: ...
 
     def torrents_set_download_limit(
         self, torrent_hashes: str | list[str], limit: int
@@ -154,18 +128,11 @@ class QbitDestructiveMutator(Protocol):
 class QbitBulkTorrentMutator(
     QbitTorrentMutator, QbitDestructiveMutator, Protocol
 ):
-    """Every action `apply_bulk_torrent_action` can reach, across both
-    its callers -- every LOW-risk action plus `torrents_delete`.
-
-    Not a TUI-safety boundary: `apply_bulk_torrent_action` is the
-    engine shared by the CLI (which can request `delete`) and the TUI
-    (which cannot). That restriction is not this type -- a value
-    typed `QbitBulkTorrentMutator` can still be asked to delete. It is
-    `qbit_ops.tui.state.TuiController.build_bulk_plan`, which never
-    builds a plan whose action is `delete` (typed `TuiBulkAction`,
-    refused at runtime otherwise; see `tests/test_tui_state.py`). Use
-    `QbitTorrentMutator` instead, not this protocol, wherever a caller
-    itself must stay provably restricted to LOW-risk mutations.
+    """Every action `apply_bulk_torrent_action` can reach; not itself a
+    TUI-safety boundary (see
+    `qbit_ops.tui.state.TuiController.build_bulk_plan`). Use
+    `QbitTorrentMutator` instead wherever a caller itself must stay
+    provably restricted to LOW-risk mutations.
     """
 
 
@@ -173,21 +140,15 @@ class QbitBulkTorrentMutator(
 class QbitTrackerMutator(Protocol):
     """Tracker-list mutations -- never reachable from the TUI."""
 
-    def torrents_add_trackers(self, torrent_hash: str, urls: str) -> None:
-        """Add a tracker URL to one torrent."""
-        ...
+    def torrents_add_trackers(self, torrent_hash: str, urls: str) -> None: ...
 
     def torrents_remove_trackers(
         self, torrent_hash: str, urls: list[str]
-    ) -> None:
-        """Remove one or more tracker URLs from one torrent."""
-        ...
+    ) -> None: ...
 
     def torrents_edit_tracker(
         self, torrent_hash: str, original_url: str, new_url: str
-    ) -> None:
-        """Replace one torrent's tracker URL with another."""
-        ...
+    ) -> None: ...
 
 
 @runtime_checkable

@@ -135,15 +135,10 @@ SETUP_WORKER_GROUP = "qbit-setup"
 SAMPLE_WORKER_GROUP = "qbit-sample"
 INSTANCE_LISTS_WORKER_GROUP = "qbit-instance-lists"
 
-# Trailing debounce for search-as-you-type. `set_search` is pure
-# in-memory filtering, but "pure" is not "free": measured at ~120 ms at
-# 5,000 torrents for the recompute alone, run synchronously on the UI
-# thread on every keystroke -- long enough to stall the very character
-# just typed from being painted. 150 ms sits above a fast typist's
-# inter-keystroke gap (commonly 60-150 ms in a continuous burst), so a
-# typed word collapses to one recompute instead of one per character,
-# while staying inside the ~100-300 ms band a UI reads as "live" once
-# typing actually pauses -- see `scripts/profile_tui_table.py`.
+# Trailing debounce for search-as-you-type: `set_search` costs ~120 ms
+# at 5,000 torrents on the UI thread (see `scripts/profile_tui_table.py`),
+# long enough to stall the keystroke just typed. 150 ms coalesces a
+# typed word into one recompute instead of one per character.
 SEARCH_DEBOUNCE_SECONDS = 0.15
 
 
@@ -172,9 +167,8 @@ class QbitOpsTuiApp(App[None]):
     ENABLE_COMMAND_PALETTE = False
 
     # Every rule lives in one external sheet, shipped inside the wheel
-    # (see `tests/test_distribution.py`). Nine per-class `CSS` blocks
-    # used to re-decide the same frame nine times; the sheet plus
-    # `QbitModal` leave each surface only what is its own.
+    # (see `tests/test_distribution.py`); `QbitModal` leaves each
+    # surface only what is its own.
     CSS_PATH = "qbit_ops.tcss"
 
     BINDINGS = [
@@ -191,10 +185,7 @@ class QbitOpsTuiApp(App[None]):
         # moves the caret instead of changing page.
         Binding("left", "show_overview", "Overview", show=False),
         Binding("right", "show_torrents", "Torrents", show=False),
-        # One visible token, announcing the arrows alone: the command bar
-        # teaches the gesture a first-time reader reaches for, it is not
-        # the key inventory. `j`/`k` keep working, and the help modal
-        # lists `j/k, ↑/↓` together for whoever wants the whole set.
+        # `j`/`k` keep working; the help modal lists `j/k, ↑/↓` together.
         #
         # The token hangs off `j`, not `down`, and that is load-bearing:
         # a focused `DataTable` binds `up`/`down` itself, so the screen's
@@ -359,14 +350,10 @@ class QbitOpsTuiApp(App[None]):
     # -- the graph's own clock ----------------------------------------
     #
     # A second timer, deliberately not `refresh_interval`: the graph
-    # window is a span of wall-clock time, so its axis label would stop
-    # being true the moment an operator passed `--interval`.
-    #
-    # It costs one `transfer_info()` per second, which is why it runs
-    # *only while the Overview is on screen*. On the Torrents page it is
-    # stopped outright, and the seconds it did not watch are recorded as
-    # unmeasured rather than back-filled with zeroes -- nobody was
-    # looking, and the graph says so instead of drawing a still library.
+    # window is wall-clock time, so its axis label must stay true
+    # regardless of `--interval`. Costs one `transfer_info()` per second,
+    # so it only runs while the Overview is on screen; seconds it didn't
+    # watch are recorded as unmeasured, never back-filled with zeroes.
 
     def _resume_sampling(self) -> None:
         if not self._refreshing_started or self._sample_timer is not None:
@@ -1883,6 +1870,11 @@ class QbitOpsTuiApp(App[None]):
         result. On `ResultScreen`, this priority binding pre-empts the
         screen's own `action_dismiss`, so its selection-clearing policy
         is triggered explicitly here instead.
+
+        Closing the search input this way never touches `state.search`
+        or the filtering it drives -- only the input widget and its
+        footer token are torn down; the search term and its results
+        survive.
         """
         if len(self.screen_stack) > 1:
             screen = self.screen
@@ -1896,9 +1888,9 @@ class QbitOpsTuiApp(App[None]):
                 # A value modal was opened *from* Actions, so escape
                 # pops one conceptual level rather than closing the
                 # stack: it goes back to every other action, and a
-                # second escape closes from there. It replaced an
-                # `alt+left` binding a window manager was eating before
-                # the app ever saw it.
+                # second escape closes from there -- not `alt+left`,
+                # which a window manager typically intercepts before
+                # the app ever sees it.
                 screen.action_back()
                 return
             if isinstance(screen, ResultScreen):

@@ -37,7 +37,9 @@ class FiltersScreen(QbitModal):
     `Apply`: no re-filtering on every keystroke (zero qBittorrent calls
     either way -- this whole screen is in-memory). `⏎` applies the
     draft and *stays open*; `esc` closes without undoing anything
-    already applied; `ctrl+r` empties the draft without applying. See
+    already applied; `ctrl+r` empties the draft without applying. No
+    `Button` widgets: Apply/Clear/Cancel are these bottom-border key
+    gestures, not buttons to click. See
     `.agents/features/tui-filters/SPEC.md`, "Les trois gestes, tranchés".
 
     `enter`/`escape` are not bound here: both are `priority=True` on
@@ -56,11 +58,9 @@ class FiltersScreen(QbitModal):
     terminal -- a near-universal virtual-desktop shortcut on Linux --
     so the binding worked in every test (`pilot.press` injects the
     Textual key event directly, bypassing the WM entirely) while being
-    dead on a real desktop. Nobody caught it because no test pressed
-    the key and checked the pane actually changed; the announcement
-    guard only checks that an announced key is *bound*, not that
-    pressing it *does* something (see
-    `test_every_announced_key_is_a_binding_that_is_actually_active`).
+    dead on a real desktop. The announcement guard only checks that an
+    announced key is *bound*, not that pressing it *does* something
+    (see `test_every_announced_key_is_a_binding_that_is_actually_active`).
     `pageup`/`pagedown` carry no such OS-level meaning, so they become
     the primary, announced gesture; `alt+left`/`alt+right` stay bound
     (unannounced) for the terminals that do deliver them.
@@ -94,7 +94,7 @@ class FiltersScreen(QbitModal):
     MODAL_TITLE = "Filters"
     # `wide`, not `large`: measured (`MODAL_WIDTHS`' own comment,
     # `modals/base.py`) that this dialog's floor is its own footer, not
-    # its fields -- `large` (100) left ~39 columns nothing used.
+    # its fields -- `large` (100) left ~26 columns nothing used.
     MODAL_WIDTH = "wide"
     MODAL_KEYS = (
         KeyHint(("pageup",), "Section"),

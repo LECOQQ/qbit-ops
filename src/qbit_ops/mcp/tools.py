@@ -1,23 +1,12 @@
 """Bounded, read-only views over `qbit_core`, shaped for an agent.
 
-The problem this package exists to solve was measured, not assumed: a
-`torrents list --format json` over a 1000-torrent library serialises
-~346 KiB. An MCP tool result cannot be piped through `jq` or `head` --
-it lands in the model's context whole. So the bound lives here, on the
-server, never in the model's good intentions.
-
-The shape is drill-down, and it is deliberate:
-
-    summary  ->  find (bounded)  ->  inspect one  ->  explain one
+See `docs/MCP.md` for why the surface is bounded and drill-down shaped,
+and `qbit_ops.mcp` for why it holds no domain logic of its own.
 
 Each step returns just enough to choose the next one. `find_torrents`
 returns the handful of fields `_brief` names, not every field
 `inspect_torrent` carries through `_full`, because a hash, a name and a
 state are what a next step is chosen from.
-
-No tool mutates. No tool holds a rule of its own: every classification
-comes from `qbit_core`, so this surface cannot drift from the CLI's
-answers -- and it can be deleted without taking a verdict with it.
 """
 
 from __future__ import annotations
@@ -122,11 +111,9 @@ def find_torrents(
     in context.
 
     Filters go through `build_torrent_filter` and `select_torrents`,
-    the same engine `aggregate_stats` and every CLI selector use: this
-    tool used to compare `category` with `==` and `state_group` with a
-    hand-rolled lowercase check, so it silently disagreed with
-    `aggregate_stats` on the same arguments (case, and the
-    `uncategorized` token). One engine, one answer.
+    the same engine `aggregate_stats` and every CLI selector use, so
+    this tool's answer can never diverge from theirs on the same
+    arguments.
     """
     filters = build_torrent_filter(
         categories=[category] if category else (),

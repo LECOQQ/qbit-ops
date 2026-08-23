@@ -10,9 +10,8 @@ Three independent checks, all hard failures:
    (`docs/...`, `src/...`, `tests/...`) must exist.
 3. A section citation on such a path -- a doc path immediately
    followed by `§<number>` -- must name a section still present in
-   that file. (1) and (2) only ever proved the *file* resolves. A doc
-   trimmed down to fewer sections left four such citations pointing
-   at nothing, uncaught by either.
+   that file. (1) and (2) only ever prove the *file* resolves, not
+   that the cited section still exists inside it.
 
 The anchoring rule in (2) is what keeps this usable. Documentation is
 full of contextual shorthand -- `shared/selection.py`, `conftest.py`,
@@ -52,9 +51,8 @@ SKIPPED_DIRS = frozenset(
         # Scratch. `tmp/` is gitignored and exists so an agent can put
         # a variant, a measurement table or a draft somewhere it will
         # not be mistaken for the repository saying something. Holding
-        # it to the reference check makes a throwaway file able to fail
-        # a build -- and it did, on a design draft nobody would ever
-        # read as documentation.
+        # it to the reference check would make a throwaway file able
+        # to fail a build.
         "tmp",
         # Frozen records, not live documentation. A delivered feature's
         # SPEC and a workflow-history entry cite the world as it was;
@@ -101,9 +99,6 @@ BACKTICK_TOKEN = re.compile(r"`([^`\n]+)`")
 # The house citation idiom for pointing at part of a doc rather than
 # the whole file: a doc path immediately followed by one or more
 # section numbers, each led by "§" and optionally chained with "/".
-# A link check confirms the *file* exists; this confirms the *section*
-# still does, which a doc trimmed down to fewer sections can silently
-# break without either half-file-check ever seeing it.
 SECTION_CITATION = re.compile(r"`([\w./-]+\.md)`\s+((?:§[\w.]+/?)+)")
 SECTION_NUMBER = re.compile(r"§([\w.]+)")
 
@@ -372,9 +367,7 @@ def _check_section_citations(
 
     A link or reference check only proves the *file* resolves; a
     citation like `docs/COMPATIBILITY.md §5.2` makes the narrower claim
-    that section still exists inside it. Four such citations survived
-    a doc trimmed down to fewer sections because nothing checked the
-    second half of that claim.
+    that section still exists inside it, which neither check verifies.
     """
     findings: list[Finding] = []
     skipped = _ignored_lines(text)

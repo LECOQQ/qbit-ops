@@ -18,10 +18,8 @@ allowlist. That is how a genuine use survives -- the TUI renders an em
 dash as the glyph for an inactive rate cell, and no style rule should
 change user-visible output.
 
-New rules arrive through a run's `REPORT.md` as an improvement
-opportunity, then approval, then a control-plane run. Never
-opportunistically, or this gate becomes the vibes detector it exists to
-avoid.
+New rules go through the governance AGENTS.md describes, never
+opportunistically.
 """
 
 from __future__ import annotations

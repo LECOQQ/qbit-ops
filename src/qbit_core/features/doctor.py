@@ -1,7 +1,6 @@
 """Collect and represent a qbit-ops diagnostic report.
 
-Callable without Typer or Rich, mirroring `qbit_core.features.status`'s
-collection/render split. Performs a bounded, documented number of
+Callable without Typer or Rich. Performs a bounded, documented number of
 remote calls: one login (by the caller) plus up to four read calls
 (`app_version`, `app_web_api_version`, `transfer_info`,
 `torrents_info`) -- never a per-torrent call.
@@ -51,13 +50,12 @@ _URL_USERINFO_PATTERN = re.compile(r"://[^/@\s]+:[^/@\s]+@")
 
 # Web API floors already declared by `qbittorrent-api` itself
 # (`version_introduced`) for the two mutation capabilities qbit-ops
-# actually issues that carry a declared floor -- see
-# docs/COMPATIBILITY.md. `torrents/addTrackers` and every read
-# endpoint qbit-ops calls have no declared floor, so they are not
-# listed here. The pause/resume vs. stop/start Web API 2.11.0
-# threshold is deliberately excluded: `qbittorrent-api` itself selects
-# the endpoint internally (docs/COMPATIBILITY.md), so it is never a
-# capability that can be "missing" from qbit-ops's point of view.
+# actually issues that carry a declared floor. `torrents/addTrackers`
+# and every read endpoint qbit-ops calls have no declared floor, so
+# they are not listed here. The pause/resume vs. stop/start Web API
+# 2.11.0 threshold is deliberately excluded: `qbittorrent-api` itself
+# selects the endpoint internally, so it is never a capability that
+# can be "missing" from qbit-ops's point of view.
 _REQUIRED_WEB_API_CAPABILITIES: tuple[tuple[str, str], ...] = (
     ("torrent reannounce (torrents/reannounce)", "2.0.2"),
     (
@@ -258,19 +256,8 @@ _SMALL_CAPS_TITLES: tuple[str, ...] = ("Session", "Trackers", "Transfer")
 
 
 def _small_caps_coverage_check() -> DoctorCheck:
-    """State what opting into Unicode small-capital titles requires.
-
-    `SKIPPED`, and that is the accurate status rather than a softened
-    one: **no process can read the terminal's font.** Whether a glyph
-    renders at the right size is decided by the emulator and its
-    fallback chain, and nothing qbit-ops can query reports it honestly.
-    A permanent `WARNING` would have been a lie of a different kind --
-    it would have put every healthy instance on exit code 1 forever.
-
-    The default needs none of this: window titles are letter-spaced
-    ordinary capitals, which ask nothing of a font. This check exists
-    for the operator considering the opt-in.
-    """
+    """Always `SKIPPED`: no process can read the terminal's font, so
+    glyph coverage can only be described, never graded."""
     worst = _SMALL_CAPS_TITLES[0]
     blocks = blocks_used(worst)
     return DoctorCheck(
@@ -788,7 +775,7 @@ def _capability_check(web_api_version: str | None) -> DoctorCheck:
 
     Separate from `COMPAT002`: backed by `qbittorrent-api`'s declared
     floors, not the Docker matrix. Never invents a floor beyond the two
-    in docs/COMPATIBILITY.md.
+    declared in `_REQUIRED_WEB_API_CAPABILITIES`.
     """
     if web_api_version is None:
         return DoctorCheck(
@@ -963,10 +950,9 @@ def _torrent_states_check(torrents: list[Any] | None) -> DoctorCheck:
 
 
 def _redact(error: Exception | None, config: QbitConfig | None) -> str | None:
-    """Strip known secrets and embedded URL credentials from error text.
+    """Strip URL userinfo and the configured password from error text.
 
     The single funnel every check must use before a `detail` field.
-    Never exposes passwords, cookies, or authorization headers.
     """
     if error is None:
         return None

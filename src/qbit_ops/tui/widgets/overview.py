@@ -1,4 +1,5 @@
-"""The Overview workspace: `BrandHeader` + `WorkspaceTabs` + `OverviewPanel`."""
+"""The Overview workspace's own content (`BrandHeader` + `OverviewPanel`);
+also defines the always-visible `WorkspaceTabs` strip."""
 
 from __future__ import annotations
 
@@ -79,8 +80,8 @@ _LOGO_COMPACT: tuple[str, ...] = (
 # the general card-layout breakpoints in `formatting.py` -- reusing those
 # made the compact wordmark disappear far before it needed to.
 #
-# The margins are one column each, not five and six: the wordmark no
-# longer owns the full width, it owns the identity column inside the
+# The margins are one column each: the wordmark no longer owns the
+# full width, it owns the identity column inside the
 # ᴛʀᴀɴꜱꜰᴇʀ window's border, beside the graph. A wider margin dropped the
 # full wordmark at 140 columns -- the very width the design is drawn at.
 _FULL_LOGO_WIDTH = max(len(line) for line in _LOGO_FULL)
@@ -241,7 +242,7 @@ class OverviewPanel(VerticalScroll):
     refresh already populates -- no qBittorrent call of its own:
 
         identity   the wordmark, and the instance's own status line
-        graph      sixty seconds of transfer, in the band beside it
+        graph      up to sixty seconds of transfer, in the band beside it
         ᴛʀᴀᴄᴋᴇʀꜱ    per-tracker activity, derived from torrent rates
         ꜱᴇꜱꜱɪᴏɴ     the instance's counters and the library's shape
 

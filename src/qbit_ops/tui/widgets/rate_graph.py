@@ -4,11 +4,11 @@ Fills the band the wordmark reserved and never used, so it costs the
 page no line of its own. Download grows upward from the axis, upload
 downward, in the same four dot steps -- see `qbit_ops.tui.dots`.
 
-**The width decides the window.** One sample per second and one column
-per sample, so a panel `N` columns wide shows exactly `N` seconds, and
-the axis label is read back off that. Nothing is rounded to a nicer
-number: a label that said "60s" over a 67-column window would be the
-one thing on this page allowed to lie.
+**The window decides the plot, not the panel** (see `plot_slots`): one
+sample per second and one column per sample, normally sixty of them. A
+panel too narrow for the whole window shows only the trailing seconds
+that fit, and the axis label always says that real number -- it is
+never rounded to a nicer one.
 
 The scale is relative to the window's own peak, which is what keeps the
 panel from being a flat line on a steady seedbox. The consequence is

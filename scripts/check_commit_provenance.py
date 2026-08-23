@@ -5,11 +5,10 @@ The repository's commit history is the record of who authored the work,
 and agent-generated `Co-Authored-By` trailers pollute it with a
 co-author that never existed as a person.
 
-This is enforced mechanically rather than by convention because the
-convention demonstrably failed: on `stats-tracker-breakdown`, every
-commit carried the trailer -- not because an agent drifted, but because
-the instruction it was given said to add it. A rule that lives only in a
-prompt is only as good as the prompt that happened to be used.
+This is enforced mechanically rather than by convention: a rule that
+lives only in a prompt is only as good as the prompt that happened to
+be used, and an instruction that asks for the trailer defeats a
+convention no gate checks.
 
 Two entry points share this check:
 

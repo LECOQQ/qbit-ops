@@ -3,14 +3,12 @@
 Two blocks of different natures, never merged: `library` sums the
 measures of the torrents currently present and retained by the
 selection, while `instance` reports qBittorrent's own all-time counters,
-which include torrents since deleted and cannot be segmented. Putting a
-filtered total next to a global one would invite a comparison that means
-nothing, so the second block only exists when the invocation narrowed
-nothing (`SelectionRequest.has_selector`).
+which include torrents since deleted and cannot be segmented. See
+`TorrentStatsReport` for when the second block is produced.
 
-Free of Typer and Rich, like every other feature module. The aggregation
-functions take a sequence of `TorrentSnapshot` and no client, so a test,
-the TUI, or a future policy engine can call them directly.
+The aggregation functions take a sequence of `TorrentSnapshot` and no
+client, so a test, the TUI, or a future policy engine can call them
+directly.
 """
 
 from __future__ import annotations
@@ -72,12 +70,7 @@ class LibraryStats:
 
 @dataclass(frozen=True)
 class MeasureTotals:
-    """The measures any aggregate over torrents sums the same way.
-
-    Deliberately smaller than `LibraryStats`: only the measures a
-    second aggregation (today the per-tracker breakdown) also needs,
-    so both come out of one arithmetic instead of two.
-    """
+    """The measures every aggregation over torrents sums the same way."""
 
     total_size_bytes: int
     downloaded_bytes: int
@@ -294,13 +287,8 @@ def stats_report_to_dict(report: TorrentStatsReport) -> dict[str, Any]:
 def stats_report_to_csv_rows(
     report: TorrentStatsReport,
 ) -> list[tuple[str, str, str]]:
-    """Convert a stats report into stable `section,key,value` rows.
-
-    The long shape `status` already established: one row per metric, so
-    an absent `instance` block is simply absent rather than a run of
-    empty columns, and a metric added later appends rows instead of
-    changing every existing one.
-    """
+    """Convert a stats report into stable `section,key,value` rows; an
+    absent `instance` block is simply absent."""
     payload = stats_report_to_dict(report)
     rows = [
         ("library", key, _csv_value(value))

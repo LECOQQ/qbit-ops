@@ -81,9 +81,11 @@ class CommandBar(Static):
     `Screen.bindings_updated_signal` exactly like `Footer`.
 
     A live search replaces the `[/→Search]` token with a pipe-delimited
-    `|search: xxx|` one. "Active" is real focus on `#search-input`,
+    `|search: xxx|` one. `CommandBar` itself is a `Static` and never
+    receives a keystroke -- the real sink is the separately mounted
+    `#search-input`. "Active" is real focus on that `Input`,
     re-checked every render rather than a sticky flag, so it self-heals
-    the instant focus leaves the input -- which also lets
+    the instant focus leaves it -- which also lets
     `Screen.active_bindings` drop every other single-key binding via
     Textual's `check_consume_key` while the input is focused, so
     `entries` naturally shrinks to just Search while typing.

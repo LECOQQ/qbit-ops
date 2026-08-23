@@ -48,21 +48,6 @@ __all__ = [
     "tracker_status_report_to_dict",
 ]
 
-__all__ = [
-    "SCHEMA_VERSION",
-    "TrackerHealth",
-    "classify_raw_tracker_status",
-    "TrackerEndpointObservation",
-    "TrackerAggregate",
-    "TrackerStatusReport",
-    "tracker_status_exit_code",
-    "collect_tracker_status",
-    "tracker_aggregate_to_dict",
-    "tracker_status_report_to_dict",
-    "TRACKER_STATUS_CSV_FIELDNAMES",
-    "tracker_status_report_to_csv_rows",
-]
-
 SCHEMA_VERSION = "1"
 
 
@@ -288,7 +273,7 @@ def collect_tracker_status(
     `qbit_core.shared.inspection`). A lookup failure is caught and
     counted rather than aborting: `collection_errors` is always
     visible, and `overall_health` can never read fully healthy while
-    errors > 0. When `filters.tracker` is set, every surviving torrent
+    errors > 0. When `filters.trackers` is set, every surviving torrent
     is still scanned and the aggregates are filtered afterward --
     `--tracker` restricts the report, not the API-call volume. Several
     values combine with OR.

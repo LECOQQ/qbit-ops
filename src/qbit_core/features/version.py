@@ -1,4 +1,4 @@
-"""Collect the qbit-ops, Python, and qBittorrent versions.
+"""Collect the qbit-ops, Python, qBittorrent, and Web API versions.
 
 Kept free of Typer and Rich so the collection stays reusable and
 testable without the CLI layer. `qbit_core` never imports `qbit_ops`,

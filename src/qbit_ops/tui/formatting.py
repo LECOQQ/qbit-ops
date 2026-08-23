@@ -77,7 +77,7 @@ _FRAME_BORDER_COLS = 2
 def _content_width(app_width: int) -> int:
     """Usable content width once the outer AppFrame border is
     accounted for -- the frame itself is removed entirely (see
-    `Screen.narrow`'s CSS) below `NARROW_WIDTH_THRESHOLD`."""
+    `MainScreen.narrow`'s CSS) below `NARROW_WIDTH_THRESHOLD`."""
     if app_width < NARROW_WIDTH_THRESHOLD:
         return app_width
     return app_width - _FRAME_BORDER_COLS
@@ -141,13 +141,10 @@ def _format_byte_rate(bytes_per_second: int) -> str:
     return f"{_format_bytes(bytes_per_second)}/s"
 
 
-# The hue names the *direction*; having a hue at all names the
-# activity. Seeding takes the brand orange -- it is what a seedbox does
-# most -- and leeching the restrained blue. An idle direction gets no
-# hue rather than a third one, so the colour never has to answer two
-# questions at once. Read by the three regions that paint a direction:
-# the top-right rate readout, the two halves of the Overview graph, and
-# the Trackers window's `up`/`down` columns.
+# Per-direction accent, read by the three regions that paint a
+# direction: the top-right rate readout, the two halves of the
+# Overview graph, and the Trackers window's `up`/`down` columns. Idle
+# gets no hue rather than a third one.
 UP_RATE_ACCENT = BRAND_ACCENT
 DOWN_RATE_ACCENT = BRAND_SECONDARY
 IDLE_RATE_STYLE = "dim"
@@ -197,17 +194,7 @@ TABLE_NAV_HINT = "← Overview · Torrents →"
 def _window_title(name: str, *, small_caps: bool) -> str:
     """A window's border title: ordinary capitals unless small caps are on.
 
-    Capitals are the default because the Unicode small-capital alphabet
-    cannot be made font-independent -- its 25 letters sit in three
-    unrelated blocks and no terminal font covers them evenly, so a title
-    mixes sizes on the reader's machine however carefully it is composed
-    here. Plain capitals cost `n` cells for `n` letters and every font
-    has them.
-
-    Letter-spacing was tried and rejected: `T R A N S F E R` reads as
-    seven words rather than one, and it cost `2n - 1` cells, which a
-    four-tab strip cannot afford.
-
+    Capitals are the font-independent default (see `_SMALL_CAPS` above).
     The escape hatch is a setting rather than a probe: font coverage is
     the one risk here that no measurement lifts, and no terminal query
     reports it reliably.
@@ -435,12 +422,13 @@ _SCROLLBAR_RESERVE = 2
 # column each side) -- see `qbit_ops.tcss`.
 _TORRENTS_BORDER_COLS = 2
 
-# Mirrors `DetailsScreen.CSS`'s `#details-dialog` rule (`width: 86%;
-# min-width: 60; max-width: 100`) -- computed here, not read back from
-# the live widget, for the same pre-layout-timing reason as every
-# other width helper in this module. `_DETAILS_DIALOG_BORDER_COLS`
-# accounts for the dialog's own round border (2) plus `padding: 1 2`
-# (4 columns).
+# Approximates `.qbit-dialog.-large`'s fixed `width: 100`
+# (`qbit_ops.tcss`) -- computed here, not read back from the live
+# widget, for the same pre-layout-timing reason as every other width
+# helper in this module. The 86%/60-100 clamp below predates that
+# fixed-width rule; it has not been re-verified against it.
+# `_DETAILS_DIALOG_BORDER_COLS` accounts for the dialog's own round
+# border (2) plus `padding: 1 2` (4 columns).
 _DETAILS_DIALOG_WIDTH_FRACTION = 0.86
 _DETAILS_DIALOG_MIN_WIDTH = 60
 _DETAILS_DIALOG_MAX_WIDTH = 100
@@ -592,8 +580,8 @@ _NAME_WRAP_TOKEN_RE = re.compile(r".*?(?:[ .\-_\[\]]|$)")
 
 
 def _wrap_name_at_separators(name: str, width: int) -> str:
-    """Wrap `name` to `width` cells, breaking only right after a space
-    or one of '.', '-', '_', '[', ']' -- never truncates.
+    """Wrap `name` to `width` cells at `_NAME_WRAP_TOKEN_RE`'s
+    separators -- never truncates.
 
     Width is measured with `rich.cells.cell_len`, not `len()` (a
     Details modal name is plain, markup-free text at this point, but

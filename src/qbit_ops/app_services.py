@@ -74,9 +74,9 @@ class TuiRefreshResult:
     `raw_torrents` is the raw `torrents_info()` result. It is the only
     torrent payload carried, and it is carried raw on purpose: the
     controller re-applies a `TorrentFilter` in memory without a second
-    API call, and the composable filters read fields (`tags`,
-    `save_path`, `uploaded`, `seeding_time`, `added_on`, `private`)
-    that `TorrentSnapshot` deliberately does not hold. It also feeds
+    API call, and the composable filters read raw fields (`save_path`,
+    `private`, and the raw-named `added_on`) that `TorrentSnapshot`
+    does not expose under that name or type. It also feeds
     `build_bulk_action_plan_from_snapshot`'s zero-API planning path.
 
     `total_torrents` is the instance-wide count the Overview shows --

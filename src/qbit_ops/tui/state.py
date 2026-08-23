@@ -5,19 +5,10 @@ Blocking qBittorrent calls are split into `collect_*()` (blocking) /
 the Textual event loop; a monotonic `_detail_request_id` guards
 against a stale background result overwriting a newer one.
 
-Security boundary -- only imports safe, structured domain outputs and
-the two frozen-plan LOW-risk mutation functions -- exactly the actions
-`TuiBulkAction` names (pause/resume/start/reannounce/category_set/
-category_clear/tag_add/tag_remove/throttle, widened by `tui-filters`
-from pause/resume/reannounce alone) -- never a rescanning or
-unbounded-selector function, any deletion function, or
-`qbit_ops.cli`. `tests/test_tui_security.py`
-enforces the *import* half of that boundary; it cannot see a value
-passed at a call site, which is why `"delete"` -- part of
-`qbit_core`'s shared `TorrentBulkAction` union, since the CLI does
-reach it -- is additionally made inexpressible here: `build_bulk_plan`
-is typed against `TuiBulkAction`, the same union minus `"delete"`, and
-refuses at runtime if a caller defeats that typing.
+Security boundary: same import-level rule as `qbit_ops.tui.app` (see
+its module docstring). `TuiController.build_bulk_plan` additionally
+makes `"delete"` inexpressible at runtime, since the import scan in
+`tests/test_tui_security.py` cannot see a value passed at a call site.
 """
 
 from __future__ import annotations
@@ -113,12 +104,9 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 # `slots x interval` seconds wide, so its axis label would become a
 # false claim the moment an operator changed the interval.
 #
-# One second per sample, and one *column* per sample: at five seconds
-# the trace was a staircase of blocks rather than a shape. The window is
-# therefore as many seconds wide as the panel is columns wide, and the
-# label is read back off that -- the width decides the window, the
-# window decides the label, and the label can never be the thing that
-# lies. Nothing here is rounded to a nicer number for that reason.
+# One second per sample, one column per sample: coarser than that and
+# the trace stops reading as a shape. Nothing here is rounded to a
+# nicer number, for the same reason `GRAPH_WINDOW_SECONDS` below isn't.
 GRAPH_SAMPLE_INTERVAL_SECONDS = 1.0
 
 # The window is sixty seconds, and *that* is what fixes the plot at
@@ -1128,12 +1116,12 @@ class TuiController:
         call site. The `_TUI_BULK_ACTIONS` check below is not
         redundant with that: nothing in Python enforces a parameter's
         static type at runtime, so a caller that defeats the checker
-        (a `cast`, an `Any`-typed value, a future refactor that widens
-        this parameter back) would otherwise reach
-        `apply_bulk_torrent_action` -> `client.torrents_delete` with no
-        further gate in between -- the import-only scan in
-        `tests/test_tui_security.py` cannot see it, since no import
-        changes when the *value* passed here does.
+        (a `cast`, a future refactor that widens this parameter back)
+        would otherwise reach `apply_bulk_torrent_action` ->
+        `client.torrents_delete` with no further gate in between --
+        the import-only scan in `tests/test_tui_security.py` cannot
+        see it, since no import changes when the *value* passed here
+        does.
         """
         if action not in _TUI_BULK_ACTIONS:
             raise ValueError(

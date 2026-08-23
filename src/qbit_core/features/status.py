@@ -1,8 +1,8 @@
 """Collect and represent a qBittorrent instance status snapshot.
 
-This module is the status "service": it must remain callable without
-Typer and without Rich so it can be reused by future consumers (a
-`--watch` loop, a TUI) without pulling in CLI or presentation concerns.
+This module is the status "service": callable without Typer and
+without Rich so the CLI's `--watch` loop and the TUI can both reuse it
+without pulling in presentation concerns.
 """
 
 from __future__ import annotations
@@ -426,10 +426,8 @@ def snapshot_to_csv_rows(
 def _transfer_rates_from_data(transfer_info: Any) -> TransferRates:
     """Build transfer rates from an already-fetched `transfer_info()` result.
 
-    Routes through `qbit_core.qbit.fields.get_transfer_rates` instead of
-    calling `.get()` on `transfer_info` directly: a
-    malformed non-mapping payload now fails with an explicit `TypeError`
-    there rather than an accidental `AttributeError` here.
+    Delegates to `get_transfer_rates`, which raises `TypeError` on a
+    non-mapping payload.
     """
     download, upload = get_transfer_rates(transfer_info)
     return TransferRates(
@@ -500,8 +498,7 @@ def _build_alerts(
     """Build structured alerts from computed torrent counts.
 
     `torrents_stalled` counts `unexplained_stalled`, not
-    `counts.stalled`: a stalled torrent that needs no action does not
-    belong in a signal meant to say "intervene".
+    `counts.stalled` -- see `_count_torrents`.
     """
     alerts: list[StatusAlert] = []
 
@@ -545,9 +542,8 @@ def _build_alerts(
 def _compute_health(counts: TransferCounts, unexplained_stalled: int) -> Health:
     """Compute overall health, keeping the most severe condition.
 
-    Uses `unexplained_stalled`, not `counts.stalled`: a `stalledUP`
-    torrent completed purely from local data needs no action and must
-    not by itself turn a healthy library into a warning one.
+    Uses `unexplained_stalled`, not `counts.stalled` -- see
+    `_count_torrents`.
     """
     if counts.errored > 0:
         return Health.CRITICAL

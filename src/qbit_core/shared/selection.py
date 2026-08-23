@@ -259,9 +259,9 @@ class TorrentFilter:
     an AND NOT applied after inclusion. Bounded fields are `Range`
     objects, inclusive on both sides.
 
-    `tracker`, when set, is always pre-normalized to `host` or
-    `host:port` -- never a full URL, so a passkey can never reach this
-    model. `added` holds *resolved* datetimes: a relative duration like
+    `trackers`, when set, always holds values pre-normalized to `host`
+    or `host:port` -- never a full URL, so a passkey can never reach
+    this model. `added` holds *resolved* datetimes: a relative duration like
     `90d` is user intent, translated at the CLI boundary, so the filter
     itself stays comparable and serializable.
 

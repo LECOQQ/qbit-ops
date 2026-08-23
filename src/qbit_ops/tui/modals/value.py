@@ -122,12 +122,9 @@ class ValueActionScreen(QbitModal):
         routes here rather than closing outright: a value modal is opened
         *from* Actions, and popping one level is what escape means in a
         stack of modals. A second `escape`, now on Actions, closes as it
-        always did.
-
-        It carried `alt+left` until a live terminal showed the flaw: the
-        window manager takes `alt` plus an arrow for its own workspace
-        switching, so the announced gesture never reached the app. No
-        replacement key was needed once escape did the obvious thing.
+        always did. Never `alt+left`: the window manager takes `alt` plus
+        an arrow for its own workspace switching before the app ever sees
+        it.
         """
         app = cast("QbitOpsTuiApp", self.app)
         hashes = tuple(torrent.hash for torrent in self.selected)

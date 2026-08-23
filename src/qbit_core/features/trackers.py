@@ -1123,7 +1123,8 @@ def _ensure_distinct_tracker_identity(
     target_tracker: str,
     match_mode: TrackerMatchMode,
 ) -> None:
-    """Ensure source and target trackers are distinct for replacement."""
+    """Raise `RuntimeError` when source and target normalize to the
+    same tracker identity."""
     normalized_source = normalize_tracker_url(source_tracker, match_mode)
     normalized_target = normalize_tracker_url(target_tracker, match_mode)
 
@@ -1134,7 +1135,7 @@ def _ensure_distinct_tracker_identity(
 
 
 def _get_torrent_hash(torrent: Any) -> str:
-    """Extract the torrent hash from a qBittorrent torrent object."""
+    """Return the torrent hash, or raise `RuntimeError` when blank."""
     torrent_hash = get_field_as_string(torrent, "hash")
     if torrent_hash == "":
         raise RuntimeError("Unable to read torrent hash from qBittorrent data.")
@@ -1143,7 +1144,7 @@ def _get_torrent_hash(torrent: Any) -> str:
 
 
 def _get_torrent_name(torrent: Any) -> str:
-    """Extract the torrent name from a qBittorrent torrent object."""
+    """Return the torrent name, falling back to its hash when blank."""
     torrent_name = get_field_as_string(torrent, "name")
     if torrent_name == "":
         return _get_torrent_hash(torrent)

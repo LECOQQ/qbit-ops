@@ -5,8 +5,6 @@ client-facing use cases: fetching torrents, resolving a
 `SelectionRequest` against them, and planning/applying bulk actions.
 Every result carries `TorrentSnapshot` directly -- display concerns
 such as the `(uncategorized)` label belong to the rendering layers.
-Kept free of Typer and Rich so both the CLI and the TUI can reuse it
-without pulling in presentation concerns.
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -171,9 +169,7 @@ def build_torrent_filter(
     cross-family contradiction. Callers therefore never have to
     remember to validate separately.
 
-    Bounded families arrive as `Range` objects because turning `10GiB`
-    or `90d` into a number is a presentation concern -- the filter
-    stores resolved values so it stays comparable and serializable.
+    Bounded families arrive as `Range` objects holding resolved values.
     """
     if completed and incomplete:
         raise ValueError("Use --completed or --incomplete, not both.")
@@ -615,8 +611,7 @@ class BulkTorrentActionPlan:
     is the target tag set (`action in ("tag_add", "tag_remove")`).
     `category_needs_creation` is only ever `True` for `"category_set"`,
     and only once real changes exist -- creating a category with no
-    torrent to attach it to is out of scope (see `.agents/specs/
-    bulk-category-tag.md`, "Hors périmètre").
+    torrent to attach it to is out of scope.
 
     `download_limit`/`upload_limit` are bytes per second for
     `action == "throttle"`, where `0` means unlimited (qBittorrent's own
@@ -724,15 +719,13 @@ def plan_bulk_torrent_action(
     `category_needs_creation` is the caller's own read of
     `client.torrents_categories()` (see `resolve_category_availability`)
     -- planning never issues that read itself, so a `category_set` dry-run
-    costs exactly the one call the caller already made. It only survives
-    into the returned plan when there is at least one real change:
-    creating a category nothing ends up wearing is out of scope.
+    costs exactly the one call the caller already made. See
+    `BulkTorrentActionPlan.category_needs_creation` for when it survives
+    into the returned plan.
 
-    For `"tag_add"`/`"tag_remove"`, current tag membership is read from
-    `TorrentSnapshot.tags` -- the same bulk listing SELECT already
-    fetched, no second scan. `"throttle"` was the first action to make
-    this move: `TorrentSnapshot` already carries the current limits, so
-    planning costs the one scan every action costs.
+    For `"tag_add"`/`"tag_remove"`/`"throttle"`, current tag membership
+    and rate limits are both read from `TorrentSnapshot` -- the same
+    bulk listing SELECT already fetched, no second scan.
 
     `download_limit`/`upload_limit` are only meaningful for
     `"throttle"`, in bytes per second, `0` being unlimited and `None`
@@ -812,12 +805,10 @@ def known_tags(client: Any) -> tuple[str, ...]:
     """Every tag declared on the instance, including one no torrent
     currently carries -- what `TorrentSnapshot.tags` cannot give, since
     it only ever reports a torrent's own tags. One `torrents_tags()`
-    call; qBittorrent has exposed it since Web API 2.3.0.
+    call.
 
-    The tag counterpart of `client.torrents_categories()` (called
-    directly, with no wrapper, at every existing call site) -- given a
-    name here because unlike categories, `qbit_core` had no read
-    primitive for it at all before `tui-filters` needed one.
+    The tag counterpart of `client.torrents_categories()`, called
+    directly, with no wrapper, at every existing call site.
     """
     return tuple(sorted(client.torrents_tags()))
 

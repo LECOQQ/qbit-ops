@@ -7,8 +7,8 @@ The Trackers window states its own limits, because it shows a *derived*
 truth: activity is inferred from torrent rates, not read from an
 announce. Four devices keep it from being mistaken for the real thing --
 a glyph alphabet disjoint from `TrackerHealth`'s, a title that names the
-derivation, a last line naming what is not read here, and the Trackers
-page keeping the announce status for itself.
+derivation, a last line naming what is not read here, and the CLI's
+`trackers` command keeping the announce status for itself.
 """
 
 from __future__ import annotations
@@ -37,11 +37,9 @@ from qbit_ops.tui.state import (
     TuiState,
 )
 
-# One arrow alphabet for the whole page. Seeding *is* uploading and
-# leeching *is* downloading, so the graph's `↑`/`↓` and a second set of
-# triangles were two shapes for one physical fact. The arrow now carries
-# only the direction; the word beside it carries the state, which is the
-# part `↕` cannot say.
+# One arrow alphabet for the whole page: the arrow carries only the
+# direction, the word beside it carries the state -- the part `↕`
+# cannot say.
 #
 # Still disjoint from `formatting._TRACKER_GLYPHS` (`● ! ○`): an
 # operator who has learnt one alphabet can never read a row of the other
@@ -74,23 +72,17 @@ _LEGEND_ORDER: tuple[tuple[TrackerActivityKind, str], ...] = (
     (TrackerActivityKind.UNKNOWN, "unknown"),
 )
 
-# One word, like ꜱᴇꜱꜱɪᴏɴ facing it. The border used to add "derived from
-# torrent activity", which said the same thing as the window's own last
-# line eleven rows below -- and said it less precisely, since the last
-# line names what is *not* read and sits against the data it qualifies.
-# qBittorrent's own word for what the graph plots, and unique on the
-# page: `activity` was rejected because the Trackers window already
-# spends it on a column of its own.
+# One word, like ꜱᴇꜱꜱɪᴏɴ facing it: qBittorrent's own word for what the
+# graph plots, and unique on the page -- `activity` was rejected
+# because the Trackers window already spends it on a column of its own.
 TRANSFER_TITLE = "Transfer"
 TRACKERS_TITLE = "Trackers"
 # The window names what it does not know, on its own last line: "idle"
 # here means "moving nothing", never "not announcing".
 #
-# It deliberately points nowhere. The line first read "see Trackers
-# (3/k)", and both halves were false -- there is no Trackers workspace,
-# and `k` is bound to `cursor_up`, so following the instruction moved a
-# table cursor. An announcement is only worth making when the gesture
-# it names exists and does what it says.
+# It deliberately points nowhere: no gesture in this app currently
+# reaches per-tracker announce status. An announcement is only worth
+# making when the gesture it names exists and does what it says.
 TRACKERS_DISCLAIMER = "announce status not read here"
 SESSION_TITLE = "Session"
 
@@ -122,7 +114,8 @@ _FIXED_ROW_WIDTH = (
     + TRACKER_SPARKLINE_SLOTS
 )
 
-# Header, blank, then the four footer lines the window always keeps.
+# Header, two blank separators, then the three footer lines the
+# window always keeps.
 _TRACKER_CHROME_ROWS = 6
 
 _LABEL_WIDTH = 13
@@ -130,8 +123,8 @@ _LABEL_WIDTH = 13
 # The widest word in either counter column ("downloading", 11).
 _COUNT_LABEL_WIDTH = 11
 
-# Two lines per list. The window's other fourteen rows are worth more
-# than a complete inventory of category names.
+# Two lines per list: the rest of the window is worth more than a
+# complete inventory of category names.
 _MAX_VALUE_LINES = 2
 
 # The three markers `connection_status` can carry, each with its own
@@ -146,7 +139,7 @@ _CONNECTION_MARKERS: dict[str, tuple[str, str, str]] = {
 _UNKNOWN_CONNECTION_MARKER = ("?", "Unknown", "bold yellow")
 
 _UNAVAILABLE = "unavailable"
-_NOT_COMPUTED = "–"  # ai-hygiene: allow-em-dash
+_NOT_COMPUTED = "–"
 _NO_LIMIT = "off"
 
 
@@ -346,9 +339,7 @@ def _append_torrent_counts(text: Text, state: TuiState) -> None:
     )
     # One width for every number in the block, not three columns each
     # sized to their own row. A per-row width let a four-digit count
-    # overflow its field and shove the right-hand label sideways, so on
-    # a 1147-torrent library `incomplete` sat a column off from the
-    # three labels under it.
+    # overflow its field and shove the right-hand label sideways.
     value_width = max(
         len(str(value)) for row in rows for value in (row[1], row[3])
     )

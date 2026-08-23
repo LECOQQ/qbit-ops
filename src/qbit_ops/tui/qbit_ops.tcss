@@ -39,10 +39,8 @@ MainScreen {
 MainScreen.narrow {
     border: none;
 }
-/* No fill here: this
-   strip used to carry a `$panel` background + bottom border that
-   read as an empty grey seam. The active/inactive tab colours
-   (see `WorkspaceTabs`) now carry all of this row's meaning. */
+/* No fill here: the active/inactive tab colours (see `WorkspaceTabs`)
+   already carry this row's meaning. */
 #top-bar {
     height: 1;
     padding: 0 1;

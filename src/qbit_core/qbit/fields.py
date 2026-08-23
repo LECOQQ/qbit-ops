@@ -4,9 +4,9 @@ Every field read goes through a `dict`-or-`getattr` accessor, since a
 response item can be either a plain `dict` or an attribute-bearing
 object. Checked with `isinstance(item, dict)`, not the more general
 `isinstance(item, Mapping)`: every qbittorrent-api response type read
-here is itself a `dict` subclass, and `dict`'s `isinstance` check
-measured ~4.5x cheaper than `Mapping`'s ABC-backed one -- paid per
-field, per torrent, on every filter pass.
+here is itself a `dict` subclass, and `dict`'s `isinstance` check is
+measurably cheaper than `Mapping`'s ABC-backed one -- paid per field,
+per torrent, on every filter pass.
 
 Two deliberately different reading policies coexist here:
 

@@ -37,8 +37,7 @@ from qbit_ops.tui.widgets.overview import _tab_label
 # the two corners. Measured empirically against `render_border_label`,
 # and the one place this number is written -- `qbit_ops.tui.modals.base`
 # and `tests/test_tui_app.py` both import it rather than keep their own
-# copy, which is how a `width - 4` guess survived next to this correct
-# `width - 6` for as long as it did.
+# copy.
 BORDER_LABEL_MARGIN: Final[int] = 6
 
 # (keep the dialog's own title?, abbreviate the inactive tabs?, drop

@@ -2,14 +2,11 @@
 """Refuse a commit body written as prose instead of bullets.
 
 This repository's commit bodies are short bullets, one line per change.
-The convention held for 91 commits against 12 exceptions -- and then
-broke, on 2026-08-15, when eleven consecutive commits arrived as
-paragraphs. Nobody noticed until a human read them.
-
-It broke for the same reason the provenance trailer did: the rule lived
-only in the history, never in `AGENTS.md` and never in a hook. An agent
-that reads the last few commits to infer the house style now infers the
-drift instead, and each prose commit makes the next one likelier.
+Enforced mechanically, for the same reason the provenance trailer is:
+a rule that lives only in the history, never in `AGENTS.md` and never
+in a hook, is a rule an agent reading the last few commits can infer
+as drift instead of convention -- and each prose commit that slips
+through makes the next one likelier.
 
 What this checks is deliberately narrow: the body's first non-empty line
 starts a bullet, and no bullet wraps earlier than it had to. It does not

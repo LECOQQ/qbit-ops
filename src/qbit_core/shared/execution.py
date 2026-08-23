@@ -3,14 +3,8 @@
 Every mutation this project can apply is classified into exactly one
 `MutationRisk` tier and goes through the same `ExecutionPolicy.decide()`
 logic to determine whether it previews, applies silently, prompts for
-confirmation, or refuses. This keeps the safety model in one place
-instead of re-implemented per surface.
-
-`MutationOperation` and `MUTATION_RISK` are CLI-agnostic on purpose --
-any surface (today only the CLI mutates through this module, but the
-TUI's own LOW-risk allowlist is checked against it in
-`tests/test_tui_security.py`) can ask "how risky is this?" without
-knowing a single thing about how the CLI spells its commands.
+confirmation, or refuses. See `MutationOperation` for why the
+classification stays CLI-agnostic.
 """
 
 from dataclasses import dataclass
@@ -36,16 +30,14 @@ class MutationRisk(StrEnum):
 class MutationOperation(StrEnum):
     """Every kind of mutation this project can apply to a qBittorrent
     instance -- one member per distinct blast radius, not per interface.
-
-    "Mutating" means changing the *qBittorrent instance*. Writing only
-    qbit-ops' own configuration file (`init`) is deliberately absent: it
-    has no selector to widen, no plan to preview, and no blast radius
-    beyond one local file that `--force` already guards.
+    "Mutating" means changing the *qBittorrent instance*; writing only
+    qbit-ops' own configuration file (`init`) is out of scope.
 
     Values are plain symbolic identifiers, never a CLI invocation path
     -- this module stays usable by any surface (TUI, MCP, a future one)
-    that only needs to ask "how risky is this?". The CLI's own spelling
-    for each of these (e.g. "torrents pause") lives in
+    that only needs to ask "how risky is this?" without knowing how the
+    CLI spells its commands. The CLI's own spelling for each of these
+    (e.g. "torrents pause") lives in
     `qbit_ops.cli.commands._shared.CLI_COMMAND_PATH`, the one place that
     correspondence belongs.
     """

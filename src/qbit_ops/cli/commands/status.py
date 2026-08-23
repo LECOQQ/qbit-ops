@@ -67,11 +67,10 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
 class _WatchClient:
     """Cache the qBittorrent client across `status --watch` iterations.
 
-    Rebuilding it every cycle re-paid the login handshake -- the most
-    expensive qBittorrent call -- on every tick: 720 logins per hour at
-    the default 5s interval. Dropped on any recoverable failure so the
-    next cycle reconnects with a fresh login instead of reusing a
-    client whose session may have expired.
+    Rebuilding it every cycle would re-pay the login handshake, the
+    most expensive qBittorrent call, on every tick. Dropped on any
+    recoverable failure so the next cycle reconnects with a fresh
+    login instead of reusing a client whose session may have expired.
     """
 
     def __init__(self) -> None:
