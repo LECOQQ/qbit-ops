@@ -210,7 +210,11 @@ class QbitOpsTuiApp(App[None]):
         # Explicit multi-selection, distinct from focus: only an
         # explicit Space press toggles it, never mere highlighting.
         Binding("space", "toggle_selection", "Select"),
-        Binding("ctrl+a", "select_all_visible", "Select visible", show=False),
+        # Announced in the command bar, and safe to announce: `Input`
+        # claims `ctrl+a` for "start of line", but `CommandBar` renders
+        # search tokens instead of bindings whenever `#search-input`
+        # holds focus -- so this is only ever shown where it acts.
+        Binding("ctrl+a", "select_all_visible", "Select visible"),
         Binding("ctrl+d", "deselect_all", "Deselect all", show=False),
         # `ctrl+r` is free at this level: it only ever resolves through
         # `check_action` outside a modal, and `FiltersScreen`'s own
