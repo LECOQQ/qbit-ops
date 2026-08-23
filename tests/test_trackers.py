@@ -536,6 +536,16 @@ def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
         )
 
 
+# The four passkey tests below each exercise one real URL shape, and the
+# host names say which: `-query` carries the passkey as a query parameter,
+# `-prefix` puts it before `/announce`, `-suffix` after it, and `-port`
+# adds an explicit port. They named four real private trackers until this
+# audit; the shapes are the whole point of the tests, the hosts never
+# were. `.example` is reserved by RFC 2606 and can never resolve, which
+# is the property that matters here -- a real host published in a public
+# repository names a tracker somebody is a member of.
+
+
 def test_plan_passkey_replacement_updates_query_placeholder() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
@@ -625,7 +635,9 @@ def test_plan_passkey_replacement_updates_path_before_announce() -> None:
 def test_plan_passkey_replacement_updates_path_segment_after_announce() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker-suffix.example/announce/old-passkey"}],
+            "hash-a": [
+                {"url": "https://tracker-suffix.example/announce/old-passkey"}
+            ],
         }
     )
 
@@ -685,7 +697,9 @@ def test_plan_passkey_replacement_never_leaks_secret_in_repr() -> None:
     """
     client = FakeQbitClient(
         trackers_by_hash={
-            "hash-a": [{"url": "https://tracker-suffix.example/announce/OLD-SECRET"}],
+            "hash-a": [
+                {"url": "https://tracker-suffix.example/announce/OLD-SECRET"}
+            ],
         }
     )
 
@@ -724,7 +738,9 @@ def test_plan_passkey_replacement_skips_torrents_already_up_to_date() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
-                {"url": "https://tracker-suffix.example/announce/ALREADY-CURRENT"}
+                {
+                    "url": "https://tracker-suffix.example/announce/ALREADY-CURRENT"
+                }
             ],
         }
     )
