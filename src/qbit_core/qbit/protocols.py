@@ -59,7 +59,11 @@ class QbitAppInfoReader(Protocol):
 class QbitTorrentMutator(Protocol):
     """LOW-risk torrent state mutations (see `shared.execution.MutationRisk`).
 
-    The only mutation surface the TUI is allowed to reach.
+    The only mutation surface the TUI is allowed to reach. Covers all
+    seven LOW-risk bulk actions `apply_bulk_torrent_action` can apply
+    (pause/resume/reannounce plus category/tags/throttle, since
+    `tui-filters`) -- `torrents_delete` is the one HIGH-risk exception,
+    deliberately kept out; see `QbitDestructiveMutator`.
     """
 
     def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
@@ -72,6 +76,40 @@ class QbitTorrentMutator(Protocol):
 
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
         """Reannounce the given torrents to their trackers."""
+        ...
+
+    def torrents_create_category(self, name: str) -> None:
+        """Create a new category, by name."""
+        ...
+
+    def torrents_set_category(
+        self, torrent_hashes: str | list[str], category: str
+    ) -> None:
+        """Assign a category to the given torrents (empty string clears it)."""
+        ...
+
+    def torrents_add_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Add one or more tags to the given torrents."""
+        ...
+
+    def torrents_remove_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Remove one or more tags from the given torrents."""
+        ...
+
+    def torrents_set_download_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Set the download rate limit for the given torrents, in bytes/s."""
+        ...
+
+    def torrents_set_upload_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Set the upload rate limit for the given torrents, in bytes/s."""
         ...
 
 

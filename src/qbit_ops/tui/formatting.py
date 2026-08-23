@@ -13,6 +13,8 @@ from typing import Any
 
 from rich.cells import cell_len
 from rich.text import Text
+from textual.binding import Binding
+from textual.keys import format_key
 
 from qbit_core.errors import ErrorCategory
 from qbit_core.features.explain import (
@@ -769,6 +771,32 @@ def _format_details_trackers(
             f"[dim]Last fetched {_format_local_time(fetched_at)}[/dim]"
         )
     return "\n".join(lines)
+
+
+def resolve_key_display(binding: Binding, *, is_macos: bool) -> str:
+    """The one point every rendered key passes through -- OS-aware.
+
+    `App.get_key_display`'s own default always spells a `ctrl` modifier
+    as `^`, which reads as the macOS convention (`^R`) and as nothing
+    in particular anywhere else, where `Ctrl+R` is what's actually
+    read. `is_macos` is a plain argument, never `sys.platform` read in
+    here: the caller (`QbitOpsTuiApp.get_key_display`) captures it once
+    at construction, so this stays a pure function a test can
+    parametrize over both branches directly.
+
+    An explicit `binding.key_display` -- a modal's own hand-picked
+    glyph, e.g. `PgUp/PgDn` -- always wins, exactly like Textual's own
+    default: this only changes what happens when there is none to fall
+    back on.
+    """
+    if binding.key_display:
+        return binding.key_display
+    modifiers, key = binding.parse_key()
+    key = format_key(key)
+    if "ctrl" in modifiers:
+        modifiers.remove("ctrl")
+        key = f"^{key}" if is_macos else f"Ctrl+{key.upper()}"
+    return "+".join([*modifiers, key])
 
 
 def _format_command_entry(key_display: str, description: str) -> str:

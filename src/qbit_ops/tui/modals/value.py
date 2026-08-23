@@ -37,6 +37,7 @@ from qbit_ops.tui.value_form import (
     throttle_current,
     throttle_verdict,
 )
+from qbit_ops.tui.widgets.checkbox import QbitCheckbox
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
@@ -159,7 +160,9 @@ class CategorySetScreen(ValueActionScreen):
         with Horizontal(classes="v-row"):
             yield Static("Category", classes="v-label")
             yield Input(id="v-category", classes="v-field")
-        yield Checkbox("create it as well", id="v-create", classes="v-create")
+        yield QbitCheckbox(
+            "create it as well", id="v-create", classes="v-create"
+        )
 
     def action_toggle_create(self) -> None:
         checkbox = self.query_one("#v-create", Checkbox)

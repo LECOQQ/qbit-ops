@@ -78,6 +78,38 @@ def test_fake_qbit_client_methods_accept_the_exact_keyword_arguments_used() -> (
     )
     assert {"torrent_hash", "original_url", "new_url"} <= edit_tracker_params
 
+    # `QbitTorrentMutator`'s widened half (`apply_bulk_torrent_action`,
+    # `qbit_core.features.torrents`) -- same rationale as above: a fake
+    # whose keywords drifted from production's would still pass a bare
+    # `isinstance` check.
+    create_category_params = set(
+        inspect.signature(fake.torrents_create_category).parameters
+    )
+    assert {"name"} <= create_category_params
+
+    set_category_params = set(
+        inspect.signature(fake.torrents_set_category).parameters
+    )
+    assert {"torrent_hashes", "category"} <= set_category_params
+
+    add_tags_params = set(inspect.signature(fake.torrents_add_tags).parameters)
+    assert {"torrent_hashes", "tags"} <= add_tags_params
+
+    remove_tags_params = set(
+        inspect.signature(fake.torrents_remove_tags).parameters
+    )
+    assert {"torrent_hashes", "tags"} <= remove_tags_params
+
+    set_download_limit_params = set(
+        inspect.signature(fake.torrents_set_download_limit).parameters
+    )
+    assert {"torrent_hashes", "limit"} <= set_download_limit_params
+
+    set_upload_limit_params = set(
+        inspect.signature(fake.torrents_set_upload_limit).parameters
+    )
+    assert {"torrent_hashes", "limit"} <= set_upload_limit_params
+
 
 def test_protocols_contain_only_methods_actually_consumed() -> None:
     """Guard against protocol scope creep: no method exists "because the
@@ -94,6 +126,12 @@ def test_protocols_contain_only_methods_actually_consumed() -> None:
         "torrents_pause",
         "torrents_resume",
         "torrents_reannounce",
+        "torrents_create_category",
+        "torrents_set_category",
+        "torrents_add_tags",
+        "torrents_remove_tags",
+        "torrents_set_download_limit",
+        "torrents_set_upload_limit",
         "torrents_delete",
         "torrents_add_trackers",
         "torrents_remove_trackers",
@@ -127,14 +165,14 @@ def test_torrents_start_is_deliberately_absent_from_the_mutator_protocol() -> (
 
 
 def test_torrents_delete_stays_out_of_the_tui_reachable_mutator() -> None:
-    """`QbitTorrentMutator` types pause/resume/reannounce -- the TUI's
-    other LOW-risk actions (category/tags/throttle, since `tui-filters`)
-    reach the client through `apply_bulk_torrent_action`'s untyped
-    `client: Any` instead, so this Protocol is no longer the TUI's
-    *entire* mutation surface, only its typed slice. What still holds,
-    and what this test actually checks: deleting torrents is HIGH risk,
-    so it lives in its own protocol, separate from every LOW-risk one --
-    moving it back would silently widen what a TUI-typed consumer can do.
+    """`QbitTorrentMutator` types all seven LOW-risk bulk actions
+    `apply_bulk_torrent_action` can apply -- pause/resume/reannounce
+    plus category/tags/throttle, widened from three to close the gap
+    those four actions used to pass through untyped. What this test
+    actually checks, and the one thing that does not move with that
+    widening: deleting torrents is HIGH risk, so it lives in its own
+    protocol, separate from every LOW-risk one -- moving it back would
+    silently widen what a TUI-typed consumer can do.
     """
     assert "torrents_delete" not in vars(QbitTorrentMutator)
     assert "torrents_delete" in vars(QbitDestructiveMutator)

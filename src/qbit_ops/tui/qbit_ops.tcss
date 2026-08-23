@@ -376,6 +376,20 @@ QbitModal {
 .qbit-dialog RadioSet > RadioButton.-on > .toggle--button {
     color: $primary;
 }
+/* Same reasoning, applied to `QbitCheckbox`'s `✓`/`✗`: `$text-muted`
+   off, `$primary` on -- never Textual's default grey/green pairing.
+   `background: transparent`, not the default `$panel`: `QbitCheckbox`
+   drops `BUTTON_LEFT`/`BUTTON_RIGHT` (see `widgets/checkbox.py`), so a
+   `$panel` fill here would paint an isolated patch behind the one
+   remaining glyph instead of blending into the row -- the job the two
+   blank side glyphs did for free before. */
+.qbit-dialog Checkbox > .toggle--button {
+    color: $text-muted;
+    background: transparent;
+}
+.qbit-dialog Checkbox.-on > .toggle--button {
+    color: $primary;
+}
 .qbit-dialog Input {
     background: transparent;
 }

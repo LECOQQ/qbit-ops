@@ -28,6 +28,7 @@ from textual.widgets import Checkbox, Input, RadioButton, RadioSet, Static
 
 from qbit_core.shared.selection import TorrentFilter
 from qbit_ops.tui.filter_form import FiltersDraft
+from qbit_ops.tui.widgets.checkbox import QbitCheckbox
 
 # The zone every pane is centred into -- criterion 2's invariant.
 PANE_HEIGHT = 10
@@ -156,8 +157,8 @@ def _state_rows() -> list[_Row]:
         _Row(
             pane,
             _label("Attention"),
-            Checkbox("Stalled", id="f-stalled", classes="f-check"),
-            Checkbox("Errored", id="f-errored", classes="f-check"),
+            QbitCheckbox("Stalled", id="f-stalled", classes="f-check"),
+            QbitCheckbox("Errored", id="f-errored", classes="f-check"),
         ),
         _Row(pane),
         _Row(
@@ -214,7 +215,7 @@ def _trackers_rows() -> list[_Row]:
         _Row(
             pane,
             _label("Presence"),
-            Checkbox(
+            QbitCheckbox(
                 "only torrents with no tracker at all",
                 id="f-no_trackers",
                 classes="f-check",

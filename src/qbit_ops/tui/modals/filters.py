@@ -43,16 +43,58 @@ class FiltersScreen(QbitModal):
     `enter`/`escape` are not bound here: both are `priority=True` on
     `QbitOpsTuiApp`, which always wins over a same-key Screen binding,
     so `action_activate`/`action_dismiss_overlay` special-case
-    `FiltersScreen` instead. `alt+left`/`alt+right` (section switch)
-    *are* declared here, and must be: `check_action` (`app.py`) returns
-    `False` for every App-level action once a modal is on top, so an
-    App binding for them would never fire.
+    `FiltersScreen` instead. `pageup`/`pagedown` (section switch,
+    the announced gesture) and `alt+left`/`alt+right` (kept working for
+    terminals that deliver them, see below) *are* declared here, and
+    must be: `check_action` (`app.py`) returns `False` for every
+    App-level action once a modal is on top, so an App binding for them
+    would never fire.
+
+    **Why `pageup`/`pagedown`, not `alt+left`/`alt+right`, is what gets
+    announced.** A real user's `alt+left`/`alt+right` keypress is
+    intercepted by the window manager before it ever reaches the
+    terminal -- a near-universal virtual-desktop shortcut on Linux --
+    so the binding worked in every test (`pilot.press` injects the
+    Textual key event directly, bypassing the WM entirely) while being
+    dead on a real desktop. Nobody caught it because no test pressed
+    the key and checked the pane actually changed; the announcement
+    guard only checks that an announced key is *bound*, not that
+    pressing it *does* something (see
+    `test_every_announced_key_is_a_binding_that_is_actually_active`).
+    `pageup`/`pagedown` carry no such OS-level meaning, so they become
+    the primary, announced gesture; `alt+left`/`alt+right` stay bound
+    (unannounced) for the terminals that do deliver them.
+
+    **Why `priority=True` is needed for `pageup`/`pagedown` and was
+    never needed for `alt+left`/`alt+right`.** `Input` claims every
+    arrow-key variant except `alt+`, so `alt+left`/`alt+right` were
+    always free of that layer. `pageup`/`pagedown` are different, and
+    more subtly than "an ancestor claims them": every `Widget` inherits
+    `action_page_up`/`action_page_down` (`Input` included, through
+    `ScrollView`), but each one raises `SkipAction` when
+    `not self.allow_vertical_scroll` -- so a non-priority `pageup`
+    harmlessly falls through the focused `Input` *and* the
+    `VerticalScroll` `#filters-dialog` is built from (see
+    `QbitModal.compose`) as long as neither actually needs to scroll,
+    reaching this screen's own binding regardless. Measured in a live
+    app (`textual==8.2.8`) at the dialog's normal fixed height (19
+    lines, criterion 2) that holds -- but shrink the terminal enough
+    that `.qbit-dialog`'s `max-height: 90%` clips it (verified at
+    height 20), and `#filters-dialog.allow_vertical_scroll` flips to
+    `True`: a non-priority `pageup` is then consumed by the dialog's
+    own real scroll, and section-switching silently stops working on
+    exactly the short terminals most likely to need it. `priority=True`
+    removes the dependency on window height entirely -- it is checked
+    *before* the event is ever forwarded to the focused widget
+    (`App._check_bindings` walks the screen's priority chain top-down
+    first), so it wins outright -- the same mechanism `escape`/`enter`
+    already rely on at the App level.
     """
 
     MODAL_TITLE = "Filters"
     MODAL_WIDTH = "large"
     MODAL_KEYS = (
-        KeyHint(("alt+left",), "Section"),
+        KeyHint(("pageup",), "Section"),
         KeyHint(("tab",), "Move"),
         KeyHint(("enter",), "Apply"),
         KeyHint(("ctrl+r",), "Clear"),
@@ -62,11 +104,17 @@ class FiltersScreen(QbitModal):
 
     BINDINGS = [
         Binding(
-            "alt+left",
+            "pageup",
             "prev_pane",
             "Section",
-            key_display="alt+←/→",
+            key_display="PgUp/PgDn",
+            priority=True,
         ),
+        Binding("pagedown", "next_pane", "Section", show=False, priority=True),
+        # Kept working, not announced: some terminals do deliver these
+        # (see the class docstring), and dropping them would be a
+        # needless regression for whoever's does.
+        Binding("alt+left", "prev_pane", "Section", show=False),
         Binding("alt+right", "next_pane", "Section", show=False),
         Binding("ctrl+r", "clear", "Clear"),
         # `up`/`down` move focus between fields, same as Tab/Shift+Tab --

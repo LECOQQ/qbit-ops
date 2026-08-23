@@ -18,6 +18,7 @@ UI thread.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from time import monotonic
 from typing import Any, cast
@@ -56,6 +57,7 @@ from qbit_core.features.torrents import (
 )
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import (
+    TorrentFilter,
     describe_torrent_filter,
 )
 from qbit_ops import __version__
@@ -77,6 +79,7 @@ from qbit_ops.tui.formatting import (
     _progress_column_width,
     _shorten_hash,
     _torrent_row_values,
+    resolve_key_display,
 )
 from qbit_ops.tui.modals.actions import ActionsScreen
 from qbit_ops.tui.modals.details import DetailsScreen
@@ -210,6 +213,13 @@ class QbitOpsTuiApp(App[None]):
         Binding("space", "toggle_selection", "Select"),
         Binding("ctrl+a", "select_all_visible", "Select visible", show=False),
         Binding("ctrl+d", "deselect_all", "Deselect all", show=False),
+        # `ctrl+r` is free at this level: it only ever resolves through
+        # `check_action` outside a modal, and `FiltersScreen`'s own
+        # `ctrl+r` ("Clear", the draft) lives on a different screen in
+        # the binding chain -- the two never compete for the same
+        # keypress. "R" already means refresh (one torrent); the
+        # modifier marks this as the broader, view-wide gesture.
+        Binding("ctrl+r", "reset_view", "Reset"),
         Binding("a", "open_actions", "Actions"),
         Binding("question_mark", "toggle_help", "Help"),
         # priority=True so escape always wins over whatever has focus.
@@ -224,6 +234,7 @@ class QbitOpsTuiApp(App[None]):
         refresh_interval: float = DEFAULT_REFRESH_INTERVAL_SECONDS,
         needs_setup: bool = False,
         small_caps_titles: bool = False,
+        platform: str = sys.platform,
     ) -> None:
         super().__init__()
         self.controller = TuiController(
@@ -236,6 +247,10 @@ class QbitOpsTuiApp(App[None]):
         # The Unicode small capitals stay available for whoever has a
         # font that covers all three of their blocks.
         self.small_caps_titles = small_caps_titles
+        # Captured once, here -- never read as `sys.platform` inside
+        # `get_key_display` itself, which would make the OS branch
+        # untestable without a real `sys.platform` to run on.
+        self._is_macos = platform == "darwin"
         self._hash_by_row: dict[int, str] = {}
         self._rebuilding_table = False
         # Incremental-update bookkeeping for `_render_table` -- see its
@@ -296,6 +311,15 @@ class QbitOpsTuiApp(App[None]):
         # The brand gradient has two ends and a `Theme` has one
         # `primary` slot, so the ends reach the stylesheet here.
         return {**super().get_css_variables(), **BRAND_CSS_VARIABLES}
+
+    def get_key_display(self, binding: Binding) -> str:
+        """The one override point: every rendered key
+        (`QbitModal.key_hints`, `CommandBar`) already calls
+        `self.app.get_key_display(binding)`, so overriding it here is
+        enough to make both OS-aware without a second render path. See
+        `resolve_key_display`'s docstring for why `^R` reads as macOS
+        but nowhere else."""
+        return resolve_key_display(binding, is_macos=self._is_macos)
 
     def on_mount(self) -> None:
         # Registered before anything paints: `$primary` must already be
@@ -862,6 +886,12 @@ class QbitOpsTuiApp(App[None]):
             return state.workspace is Workspace.TORRENTS and bool(
                 state.selected_hashes
             )
+        if action == "reset_view":
+            return state.workspace is Workspace.TORRENTS and (
+                state.filters != TorrentFilter()
+                or state.sort != SortOrder()
+                or bool(state.selected_hashes)
+            )
         return True
 
     # -- workspace navigation --------------------------------------------
@@ -1296,6 +1326,37 @@ class QbitOpsTuiApp(App[None]):
         self._render_filter_summary()
         self.refresh_bindings()
         self.notify(f"Cleared {count} selection(s).")
+
+    def action_reset_view(self) -> None:
+        """Put filters, sort and selection back to their initial state
+        in one gesture -- zero qBittorrent calls, every field local to
+        `TuiController`.
+
+        Deliberately calls `clear_selection()`, not
+        `reconcile_selection()`: reconciling only drops hashes hidden
+        by the *new* filter, and a reset widens filters back to none,
+        so nothing stays hidden and reconcile would remove nothing --
+        it is not a narrower substitute here. This is an explicit,
+        unconditional wipe of the selection, the gesture the operator
+        actually asked for.
+        """
+        if not self._in_torrents_workspace():
+            return
+        state = self.controller.state
+        if (
+            state.filters == TorrentFilter()
+            and state.sort == SortOrder()
+            and not state.selected_hashes
+        ):
+            return
+        self.controller.set_filters(TorrentFilter())
+        self.controller.set_sort(SortOrder())
+        self.controller.clear_selection()
+        self._render_filter_summary()
+        self._render_table()
+        self._render_details_panels()
+        self.refresh_bindings()
+        self.notify("Filters, sort and selection reset.")
 
     def action_open_actions(self) -> None:
         if not self._in_torrents_workspace():

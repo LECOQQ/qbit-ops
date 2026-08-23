@@ -90,6 +90,7 @@ from qbit_ops.tui.formatting import (
     _format_local_time,
     _indicator_cell,
     _truncate,
+    resolve_key_display,
 )
 from qbit_ops.tui.modals.base import MODAL_WIDTHS, QbitModal
 from qbit_ops.tui.modals.value import (
@@ -4056,6 +4057,90 @@ async def test_tab_navigates_between_filter_fields() -> None:
         await pilot.pause()
 
 
+async def test_section_keys_actually_change_the_active_pane() -> None:
+    """The véracité gap `alt+left`/`alt+right` shipped with: the
+    announcement guard only checks a key is *bound*
+    (`test_every_announced_key_is_a_binding_that_is_actually_active`),
+    never that pressing it changes anything -- so a real user's
+    `alt+left`/`alt+right`, silently eaten by the window manager before
+    ever reaching the terminal, shipped with nothing catching it.
+    `pageup`/`pagedown` are now the announced gesture and
+    `alt+left`/`alt+right` stay bound for terminals that do deliver
+    them; this presses all four, each direction, and checks the pane
+    actually switched (via which field picks up focus), not just that
+    the key resolves to a binding."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        category_input = app.screen.query_one("#f-categories", Input)
+        assert category_input.has_focus
+
+        # Organisation(0) -> Trackers(3): "prev_pane" wraps backward.
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert app.screen.query_one("#f-no_trackers").has_focus
+
+        # Trackers(3) -> Organisation(0): "next_pane" wraps forward.
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert category_input.has_focus
+
+        # Same two directions again, via the kept-but-unannounced keys.
+        await pilot.press("alt+left")
+        await pilot.pause()
+        assert app.screen.query_one("#f-no_trackers").has_focus
+
+        await pilot.press("alt+right")
+        await pilot.pause()
+        assert category_input.has_focus
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_pageup_pagedown_switch_panes_even_when_the_dialog_scrolls() -> (
+    None
+):
+    """`priority=True` is what makes this true regardless of window
+    height: every `Widget.action_page_up`/`action_page_down` (`Input`
+    included, through `ScrollView`) raises `SkipAction` unless
+    `allow_vertical_scroll`, so a non-priority `pageup` happens to fall
+    through both the focused `Input` and `#filters-dialog` when the
+    19-line dialog fits without scrolling -- but shrink the terminal
+    enough that `.qbit-dialog`'s `max-height: 90%` actually clips it,
+    and the dialog becomes genuinely scrollable: without `priority=True`
+    a non-priority `pageup` would be consumed by that real scroll
+    instead of switching sections. Verified red without it (pasted in
+    the build report)."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=(140, 20)) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        dialog = app.screen.query_one("#filters-dialog")
+        assert dialog.allow_vertical_scroll, (
+            "test assumption broken: the dialog no longer scrolls at "
+            "this terminal height, so this test would pass vacuously"
+        )
+
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert app.screen.query_one("#f-no_trackers").has_focus
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
 # --- 14. TUI 2: multi-selection + LOW-risk bulk actions ---------------------
 
 
@@ -7691,3 +7776,319 @@ async def test_the_counter_grid_holds_when_a_number_gains_a_digit(
         }
         assert len(labels) == 1, rows
         assert len(ends) == 1, rows
+
+
+# --- Second pass, dogfooding after human review: real-desktop fixes --------
+
+
+@pytest.mark.parametrize(
+    "is_macos, expected",
+    [(True, "^r"), (False, "Ctrl+R")],
+    ids=["macos", "not-macos"],
+)
+def test_resolve_key_display_branches_on_the_injected_platform_only(
+    is_macos: bool, expected: str
+) -> None:
+    """`^r` reads as the macOS convention; `Ctrl+R` is what's actually
+    read everywhere else. Parametrized over the injected `is_macos`
+    flag itself, never a conditional inside the test -- `sys.platform`
+    is read once, at `QbitOpsTuiApp.__init__`, never inside this
+    function (see `resolve_key_display`'s docstring)."""
+    binding = Binding("ctrl+r", "clear", "Clear")
+    assert resolve_key_display(binding, is_macos=is_macos) == expected
+
+
+@pytest.mark.parametrize(
+    "platform, expected",
+    [("darwin", "^r"), ("linux", "Ctrl+R"), ("win32", "Ctrl+R")],
+    ids=["darwin", "linux", "win32"],
+)
+async def test_filters_clear_hint_is_os_aware_end_to_end(
+    platform: str, expected: str
+) -> None:
+    """The border subtitle -- one of the two real render call sites,
+    alongside `CommandBar` -- reflects the injected platform through
+    `QbitOpsTuiApp.get_key_display`, with no other conditional along
+    the way."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        platform=platform,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        dialog = app.screen.query_one("#filters-dialog")
+        subtitle = Text.from_markup(str(dialog.border_subtitle)).plain
+        assert f"[{expected}→Clear]" in subtitle
+
+
+@pytest.mark.parametrize(
+    "platform, select_all_key, deselect_all_key, reset_view_key",
+    [
+        ("darwin", "^a", "^d", "^r"),
+        ("linux", "Ctrl+A", "Ctrl+D", "Ctrl+R"),
+    ],
+    ids=["darwin", "linux"],
+)
+async def test_help_screen_ctrl_a_is_os_aware_and_stays_aligned(
+    platform: str,
+    select_all_key: str,
+    deselect_all_key: str,
+    reset_view_key: str,
+) -> None:
+    """The help modal's `ctrl+a`/`ctrl+d`/`ctrl+r` lines are a *third*
+    render site -- a hand-written block, not a `KeyHint` -- unified
+    through the same `get_key_display` call rather than a second,
+    hardcoded grammar. The description column must not drift: `^a` and
+    `Ctrl+A` alike still start the description at column 11, like every
+    other entry in the block."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        platform=platform,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("question_mark")
+        await pilot.pause()
+
+        lines = cast(HelpScreen, app.screen)._help_text().splitlines()
+        select_all_line = next(
+            line for line in lines if "Select all visible" in line
+        )
+        deselect_all_line = next(
+            line for line in lines if "Deselect all" in line
+        )
+        reset_view_line = next(
+            line for line in lines if "Reset filters" in line
+        )
+        assert select_all_line.startswith(select_all_key.ljust(11))
+        assert deselect_all_line.startswith(deselect_all_key.ljust(11))
+        assert reset_view_line.startswith(reset_view_key.ljust(11))
+
+
+async def test_ctrl_r_resets_filters_sort_and_selection() -> None:
+    """One gesture, three fields back to their initial state -- all
+    local to `TuiController`, zero qBittorrent calls either way."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Alpha", category="films"),
+            make_torrent(hash="b" * 40, name="Beta", category="films"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        app.controller.set_filters(TorrentFilter(categories=("films",)))
+        app.controller.set_sort(
+            SortOrder(field=SortField.RATIO, direction=SortDirection.DESCENDING)
+        )
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+
+        assert app.controller.state.filters != TorrentFilter()
+        assert app.controller.state.sort != SortOrder()
+        assert app.controller.state.selected_hashes == {"a" * 40, "b" * 40}
+
+        calls_before = len(client.calls)
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+
+        assert app.controller.state.filters == TorrentFilter()
+        assert app.controller.state.sort == SortOrder()
+        assert app.controller.state.selected_hashes == set()
+        assert len(client.calls) == calls_before, client.calls[calls_before:]
+
+
+async def test_ctrl_r_with_nothing_to_reset_is_a_safe_noop() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        calls_before = len(client.calls)
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+
+        assert app.controller.state.filters == TorrentFilter()
+        assert app.controller.state.sort == SortOrder()
+        assert app.controller.state.selected_hashes == set()
+        assert len(client.calls) == calls_before
+
+
+async def test_reset_view_is_announced_only_once_something_differs() -> None:
+    """`check_action` both hides and disables the gesture until there
+    is something to reset -- same pattern as `deselect_all`."""
+    client = FakeQbitClient(torrents=[make_torrent(hash="a" * 40)])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        assert app.check_action("reset_view", ()) is False
+        assert "reset_view" not in _footer_actions(app)
+
+        await pilot.press("ctrl+a")
+        await pilot.pause()
+
+        assert app.check_action("reset_view", ()) is True
+        assert "reset_view" in _footer_actions(app)
+
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+
+        assert app.check_action("reset_view", ()) is False
+        assert "reset_view" not in _footer_actions(app)
+
+
+@pytest.mark.parametrize("glyph", ["✓", "✗"], ids=["check", "cross"])
+def test_checkbox_glyphs_are_a_single_safe_width_cell(glyph: str) -> None:
+    """Measured against `▌` (`Checkbox.BUTTON_RIGHT`'s Textual default),
+    which is East Asian Width *Ambiguous* and can render two cells wide
+    under a CJK-leaning locale: both replacement glyphs are *Neutral*
+    and `cell_len` 1 -- strictly safer, never wider."""
+    import unicodedata
+
+    assert cell_len(glyph) == 1
+    assert unicodedata.east_asian_width(glyph) == "N"
+
+
+def test_textuals_default_checkbox_right_glyph_is_ambiguous_width() -> None:
+    """The measurement `QbitCheckbox` responds to: proves the default
+    this replaces is the wider width class, not an assumption."""
+    import unicodedata
+
+    from textual.widgets import Checkbox
+
+    assert unicodedata.east_asian_width(Checkbox.BUTTON_RIGHT) == "A"
+
+
+async def test_qbit_checkbox_renders_one_state_coloured_glyph() -> None:
+    """`▐X▌` becomes a single `✓`/`✗`, state-coloured -- applied to
+    every checkbox in the TUI, not only `v-create` (the one that
+    prompted it): checked here on the Filters modal's `f-stalled` (a
+    plain in-place check) and on `v-create`, mounted through
+    `CategorySetScreen` exactly as the app opens it."""
+    from qbit_ops.tui.widgets.checkbox import QbitCheckbox
+
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("alt+right")  # State pane: f-stalled/f-errored
+        await pilot.pause()
+
+        stalled = app.screen.query_one("#f-stalled", QbitCheckbox)
+        assert stalled.BUTTON_LEFT == ""
+        assert stalled.BUTTON_RIGHT == ""
+        assert str(stalled._button.plain) == "✗"
+        stalled.value = True
+        await pilot.pause()
+        assert str(stalled._button.plain) == "✓"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        button = app.screen.query_one("#actions-category-set", Button)
+        await pilot.click(button)
+        await pilot.pause()
+
+        create = app.screen.query_one("#v-create", QbitCheckbox)
+        assert create.BUTTON_LEFT == ""
+        assert create.BUTTON_RIGHT == ""
+        assert str(create._button.plain) == "✗"
+        create.value = True
+        await pilot.pause()
+        assert str(create._button.plain) == "✓"
+
+
+def _rendered_widget(app: QbitOpsTuiApp, widget: Any) -> str:
+    """One widget's own rendered rows, flattened to plain text -- the
+    same technique `test_no_dot_glyph_appears_in_the_filters_modal`
+    uses on a whole dialog, narrowed to a single widget's `.region` so
+    a `Checkbox` row can be checked without also picking up a sibling
+    `RadioSet`'s own (out of scope here) button chrome."""
+    strips = app.screen._compositor.render_strips()
+    region = widget.region
+    return "\n".join(
+        "".join(segment.text for segment in strips[y])[
+            region.x : region.x + region.width
+        ]
+        for y in range(region.y, region.y + region.height)
+    )
+
+
+async def test_no_checkbox_chrome_glyph_reaches_the_rendered_screen() -> None:
+    """`▐`/`▌` never reach either checkbox's own rendered row, with the
+    box actually checked so `✓` has something to draw, not merely the
+    unchecked default. Scoped to the checkbox's own region, not the
+    whole dialog: `RadioSet`'s tri-states share the same
+    `▐`/`▌`-around-`●` chrome and are out of scope for this change."""
+    from qbit_ops.tui.widgets.checkbox import QbitCheckbox
+
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("alt+right")
+        await pilot.pause()
+        stalled = app.screen.query_one("#f-stalled", QbitCheckbox)
+        stalled.value = True
+        await pilot.pause()
+
+        rendered = _rendered_widget(app, stalled)
+        assert "▐" not in rendered
+        assert "▌" not in rendered
+        assert "✓" in rendered, "fixture produced no checked box to check"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        button = app.screen.query_one("#actions-category-set", Button)
+        await pilot.click(button)
+        await pilot.pause()
+        create = app.screen.query_one("#v-create", QbitCheckbox)
+        create.value = True
+        await pilot.pause()
+
+        rendered = _rendered_widget(app, create)
+        assert "▐" not in rendered
+        assert "▌" not in rendered
+        assert "✓" in rendered, "fixture produced no checked box to check"
