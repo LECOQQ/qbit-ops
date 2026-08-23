@@ -485,6 +485,10 @@ def test_no_calls_for_torrents_filtered_out_by_cheap_filters() -> None:
 
 
 def test_at_most_one_lookup_per_surviving_torrent() -> None:
+    """On a server that does not honor `include_trackers` (the default
+    fake), the bulk attempt costs exactly one extra, bounded
+    `torrents_info()` call -- never a per-torrent one -- before falling
+    back to one `torrents_trackers()` per surviving torrent."""
     client = FakeQbitClient(
         torrents=[
             make_torrent(hash=HASH_A, name="T1"),
@@ -498,8 +502,38 @@ def test_at_most_one_lookup_per_surviving_torrent() -> None:
 
     collect_tracker_status(client, build_torrent_filter())
 
-    assert client.torrents_info_calls == 1
+    # 1 SELECT (`select_torrents`) + 1 bulk `include_trackers` probe that
+    # this fake ignores -- see `_fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 2
+
+
+def test_a_capable_server_collapses_the_scan_to_two_calls() -> None:
+    """The whole point of `include_trackers`: on a server that honors it
+    (Web API >= 2.11.4), the bulk `torrents_info(include_trackers=True)`
+    call returns every tracker directly, and no per-torrent
+    `torrents_trackers()` call is ever made -- regardless of library
+    size. Reintroduce the regression (drop `include_trackers_supported`)
+    to see this test fail: `torrents_trackers_calls` goes from 0 to 2."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=HASH_A, name="T1"),
+            make_torrent(hash=HASH_B, name="T2"),
+        ],
+        trackers_by_hash={
+            HASH_A: [{"url": "https://tracker.example/announce", "status": 2}],
+            HASH_B: [{"url": "https://tracker.example/announce", "status": 2}],
+        },
+        include_trackers_supported=True,
+    )
+
+    report = collect_tracker_status(client, build_torrent_filter())
+
+    # 1 SELECT + 1 bulk INSPECT call, whatever the library size.
+    assert client.torrents_info_calls == 2
+    assert client.torrents_trackers_calls == 0
+    assert report.matched_torrents == 2
+    assert report.collection_errors == 0
 
 
 # --- Per-tracker volume -----------------------------------------------------
@@ -673,7 +707,7 @@ def test_summing_a_column_over_trackers_can_exceed_the_library_total() -> None:
 
 def test_volume_costs_no_call_beyond_the_health_collection() -> None:
     """The measures ride along with the pass `trackers status` already
-    made: one listing, one tracker lookup per surviving torrent.
+    made: one listing, one bounded bulk-or-fallback tracker collection.
     """
     client = FakeQbitClient(
         torrents=[
@@ -691,7 +725,8 @@ def test_volume_costs_no_call_beyond_the_health_collection() -> None:
     ]
 
     assert aggregate.downloaded_bytes == 40
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 2
 
 

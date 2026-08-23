@@ -521,7 +521,9 @@ def test_exclude_tracker_inspects_only_cheap_survivors(
     assert _names(
         runner, "--category", "linux", "--exclude-tracker", "new.example"
     ) == ["A"]
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores --
+    # see `qbit_core.shared.inspection._fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 1
 
 

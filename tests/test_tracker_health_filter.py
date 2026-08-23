@@ -295,7 +295,9 @@ def test_tracker_and_tracker_health_together_cost_one_inspect_pass() -> None:
         client, trackers=["one.example"], tracker_health=["critical"]
     )
 
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores --
+    # see `qbit_core.shared.inspection._fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 3
 
 
@@ -326,7 +328,9 @@ def test_trackers_list_with_volume_costs_one_lookup_per_torrent() -> None:
         client, build_torrent_filter(tracker_health=["critical"])
     )
 
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores --
+    # see `qbit_core.shared.inspection._fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 3
 
 

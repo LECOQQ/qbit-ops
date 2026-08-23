@@ -59,8 +59,19 @@ class FakeQbitClient:
         self.torrents_trackers_call_order: list[str] = []
         self.torrents_info_calls = 0
 
-    def torrents_info(self) -> list[dict[str, Any]]:
-        """Return fake torrents."""
+    def torrents_info(
+        self,
+        torrent_hashes: list[str] | None = None,
+        include_trackers: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return fake torrents.
+
+        Never embeds a `"trackers"` field regardless of
+        `include_trackers`: this double models a server that does not
+        support it, so `inspect_trackers`/`select_and_inspect` always
+        fall back to `torrents_trackers()` -- exactly what every
+        existing call-count assertion in this file expects.
+        """
         self.torrents_info_calls += 1
         return self.torrents
 

@@ -22,6 +22,7 @@ class FakeQbitClient:
         torrents: list[dict[str, Any]] | None = None,
         trackers_by_hash: dict[str, list[dict[str, Any]]] | None = None,
         tracker_error_hashes: set[str] | None = None,
+        include_trackers_supported: bool = False,
         qbittorrent_version: str = "5.0.1",
         api_version: str = "2.9.3",
         download_speed: int = 0,
@@ -59,10 +60,22 @@ class FakeQbitClient:
         both are markers, not measures, and defaulting them to a real
         number would make the sentinels invisible to every test that
         did not ask for them.
+
+        `include_trackers_supported` mirrors the real split in the
+        compatibility matrix (Web API >= 2.11.4 only). Defaults to
+        `False` -- the flag is silently ignored and no `"trackers"` key
+        is added, matching every test written before this parameter
+        existed and keeping their `torrents_trackers_calls` counts
+        unchanged. Pass `True` to simulate a capable server instead: a
+        `torrents_info(include_trackers=True)` call then embeds each
+        torrent's `trackers_by_hash` entry as a `"trackers"` key, and
+        `inspect_trackers`/`select_and_inspect` skip the per-torrent
+        fallback entirely.
         """
         self.torrents = torrents or []
         self.trackers_by_hash = trackers_by_hash or {}
         self.tracker_error_hashes = tracker_error_hashes or set()
+        self.include_trackers_supported = include_trackers_supported
         self.qbittorrent_version = qbittorrent_version
         self.api_version = api_version
         self.download_speed = download_speed
@@ -161,23 +174,46 @@ class FakeQbitClient:
         }
 
     def torrents_info(
-        self, torrent_hashes: list[str] | None = None
+        self,
+        torrent_hashes: list[str] | None = None,
+        include_trackers: bool | None = None,
     ) -> list[dict[str, Any]]:
         """Return fake torrents, narrowed upstream when asked.
 
         Mirrors `qbittorrent-api`: passing hashes filters server-side, so
         a caller that fetches one torrent does not transfer the library.
         Modelled here too, or a test could not tell the two apart.
+
+        `include_trackers` only has an effect when
+        `self.include_trackers_supported` -- see `__init__`.
         """
         self.torrents_info_calls += 1
-        self._record("torrents_info")
+        self._record(
+            "torrents_info",
+            torrent_hashes=torrent_hashes,
+            include_trackers=include_trackers,
+        )
         if torrent_hashes is None:
-            return self.torrents
-        wanted = {value.lower() for value in torrent_hashes}
+            selected = self.torrents
+        else:
+            wanted = {value.lower() for value in torrent_hashes}
+            selected = [
+                torrent
+                for torrent in self.torrents
+                if str(torrent.get("hash", "")).lower() in wanted
+            ]
+
+        if not include_trackers or not self.include_trackers_supported:
+            return selected
+
         return [
-            torrent
-            for torrent in self.torrents
-            if str(torrent.get("hash", "")).lower() in wanted
+            {
+                **torrent,
+                "trackers": self.trackers_by_hash.get(
+                    str(torrent.get("hash", "")), []
+                ),
+            }
+            for torrent in selected
         ]
 
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:

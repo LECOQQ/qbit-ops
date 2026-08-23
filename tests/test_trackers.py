@@ -860,8 +860,18 @@ class FakeQbitClient:
         self.edited_trackers: list[tuple[str, str, str]] = []
         self.added_trackers: list[tuple[str, str]] = []
 
-    def torrents_info(self) -> list[dict[str, str]]:
-        """Return fake torrents."""
+    def torrents_info(
+        self,
+        torrent_hashes: list[str] | None = None,
+        include_trackers: bool | None = None,
+    ) -> list[dict[str, str]]:
+        """Return fake torrents.
+
+        Never embeds a `"trackers"` field regardless of
+        `include_trackers`: this double models a server that does not
+        support it, so `select_and_inspect` always falls back to
+        `torrents_trackers()` -- exactly what this file's tests expect.
+        """
         return [
             {"hash": torrent_hash, "name": torrent_hash}
             for torrent_hash in self.trackers_by_hash

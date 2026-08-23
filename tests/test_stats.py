@@ -200,7 +200,9 @@ def test_a_tracker_filter_inspects_only_the_cheap_filter_survivors() -> None:
         ),
     )
 
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores --
+    # see `qbit_core.shared.inspection._fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 1
     assert client.sync_maindata_calls == 0
     assert report.library.torrents == 1

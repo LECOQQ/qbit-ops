@@ -271,14 +271,18 @@ def collect_tracker_status(
 ) -> TrackerStatusReport:
     """Collect a filter-aware tracker status report.
 
-    Applies every cheap filter first, then calls
-    `client.torrents_trackers()` at most once per surviving torrent. A
-    lookup failure is caught and counted rather than aborting:
-    `collection_errors` is always visible, and `overall_health` can
-    never read fully healthy while errors > 0. When `filters.tracker` is
-    set, every surviving torrent is still scanned and the aggregates are
-    filtered afterward -- `--tracker` restricts the report, not the
-    API-call volume. Several values combine with OR.
+    Applies every cheap filter first, then collects tracker data for
+    every surviving torrent via `inspect_trackers` -- one bulk
+    `torrents_info(include_trackers=True)` call on a server that
+    supports it (Web API >= 2.11.4), falling back to
+    `client.torrents_trackers()` per torrent otherwise (see
+    `qbit_core.shared.inspection`). A lookup failure is caught and
+    counted rather than aborting: `collection_errors` is always
+    visible, and `overall_health` can never read fully healthy while
+    errors > 0. When `filters.tracker` is set, every surviving torrent
+    is still scanned and the aggregates are filtered afterward --
+    `--tracker` restricts the report, not the API-call volume. Several
+    values combine with OR.
 
     `filters.tracker_health` narrows the torrents the report covers, and
     costs nothing extra: the verdict is read off the tracker data this

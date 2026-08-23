@@ -198,7 +198,9 @@ def test_list_inspects_only_the_torrents_surviving_the_cheap_filters(
 
     assert result.exit_code == ExitCode.SUCCESS
     assert [t["name"] for t in json.loads(result.stdout)["torrents"]] == ["A"]
-    assert client.torrents_info_calls == 1
+    # 1 SELECT + 1 bulk `include_trackers` probe this fake ignores --
+    # see `qbit_core.shared.inspection._fetch_trackers_in_bulk`.
+    assert client.torrents_info_calls == 2
     assert client.torrents_trackers_calls == 1
 
 
