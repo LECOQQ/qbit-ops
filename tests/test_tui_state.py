@@ -8,7 +8,7 @@ event loop. Interface-level (Pilot) tests live in `tests/test_tui_app.py`.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -21,7 +21,12 @@ from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import TorrentFilter
 from qbit_ops.config import ConfigError
-from qbit_ops.tui.state import ConnectionState, TuiController, Workspace
+from qbit_ops.tui.state import (
+    ConnectionState,
+    TuiBulkAction,
+    TuiController,
+    Workspace,
+)
 from tests.support import FakeQbitClient, make_torrent
 
 
@@ -903,6 +908,29 @@ def test_build_bulk_plan_performs_zero_api_calls() -> None:
     calls_before = len(client.calls)
 
     controller.build_bulk_plan("pause", ("a" * 40,))
+
+    assert len(client.calls) == calls_before
+
+
+def test_build_bulk_plan_refuses_a_delete_action_smuggled_past_typing() -> None:
+    """`build_bulk_plan` is typed `TuiBulkAction`, which excludes
+    `"delete"` -- Pyright refuses `build_bulk_plan("delete", ...)`
+    outright at every real call site. `cast` here models a caller that
+    defeats that static typing (a bug, a future widening); the runtime
+    guard this test pins is the only thing left standing at that point,
+    since nothing else downstream of this method checks `action` again
+    before `client.torrents_delete`.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    controller = _controller(client)
+    controller.refresh()
+    smuggled_action = cast(TuiBulkAction, "delete")
+    calls_before = len(client.calls)
+
+    with pytest.raises(ValueError, match="delete"):
+        controller.build_bulk_plan(smuggled_action, ("a" * 40,))
 
     assert len(client.calls) == calls_before
 

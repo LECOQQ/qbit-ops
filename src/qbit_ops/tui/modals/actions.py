@@ -12,9 +12,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import Button, Static
 
-from qbit_core.features.torrents import TorrentBulkAction
 from qbit_ops.tui.formatting import _truncate
 from qbit_ops.tui.modals.base import KeyHint, QbitModal
+from qbit_ops.tui.state import TuiBulkAction
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
@@ -46,7 +46,7 @@ class ActionsScreen(QbitModal):
         Binding("down", "app.focus_next", "Down", show=False),
     ]
 
-    _ACTION_BY_BUTTON_ID: dict[str, TorrentBulkAction] = {
+    _ACTION_BY_BUTTON_ID: dict[str, TuiBulkAction] = {
         "actions-pause": "pause",
         "actions-resume": "resume",
         "actions-reannounce": "reannounce",
@@ -58,7 +58,7 @@ class ActionsScreen(QbitModal):
     # The four that collect an argument first: routed to their own
     # modal instead of straight to Preview (see `_VALUE_ACTIONS` in
     # `on_button_pressed`).
-    _VALUE_ACTIONS: frozenset[TorrentBulkAction] = frozenset(
+    _VALUE_ACTIONS: frozenset[TuiBulkAction] = frozenset(
         {"category_set", "tag_add", "tag_remove", "throttle"}
     )
 

@@ -9,12 +9,24 @@ TUI 2 narrowed, not removed, this boundary: the TUI may import
 exactly `qbit_core.features.torrents.apply_bulk_torrent_action`/
 `build_bulk_action_plan_from_snapshot` -- frozen-plan-in, frozen-plan-
 out, never a rescan, never `--all`. `tui-filters` widened the *actions*
-those two functions cover from Pause/Resume/Reannounce to seven
-(category/tags/throttle too, all still `MutationRisk.LOW`); the two
-function names allowed through this boundary did not change.
+those two functions cover from Pause/Resume/Reannounce to every
+LOW-risk action `TuiBulkAction` names (category/tags/throttle too,
+all still `MutationRisk.LOW`); the two function names allowed through
+this boundary did not change.
 `plan_bulk_torrent_action` (always rescans and accepts an unbounded
 `--all` selector -- neither fits the frozen-plan model) and every
 tracker mutation function remain fully forbidden, same as before.
+
+Every gate below inspects *imported names*, never a call-site value --
+see `test_import_scan_cannot_see_a_delete_value_reaching_build_bulk_plan`
+for the resulting blind spot. `"delete"` is one of the values
+`build_bulk_action_plan_from_snapshot`'s `action` parameter accepts
+(it is `qbit_core`'s shared `TorrentBulkAction`, since the CLI does
+reach it) and no import here would ever change if a caller passed it.
+That value-level barrier is `qbit_ops.tui.state.TuiController
+.build_bulk_plan`'s own job: it is typed `TuiBulkAction` -- the same
+union minus `"delete"` -- and refuses at runtime if that typing is
+ever defeated.
 """
 
 from __future__ import annotations
@@ -256,6 +268,34 @@ def test_tui_module_discovery_is_recursive(tmp_path: Path) -> None:
 
     assert root / "screens" / "help.py" in discovered
     assert len(discovered) == 2
+
+
+def test_import_scan_cannot_see_a_delete_value_reaching_build_bulk_plan() -> (
+    None
+):
+    """Every gate above is AST-based *import* scanning -- proof that this
+    approach is structurally blind to a value smuggled past
+    `TuiController.build_bulk_plan`'s own typing (see
+    `tests/test_tui_state.py::
+    test_build_bulk_plan_refuses_a_delete_action_smuggled_past_typing`
+    for the runtime guard that actually refuses it).
+
+    The source below is a hypothetical TUI module calling
+    `build_bulk_plan("delete", ...)` directly. It imports nothing this
+    file's own `_imported_names_by_module` would ever flag: no forbidden
+    name from `qbit_core.features.torrents` appears, because "delete"
+    is a plain string argument, not an import. A gate that only ever
+    inspects imported names cannot, even in principle, see it.
+    """
+    source = (
+        "from qbit_ops.tui.state import TuiController\n\n"
+        "def unsafe(controller: TuiController, torrent_hash: str) -> None:\n"
+        "    controller.build_bulk_plan('delete', (torrent_hash,))\n"
+    )
+    imports = _imported_names_by_module(source)
+    torrents_names = imports.get("qbit_core.features.torrents", set())
+    assert not (torrents_names & _FORBIDDEN_TORRENTS_NAMES)
+    assert torrents_names == set()
 
 
 def test_tui_state_module_never_imports_textual() -> None:

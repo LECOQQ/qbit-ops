@@ -4,11 +4,15 @@ Security boundary -- only imports the two LOW-risk, frozen-plan
 functions (`apply_bulk_torrent_action`, `build_bulk_action_plan_from_
 snapshot`) -- never a rescanning or deletion function, or
 `qbit_ops.cli`. `tui-filters` widened the *actions* those two
-functions build/apply plans for from Pause/Resume/Reannounce to seven
-(`category_set`/`category_clear`/`tag_add`/`tag_remove`/`throttle`
-too, all still `MutationRisk.LOW`) -- the import boundary itself did
-not move, and is still exactly these two names. Enforced by
-`tests/test_tui_security.py`.
+functions build/apply plans for from Pause/Resume/Reannounce to every
+`TuiBulkAction` (`category_set`/`category_clear`/`tag_add`/
+`tag_remove`/`throttle` too, all still `MutationRisk.LOW`) -- the
+import boundary itself did not move, and is still exactly these two
+names. Enforced by
+`tests/test_tui_security.py`, which only ever sees imports: `"delete"`
+is a value, not a name, so `qbit_ops.tui.state.TuiController
+.build_bulk_plan` is the one that actually keeps it unreachable, typed
+`TuiBulkAction` and refusing it at runtime besides.
 
 Every qBittorrent API call runs on a Textual thread worker, never on
 the UI thread; `apply_*` (state-mutating) `TuiController` methods only
@@ -51,10 +55,7 @@ from qbit_core.features.connection_setup import (
     write_connection_env_file,
 )
 from qbit_core.features.explain import ExplanationReport
-from qbit_core.features.torrents import (
-    BulkTorrentActionPlan,
-    TorrentBulkAction,
-)
+from qbit_core.features.torrents import BulkTorrentActionPlan
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.selection import (
     TorrentFilter,
@@ -104,6 +105,7 @@ from qbit_ops.tui.state import (
     ConnectionState,
     MutationUiResult,
     SortOrder,
+    TuiBulkAction,
     TuiController,
     Workspace,
     _classify_mutation_error,
@@ -1396,7 +1398,7 @@ class QbitOpsTuiApp(App[None]):
 
     def _open_value_screen(
         self,
-        action: TorrentBulkAction,
+        action: TuiBulkAction,
         hashes: tuple[str, ...],
         names: tuple[str, ...],
     ) -> None:
@@ -1427,7 +1429,7 @@ class QbitOpsTuiApp(App[None]):
 
     def _open_preview_for_action(
         self,
-        action: TorrentBulkAction,
+        action: TuiBulkAction,
         hashes: tuple[str, ...],
         *,
         category: str | None = None,

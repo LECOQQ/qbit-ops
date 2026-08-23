@@ -73,11 +73,10 @@ class QbitAppInfoReader(Protocol):
 class QbitTorrentMutator(Protocol):
     """LOW-risk torrent state mutations (see `shared.execution.MutationRisk`).
 
-    The only mutation surface the TUI is allowed to reach. Covers all
-    seven LOW-risk bulk actions `apply_bulk_torrent_action` can apply
-    (pause/resume/reannounce plus category/tags/throttle, since
-    `tui-filters`) -- `torrents_delete` is the one HIGH-risk exception,
-    deliberately kept out; see `QbitDestructiveMutator`.
+    The only mutation surface the TUI is allowed to reach. Covers
+    every action `apply_bulk_torrent_action` can apply except
+    `torrents_delete` -- the one HIGH-risk exception, deliberately
+    kept out; see `QbitDestructiveMutator`.
     """
 
     def torrents_pause(self, torrent_hashes: str | list[str]) -> None:
@@ -152,12 +151,15 @@ class QbitBulkTorrentMutator(
     QbitTorrentMutator, QbitDestructiveMutator, Protocol
 ):
     """Every action `apply_bulk_torrent_action` can reach, across both
-    its callers -- the seven LOW-risk actions plus `torrents_delete`.
+    its callers -- every LOW-risk action plus `torrents_delete`.
 
     Not a TUI-safety boundary: `apply_bulk_torrent_action` is the
     engine shared by the CLI (which can request `delete`) and the TUI
-    (which cannot -- proved by `tests/test_tui_security.py`, since the
-    TUI can never construct a plan whose action is `delete`). Use
+    (which cannot). That restriction is not this type -- a value
+    typed `QbitBulkTorrentMutator` can still be asked to delete. It is
+    `qbit_ops.tui.state.TuiController.build_bulk_plan`, which never
+    builds a plan whose action is `delete` (typed `TuiBulkAction`,
+    refused at runtime otherwise; see `tests/test_tui_state.py`). Use
     `QbitTorrentMutator` instead, not this protocol, wherever a caller
     itself must stay provably restricted to LOW-risk mutations.
     """

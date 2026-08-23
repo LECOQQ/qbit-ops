@@ -22,10 +22,10 @@ from textual.containers import Horizontal
 from textual.widgets import Checkbox, Input, Static
 
 from qbit_core.errors import InvalidInputError
-from qbit_core.features.torrents import TorrentBulkAction
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.modals.actions import ActionsScreen
 from qbit_ops.tui.modals.base import KeyHint, QbitModal
+from qbit_ops.tui.state import TuiBulkAction
 from qbit_ops.tui.value_form import (
     CategorySetDraft,
     PlanKwargs,
@@ -52,7 +52,7 @@ class ValueActionScreen(QbitModal):
     MODAL_WIDTH = "medium"
     MODAL_TITLE = "Value"  # placeholder: never instantiated directly
     DIALOG_ID = "value-dialog"
-    bulk_action: ClassVar[TorrentBulkAction]
+    bulk_action: ClassVar[TuiBulkAction]
 
     BINDINGS = [
         Binding("up", "app.focus_previous", "Up", show=False),
@@ -163,7 +163,7 @@ class CategorySetScreen(ValueActionScreen):
         KeyHint(("ctrl+n",), "Create"),
         KeyHint(("escape",), "Back"),
     )
-    bulk_action: ClassVar[TorrentBulkAction] = "category_set"
+    bulk_action: ClassVar[TuiBulkAction] = "category_set"
 
     BINDINGS = [
         *ValueActionScreen.BINDINGS,
@@ -245,7 +245,7 @@ class _TagsScreen(ValueActionScreen):
 
 class TagAddScreen(_TagsScreen):
     MODAL_TITLE = "Add tags"
-    bulk_action: ClassVar[TorrentBulkAction] = "tag_add"
+    bulk_action: ClassVar[TuiBulkAction] = "tag_add"
 
     def __init__(
         self,
@@ -269,7 +269,7 @@ class TagAddScreen(_TagsScreen):
 
 class TagRemoveScreen(_TagsScreen):
     MODAL_TITLE = "Remove tags"
-    bulk_action: ClassVar[TorrentBulkAction] = "tag_remove"
+    bulk_action: ClassVar[TuiBulkAction] = "tag_remove"
 
     def source_text(self) -> tuple[str, str]:
         counts = Counter(
@@ -297,7 +297,7 @@ class ThrottleScreen(ValueActionScreen):
         KeyHint(("enter",), "Preview"),
         KeyHint(("escape",), "Back"),
     )
-    bulk_action: ClassVar[TorrentBulkAction] = "throttle"
+    bulk_action: ClassVar[TuiBulkAction] = "throttle"
 
     def __init__(
         self, selected: tuple[TorrentSnapshot, ...], names: tuple[str, ...]

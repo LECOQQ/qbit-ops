@@ -180,14 +180,15 @@ def test_torrents_start_is_declared_not_the_unused_resume_alias() -> None:
 
 
 def test_torrents_delete_stays_out_of_the_tui_reachable_mutator() -> None:
-    """`QbitTorrentMutator` types all seven LOW-risk bulk actions
+    """`QbitTorrentMutator` types every LOW-risk bulk action
     `apply_bulk_torrent_action` can apply -- pause/resume/reannounce
-    plus category/tags/throttle, widened from three to close the gap
-    those four actions used to pass through untyped. What this test
-    actually checks, and the one thing that does not move with that
-    widening: deleting torrents is HIGH risk, so it lives in its own
-    protocol, separate from every LOW-risk one -- moving it back would
-    silently widen what a TUI-typed consumer can do.
+    plus category/tags/throttle, widened from pause/resume/reannounce
+    alone to close the gap those extra actions used to pass through
+    untyped. What this test actually checks, and the one thing that
+    does not move with that widening: deleting torrents is HIGH risk,
+    so it lives in its own protocol, separate from every LOW-risk one
+    -- moving it back would silently widen what a TUI-typed consumer
+    can do.
     """
     assert "torrents_delete" not in vars(QbitTorrentMutator)
     assert "torrents_delete" in vars(QbitDestructiveMutator)
@@ -199,7 +200,7 @@ def test_bulk_torrent_mutator_covers_every_action_apply_bulk_can_reach() -> (
     """`apply_bulk_torrent_action` is shared by the CLI (which can
     request `delete`) and the TUI (which cannot -- see
     `tests/test_tui_security.py`), so its own `client` parameter must
-    structurally cover both: the seven LOW-risk actions plus delete.
+    structurally cover both: every LOW-risk action plus delete.
     `QbitTorrentMutator` alone is not enough -- that gap is exactly
     what used to leave `apply_bulk_torrent_action` typed `Any`.
     """

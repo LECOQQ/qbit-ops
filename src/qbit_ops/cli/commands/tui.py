@@ -51,8 +51,8 @@ def register(app: typer.Typer) -> None:
         Shows the status header, torrent table, shared filters, search
         and focused-torrent details, and reaches exactly two kinds of
         write: LOW-risk bulk torrent actions (pause/resume/reannounce/
-        category/tags/throttle -- typed by `QbitTorrentMutator`, see
-        `qbit_ops.tui.app`'s security-boundary docstring), and its own
+        category/tags/throttle -- `delete` is inexpressible from here,
+        see `qbit_ops.tui.app`'s security-boundary docstring), and its own
         configuration file when qbit-ops is not set up yet. Requires
         the optional `tui` extra.
         """

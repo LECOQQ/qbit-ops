@@ -5,11 +5,19 @@ Blocking qBittorrent calls are split into `collect_*()` (blocking) /
 the Textual event loop; a monotonic `_detail_request_id` guards
 against a stale background result overwriting a newer one.
 
-Security boundary -- only imports safe,
-structured domain outputs and the two frozen-plan LOW-risk mutation
-functions (Pause/Resume/Reannounce) -- never a rescanning or
-unbounded-selector function, any deletion function, or `qbit_ops.cli`.
-Enforced by `tests/test_tui_security.py`.
+Security boundary -- only imports safe, structured domain outputs and
+the two frozen-plan LOW-risk mutation functions -- exactly the actions
+`TuiBulkAction` names (pause/resume/start/reannounce/category_set/
+category_clear/tag_add/tag_remove/throttle, widened by `tui-filters`
+from pause/resume/reannounce alone) -- never a rescanning or
+unbounded-selector function, any deletion function, or
+`qbit_ops.cli`. `tests/test_tui_security.py`
+enforces the *import* half of that boundary; it cannot see a value
+passed at a call site, which is why `"delete"` -- part of
+`qbit_core`'s shared `TorrentBulkAction` union, since the CLI does
+reach it -- is additionally made inexpressible here: `build_bulk_plan`
+is typed against `TuiBulkAction`, the same union minus `"delete"`, and
+refuses at runtime if a caller defeats that typing.
 """
 
 from __future__ import annotations
@@ -21,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal, get_args
 
 from qbit_core.errors import AppError, ErrorCategory
 from qbit_core.features.explain import (
@@ -74,6 +82,29 @@ from qbit_ops.app_services import (
     create_qbit_client,
 )
 from qbit_ops.config import ConfigError
+
+TuiBulkAction = Literal[
+    "pause",
+    "resume",
+    "start",
+    "reannounce",
+    "category_set",
+    "category_clear",
+    "tag_add",
+    "tag_remove",
+    "throttle",
+]
+"""`TorrentBulkAction` minus `"delete"` -- everything the TUI may ever
+request. Kept as a real `Literal`, not just a runtime set, so a call
+site passing a `TorrentBulkAction`-typed value (which *does* include
+`"delete"`) is a Pyright error before it is ever a `ValueError`.
+"""
+
+# Derived from `TuiBulkAction` itself, not re-listed, so the runtime
+# guard in `build_bulk_plan` can never drift from the type it backs.
+_TUI_BULK_ACTIONS: frozenset[TorrentBulkAction] = frozenset(
+    get_args(TuiBulkAction)
+)
 
 DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
@@ -1069,7 +1100,7 @@ class TuiController:
 
     def build_bulk_plan(
         self,
-        action: TorrentBulkAction,
+        action: TuiBulkAction,
         torrent_hashes: tuple[str, ...],
         *,
         category: str | None = None,
@@ -1089,7 +1120,26 @@ class TuiController:
         keyword-only arguments are the value-action's collected input
         (`category_set`/`tag_add`/`tag_remove`/`throttle`); every other
         action ignores them.
+
+        `action` is typed `TuiBulkAction`, not the wider
+        `TorrentBulkAction` `build_bulk_action_plan_from_snapshot`
+        itself accepts (the CLI's engine, which does reach `"delete"`)
+        -- so passing `"delete"` here is a Pyright error at every real
+        call site. The `_TUI_BULK_ACTIONS` check below is not
+        redundant with that: nothing in Python enforces a parameter's
+        static type at runtime, so a caller that defeats the checker
+        (a `cast`, an `Any`-typed value, a future refactor that widens
+        this parameter back) would otherwise reach
+        `apply_bulk_torrent_action` -> `client.torrents_delete` with no
+        further gate in between -- the import-only scan in
+        `tests/test_tui_security.py` cannot see it, since no import
+        changes when the *value* passed here does.
         """
+        if action not in _TUI_BULK_ACTIONS:
+            raise ValueError(
+                f"{action!r} is not a TUI-reachable bulk action -- the "
+                "TUI never requests 'delete'."
+            )
         return build_bulk_action_plan_from_snapshot(
             self._raw_torrents,
             action,
