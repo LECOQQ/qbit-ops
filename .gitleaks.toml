@@ -42,14 +42,30 @@ regexes = ['''UNMISTAKABLE-[A-Z0-9-]+''']
 # paramiko typeshed stubs) through a single nested `.venv/`, which is
 # exactly the noise a real leak would hide in.
 #
-# The agent telemetry log is deliberately NOT excluded. It records
-# shell commands verbatim, and its collector redacts credentials before
-# writing -- so scanning it is what proves the redaction still works. A
-# redactor nothing verifies is not a redactor, it is a belief. The
-# self-reference that once made this unusable (a scan writing the very
-# pattern it searches for) is gone for the same reason: the collector
-# redacts that pattern too.
+# The agent telemetry log IS excluded -- the second reversal of this
+# decision, written down so a third one starts informed. It was first
+# excluded for self-reference (a scan writes the pattern it searches
+# for into the log), then re-included because the collector redacts
+# credentials, which made scanning it the proof that the redaction
+# still worked.
+#
+# What broke that: a builder testing this very config wrote a probe
+# containing `key: X25519PrivateKey`, copied from a paramiko typeshed
+# stub. The collector left it alone because it is not a credential --
+# it is a class name -- and `generic-api-key` fired, blocking `make
+# check` on a file that is gitignored and can never be committed. A
+# verbatim log of shell commands will keep producing such strings.
+#
+# What that costs, stated here rather than discovered later: no rule
+# scans the log any more, `qbit-tracker-passkey` included, so nothing
+# verifies the collector's redaction. Scoping the exclusion to the one
+# generic rule would have kept that proof, but its only syntax
+# (`[[allowlists]]` with `targetRules`) is silently ignored by older
+# gitleaks -- verified on the installed build -- and this config is
+# held to 8.16 through 8.30. A rule muzzled on one version and live on
+# another is worse than either choice made plainly.
 paths = [
+    '''(^|/)\.agents/telemetry/''',
     '''(^|/)\.venv/''',
     '''(^|/)dist/''',
     '''(^|/)htmlcov/''',
