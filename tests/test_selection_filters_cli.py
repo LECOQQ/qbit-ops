@@ -96,6 +96,24 @@ def test_tag_any_and_tag_all(runner: CliRunner, configure_qbit_backend) -> None:
     assert _names(runner, "--tag-all", "archive", "--tag-all", "keep") == []
 
 
+def test_json_rows_carry_the_tags_that_were_filtered_on(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--tag`/`--tag-all` already filter a selection; a caller who
+    filtered on `tags` must be able to read it back in the result,
+    rather than trust the filter without a way to verify it."""
+    configure_qbit_backend(client=_client())
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--format", "json", "--tag", "archive"],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    torrents = json.loads(result.stdout)["torrents"]
+    assert [t["tags"] for t in torrents] == [["archive", "verified"]]
+
+
 def test_save_path_and_name_filters(
     runner: CliRunner, configure_qbit_backend
 ) -> None:

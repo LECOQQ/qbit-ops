@@ -965,6 +965,14 @@ def torrent_snapshot_to_dict(
     `table`/`csv` renderers, kept only in `json`/`jsonl`: a library is
     overwhelmingly unlimited, so two columns of zeros would crowd out
     the ones an operator reads.
+
+    `tags` joins `json`/`jsonl` for a sharper reason than crowding:
+    `torrents list --tag`/`--tag-all`/`--exclude-tag` already filter on
+    it, so a caller who filtered on a field could not read it back in
+    the result -- trusting the filter instead of verifying it. Table
+    and CSV stay as they were: a tag list is unbounded width, same call
+    as the rate/limit columns above, and nothing filters on it there
+    that a row would need to prove.
     """
     return {
         "hash": snapshot.hash,
@@ -979,6 +987,7 @@ def torrent_snapshot_to_dict(
         "upload_rate": snapshot.upload_rate,
         "download_limit": snapshot.download_limit,
         "upload_limit": snapshot.upload_limit,
+        "tags": list(snapshot.tags),
     }
 
 

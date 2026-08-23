@@ -11,9 +11,9 @@ The shape is drill-down, and it is deliberate:
     summary  ->  find (bounded)  ->  inspect one  ->  explain one
 
 Each step returns just enough to choose the next one. `find_torrents`
-returns seven fields per torrent, not the eighteen `inspect_torrent`
-carries, because a hash, a name and a state are what a next step is
-chosen from.
+returns the handful of fields `_brief` names, not every field
+`inspect_torrent` carries through `_full`, because a hash, a name and a
+state are what a next step is chosen from.
 
 No tool mutates. No tool holds a rule of its own: every classification
 comes from `qbit_core`, so this surface cannot drift from the CLI's
@@ -196,8 +196,10 @@ def aggregate_stats(
 
 
 def _full(snapshot: TorrentSnapshot) -> dict[str, Any]:
-    """Every `TorrentSnapshot` field but `tags`, once an agent has
-    narrowed to a single torrent.
+    """Every `TorrentSnapshot` field, once an agent has narrowed to a
+    single torrent -- `tags` included, the same raw membership list the
+    model itself carries it for: a caller that already holds this
+    projection never needs a second call just to read it.
     """
     return {
         "hash": snapshot.hash,
@@ -212,6 +214,7 @@ def _full(snapshot: TorrentSnapshot) -> dict[str, Any]:
         "upload_rate": snapshot.upload_rate,
         "download_limit": snapshot.download_limit,
         "upload_limit": snapshot.upload_limit,
+        "tags": list(snapshot.tags),
         "downloaded": snapshot.downloaded,
         "uploaded": snapshot.uploaded,
         "seeding_time": snapshot.seeding_time,
@@ -225,8 +228,8 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     """Every field of one explicitly chosen torrent.
 
     Unbounded on purpose: one torrent is a bounded answer. This is where
-    the sixteen snapshot fields belong -- after an agent has narrowed to
-    a single item, not before.
+    every snapshot field belongs -- see `_full` -- after an agent has
+    narrowed to a single item, not before.
 
     Asks upstream for that hash alone. Fetching the whole library to
     find one torrent kept the *output* bounded while leaving the *input*

@@ -7,6 +7,7 @@ when the `mcp` extra is absent.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -16,6 +17,7 @@ from qbit_core.qbit.protocols import (
     QbitTorrentMutator,
     QbitTrackerMutator,
 )
+from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.mcp import tools
 from tests.support import FakeQbitClient, make_torrent
 
@@ -56,7 +58,7 @@ def test_find_defaults_to_a_small_page() -> None:
 
 
 def test_find_returns_only_drill_down_fields() -> None:
-    """Seven fields, not the eighteen `inspect_torrent` returns: what a
+    """Seven fields, far fewer than `inspect_torrent` returns: what a
     next step is chosen from. Every extra field is permanent context
     cost, so this pins the set -- adding one is a decision, never a
     drift."""
@@ -101,6 +103,25 @@ def test_inspect_resolves_a_full_hash_case_insensitively() -> None:
     assert found is not None
     assert found["hash"] == wanted
     assert found["name"] == "T2"
+
+
+def test_inspect_exposes_exactly_the_snapshot_field_set() -> None:
+    """`inspect_torrent` promises *every* `TorrentSnapshot` field, once
+    an agent has narrowed to one torrent -- so the guard compares `_full`
+    against the model itself, not a hand-copied list of names. A field
+    the model gains and this projection quietly drops would pass a test
+    that only checks "is `tags` there", so this checks the whole set.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="f" * 40, name="F", tags="beta, alpha")]
+    )
+
+    found = tools.inspect_torrent(client, "f" * 40)
+
+    assert found is not None
+    model_fields = {field.name for field in dataclasses.fields(TorrentSnapshot)}
+    assert set(found) == model_fields
+    assert found["tags"] == ["alpha", "beta"]
 
 
 def test_no_mcp_tool_output_leaks_a_save_path_or_a_tracker_passkey() -> None:

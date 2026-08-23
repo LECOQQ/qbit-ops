@@ -31,10 +31,24 @@ MCP_FULL = "mcp_full"
 # deliberate, total omission -- not an oversight this file failed to
 # notice.
 #
-# `tags` is omitted from all three: `cli.rendering.torrent_snapshot_to_dict`
-# never carried it (predates this file), and neither MCP projection
-# added it either. Not a safety concern (tags are not secret), but an
-# undocumented gap -- flagged for a human decision, not resolved here.
+# `tags` was omitted from all three (predating this file's tracking),
+# an undocumented gap this table used to flag rather than resolve. A
+# human decision has since settled it for two of the three: `mcp_full`
+# promises *every* `TorrentSnapshot` field once an agent has narrowed
+# to a single torrent, so dropping `tags` silently broke that promise
+# (fixed in `mcp.tools._full`); `cli_list` -- `torrents list`'s
+# json/jsonl row, `cli.rendering.torrent_snapshot_to_dict` -- already
+# lets an operator filter on `--tag`/`--tag-all`/`--exclude-tag`, so a
+# caller who filtered on it could not read it back and had to trust
+# the filter rather than verify it (fixed there too; `torrents list`'s
+# `table`/`csv` renderers keep drawing a narrower set of columns from
+# that same dict and still omit `tags`, the same unbounded-width call
+# already made for `download_rate`/`upload_rate`/`download_limit`/
+# `upload_limit`, and neither renders anything a filter needs proving).
+# `mcp_brief` stays out on its own, real grounds: `mcp.tools.
+# find_torrents` chooses a next drill-down step from a handful of
+# fields, tested separately in `test_mcp_tools.py`, and carries no tag
+# filter today -- no filter there for a caller to have to trust blindly.
 FIELD_PROJECTIONS: dict[str, frozenset[str]] = {
     "hash": frozenset({CLI_LIST, MCP_BRIEF, MCP_FULL}),
     "name": frozenset({CLI_LIST, MCP_BRIEF, MCP_FULL}),
@@ -48,7 +62,7 @@ FIELD_PROJECTIONS: dict[str, frozenset[str]] = {
     "upload_rate": frozenset({CLI_LIST, MCP_FULL}),
     "download_limit": frozenset({CLI_LIST, MCP_FULL}),
     "upload_limit": frozenset({CLI_LIST, MCP_FULL}),
-    "tags": frozenset(),
+    "tags": frozenset({CLI_LIST, MCP_FULL}),
     "downloaded": frozenset({MCP_FULL}),
     "uploaded": frozenset({MCP_FULL}),
     "seeding_time": frozenset({MCP_FULL}),
