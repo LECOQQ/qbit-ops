@@ -13,8 +13,8 @@ from pathlib import Path
 
 import qbit_core
 import qbit_ops
-from qbit_core.shared.execution import MutationOperation
 from qbit_ops.cli.app import app
+from qbit_ops.cli.commands._shared import CLI_COMMAND_PATH
 
 CORE_DIR = Path(qbit_core.__file__).parent
 PACKAGE_DIR = Path(qbit_ops.__file__).parent
@@ -165,8 +165,9 @@ def _collect_mutating_names(
 
 def _mutating_torrents_command_function_names() -> set[str]:
     """Callback `__name__`s for every registered `torrents` command that
-    is a `MutationOperation` -- read from `MutationOperation`, never a
-    hand-copied command list (same source `test_execution.py:69` uses).
+    is a `MutationOperation` -- read from `CLI_COMMAND_PATH`, never a
+    hand-copied command list (same source `test_execution.py` uses for
+    its own CLI-registration completeness check).
     """
     torrents_group = next(
         group.typer_instance
@@ -175,7 +176,7 @@ def _mutating_torrents_command_function_names() -> set[str]:
     )
     assert torrents_group is not None
 
-    mutation_values = {operation.value for operation in MutationOperation}
+    mutation_values = set(CLI_COMMAND_PATH.values())
     names: set[str] = set()
     _collect_mutating_names(torrents_group, "torrents", mutation_values, names)
     return names

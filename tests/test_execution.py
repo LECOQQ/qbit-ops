@@ -14,6 +14,7 @@ from qbit_core.shared.execution import (
     MutationRisk,
 )
 from qbit_ops.cli.app import app
+from qbit_ops.cli.commands._shared import CLI_COMMAND_PATH
 
 COMMANDS_DOC = Path(__file__).resolve().parent.parent / "docs" / "COMMANDS.md"
 
@@ -72,6 +73,14 @@ def test_mutation_risk_has_no_unclassified_extra_entries() -> None:
     assert len(MUTATION_RISK) == len(MutationOperation)
 
 
+def test_cli_command_path_covers_every_mutation_operation() -> None:
+    """`CLI_COMMAND_PATH` (the CLI's own spelling for each operation) must
+    stay as complete as `MUTATION_RISK` -- a mutation classified for risk
+    but missing its CLI path would crash `run_mutation`'s refusal path
+    instead of failing here."""
+    assert set(CLI_COMMAND_PATH) == set(MutationOperation)
+
+
 def _collect_commands(
     typer_instance, prefix: str, registered: set[str]
 ) -> None:
@@ -105,7 +114,7 @@ def test_every_mutation_operation_is_registered_as_a_cli_command() -> None:
         _collect_commands(group, group_name, registered)
 
     for operation in MutationOperation:
-        assert operation.value in registered, operation.value
+        assert CLI_COMMAND_PATH[operation] in registered, operation
 
 
 def _dry_run_capable_commands() -> set[str]:
@@ -139,7 +148,7 @@ def test_only_classified_mutations_offer_the_dry_run_control() -> None:
     offering = _dry_run_capable_commands()
 
     assert offering, "expected at least one command offering --dry-run"
-    assert offering == {operation.value for operation in MutationOperation}
+    assert offering == set(CLI_COMMAND_PATH.values())
     assert "init" not in offering
 
 
@@ -222,6 +231,8 @@ def test_assume_yes_never_implies_no_dry_run() -> None:
 
 def test_refusal_message_never_leaks_and_names_the_operation() -> None:
     policy = _policy(dry_run=False, interactive=False, risk=MutationRisk.HIGH)
-    message = policy.refusal_message(MutationOperation.TRACKERS_REMOVE)
+    message = policy.refusal_message(
+        CLI_COMMAND_PATH[MutationOperation.TRACKERS_REMOVE]
+    )
     assert "trackers remove" in message
     assert "--yes" in message

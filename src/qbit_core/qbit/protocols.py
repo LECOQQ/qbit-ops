@@ -19,6 +19,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+__all__ = [
+    "QbitClient",
+]
+
 
 @runtime_checkable
 class QbitTorrentReader(Protocol):

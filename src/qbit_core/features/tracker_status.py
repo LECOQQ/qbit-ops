@@ -40,6 +40,15 @@ from qbit_core.shared.selection import (
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
 __all__ = [
+    "TRACKER_STATUS_CSV_FIELDNAMES",
+    "TrackerStatusReport",
+    "collect_tracker_status",
+    "tracker_status_exit_code",
+    "tracker_status_report_to_csv_rows",
+    "tracker_status_report_to_dict",
+]
+
+__all__ = [
     "SCHEMA_VERSION",
     "TrackerHealth",
     "classify_raw_tracker_status",

@@ -38,6 +38,21 @@ from qbit_core.shared.torrent_states import (
     is_stopped_state,
 )
 
+__all__ = [
+    "AmbiguousTorrentHashError",
+    "Range",
+    "ResolvedTorrent",
+    "STATE_FILTER_VALUES",
+    "Selection",
+    "SelectionRequest",
+    "TorrentFilter",
+    "describe_torrent_filter",
+    "format_category_label",
+    "normalize_tokens",
+    "torrent_filter_to_dict",
+    "validate_selection_request",
+]
+
 UNCATEGORIZED_LABEL = "(uncategorized)"
 UNCATEGORIZED_FILTER_TOKEN = "uncategorized"
 
@@ -183,6 +198,19 @@ class Range[T: (int, float, datetime)]:
         if self.max is not None and value > self.max:
             return False
         return True
+
+
+def normalize_tokens(values: Iterable[str]) -> tuple[str, ...]:
+    """Strip, drop blanks and de-duplicate while preserving order.
+
+    The one shared rule for every comma-separated, multi-value field a
+    caller types by hand -- tags, categories, save paths -- so the CLI's
+    `--tag` validation, a filter's CSV field and a TUI modal's tag input
+    can't drift into three different definitions of "blank" or "duplicate".
+    """
+    return tuple(
+        dict.fromkeys(value.strip() for value in values if value.strip() != "")
+    )
 
 
 @dataclass(frozen=True)

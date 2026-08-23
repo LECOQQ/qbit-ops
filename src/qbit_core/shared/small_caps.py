@@ -14,6 +14,12 @@ table.
 
 from __future__ import annotations
 
+__all__ = [
+    "SMALL_CAPS",
+    "UNMAPPABLE_LETTERS",
+    "to_small_caps",
+]
+
 PHONETIC_EXTENSIONS = "Phonetic Extensions"
 IPA_EXTENSIONS = "IPA Extensions"
 LATIN_EXTENDED_D = "Latin Extended-D"

@@ -34,6 +34,16 @@ from qbit_core.shared.small_caps import (
 )
 from qbit_core.shared.torrent_states import classify_torrent_state
 
+__all__ = [
+    "CheckStatus",
+    "ConnectionOutcome",
+    "DoctorReport",
+    "collect_doctor_report",
+    "doctor_exit_code",
+    "doctor_report_to_csv_rows",
+    "doctor_report_to_json_dict",
+]
+
 SCHEMA_VERSION = "1"
 
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")

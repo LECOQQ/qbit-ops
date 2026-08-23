@@ -7,6 +7,14 @@ the user env file cannot disagree about what they are called.
 
 from dataclasses import dataclass
 
+__all__ = [
+    "CONNECTION_VARIABLES",
+    "HOST_VARIABLE",
+    "PASSWORD_VARIABLE",
+    "QbitConfig",
+    "USER_VARIABLE",
+]
+
 HOST_VARIABLE = "QBIT_HOST"
 USER_VARIABLE = "QBIT_USER"
 PASSWORD_VARIABLE = "QBIT_PASSWORD"

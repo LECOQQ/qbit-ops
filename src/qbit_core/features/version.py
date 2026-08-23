@@ -13,6 +13,12 @@ from typing import Any
 
 from qbit_core.qbit.protocols import QbitAppInfoReader
 
+__all__ = [
+    "VersionReport",
+    "collect_version_report",
+    "version_report_to_json_dict",
+]
+
 
 @dataclass(frozen=True)
 class VersionReport:

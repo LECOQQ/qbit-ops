@@ -9,6 +9,11 @@ import qbittorrentapi
 from qbit_core.config import QbitConfig
 from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
 
+__all__ = [
+    "create_qbit_client",
+    "is_qbit_error",
+]
+
 
 def create_qbit_client(config: QbitConfig) -> Any:
     """Create and authenticate a qBittorrent API client from `config`.

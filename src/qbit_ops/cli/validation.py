@@ -10,6 +10,7 @@ mutation planning) stay in their own modules (`qbit_core.features.torrents`,
 
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
 from qbit_core.shared.parsers import parse_rate
+from qbit_core.shared.selection import normalize_tokens
 from qbit_ops.cli.error_boundary import fail
 from qbit_ops.cli.rendering import OutputFormat
 
@@ -119,12 +120,10 @@ def validate_category_name(value: str) -> str:
 
 
 def validate_tag_names(values: list[str]) -> tuple[str, ...]:
-    """Strip, drop blanks and deduplicate one or more `tag add`/`tag
-    remove` names, rejecting an empty result before any API call.
+    """Apply the shared token normalization to one or more `tag add`/
+    `tag remove` names, rejecting an empty result before any API call.
     """
-    normalized = tuple(
-        dict.fromkeys(value.strip() for value in values if value.strip() != "")
-    )
+    normalized = normalize_tokens(values)
     if not normalized:
         fail(
             "Provide at least one non-blank tag name.",

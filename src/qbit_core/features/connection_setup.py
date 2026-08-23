@@ -31,6 +31,19 @@ from qbit_core.errors import (
 )
 from qbit_core.qbit.client import create_qbit_client
 
+__all__ = [
+    "ConnectionAttempt",
+    "DEFAULT_HOST",
+    "DEFAULT_USERNAME",
+    "ENV_FILE_MODE",
+    "EnvFileExistsError",
+    "MaskingSource",
+    "build_connection_config",
+    "detect_masking_sources",
+    "try_connection",
+    "write_connection_env_file",
+]
+
 DEFAULT_HOST = "http://localhost:8080"
 DEFAULT_USERNAME = "admin"
 

@@ -1,14 +1,28 @@
 """Shared mutation risk classification and execution policy.
 
-Every mutating command in `qbit_ops`'s CLI is classified into exactly one
+Every mutation this project can apply is classified into exactly one
 `MutationRisk` tier and goes through the same `ExecutionPolicy.decide()`
 logic to determine whether it previews, applies silently, prompts for
 confirmation, or refuses. This keeps the safety model in one place
-instead of re-implemented per command.
+instead of re-implemented per surface.
+
+`MutationOperation` and `MUTATION_RISK` are CLI-agnostic on purpose --
+any surface (today only the CLI mutates through this module, but the
+TUI's own LOW-risk allowlist is checked against it in
+`tests/test_tui_security.py`) can ask "how risky is this?" without
+knowing a single thing about how the CLI spells its commands.
 """
 
 from dataclasses import dataclass
 from enum import StrEnum
+
+__all__ = [
+    "ExecutionDecision",
+    "ExecutionPolicy",
+    "MUTATION_RISK",
+    "MutationOperation",
+    "MutationStatus",
+]
 
 
 class MutationRisk(StrEnum):
@@ -20,30 +34,38 @@ class MutationRisk(StrEnum):
 
 
 class MutationOperation(StrEnum):
-    """Every mutating CLI command, named after its exact invocation.
+    """Every kind of mutation this project can apply to a qBittorrent
+    instance -- one member per distinct blast radius, not per interface.
 
-    "Mutating" means changing the *qBittorrent instance*. A command that
-    only writes qbit-ops' own configuration file (`init`) is deliberately
-    absent: it has no selector to widen, no plan to preview, and no blast
-    radius beyond one local file that `--force` already guards.
+    "Mutating" means changing the *qBittorrent instance*. Writing only
+    qbit-ops' own configuration file (`init`) is deliberately absent: it
+    has no selector to widen, no plan to preview, and no blast radius
+    beyond one local file that `--force` already guards.
+
+    Values are plain symbolic identifiers, never a CLI invocation path
+    -- this module stays usable by any surface (TUI, MCP, a future one)
+    that only needs to ask "how risky is this?". The CLI's own spelling
+    for each of these (e.g. "torrents pause") lives in
+    `qbit_ops.cli.commands._shared.CLI_COMMAND_PATH`, the one place that
+    correspondence belongs.
     """
 
-    TORRENTS_PAUSE = "torrents pause"
-    TORRENTS_RESUME = "torrents resume"
-    TORRENTS_START = "torrents start"
-    TORRENTS_REANNOUNCE = "torrents reannounce"
-    TORRENTS_DELETE = "torrents delete"
-    TORRENTS_IMPORT = "torrents import"
-    TORRENTS_CATEGORY_SET = "torrents category set"
-    TORRENTS_CATEGORY_CLEAR = "torrents category clear"
-    TORRENTS_TAG_ADD = "torrents tag add"
-    TORRENTS_TAG_REMOVE = "torrents tag remove"
-    TORRENTS_THROTTLE = "torrents throttle"
-    BACKUP_RESTORE = "backup restore"
-    TRACKERS_ADD_IF_PRESENT = "trackers add-if-present"
-    TRACKERS_REMOVE = "trackers remove"
-    TRACKERS_REPLACE = "trackers replace"
-    TRACKERS_REPLACE_PASSKEY = "trackers replace-passkey"
+    TORRENTS_PAUSE = "torrents_pause"
+    TORRENTS_RESUME = "torrents_resume"
+    TORRENTS_START = "torrents_start"
+    TORRENTS_REANNOUNCE = "torrents_reannounce"
+    TORRENTS_DELETE = "torrents_delete"
+    TORRENTS_IMPORT = "torrents_import"
+    TORRENTS_CATEGORY_SET = "torrents_category_set"
+    TORRENTS_CATEGORY_CLEAR = "torrents_category_clear"
+    TORRENTS_TAG_ADD = "torrents_tag_add"
+    TORRENTS_TAG_REMOVE = "torrents_tag_remove"
+    TORRENTS_THROTTLE = "torrents_throttle"
+    BACKUP_RESTORE = "backup_restore"
+    TRACKERS_ADD_IF_PRESENT = "trackers_add_if_present"
+    TRACKERS_REMOVE = "trackers_remove"
+    TRACKERS_REPLACE = "trackers_replace"
+    TRACKERS_REPLACE_PASSKEY = "trackers_replace_passkey"
 
 
 # The single source of truth for risk classification. Tests assert this
@@ -133,10 +155,15 @@ class ExecutionPolicy:
 
         return ExecutionDecision.REFUSE_NON_INTERACTIVE
 
-    def refusal_message(self, operation: MutationOperation) -> str:
-        """Build the error shown when refusing a non-interactive run."""
+    def refusal_message(self, operation_label: str) -> str:
+        """Build the error shown when refusing a non-interactive run.
+
+        `operation_label` is the caller's own display spelling for the
+        operation (the CLI passes `CLI_COMMAND_PATH[operation]`); this
+        module has no opinion on that spelling.
+        """
         return (
-            f"'{operation.value}' requires confirmation ({self.risk.value} "
+            f"'{operation_label}' requires confirmation ({self.risk.value} "
             "risk) but stderr is not an interactive terminal. Re-run with "
             "--yes to confirm unattended execution."
         )

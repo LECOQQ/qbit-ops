@@ -15,6 +15,31 @@ from qbit_core.shared.execution import (
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.exit_codes import ExitCode
 
+# The CLI's own spelling for each `MutationOperation` -- the literal
+# Typer command path an operator types. `qbit_core.shared.execution`
+# only names *what* mutates, never how the CLI invokes it; this
+# correspondence is a CLI-layer concern and stays here. Tests assert
+# this dict covers every `MutationOperation` and matches the app's
+# actual registered commands, so it cannot drift from either side.
+CLI_COMMAND_PATH: dict[MutationOperation, str] = {
+    MutationOperation.TORRENTS_PAUSE: "torrents pause",
+    MutationOperation.TORRENTS_RESUME: "torrents resume",
+    MutationOperation.TORRENTS_START: "torrents start",
+    MutationOperation.TORRENTS_REANNOUNCE: "torrents reannounce",
+    MutationOperation.TORRENTS_DELETE: "torrents delete",
+    MutationOperation.TORRENTS_IMPORT: "torrents import",
+    MutationOperation.TORRENTS_CATEGORY_SET: "torrents category set",
+    MutationOperation.TORRENTS_CATEGORY_CLEAR: "torrents category clear",
+    MutationOperation.TORRENTS_TAG_ADD: "torrents tag add",
+    MutationOperation.TORRENTS_TAG_REMOVE: "torrents tag remove",
+    MutationOperation.TORRENTS_THROTTLE: "torrents throttle",
+    MutationOperation.BACKUP_RESTORE: "backup restore",
+    MutationOperation.TRACKERS_ADD_IF_PRESENT: "trackers add-if-present",
+    MutationOperation.TRACKERS_REMOVE: "trackers remove",
+    MutationOperation.TRACKERS_REPLACE: "trackers replace",
+    MutationOperation.TRACKERS_REPLACE_PASSKEY: "trackers replace-passkey",
+}
+
 
 def run_mutation(
     *,
@@ -66,7 +91,7 @@ def run_mutation(
     decision = policy.decide()
 
     if decision is ExecutionDecision.REFUSE_NON_INTERACTIVE:
-        error_boundary.fail(policy.refusal_message(operation))
+        error_boundary.fail(policy.refusal_message(CLI_COMMAND_PATH[operation]))
 
     if decision is ExecutionDecision.APPLY_WITHOUT_PROMPT:
         apply_fn()

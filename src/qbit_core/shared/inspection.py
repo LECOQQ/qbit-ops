@@ -52,6 +52,10 @@ from qbit_core.shared.selection import (
 )
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
+__all__ = [
+    "select_and_inspect",
+]
+
 
 @dataclass(frozen=True)
 class InspectedTorrent:

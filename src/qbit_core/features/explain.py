@@ -44,6 +44,18 @@ from qbit_core.shared.torrent_states import (
     is_stopped_state,
 )
 
+__all__ = [
+    "Evidence",
+    "ExplanationFinding",
+    "ExplanationReport",
+    "ExplanationSeverity",
+    "build_torrent_explanation",
+    "explain_torrent",
+    "explain_tracker",
+    "explanation_exit_code",
+    "explanation_report_to_dict",
+]
+
 SCHEMA_VERSION = "1"
 
 

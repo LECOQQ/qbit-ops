@@ -33,6 +33,13 @@ import re
 from collections.abc import Collection
 from typing import Any
 
+__all__ = [
+    "get_field_as_int",
+    "get_field_as_string",
+    "get_field_as_tag_list",
+    "get_transfer_rates",
+]
+
 # Distinguishes "field absent" from "field present and set to None",
 # which `get_field`'s caller-supplied default cannot express.
 _MISSING = object()

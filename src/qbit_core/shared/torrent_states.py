@@ -21,6 +21,13 @@ from qbit_core.qbit.fields import (
     get_optional_int,
 )
 
+__all__ = [
+    "TorrentSnapshot",
+    "build_torrent_snapshot",
+    "classify_torrent_state",
+    "is_stopped_state",
+]
+
 TorrentStateGroup = Literal[
     "downloading",
     "seeding",

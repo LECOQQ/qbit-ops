@@ -15,6 +15,14 @@ import re
 
 from qbit_core.errors import InvalidInputError
 
+__all__ = [
+    "parse_duration",
+    "parse_percentage",
+    "parse_rate",
+    "parse_ratio",
+    "parse_size",
+]
+
 # Suffix -> multiplier. Binary (IEC) and decimal (SI) are both accepted
 # and never conflated: `MiB` is 1024**2, `MB` is 1000**2. Comparison is
 # case-insensitive, so what distinguishes the two families is the `i`,

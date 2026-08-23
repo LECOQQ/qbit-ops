@@ -16,17 +16,15 @@ from typing import TypedDict
 
 from qbit_core.errors import InvalidInputError, require_non_blank
 from qbit_core.shared.parsers import parse_rate
+from qbit_core.shared.selection import normalize_tokens
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
 
 def _normalize_tags(raw: str) -> tuple[str, ...]:
-    """Strip, drop blanks and deduplicate a comma-separated tag list --
-    the TUI-local counterpart of the CLI's `validate_tag_names`, which
-    lives behind `qbit_ops.cli` and is therefore off-limits here (see
-    `qbit_ops.tui.app`'s security-boundary docstring)."""
-    return tuple(
-        dict.fromkeys(part.strip() for part in raw.split(",") if part.strip())
-    )
+    """Split the modal's raw comma-separated input, then apply the same
+    strip/dedupe rule the CLI's `validate_tag_names` uses (see
+    `qbit_core.shared.selection.normalize_tokens`)."""
+    return normalize_tokens(raw.split(","))
 
 
 class PlanKwargs(TypedDict, total=False):

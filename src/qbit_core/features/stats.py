@@ -33,6 +33,15 @@ from qbit_core.shared.selection import (
 )
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
+__all__ = [
+    "LibraryStats",
+    "TorrentStatsReport",
+    "collect_torrent_stats",
+    "stats_report_to_csv_rows",
+    "stats_report_to_dict",
+    "validate_stats_request",
+]
+
 SCHEMA_VERSION = "1"
 
 

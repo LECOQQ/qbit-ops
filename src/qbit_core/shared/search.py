@@ -19,6 +19,13 @@ from typing import Literal
 from qbit_core.errors import InvalidInputError
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
+__all__ = [
+    "SearchHit",
+    "SearchMode",
+    "SearchResults",
+    "search_snapshots",
+]
+
 MatchTier = Literal[
     "hash",
     "exact",

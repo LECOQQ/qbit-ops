@@ -8,6 +8,15 @@ map to different codes across commands. See docs/ERRORS_AND_EXIT_CODES.md.
 from dataclasses import dataclass
 from enum import StrEnum
 
+__all__ = [
+    "AppError",
+    "ErrorCategory",
+    "InvalidInputError",
+    "QbitAuthenticationError",
+    "QbitConnectionError",
+    "require_non_blank",
+]
+
 
 class ErrorCategory(StrEnum):
     """Classify why a command failed, independent of rendering or exit code."""

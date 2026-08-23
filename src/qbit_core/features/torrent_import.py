@@ -19,6 +19,14 @@ from typing import Any
 from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.bencode import BencodeError, decode_torrent
 
+__all__ = [
+    "TorrentImportError",
+    "TorrentImportPlan",
+    "TorrentImportResult",
+    "apply_torrent_import",
+    "plan_torrent_import",
+]
+
 MAX_TORRENT_FILE_SIZE = 10 * 1024 * 1024
 MAX_ZIP_ENTRIES = 5000
 MAX_ZIP_TOTAL_UNCOMPRESSED = 200 * 1024 * 1024

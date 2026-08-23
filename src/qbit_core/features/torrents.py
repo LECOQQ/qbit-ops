@@ -58,6 +58,7 @@ from qbit_core.shared.selection import (
     TorrentNotFoundError,
     format_category_label,
     matches_cheap_filters,
+    normalize_tokens,
     resolve_torrent_hash,
     select_from_items,
     torrent_filter_to_dict,
@@ -71,6 +72,32 @@ from qbit_core.shared.torrent_states import (
     build_torrent_snapshot,
     is_stopped_state,
 )
+
+__all__ = [
+    "BulkHashActionResult",
+    "BulkTorrentActionPlan",
+    "HashActionOutcome",
+    "HashActionStatus",
+    "TRACKER_HEALTH_FILTER_VALUES",
+    "TorrentBulkAction",
+    "apply_bulk_torrent_action",
+    "build_bulk_action_plan_from_snapshot",
+    "build_torrent_filter",
+    "get_peer_discovery_details",
+    "get_safe_tracker_details",
+    "inspect_filtered_torrents",
+    "inspect_torrent",
+    "known_tags",
+    "list_category_usage",
+    "list_torrent_snapshots",
+    "pause_torrents_by_hash",
+    "plan_bulk_torrent_action",
+    "resolve_category_availability",
+    "resume_torrents_by_hash",
+    "search_torrents",
+    "select_torrents",
+    "select_torrents_from_items",
+]
 
 TorrentBulkAction = Literal[
     "pause",
@@ -154,17 +181,17 @@ def build_torrent_filter(
         raise ValueError("Use --active or --inactive, not both.")
 
     filters = TorrentFilter(
-        categories=_normalize_tokens(categories),
-        categories_excluded=_normalize_tokens(categories_excluded),
+        categories=normalize_tokens(categories),
+        categories_excluded=normalize_tokens(categories_excluded),
         tags=TagCriterion(
-            any_of=_normalize_tokens(tags_any),
-            all_of=_normalize_tokens(tags_all),
-            none_of=_normalize_tokens(tags_excluded),
+            any_of=normalize_tokens(tags_any),
+            all_of=normalize_tokens(tags_all),
+            none_of=normalize_tokens(tags_excluded),
         ),
-        save_path_prefixes=_normalize_tokens(save_paths),
-        save_paths_excluded=_normalize_tokens(save_paths_excluded),
-        name_contains=_normalize_tokens(name_contains),
-        name_excluded=_normalize_tokens(name_excluded),
+        save_path_prefixes=normalize_tokens(save_paths),
+        save_paths_excluded=normalize_tokens(save_paths_excluded),
+        name_contains=normalize_tokens(name_contains),
+        name_excluded=normalize_tokens(name_excluded),
         name_regex=name_regex,
         states=_normalize_states(states, option="--state"),
         states_excluded=_normalize_states(
@@ -202,13 +229,6 @@ def build_torrent_filter(
     )
     validate_torrent_filter(filters)
     return filters
-
-
-def _normalize_tokens(values: Sequence[str]) -> tuple[str, ...]:
-    """Strip, drop blanks and de-duplicate while preserving order."""
-    return tuple(
-        dict.fromkeys(value.strip() for value in values if value.strip() != "")
-    )
 
 
 def _normalize_states(
@@ -726,7 +746,7 @@ def plan_bulk_torrent_action(
         on_progress=on_progress,
     )
 
-    normalized_tags = _normalize_tokens(tags)
+    normalized_tags = normalize_tokens(tags)
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []
 
@@ -847,7 +867,7 @@ def build_bulk_action_plan_from_snapshot(
     by_hash: dict[str, Any] = {
         get_field_as_string(item, "hash").lower(): item for item in raw_torrents
     }
-    normalized_tags = _normalize_tokens(tags)
+    normalized_tags = normalize_tokens(tags)
 
     changes: list[BulkTorrentChange] = []
     skips: list[BulkTorrentSkip] = []

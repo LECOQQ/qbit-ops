@@ -33,10 +33,17 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import get_args
 
 import qbit_ops.tui
 import qbit_ops.tui.app
 import qbit_ops.tui.state
+from qbit_core.shared.execution import (
+    MUTATION_RISK,
+    MutationOperation,
+    MutationRisk,
+)
+from qbit_ops.tui.state import TuiBulkAction
 
 TUI_PACKAGE_DIR = Path(qbit_ops.tui.__file__).parent
 
@@ -311,3 +318,23 @@ def test_tui_state_module_never_imports_textual() -> None:
         module == "textual" or module.startswith("textual.")
         for module in imports
     )
+
+
+def test_every_tui_bulk_action_is_classified_low_risk() -> None:
+    """`TuiBulkAction` is meant to be exactly the LOW-risk torrent
+    mutations (see this file's own module docstring and
+    `qbit_ops.tui.state`'s "Security boundary" docstring) -- but until
+    now nothing checked that against `qbit_core`'s actual classification,
+    so the two could drift the moment either changed independently.
+
+    Each action name maps onto the `MutationOperation` member of the
+    same shape (`"category_set"` -> `TORRENTS_CATEGORY_SET`); a torrent
+    mutation reclassified away from LOW without updating `TuiBulkAction`
+    now fails here instead of silently reaching the TUI unconfirmed.
+    """
+    for action in get_args(TuiBulkAction):
+        operation = MutationOperation[f"TORRENTS_{action.upper()}"]
+        assert MUTATION_RISK[operation] is MutationRisk.LOW, (
+            f"TuiBulkAction {action!r} maps to {operation}, classified "
+            f"{MUTATION_RISK[operation]} -- not LOW"
+        )

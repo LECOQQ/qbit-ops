@@ -23,6 +23,19 @@ from qbit_core.qbit.fields import (
     is_disabled_tracker,
 )
 
+__all__ = [
+    "BackupExportError",
+    "BackupRestorePlan",
+    "BackupRestoreResult",
+    "apply_backup_restore",
+    "diff_backup_exports",
+    "export_instance_state",
+    "has_backup_diff",
+    "load_export_file",
+    "plan_backup_restore",
+    "redact_backup_diff",
+]
+
 
 class BackupExportError(ValueError):
     """Report invalid backup export payloads."""
