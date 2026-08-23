@@ -87,8 +87,8 @@ select = ["E", "F", "I", "B", "UP"]
 # so its import cannot be resolved in the default environment. The
 # module that imports it is confined by R7 in tests/test_layering.py.
 reportMissingImports = "warning"
-include = ["src", "tests", "scripts"]
-extraPaths = ["scripts"]
+include = ["src", "tests", "scripts", "demo"]
+extraPaths = ["scripts", "demo"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"
 venvPath = "."

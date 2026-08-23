@@ -50,7 +50,7 @@ class Fixture:
 
 def _make_payload(label: str, size: int) -> bytes:
     """Deterministic filler bytes derived only from `label` and `size`."""
-    filler = f"qbit-ops synthetic demo payload -- {label} -- ".encode("utf-8")
+    filler = f"qbit-ops synthetic demo payload -- {label} -- ".encode()
     repeated = filler * (size // len(filler) + 1)
     return repeated[:size]
 
@@ -137,9 +137,10 @@ def main() -> None:
     )
     (CONFIG_DIR / "qBittorrent.conf").write_text(conf_text, encoding="utf-8")
 
+    written_payload_mb = written_payload_bytes / 1_000_000
     print(
         f"\nGenerated {len(raw)} torrent(s), "
-        f"{written_payload_bytes / 1_000_000:.1f} MB of payload written to disk."
+        f"{written_payload_mb:.1f} MB of payload written to disk."
     )
 
 

@@ -21,7 +21,6 @@ from pathlib import Path
 
 import qbittorrentapi
 from dotenv import dotenv_values
-
 from generate_fixtures import DOWNLOADS_DIR, Fixture, load_fixtures
 
 DEMO_DIR = Path(__file__).parent
@@ -31,8 +30,14 @@ READY_TIMEOUT_SECONDS = 90
 STATE_TIMEOUT_SECONDS = 60
 
 TRANSIENT_STATES = {
-    "checkingDL", "checkingUP", "checkingResumeData", "allocating",
-    "queuedDL", "queuedUP", "metaDL", "moving",
+    "checkingDL",
+    "checkingUP",
+    "checkingResumeData",
+    "allocating",
+    "queuedDL",
+    "queuedUP",
+    "metaDL",
+    "moving",
 }
 RUNNING_STATES = {
     "seeding": {"stalledUP", "uploading", "forcedUP", "queuedUP"},
@@ -50,7 +55,11 @@ class SeedError(RuntimeError):
 
 def _load_env() -> dict[str, str]:
     values = dotenv_values(DEMO_DIR / "qbit-ops.env")
-    missing = [k for k in ("QBIT_HOST", "QBIT_USER", "QBIT_PASSWORD") if not values.get(k)]
+    missing = [
+        k
+        for k in ("QBIT_HOST", "QBIT_USER", "QBIT_PASSWORD")
+        if not values.get(k)
+    ]
     if missing:
         raise SeedError(f"demo/qbit-ops.env is missing {missing}")
     return {k: v for k, v in values.items() if v is not None}
@@ -82,17 +91,23 @@ def _wait_for_webui(host: str) -> None:
         except (urllib.error.URLError, OSError) as error:
             last_error = error
         time.sleep(1)
-    raise SeedError(f"qBittorrent WebUI at {host} did not become ready: {last_error}")
+    raise SeedError(
+        f"qBittorrent WebUI at {host} did not become ready: {last_error}"
+    )
 
 
-def _ensure_categories(client: qbittorrentapi.Client, fixtures: list[Fixture]) -> None:
+def _ensure_categories(
+    client: qbittorrentapi.Client, fixtures: list[Fixture]
+) -> None:
     existing = set(client.torrent_categories.categories.keys())
     for category in sorted({f.category for f in fixtures}):
         if category not in existing:
             client.torrents_create_category(name=category)
 
 
-def _add_missing(client: qbittorrentapi.Client, fixtures: list[Fixture]) -> None:
+def _add_missing(
+    client: qbittorrentapi.Client, fixtures: list[Fixture]
+) -> None:
     present = {t.hash for t in client.torrents_info()}
     for fixture in fixtures:
         if fixture.info_hash in present:
@@ -126,7 +141,9 @@ def _reconcile_state(client: qbittorrentapi.Client, fixture: Fixture) -> str:
     while time.monotonic() < deadline:
         info = client.torrents_info(torrent_hashes=[fixture.info_hash])
         if not info:
-            raise SeedError(f"{fixture.name}: disappeared while reconciling state")
+            raise SeedError(
+                f"{fixture.name}: disappeared while reconciling state"
+            )
         torrent = info[0]
         last_state = torrent.state
 
@@ -137,9 +154,9 @@ def _reconcile_state(client: qbittorrentapi.Client, fixture: Fixture) -> str:
         if running_states is not None:
             if torrent.state in running_states:
                 return torrent.state
-            if torrent.state in STOPPED_STATES.get("completed-paused", set()) | STOPPED_STATES.get(
-                "incomplete-paused", set()
-            ):
+            if torrent.state in STOPPED_STATES.get(
+                "completed-paused", set()
+            ) | STOPPED_STATES.get("incomplete-paused", set()):
                 client.torrents_start(torrent_hashes=[fixture.info_hash])
             time.sleep(1)
             continue
@@ -152,8 +169,8 @@ def _reconcile_state(client: qbittorrentapi.Client, fixture: Fixture) -> str:
             continue
 
     raise SeedError(
-        f"{fixture.name}: never reached desired state {fixture.desired_state!r}, "
-        f"last observed state {last_state!r}"
+        f"{fixture.name}: never reached desired state "
+        f"{fixture.desired_state!r}, last observed state {last_state!r}"
     )
 
 
@@ -167,8 +184,10 @@ def main() -> None:
         host=host, username=env["QBIT_USER"], password=env["QBIT_PASSWORD"]
     )
     client.auth_log_in()
-    print(f"Connected to {host} -- app {client.app_version()}, "
-          f"Web API {client.app_web_api_version()}")
+    print(
+        f"Connected to {host} -- app {client.app_version()}, "
+        f"Web API {client.app_web_api_version()}"
+    )
 
     if not DOWNLOADS_DIR.exists():
         raise SeedError(
@@ -183,7 +202,11 @@ def main() -> None:
     print(f"\n{'HASH':10} {'STATE':12} {'CATEGORY':10} NAME")
     for fixture in fixtures:
         state = _reconcile_state(client, fixture)
-        print(f"{fixture.info_hash[:8]:10} {state:12} {fixture.category:10} {fixture.name}")
+        row = (
+            f"{fixture.info_hash[:8]:10} {state:12} "
+            f"{fixture.category:10} {fixture.name}"
+        )
+        print(row)
 
 
 if __name__ == "__main__":

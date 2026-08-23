@@ -20,7 +20,10 @@ _FIXED_SALT = b"qbit-ops-demo-fixed-salt"
 
 def _webui_password_hash(password: str) -> str:
     digest = hashlib.pbkdf2_hmac(
-        "sha512", password.encode("utf-8"), _FIXED_SALT, _PBKDF2_ITERATIONS,
+        "sha512",
+        password.encode("utf-8"),
+        _FIXED_SALT,
+        _PBKDF2_ITERATIONS,
         dklen=_PBKDF2_DKLEN,
     )
     salt_b64 = base64.b64encode(_FIXED_SALT).decode("ascii")

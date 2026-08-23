@@ -77,12 +77,12 @@ run: ## use: Run the application
 	@$(PY) python -m qbit_ops.cli.app
 
 format: ## qa: Format and fix Python files
-	@$(PY) ruff check --fix src tests scripts
-	@$(PY) black src tests scripts
+	@$(PY) ruff check --fix demo scripts src tests
+	@$(PY) black demo scripts src tests
 
 lint: ## qa: Check Python style and types without modifying files
-	@$(PY) ruff check src tests scripts
-	@$(PY) black --check src tests scripts
+	@$(PY) ruff check demo scripts src tests
+	@$(PY) black --check demo scripts src tests
 	@$(PY) pyright
 
 # Hermetic suites run under xdist; the Docker matrix targets below stay
@@ -150,8 +150,8 @@ check-image: sync ## qa: Build the container image locally and verify its entryp
 check: sync lint test check-version check-docs check-ai check-agents ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
 
 check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
-	@$(PY) ruff check src tests scripts
-	@$(PY) black --check src tests scripts
+	@$(PY) ruff check demo scripts src tests
+	@$(PY) black --check demo scripts src tests
 	@$(PY) pyright
 	@python3 scripts/check_version_sync.py
 	@python3 scripts/check_doc_links.py
@@ -178,8 +178,8 @@ worktree-clean: ## dev: Remove a feature worktree and its merged branch: make wo
 	@python3 scripts/worktree_clean.py "$(FEATURE)"
 
 clean: ## dev: Remove locally generated, reproducible artifacts (safe, idempotent -- never touches .venv, .git, .env, or committed fixtures)
-	@find src tests scripts -type d -name "__pycache__" -exec rm -rf {} +
-	@find src tests scripts -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+	@find demo scripts src tests -type d -name "__pycache__" -exec rm -rf {} +
+	@find demo scripts src tests -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
 	@rm -rf .pytest_cache .ruff_cache .mypy_cache
 	@if [ -d .pyright ]; then rm -rf .pyright; fi
 	@rm -f .coverage
