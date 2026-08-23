@@ -11,7 +11,10 @@
 > the code rather than a feature built to satisfy its wording.
 > Enriching `doctor` and `explain` was removed on 2026-08-16: two
 > discovery runs found the capabilities already served elsewhere, and
-> concluded `REJECT` rather than building to tick a line.
+> concluded `REJECT` rather than building to tick a line. Tracker URL
+> migration was removed from v0.6.0 on 2026-08-23 for the same reason:
+> `trackers replace`, `replace-passkey`, `add-if-present` and `remove`
+> already ship it.
 
 ## 🚧 WIP - v0.5.0: 📚 Know Your Library - Part 2
 
@@ -32,8 +35,8 @@
 - JSONL output ✅
 - Experimental MCP server, read-only and bounded ✅
 - Guided connection setup, from the CLI or the TUI ✅
+- Duration-range filters on the TUI ✅
 - A canonical name for "no longer seeding"
-- Duration-range filters on the TUI
 
 ## 🔭 Later
 
@@ -41,7 +44,8 @@
 
 > Select precisely. Operate on thousands of torrents safely.
 
-- Tracker URL migration
+- A trackers page in the TUI, read-only, with copyable commands
+- `qbit_core` as a versioned library, with its own public surface
 - Saved selectors
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
@@ -61,19 +65,17 @@
 
 ### v0.8.0 - 🛡️ Guardrails
 
-> Expliciting what must never happens.
+> Making explicit what must never happen.
 
 - Protected torrents
 - Retention policies
 - Tracker-specific protections
-- Ratio constraints
+- Ratio, seed-time and absolute-upload constraints
 - Potential HnR detection
 - Warnings and hard stops before unsafe mutation
 - Cleanup planner
 - Policy-aware delete, move and pause
 - Stale configuration and torrents detection
-- Seed time
-- Absolute uploaded
 
 ### v0.9.0 - ⚙️ Automation Toolkit
 
