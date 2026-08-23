@@ -371,22 +371,50 @@ class _CountingTorrent(dict):
 
 
 def test_an_unset_measure_reads_no_field_at_all() -> None:
-    """`ratio`/`size`/`uploaded`/`seeding_time` are read by nothing else
-    in `matches_cheap_filters` -- so with every measure left unset, they
-    must be read zero times. `progress` is the exception: `_matches_state`
-    reads it unconditionally for `--completed`, so it is read exactly
-    once (never twice) rather than zero. Reading any bound that was
-    never posed is the cost this test exists to catch -- paid on every
-    torrent, on every filter pass, when most filters bound no measure."""
+    """`ratio`/`size`/`uploaded`/`seeding_time`/`progress`/`state` are
+    read by nothing in `matches_cheap_filters` unless a criterion needs
+    them -- so with every measure and state criterion left unset, every
+    one of them must be read zero times. Reading a bound that was never
+    posed is the cost this test exists to catch -- paid on every
+    torrent, on every filter pass, when most filters bound none of
+    this family."""
     torrent = _CountingTorrent(_torrent())
 
     assert matches_cheap_filters(torrent, TorrentFilter())
 
-    for measure_field in ("ratio", "size", "uploaded", "seeding_time"):
+    for measure_field in (
+        "ratio",
+        "size",
+        "uploaded",
+        "seeding_time",
+        "progress",
+        "state",
+    ):
         assert (
             torrent.get_counts.get(measure_field, 0) == 0
         ), f"{measure_field} was read even though no bound was posed"
+
+
+def test_completed_reads_progress_but_never_state() -> None:
+    """`--completed`/`--incomplete` need only `progress`; `state` stays
+    unread since none of the state-group criteria are posed."""
+    torrent = _CountingTorrent(_torrent())
+
+    assert matches_cheap_filters(torrent, TorrentFilter(completed=True))
+
     assert torrent.get_counts.get("progress", 0) == 1
+    assert torrent.get_counts.get("state", 0) == 0
+
+
+def test_active_reads_state_but_never_progress() -> None:
+    """`--active`/`--inactive` need only `state`; `progress` stays
+    unread since `--completed` was never posed."""
+    torrent = _CountingTorrent(_torrent())
+
+    assert matches_cheap_filters(torrent, TorrentFilter(active=True))
+
+    assert torrent.get_counts.get("state", 0) == 1
+    assert torrent.get_counts.get("progress", 0) == 0
 
 
 def test_seeding_time_zero_is_a_value_not_unknown() -> None:

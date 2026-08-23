@@ -270,10 +270,10 @@ async def _bench_one(count: int) -> None:
         )
 
         def scenario_set_search_only() -> None:
-            # Isolates exactly what one keystroke costs on the UI thread
-            # per `TuiController.set_search`'s own docstring claim ("no
-            # I/O or debounce needed since set_search is pure in-memory
-            # filtering") -- no render, no widget I/O.
+            # Isolates what one recompute costs on the UI thread with no
+            # render and no widget I/O -- the cost `SEARCH_DEBOUNCE_
+            # SECONDS` exists to pay once per settled search instead of
+            # once per keystroke.
             controller.set_search("synthetic.torrent.001")
 
         median, p95 = _timeit(scenario_set_search_only)
@@ -293,6 +293,43 @@ async def _bench_one(count: int) -> None:
         median, p95 = _timeit(scenario_search_keystroke)
         print(
             f"  {'search: narrow then clear (2 renders)':<55} "
+            f"median={median:7.2f} ms   p95={p95:7.2f} ms"
+        )
+
+        # What `SEARCH_DEBOUNCE_SECONDS` actually buys: a realistic
+        # 9-character burst, undebounced (one recompute+render per
+        # keystroke, `app._apply_search`'s own path) against debounced
+        # (the same 9 keystrokes only ever schedule; one flush does the
+        # single recompute+render the settled text needs).
+        burst_text = "synthetic"
+
+        def scenario_burst_undebounced() -> None:
+            typed = ""
+            for char in burst_text:
+                typed += char
+                controller.set_search(typed)
+                app._render_table()
+            controller.set_search("")
+            app._render_table()
+
+        median, p95 = _timeit(scenario_burst_undebounced)
+        print(
+            f"  {'search: 9-key burst, undebounced (9 recompute+render)':<55} "
+            f"median={median:7.2f} ms   p95={p95:7.2f} ms"
+        )
+
+        def scenario_burst_debounced() -> None:
+            typed = ""
+            for char in burst_text:
+                typed += char
+                app._schedule_search(typed)
+            app._flush_pending_search()
+            controller.set_search("")
+            app._render_table()
+
+        median, p95 = _timeit(scenario_burst_debounced)
+        print(
+            f"  {'search: 9-key burst, debounced (1 recompute+render)':<55} "
             f"median={median:7.2f} ms   p95={p95:7.2f} ms"
         )
 

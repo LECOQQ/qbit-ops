@@ -135,6 +135,17 @@ SETUP_WORKER_GROUP = "qbit-setup"
 SAMPLE_WORKER_GROUP = "qbit-sample"
 INSTANCE_LISTS_WORKER_GROUP = "qbit-instance-lists"
 
+# Trailing debounce for search-as-you-type. `set_search` is pure
+# in-memory filtering, but "pure" is not "free": measured at ~120 ms at
+# 5,000 torrents for the recompute alone, run synchronously on the UI
+# thread on every keystroke -- long enough to stall the very character
+# just typed from being painted. 150 ms sits above a fast typist's
+# inter-keystroke gap (commonly 60-150 ms in a continuous burst), so a
+# typed word collapses to one recompute instead of one per character,
+# while staying inside the ~100-300 ms band a UI reads as "live" once
+# typing actually pauses -- see `scripts/profile_tui_table.py`.
+SEARCH_DEBOUNCE_SECONDS = 0.15
+
 
 class MainScreen(Screen[None]):
     """The app's single primary screen.
@@ -278,6 +289,8 @@ class QbitOpsTuiApp(App[None]):
         changed`) -- never on the periodic refresh timer."""
         self._sample_timer: Timer | None = None
         self._sampling_stopped_at: float | None = None
+        self._search_debounce_timer: Timer | None = None
+        self._pending_search_text: str = ""
         # Nothing may reach qBittorrent before the first-run form is
         # answered, and `_render_workspace_visibility()` runs before it.
         # Sampling therefore stays shut until `_begin_refreshing()` has
@@ -930,6 +943,7 @@ class QbitOpsTuiApp(App[None]):
             # for Overview navigation.
             search_inputs = self.query("#search-input")
             if search_inputs:
+                self._flush_pending_search()
                 search_inputs.first().remove()
                 self._push_search_state(None)
             self.screen.set_focus(None)
@@ -1088,15 +1102,49 @@ class QbitOpsTuiApp(App[None]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search-input":
-            self._apply_search(event.value)
+            self._schedule_search(event.value)
+
+    def _schedule_search(self, text: str) -> None:
+        """Coalesce a burst of keystrokes into one recompute+render.
+
+        Restarts the timer on every keystroke (trailing debounce): only
+        the text still current once `SEARCH_DEBOUNCE_SECONDS` passes
+        with no further keystroke is ever applied. The `Input` widget
+        renders the typed character itself regardless -- only the
+        expensive half (`_apply_search`) is delayed.
+        """
+        self._pending_search_text = text
+        if self._search_debounce_timer is not None:
+            self._search_debounce_timer.stop()
+        self._search_debounce_timer = self.set_timer(
+            SEARCH_DEBOUNCE_SECONDS, self._flush_pending_search
+        )
+
+    def _flush_pending_search(self) -> None:
+        """Apply the pending search now, cancelling its timer first.
+
+        Both the debounce's own natural firing and every call site that
+        must not leave a stale `state.search` behind (the search input
+        being torn down) go through here -- otherwise the input could be
+        re-mounted from a `state.search` its own last keystrokes never
+        reached.
+        """
+        timer = self._search_debounce_timer
+        if timer is None:
+            return
+        timer.stop()
+        self._search_debounce_timer = None
+        self._apply_search(self._pending_search_text)
 
     def _apply_search(self, text: str) -> None:
-        """Apply search text live, as it's typed -- no I/O or debounce
-        needed since `set_search` is pure in-memory filtering.
+        """Recompute and render for one settled search text.
+
+        Only ever reached through `_flush_pending_search` -- never
+        called directly from a keystroke, see `SEARCH_DEBOUNCE_SECONDS`.
 
         The hidden-selection count `set_search` returns isn't surfaced
-        as a notification: search reconciles on every keystroke, and a
-        toast per character would be noise. The filter summary
+        as a notification: search reconciles on every settled search,
+        and a toast per keystroke would be noise. The filter summary
         (re-rendered below) still reflects it immediately.
         """
         self.controller.set_search(text)
@@ -1867,6 +1915,7 @@ class QbitOpsTuiApp(App[None]):
 
         search_inputs = self.query("#search-input")
         if search_inputs:
+            self._flush_pending_search()
             search_inputs.first().remove()
             self._push_search_state(None)
             was_editing_text = True

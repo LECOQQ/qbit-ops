@@ -695,11 +695,21 @@ def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
     reported.
 
     Exclusions stay "no match, nothing excluded": an unknown state is
-    not proof of being refused.
+    not proof of being refused. `state` and `progress` are each read
+    only when a criterion actually needs them, matching
+    `_matches_measures`'s guard: reading either for nothing is a cost
+    paid by every torrent, on every call, when most filters leave this
+    whole family unset.
     """
-    state = _known_state(torrent)
+    needs_state = bool(
+        filters.states
+        or filters.states_excluded
+        or filters.active is not None
+        or filters.stalled is not None
+        or filters.errored is not None
+    )
+    state = _known_state(torrent) if needs_state else None
     group = None if state is None else classify_torrent_state(state)
-    progress = get_optional_float(torrent, "progress")
 
     if filters.states and group not in filters.states:
         return False
@@ -707,6 +717,7 @@ def _matches_state(torrent: Any, filters: TorrentFilter) -> bool:
         return False
 
     if filters.completed is not None:
+        progress = get_optional_float(torrent, "progress")
         if progress is None or (progress >= 1.0) != filters.completed:
             return False
 

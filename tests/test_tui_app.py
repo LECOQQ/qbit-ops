@@ -64,6 +64,7 @@ from qbit_core.features.status import TransferRates
 from qbit_core.shared.selection import TorrentFilter
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.app import (
+    SEARCH_DEBOUNCE_SECONDS,
     ActionsScreen,
     ConnectionBanner,
     DetailsPanel,
@@ -299,10 +300,17 @@ def _visible_names(app: QbitOpsTuiApp) -> list[str]:
 
 
 async def _type_into_search(pilot: Pilot[None], text: str) -> None:
+    """Type `text`, then settle its debounce deterministically -- like an
+    operator who stops typing, without waiting on real time. Tests that
+    care about the debounce itself (`SEARCH_DEBOUNCE_SECONDS`) drive it
+    directly instead.
+    """
     await pilot.press("slash")
     await pilot.pause()
     for char in text:
         await pilot.press(char)
+    await pilot.pause()
+    cast(QbitOpsTuiApp, pilot.app)._flush_pending_search()
     await pilot.pause()
 
 
@@ -1362,6 +1370,113 @@ async def test_typed_characters_appear_in_the_search_input() -> None:
         assert search.value == "ubu"
 
 
+async def test_search_recompute_is_debounced_while_typing_a_burst() -> None:
+    """A burst of scheduled searches restarts the same timer -- only the
+    last one is ever applied, and none of them until flushed. Drives
+    `_schedule_search` directly rather than real keystrokes: this is a
+    coalescing-logic assertion, not a timing race a slow machine should
+    ever be able to fail (see `SEARCH_DEBOUNCE_SECONDS`)."""
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+
+        for partial in ("u", "ub", "ubu", "ubun", "ubunt", "ubuntu"):
+            app._schedule_search(partial)
+
+        assert app.controller.state.search == ""
+        assert _visible_names(app) == ["Ubuntu ISO"]  # unfiltered still
+
+        app._flush_pending_search()
+
+        assert app.controller.state.search == "ubuntu"
+        assert _visible_names(app) == ["Ubuntu ISO"]
+
+
+async def test_search_fires_naturally_after_the_debounce_settles() -> None:
+    """End-to-end through the real `Input`: typing, then a pause well
+    past `SEARCH_DEBOUNCE_SECONDS` with no further keystroke, applies
+    the search with no explicit flush -- proving `on_input_changed` is
+    actually wired to the timer, not just `_flush_pending_search`
+    itself."""
+    client = FakeQbitClient(torrents=[make_torrent(name="Ubuntu ISO")])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        await pilot.press(*"ubuntu")
+        await pilot.pause(SEARCH_DEBOUNCE_SECONDS * 5)
+
+        assert app.controller.state.search == "ubuntu"
+
+
+async def test_leaving_the_workspace_flushes_a_pending_search() -> None:
+    """Tearing down `#search-input` mid-debounce must not strand the
+    last keystrokes: re-entering search later reads `state.search`, so
+    a lost flush here would silently roll the text back. Schedules and
+    switches workspace back to back, with no `await` between them, so
+    no real time -- and therefore no natural firing -- can pass in
+    between: only the explicit flush in `_switch_workspace` can be
+    responsible for the result."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+
+        app._schedule_search("ubuntu")
+        assert app.controller.state.search == ""  # still pending
+        app._switch_workspace(Workspace.OVERVIEW)
+
+        assert app.controller.state.workspace is Workspace.OVERVIEW
+        assert app.controller.state.search == "ubuntu"
+        # Switching into Overview resumes its per-second sampler worker;
+        # wait for it like every other worker-dispatching action, or its
+        # completion can race the app's own teardown below.
+        await _settle(app, pilot)
+
+
+async def test_escape_flushes_a_pending_search() -> None:
+    """Same guarantee as the workspace switch above, for the other path
+    that tears down `#search-input` -- `action_dismiss_overlay`."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="a" * 40, name="Debian ISO"),
+            make_torrent(hash="b" * 40, name="Ubuntu ISO"),
+        ]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+
+        app._schedule_search("ubuntu")
+        assert app.controller.state.search == ""  # still pending
+        app.action_dismiss_overlay()
+
+        assert app.controller.state.search == "ubuntu"
+        assert _visible_names(app) == ["Ubuntu ISO"]
+        await pilot.pause()
+
+
 async def test_search_matches_name_substring_case_insensitively() -> None:
     client = FakeQbitClient(
         torrents=[
@@ -1477,6 +1592,7 @@ async def test_clearing_search_repopulates_rows() -> None:
         search.focus()
         await pilot.press("ctrl+u")
         await pilot.pause()
+        app._flush_pending_search()
 
         assert search.value == ""
         assert sorted(_visible_names(app)) == ["Debian ISO", "Ubuntu ISO"]
@@ -1508,6 +1624,7 @@ async def test_search_performs_zero_qbittorrent_api_calls() -> None:
         search.focus()
         await pilot.press("ctrl+u")
         await pilot.pause()
+        app._flush_pending_search()
 
         scans_after = (
             client.torrents_info_calls,
@@ -2230,6 +2347,11 @@ async def test_resize_does_not_trigger_extra_api_calls() -> None:
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        # The graph's per-second sampler runs on real wall-clock time,
+        # independent of `refresh_interval`; under load the resizes below
+        # can take over a second and its tick adds an extra `transfer_info`
+        # call unrelated to what this test budgets.
+        app._pause_sampling()
         calls_before = len(client.calls)
 
         await pilot.resize_terminal(*NARROW_SIZE)
