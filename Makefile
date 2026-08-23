@@ -159,7 +159,7 @@ check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non
 	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker and not network and not image"
 
 test-tui: sync ## qa: Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
-	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_dots.py tests/test_tui_gallery.py tests/test_tui_overview_model.py tests/test_tui_overview_windows.py tests/test_tui_security.py tests/test_tui_setup.py tests/test_tui_state.py tests/test_tui_table_performance.py tests/test_tui_value_form.py
+	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_dots.py tests/test_tui_gallery.py tests/test_tui_overview_model.py tests/test_tui_overview_windows.py tests/test_profile_tui_table.py tests/test_tui_security.py tests/test_tui_setup.py tests/test_tui_state.py tests/test_tui_table_performance.py tests/test_tui_value_form.py
 
 ci: ## qa: Run CI checks (install, lint, tests, CLI entrypoint)
 	@poetry install --extras "tui mcp" --no-interaction --no-ansi

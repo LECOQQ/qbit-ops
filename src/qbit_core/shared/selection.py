@@ -748,29 +748,33 @@ def _matches_measures(torrent: Any, filters: TorrentFilter) -> bool:
 
     Every value is read through the optional accessors, so an absent,
     null, unparsable or sentinel field reads as unknown and satisfies no
-    bound (decision M1).
+    bound (decision M1). Each bound is checked for `is_unset` before the
+    field is even read: an unset `Range` matches everything regardless
+    of the value, so reading it would cost a field access for nothing --
+    paid by every torrent, on every call, when most filters leave most
+    measures unbounded.
     """
-    if not filters.ratio.contains(
+    if not filters.ratio.is_unset and not filters.ratio.contains(
         get_optional_float(torrent, "ratio", sentinels=UNSET_NUMERIC)
     ):
         return False
 
-    if not filters.size.contains(
+    if not filters.size.is_unset and not filters.size.contains(
         get_optional_int(torrent, "size", sentinels=UNSET_NUMERIC)
     ):
         return False
 
-    if not filters.progress.contains(
+    if not filters.progress.is_unset and not filters.progress.contains(
         get_optional_float(torrent, "progress", sentinels=UNSET_NUMERIC)
     ):
         return False
 
-    if not filters.uploaded.contains(
+    if not filters.uploaded.is_unset and not filters.uploaded.contains(
         get_optional_int(torrent, "uploaded", sentinels=UNSET_NUMERIC)
     ):
         return False
 
-    if not filters.seeding_time.contains(
+    if not filters.seeding_time.is_unset and not filters.seeding_time.contains(
         get_optional_int(torrent, "seeding_time", sentinels=UNSET_NUMERIC)
     ):
         return False

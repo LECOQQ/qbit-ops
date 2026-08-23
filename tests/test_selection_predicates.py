@@ -357,6 +357,38 @@ def test_ratio_and_size_bounds() -> None:
     assert not _matches(TorrentFilter(size=Range(max=1_000_000)))
 
 
+class _CountingTorrent(dict):
+    """A `.get()` that counts calls per key -- a budget guard, not a
+    timer. Machine speed cannot make this test flaky."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.get_counts: dict[str, int] = {}
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self.get_counts[key] = self.get_counts.get(key, 0) + 1
+        return super().get(key, default)
+
+
+def test_an_unset_measure_reads_no_field_at_all() -> None:
+    """`ratio`/`size`/`uploaded`/`seeding_time` are read by nothing else
+    in `matches_cheap_filters` -- so with every measure left unset, they
+    must be read zero times. `progress` is the exception: `_matches_state`
+    reads it unconditionally for `--completed`, so it is read exactly
+    once (never twice) rather than zero. Reading any bound that was
+    never posed is the cost this test exists to catch -- paid on every
+    torrent, on every filter pass, when most filters bound no measure."""
+    torrent = _CountingTorrent(_torrent())
+
+    assert matches_cheap_filters(torrent, TorrentFilter())
+
+    for measure_field in ("ratio", "size", "uploaded", "seeding_time"):
+        assert (
+            torrent.get_counts.get(measure_field, 0) == 0
+        ), f"{measure_field} was read even though no bound was posed"
+    assert torrent.get_counts.get("progress", 0) == 1
+
+
 def test_seeding_time_zero_is_a_value_not_unknown() -> None:
     """A freshly added torrent has genuinely seeded for zero seconds."""
     assert _matches(TorrentFilter(seeding_time=Range(max=60)), seeding_time=0)

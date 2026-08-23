@@ -9,6 +9,7 @@ doubles.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -75,6 +76,36 @@ def test_field_helpers_accept_attribute_based_object() -> None:
 
     assert get_field_as_string(_AttrItem(), "hash") == "attr-hash"
     assert get_field_as_string(_AttrItem(), "missing") == ""
+
+
+class _MappingNotDict(Mapping):
+    """A real `Mapping`, deliberately not a `dict` subclass."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self) -> Any:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+def test_get_field_takes_the_dict_branch_not_any_mapping() -> None:
+    """`get_field` checks `isinstance(item, dict)`, not the broader
+    `isinstance(item, Mapping)` -- measured ~4.5x cheaper (see
+    `fields.py`'s module docstring), and every qbittorrent-api response
+    type read here is itself a `dict` subclass. A `Mapping` that is not
+    a `dict` must fall to the attribute branch instead of the mapping
+    one, and since it exposes no matching attribute, reads as absent.
+    Nothing in this codebase constructs such an object; this pins the
+    contract against a well-meaning revert to `Mapping`."""
+    mapping_not_dict = _MappingNotDict({"hash": "abc123"})
+
+    assert get_field_as_string(mapping_not_dict, "hash") == ""
 
 
 def test_optional_missing_field_uses_documented_fallback() -> None:

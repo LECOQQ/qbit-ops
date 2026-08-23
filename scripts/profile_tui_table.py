@@ -37,8 +37,10 @@ WIDE_SIZE = (140, 40)
 
 
 class _BenchClient:
-    """Minimal fake client: only `torrents_info()`/`transfer_info()`/
-    version calls are used by the refresh path this script drives."""
+    """Minimal fake client for the two worker paths this script drives
+    on startup: `collect_tui_refresh` (`torrents_info()`/`transfer_info()`/
+    `sync_maindata()`/version calls) and `collect_instance_lists`
+    (`torrents_categories()`/`torrents_tags()`)."""
 
     def __init__(self, torrents: list[dict[str, Any]]) -> None:
         self.torrents = torrents
@@ -56,6 +58,15 @@ class _BenchClient:
         return self.torrents
 
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
+        return []
+
+    def sync_maindata(self) -> dict[str, Any]:
+        return {"server_state": {}}
+
+    def torrents_categories(self) -> dict[str, Any]:
+        return {}
+
+    def torrents_tags(self) -> list[str]:
         return []
 
 
@@ -257,6 +268,21 @@ async def _bench_one(count: int) -> None:
             f"  {'sort: toggle direction (full reorder)':<55} "
             f"median={median:7.2f} ms   p95={p95:7.2f} ms"
         )
+
+        def scenario_set_search_only() -> None:
+            # Isolates exactly what one keystroke costs on the UI thread
+            # per `TuiController.set_search`'s own docstring claim ("no
+            # I/O or debounce needed since set_search is pure in-memory
+            # filtering") -- no render, no widget I/O.
+            controller.set_search("synthetic.torrent.001")
+
+        median, p95 = _timeit(scenario_set_search_only)
+        print(
+            f"  {'search: set_search() only, no render (1 keystroke)':<55} "
+            f"median={median:7.2f} ms   p95={p95:7.2f} ms"
+        )
+        controller.set_search("")
+        app._render_table()
 
         def scenario_search_keystroke() -> None:
             controller.set_search("synthetic.torrent.001")

@@ -18,10 +18,33 @@ import pytest
 
 from qbit_ops.tui.modals.base import MODAL_WIDTHS
 from scripts.tui_gallery import GALLERY_SIZE, SCREENS, _capture
+from scripts.tui_wireframe import Surface, capture_inventory
 from scripts.tui_wireframe import capture as capture_wireframe
-from scripts.tui_wireframe import capture_inventory
 
 pytestmark = pytest.mark.tui
+
+
+@pytest.fixture(scope="session")
+def _inventory_cache() -> dict[str, Surface]:
+    """One `Surface` per screen name, shared across the whole session.
+
+    `capture_inventory(name, SCREENS[name], max_depth=6)` drives a full
+    headless app per call and is a pure function of `name` here -- every
+    test in this file asks the same question for the same screen. Left
+    unmemoized, the module-level tests below (`_modal_surfaces` and the
+    stylesheet/width/centring checks that share it) each redrove every
+    screen from scratch, on top of what the parametrized test already
+    captured -- the session's single largest cost, well before the
+    gallery/wireframe captures below it.
+    """
+    return {}
+
+
+async def _inventory(name: str, cache: dict[str, Surface]) -> Surface:
+    if name not in cache:
+        cache[name] = await capture_inventory(name, SCREENS[name], max_depth=6)
+    return cache[name]
+
 
 # One marker per screen: text that screen renders and NO other screen
 # in the gallery does.
@@ -130,11 +153,12 @@ async def test_the_wireframe_and_the_gallery_agree_on_size() -> None:
 @pytest.mark.parametrize("name", sorted(SCREENS))
 async def test_the_inventory_measures_the_surface_not_the_screen(
     name: str,
+    _inventory_cache: dict[str, Surface],
 ) -> None:
     """A `ModalScreen` is full-bleed and transparent: measuring it
     instead of its dialog would report every modal as 140 columns wide
     and hide the very divergence the inventory exists to expose."""
-    surface = await capture_inventory(name, SCREENS[name], max_depth=6)
+    surface = await _inventory(name, _inventory_cache)
 
     assert surface.screen == name
     assert surface.width >= 4 and surface.height >= 2
@@ -146,28 +170,28 @@ async def test_the_inventory_measures_the_surface_not_the_screen(
         )
 
 
-async def test_the_inventory_counts_a_one_line_input_as_structural() -> None:
+async def test_the_inventory_counts_a_one_line_input_as_structural(
+    _inventory_cache: dict[str, Surface],
+) -> None:
     """`filters` nests `Input` five levels down (`FiltersScreen ->
     VerticalScroll -> FiltersPanel -> _Row -> Input`), verified by
     walking `.parent`. A height filter meant to drop decorative one-line
     text used to also drop this one-line control, undercounting the
     surface at depth 3."""
-    surface = await capture_inventory(
-        "filters", SCREENS["filters"], max_depth=6
-    )
+    surface = await _inventory("filters", _inventory_cache)
 
     assert surface.depth == 5
 
 
-async def test_the_inventory_excludes_a_static_subclass_by_type() -> None:
+async def test_the_inventory_excludes_a_static_subclass_by_type(
+    _inventory_cache: dict[str, Surface],
+) -> None:
     """`BrandHeader`, `RateGraph`, `TrackersWindow` and `SessionWindow`
     all subclass `Static` under a different name. Matching content
     leaves by exact class name let them through as if they carried
     nesting, inflating `overview`'s measured depth with a passive
     renderer that has no children of its own."""
-    surface = await capture_inventory(
-        "overview", SCREENS["overview"], max_depth=6
-    )
+    surface = await _inventory("overview", _inventory_cache)
 
     assert surface.depth == 4
 
@@ -200,36 +224,39 @@ MODAL_SCREENS: tuple[str, ...] = tuple(
 )
 
 
-async def _modal_surfaces() -> list:
-    return [
-        await capture_inventory(name, SCREENS[name], max_depth=6)
-        for name in MODAL_SCREENS
-    ]
+async def _modal_surfaces(cache: dict[str, Surface]) -> list[Surface]:
+    return [await _inventory(name, cache) for name in MODAL_SCREENS]
 
 
-async def test_no_surface_declares_a_stylesheet_of_its_own() -> None:
+async def test_no_surface_declares_a_stylesheet_of_its_own(
+    _inventory_cache: dict[str, Surface],
+) -> None:
     """One sheet, one file. A class-level `CSS` block is how the frame
     got re-decided nine times; a tenth would start the drift again."""
     for name in SCREENS:
-        surface = await capture_inventory(name, SCREENS[name], max_depth=6)
+        surface = await _inventory(name, _inventory_cache)
         assert surface.css_lines == 0, (
             f"{name} declares {surface.css_lines} lines of its own CSS; "
             "it belongs in src/qbit_ops/tui/qbit_ops.tcss"
         )
 
 
-async def test_every_modal_is_measured_on_the_width_scale() -> None:
+async def test_every_modal_is_measured_on_the_width_scale(
+    _inventory_cache: dict[str, Surface],
+) -> None:
     """Measured, not declared: a modal could name `medium` and still be
     squeezed by a stray rule. Only the rendered width proves the scale."""
     scale = set(MODAL_WIDTHS.values())
-    for surface in await _modal_surfaces():
+    for surface in await _modal_surfaces(_inventory_cache):
         assert surface.width in scale, (
             f"{surface.screen} renders {surface.width} columns wide, "
             f"outside the scale {sorted(scale)}"
         )
 
 
-async def test_every_modal_is_centred_on_its_own_footprint() -> None:
+async def test_every_modal_is_centred_on_its_own_footprint(
+    _inventory_cache: dict[str, Surface],
+) -> None:
     """`details` used to be the outlier on all three axes at once --
     a `Vertical` at `20,4`, 32 rows tall while every sibling was a
     `VerticalScroll` at y=2, 36 rows tall.
@@ -243,7 +270,7 @@ async def test_every_modal_is_centred_on_its_own_footprint() -> None:
     is centred on its own measured footprint, never placed by hand,
     at whatever width/height that footprint turns out to be.
     """
-    surfaces = await _modal_surfaces()
+    surfaces = await _modal_surfaces(_inventory_cache)
 
     assert {s.container for s in surfaces} == {"VerticalScroll"}
     for surface in surfaces:
