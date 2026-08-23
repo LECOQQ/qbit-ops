@@ -44,7 +44,7 @@ _TIER_INDEX: dict[MatchTier, int] = {
     tier: index for index, tier in enumerate(_TIER_ORDER)
 }
 
-# Each mode's ladder, "jusqu'à cet échelon inclus" -- a slice of
+# Each mode's ladder, "up to and including this tier" -- a slice of
 # `_TIER_ORDER`, never a hand-maintained duplicate of it.
 _MODE_TIERS: dict[SearchMode, frozenset[MatchTier]] = {
     "exact": frozenset(_TIER_ORDER[:2]),

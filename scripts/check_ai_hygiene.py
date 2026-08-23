@@ -122,7 +122,37 @@ RULES: tuple[Rule, ...] = (
         suffixes=TEXT_SUFFIXES,
         names=TEXT_NAMES,
     ),
+    Rule(
+        identifier="french-in-src",
+        category="style",
+        reason=(
+            "AGENTS.md, § Langue requires English for src/ comments "
+            "and docstrings: conversation is French, code is not. A "
+            "reader of the product's source should never need French to "
+            "follow a comment."
+        ),
+        remedy=(
+            "Translate the line, or add the pragma when the accented "
+            "text is data (a proper noun, a citation quoting a spec "
+            "heading verbatim)."
+        ),
+        # Narrow and mechanical, like every rule here: an accented Latin
+        # letter, not a language detector. It catches exactly the shape
+        # this rule exists for -- a French word or aside left untranslated
+        # -- and misses unaccented French prose, which is the tradeoff
+        # every rule in this file makes for staying reproducible.
+        pattern=re.compile("[àâäéèêëïîôöùûüçÀÂÄÉÈÊËÏÎÔÖÙÛÜÇ]"),
+        suffixes=(".py",),
+    ),
 )
+
+# `french-in-src` exceptions that are not authorship: an assimilated
+# English loanword, and a citation quoting a French spec heading
+# verbatim (translating it would break the reader's ability to find
+# that heading in the file being cited).
+_FRENCH_LOANWORDS = re.compile(r"façades?", re.IGNORECASE)
+_SPEC_CITATION_MARKER = ".agents/"
+_SPEC_CITATION_LOOKBACK = 2
 
 # Documentation published to users. `control-plane-leak` applies here and
 # nowhere else: source code may legitimately name the control-plane.
@@ -145,7 +175,20 @@ def tracked_files(root: Path) -> list[Path]:
 def _in_scope(rule: Rule, relative: Path) -> bool:
     if rule.identifier == "control-plane-leak":
         return str(relative).startswith(PUBLIC_DOC_PREFIXES)
+    if rule.identifier == "french-in-src":
+        return str(relative).startswith("src/") and rule.covers(relative)
     return rule.covers(relative)
+
+
+def _cites_a_french_spec_heading(lines: list[str], index: int) -> bool:
+    """True when the accented text at `lines[index]` is a verbatim
+    quote of a `.agents/` spec heading rather than untranslated prose --
+    the citation's file reference may wrap onto the line before the
+    quoted heading, so this looks a short way back rather than only at
+    the current line."""
+    window_start = max(0, index - _SPEC_CITATION_LOOKBACK)
+    window = lines[window_start : index + 1]
+    return any(_SPEC_CITATION_MARKER in candidate for candidate in window)
 
 
 def violations(root: Path) -> list[tuple[Rule, Path, int, str]]:
@@ -159,11 +202,18 @@ def violations(root: Path) -> list[tuple[Rule, Path, int, str]]:
             text = (root / relative).read_text(encoding="utf-8")
         except (UnicodeDecodeError, FileNotFoundError):
             continue
-        for number, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            number = index + 1
             for rule in applicable:
                 if f"{PRAGMA}{rule.identifier}" in line:
                     continue
-                if rule.pattern.search(line):
+                candidate = line
+                if rule.identifier == "french-in-src":
+                    candidate = _FRENCH_LOANWORDS.sub("", candidate)
+                    if _cites_a_french_spec_heading(lines, index):
+                        continue
+                if rule.pattern.search(candidate):
                     found.append((rule, relative, number, line.strip()))
     return found
 

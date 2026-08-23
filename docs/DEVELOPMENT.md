@@ -388,7 +388,7 @@ advisory input to a human decision.
 
 | Marker | Meaning |
 |---|---|
-| `tui` | Slow (Pilot-based) TUI tests -- `test_tui_app.py`, `test_tui_architecture.py`, `test_tui_bulk_mutation_audit.py`, `test_tui_table_performance.py` |
+| `tui` | Slow (Pilot-based) TUI tests -- see `pytest --collect-only -m tui -q` for the exact file list |
 | `docker` | Requires a real Docker daemon + `QBIT_OPS_DOCKER_MATRIX=1` -- every test under `tests/integration/` |
 | `capture` | Writes committed fixtures -- `test_matrix_capture.py` only (always also `docker`) |
 

@@ -75,7 +75,9 @@ skip-string-normalization = false
 line-length = 80
 target-version = "py312"
 exclude = [".venv", "__pycache__"]
-fix = true
+# No `fix = true` here: that default applies to every invocation of
+# `ruff check`, including `make lint`, which must only report. `make
+# format` already passes `--fix` explicitly where fixing is wanted.
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

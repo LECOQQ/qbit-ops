@@ -111,7 +111,7 @@ class ThrottleDraft:
 
 
 def format_scope(names: Sequence[str]) -> str:
-    """The "sélection" slot: "N selected · first name, +K more"."""
+    """The "scope" slot: "N selected · first name, +K more"."""
     if not names:
         return "0 selected"
     extra = len(names) - 1
@@ -124,7 +124,7 @@ def format_scope(names: Sequence[str]) -> str:
 def tag_add_verdict(
     tags: tuple[str, ...], selected: Sequence[TorrentSnapshot]
 ) -> list[str]:
-    """The "conséquence" slot for `tag add`: what each named tag will
+    """The "consequence" slot for `tag add`: what each named tag will
     do, one line per tag."""
     total = len(selected)
     lines = []
@@ -142,7 +142,7 @@ def tag_add_verdict(
 def tag_remove_verdict(
     tags: tuple[str, ...], selected: Sequence[TorrentSnapshot]
 ) -> list[str]:
-    """The "conséquence" slot for `tag remove`: how many carry each
+    """The "consequence" slot for `tag remove`: how many carry each
     named tag today, and how many would be left unaffected."""
     total = len(selected)
     lines = []
@@ -164,7 +164,7 @@ def _casefolded(torrent: TorrentSnapshot) -> set[str]:
 
 
 def throttle_verdict(upload: str, download: str) -> str:
-    """The "conséquence" slot for `throttle`: what each direction will
+    """The "consequence" slot for `throttle`: what each direction will
     do, blank meaning "left alone"."""
     up = upload.strip() or "left alone"
     down = download.strip() or "left alone"
@@ -172,7 +172,7 @@ def throttle_verdict(upload: str, download: str) -> str:
 
 
 def throttle_current(selected: Sequence[TorrentSnapshot]) -> str:
-    """The "contexte" slot for `throttle`: current per-torrent limits,
+    """The "context" slot for `throttle`: current per-torrent limits,
     grouped by value so a shared limit reads as one entry, not one row
     per torrent."""
     return (

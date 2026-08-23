@@ -82,6 +82,12 @@ def test_public_documentation_may_not_cite_the_control_plane(
     assert "control-plane-leak" in _identifiers(repo)
 
 
+def test_an_untranslated_french_word_in_src_is_refused(repo: Path) -> None:
+    _track(repo, "src/mod.py", '"""The "sélection" slot."""\n')
+
+    assert "french-in-src" in _identifiers(repo)
+
+
 # --- green cases --------------------------------------------------------
 
 
@@ -107,6 +113,49 @@ def test_a_binary_file_is_skipped_rather_than_crashing(repo: Path) -> None:
 
 def test_an_untracked_file_is_out_of_scope(repo: Path) -> None:
     (repo / "loose.md").write_text(f"{EM_DASH}\n", encoding="utf-8")
+
+    assert _identifiers(repo) == []
+
+
+def test_the_facade_loanword_is_not_french_prose(repo: Path) -> None:
+    _track(repo, "src/mod.py", '"""Two façades share one seam."""\n')
+
+    assert _identifiers(repo) == []
+
+
+def test_a_spec_heading_quoted_on_its_own_line_is_a_citation(
+    repo: Path,
+) -> None:
+    _track(
+        repo,
+        "src/mod.py",
+        '"""See `.agents/features/x/SPEC.md`, "un texte cité ici".\n"""\n',
+    )
+
+    assert _identifiers(repo) == []
+
+
+def test_a_spec_citation_wrapped_across_two_lines_is_still_a_citation(
+    repo: Path,
+) -> None:
+    """The file reference may end one line before the quoted heading
+    starts -- torrents.py's real citation wraps exactly this way."""
+    _track(
+        repo,
+        "src/mod.py",
+        '"""out of scope (see `.agents/specs/\n'
+        'x.md`, "Hors périmètre").\n"""\n',
+    )
+
+    assert _identifiers(repo) == []
+
+
+def test_french_prose_outside_src_is_not_this_rules_concern(
+    repo: Path,
+) -> None:
+    """AGENTS.md only requires English inside `src/`; this rule must
+    not reach into `tests/` or `scripts/`."""
+    _track(repo, "tests/test_mod.py", '"""The "sélection" slot."""\n')
 
     assert _identifiers(repo) == []
 

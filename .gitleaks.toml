@@ -33,6 +33,15 @@ regexes = ['''UNMISTAKABLE-[A-Z0-9-]+''']
 
 # Generated, reproducible, or vendored -- never authored here.
 #
+# Anchored `(^|/)` rather than `^`: `dir` mode (`make secrets`, the
+# default scope) walks the raw filesystem and does not consult
+# `.gitignore`, so a root-only anchor misses the same disposable
+# directory one level down -- e.g. `.worktrees/<feature>/.venv/`, which
+# `scripts/worktree_new.py` creates for every worktree. That gap once
+# let 27 vendored-stub false positives (pywin32, cryptography, jwt,
+# paramiko typeshed stubs) through a single nested `.venv/`, which is
+# exactly the noise a real leak would hide in.
+#
 # The agent telemetry log is deliberately NOT excluded. It records
 # shell commands verbatim, and its collector redacts credentials before
 # writing -- so scanning it is what proves the redaction still works. A
@@ -41,9 +50,9 @@ regexes = ['''UNMISTAKABLE-[A-Z0-9-]+''']
 # pattern it searches for) is gone for the same reason: the collector
 # redacts that pattern too.
 paths = [
-    '''^\.venv/''',
-    '''^dist/''',
-    '''^htmlcov/''',
+    '''(^|/)\.venv/''',
+    '''(^|/)dist/''',
+    '''(^|/)htmlcov/''',
     '''(^|/)__pycache__/''',
-    '''^poetry\.lock$''',
+    '''(^|/)poetry\.lock$''',
 ]

@@ -167,7 +167,7 @@ def test_no_mcp_tool_can_mutate() -> None:
             )
 
 
-def test_registered_mcp_tools_are_exactly_the_read_only_four() -> None:
+def test_registered_mcp_tools_are_exactly_the_read_only_set() -> None:
     """Read-only is a property of what is *registered*: a mutating tool
     nobody registers cannot be called."""
     pytest.importorskip("mcp")
