@@ -11,8 +11,9 @@ The shape is drill-down, and it is deliberate:
     summary  ->  find (bounded)  ->  inspect one  ->  explain one
 
 Each step returns just enough to choose the next one. `find_torrents`
-returns six fields per torrent, not the sixteen a snapshot carries,
-because a hash, a name and a state are what a next step is chosen from.
+returns seven fields per torrent, not the eighteen `inspect_torrent`
+carries, because a hash, a name and a state are what a next step is
+chosen from.
 
 No tool mutates. No tool holds a rule of its own: every classification
 comes from `qbit_core`, so this surface cannot drift from the CLI's
@@ -23,13 +24,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from qbit_core.features.explain import explain_torrent
+from qbit_core.features.explain import build_torrent_explanation
 from qbit_core.features.stats import collect_torrent_stats
 from qbit_core.features.status import collect_status_snapshot
 from qbit_core.features.torrents import (
     build_torrent_filter,
+    get_safe_tracker_details,
     list_torrent_snapshots,
+    select_torrents,
 )
+from qbit_core.qbit.fields import get_field_as_string
 from qbit_core.shared.selection import SelectionRequest
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
@@ -116,30 +120,21 @@ def find_torrents(
     an answer; paging keeps every result reachable while each response
     stays bounded. The doctrine holds -- depth is paid in calls, never
     in context.
+
+    Filters go through `build_torrent_filter` and `select_torrents`,
+    the same engine `aggregate_stats` and every CLI selector use: this
+    tool used to compare `category` with `==` and `state_group` with a
+    hand-rolled lowercase check, so it silently disagreed with
+    `aggregate_stats` on the same arguments (case, and the
+    `uncategorized` token). One engine, one answer.
     """
-    snapshots = list_torrent_snapshots(client)
-
-    if state_group is not None:
-        wanted = state_group.strip().lower()
-        snapshots = tuple(
-            snapshot for snapshot in snapshots if snapshot.state_group == wanted
-        )
-
-    if category is not None:
-        wanted_category = category.strip()
-        snapshots = tuple(
-            snapshot
-            for snapshot in snapshots
-            if (snapshot.category or "") == wanted_category
-        )
-
-    if name_contains:
-        needle = name_contains.strip().lower()
-        snapshots = tuple(
-            snapshot
-            for snapshot in snapshots
-            if needle in snapshot.name.lower()
-        )
+    filters = build_torrent_filter(
+        categories=[category] if category else (),
+        states=[state_group] if state_group else (),
+        name_contains=[name_contains] if name_contains else (),
+    )
+    selection, _ = select_torrents(client, filters)
+    snapshots = selection.matched
 
     bound = _bounded(limit)
     start = max(0, offset)
@@ -200,6 +195,32 @@ def aggregate_stats(
     }
 
 
+def _full(snapshot: TorrentSnapshot) -> dict[str, Any]:
+    """Every `TorrentSnapshot` field but `tags`, once an agent has
+    narrowed to a single torrent.
+    """
+    return {
+        "hash": snapshot.hash,
+        "name": snapshot.name,
+        "category": snapshot.category,
+        "state": snapshot.state,
+        "state_group": snapshot.state_group,
+        "size": snapshot.size,
+        "progress": snapshot.progress,
+        "ratio": snapshot.ratio,
+        "download_rate": snapshot.download_rate,
+        "upload_rate": snapshot.upload_rate,
+        "download_limit": snapshot.download_limit,
+        "upload_limit": snapshot.upload_limit,
+        "downloaded": snapshot.downloaded,
+        "uploaded": snapshot.uploaded,
+        "seeding_time": snapshot.seeding_time,
+        "added_at": _isoformat(snapshot.added_at),
+        "completed_at": _isoformat(snapshot.completed_at),
+        "last_activity_at": _isoformat(snapshot.last_activity_at),
+    }
+
+
 def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     """Every field of one explicitly chosen torrent.
 
@@ -214,40 +235,45 @@ def inspect_torrent(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     wanted = torrent_hash.strip().lower()
     for snapshot in list_torrent_snapshots(client, hashes=[wanted]):
         if snapshot.hash.lower() == wanted:
-            return {
-                "hash": snapshot.hash,
-                "name": snapshot.name,
-                "category": snapshot.category,
-                "state": snapshot.state,
-                "state_group": snapshot.state_group,
-                "size": snapshot.size,
-                "progress": snapshot.progress,
-                "ratio": snapshot.ratio,
-                "download_rate": snapshot.download_rate,
-                "upload_rate": snapshot.upload_rate,
-                "download_limit": snapshot.download_limit,
-                "upload_limit": snapshot.upload_limit,
-                "downloaded": snapshot.downloaded,
-                "uploaded": snapshot.uploaded,
-                "seeding_time": snapshot.seeding_time,
-                "added_at": _isoformat(snapshot.added_at),
-                "completed_at": _isoformat(snapshot.completed_at),
-                "last_activity_at": _isoformat(snapshot.last_activity_at),
-            }
+            return _full(snapshot)
     return None
 
 
 def explain(client: Any, torrent_hash: str) -> dict[str, Any] | None:
     """Why one torrent is in its current state.
 
-    Calls `qbit_core.features.explain.explain_torrent` unchanged. There
-    is no second diagnostic engine here, and there must never be one:
-    two engines would eventually disagree, and the operator would have
-    no way to know which answer was true.
+    Resolves the hash narrowly instead of calling
+    `qbit_core.features.explain.explain_torrent`: that entry point
+    scans the whole library because the CLI's `explain` accepts a hash
+    *prefix*, a capability this signature -- always a full infohash --
+    never uses. Calls `build_torrent_explanation`, the same pure rule
+    catalogue `explain_torrent` itself delegates to once it has
+    resolved a torrent: there is still exactly one diagnostic engine,
+    never a second one here.
     """
-    report = explain_torrent(client, torrent_hash)
-    if report is None:
+    wanted = torrent_hash.strip().lower()
+    matches = client.torrents_info(torrent_hashes=[wanted]) if wanted else []
+    torrent = next(
+        (
+            item
+            for item in matches
+            if get_field_as_string(item, "hash").lower() == wanted
+        ),
+        None,
+    )
+    if torrent is None:
         return None
+
+    resolved_hash = get_field_as_string(torrent, "hash")
+    try:
+        raw_trackers = list(client.torrents_trackers(resolved_hash))
+        safe_tracker_details: list[dict[str, Any]] | None = (
+            get_safe_tracker_details(raw_trackers)
+        )
+    except Exception:
+        safe_tracker_details = None
+
+    report = build_torrent_explanation(torrent, safe_tracker_details)
     return {
         "target": report.target_identity,
         "severity": str(report.overall_severity),

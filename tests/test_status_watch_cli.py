@@ -375,6 +375,78 @@ def test_jsonl_watch_interrupted_output_ends_after_a_complete_line(
         json.loads(line)  # raises if any line is incomplete/invalid
 
 
+# --- Client reuse across iterations ---------------------------------------
+
+
+def test_watch_builds_the_client_once_across_iterations(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every iteration used to call `create_qbit_client()` -- and so
+    log in -- again: 720 logins per hour at the default 5s interval.
+    """
+    client = _make_client()
+    monkeypatch.setattr(
+        error_boundary, "load_qbit_config", lambda: make_config()
+    )
+    build_calls = 0
+
+    def _factory() -> FakeQbitClient:
+        nonlocal build_calls
+        build_calls += 1
+        return client
+
+    monkeypatch.setattr(error_boundary, "create_qbit_client", _factory)
+    _stop_after_n_sleeps(monkeypatch, 4)
+
+    result = runner.invoke(app, ["status", "--watch", "--format", "jsonl"])
+
+    assert result.exit_code == 0
+    assert build_calls == 1, "one login must serve every watch iteration"
+
+
+def test_watch_reconnects_once_after_a_dropped_session(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached client can outlive its qBittorrent session. The iteration
+    that hits the expired session degrades to `unavailable` like any
+    other recoverable failure; the next iteration reconnects instead of
+    reusing the broken client forever.
+    """
+    from qbit_core.errors import QbitAuthenticationError
+
+    class _ExpiringClient(FakeQbitClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self._calls = 0
+
+        def torrents_info(self, torrent_hashes=None):  # type: ignore[override]
+            self._calls += 1
+            if self._calls == 2:
+                raise QbitAuthenticationError("session expired")
+            return super().torrents_info(torrent_hashes)
+
+    client = _ExpiringClient(torrents=[make_torrent(hash="a" * 40)])
+    monkeypatch.setattr(
+        error_boundary, "load_qbit_config", lambda: make_config()
+    )
+    build_calls = 0
+
+    def _factory() -> _ExpiringClient:
+        nonlocal build_calls
+        build_calls += 1
+        return client
+
+    monkeypatch.setattr(error_boundary, "create_qbit_client", _factory)
+    _stop_after_n_sleeps(monkeypatch, 3)
+
+    result = runner.invoke(app, ["status", "--watch", "--format", "jsonl"])
+
+    assert result.exit_code == 0
+    assert build_calls == 2, "exactly one relogin after the drop"
+
+
 # --- Regression: one-shot status is unaffected ------------------------
 
 

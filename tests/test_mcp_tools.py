@@ -7,6 +7,8 @@ when the `mcp` extra is absent.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from qbit_core.qbit.protocols import (
@@ -16,6 +18,10 @@ from qbit_core.qbit.protocols import (
 )
 from qbit_ops.mcp import tools
 from tests.support import FakeQbitClient, make_torrent
+
+SECRET_PASSKEY = "SUPER_SECRET_PASSKEY_918273"
+PASSKEY_URL = f"https://tracker.example/announce/{SECRET_PASSKEY}"
+SECRET_SAVE_PATH = "/downloads/secret-project"
 
 
 def _library(count: int) -> FakeQbitClient:
@@ -50,9 +56,10 @@ def test_find_defaults_to_a_small_page() -> None:
 
 
 def test_find_returns_only_drill_down_fields() -> None:
-    """Seven fields, not the sixteen a snapshot carries: what a next step
-    is chosen from. Every extra field is permanent context cost, so this
-    pins the set -- adding one is a decision, never a drift."""
+    """Seven fields, not the eighteen `inspect_torrent` returns: what a
+    next step is chosen from. Every extra field is permanent context
+    cost, so this pins the set -- adding one is a decision, never a
+    drift."""
     result = tools.find_torrents(_library(1))
 
     assert set(result["torrents"][0]) == {
@@ -94,6 +101,42 @@ def test_inspect_resolves_a_full_hash_case_insensitively() -> None:
     assert found is not None
     assert found["hash"] == wanted
     assert found["name"] == "T2"
+
+
+def test_no_mcp_tool_output_leaks_a_save_path_or_a_tracker_passkey() -> None:
+    """The security review named `get_safe_tracker_details` and the
+    absence of `save_path` as what makes this surface safe by
+    construction. Nothing tested either property from the MCP layer
+    itself before this -- a serialization change could break both
+    without a single test noticing.
+    """
+    torrent_hash = "e" * 40
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=torrent_hash,
+                name="E",
+                state="stalledUP",
+                progress=1.0,
+                category="movies",
+                save_path=SECRET_SAVE_PATH,
+            )
+        ],
+        trackers_by_hash={torrent_hash: [{"url": PASSKEY_URL, "status": 2}]},
+    )
+
+    outputs = [
+        tools.library_summary(client),
+        tools.find_torrents(client),
+        tools.aggregate_stats(client),
+        tools.inspect_torrent(client, torrent_hash),
+        tools.explain(client, torrent_hash),
+    ]
+
+    payload = json.dumps(outputs)
+    assert SECRET_SAVE_PATH not in payload
+    assert SECRET_PASSKEY not in payload
+    assert PASSKEY_URL not in payload
 
 
 def test_no_mcp_tool_can_mutate() -> None:
@@ -169,6 +212,51 @@ def test_explain_keeps_evidence_and_limitations() -> None:
     assert "limitations" in finding
 
 
+def test_explain_asks_upstream_for_one_torrent_not_the_library() -> None:
+    """`inspect_torrent`'s own docstring names this defect and fixes it
+    for itself; `explain` inherited the same full-library scan from
+    `qbit_core.features.explain.explain_torrent`, which exists only to
+    resolve a hash *prefix* -- a capability this signature never uses,
+    since it always receives a full infohash.
+    """
+    transferred = 0
+    library = [
+        make_torrent(hash=f"{index:040x}", name=f"T{index}", state="uploading")
+        for index in range(1, 201)
+    ]
+
+    class Counting(FakeQbitClient):
+        def torrents_info(self, torrent_hashes=None):  # type: ignore[override]
+            nonlocal transferred
+            result = super().torrents_info(torrent_hashes)
+            transferred += len(result)
+            return result
+
+    client = Counting(torrents=library)
+    tools.explain(client, f"{7:040x}")
+
+    assert transferred == 1, "explaining one torrent must not transfer 200"
+
+
+def test_explain_resolves_a_full_hash_case_insensitively() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="A", state="uploading")]
+    )
+
+    report = tools.explain(client, ("A" * 40).upper())
+
+    assert report is not None
+    assert report["target"]
+
+
+def test_explain_returns_none_for_an_unmatched_hash() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="A", state="uploading")]
+    )
+
+    assert tools.explain(client, "b" * 40) is None
+
+
 def test_find_returns_category_and_can_filter_on_it() -> None:
     """Category is the one axis the operator defines himself: it is what
     separates a release from a cross-seed link to that same release.
@@ -239,6 +327,58 @@ def test_inspect_asks_upstream_for_one_torrent_not_the_library() -> None:
     tools.inspect_torrent(client, f"{7:040x}")
 
     assert transferred == 1, "one lookup must not transfer 200 torrents"
+
+
+def test_find_and_aggregate_agree_on_a_case_folded_category() -> None:
+    """`find_torrents` and `aggregate_stats` are two tools an agent may
+    call in the same reasoning about the same arguments; disagreeing on
+    a filter is worse than either being wrong alone, because nothing
+    tells the caller which answer to trust.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a" * 40, name="A", state="uploading", category="Movies"
+            )
+        ]
+    )
+
+    found = tools.find_torrents(client, category="movies")
+    aggregated = tools.aggregate_stats(client, category="movies")
+
+    assert found["matched"] == aggregated["torrents"] == 1
+
+
+def test_find_and_aggregate_agree_on_the_uncategorized_token() -> None:
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash="a" * 40, name="A", state="uploading", category=""
+            ),
+            make_torrent(
+                hash="b" * 40, name="B", state="uploading", category="movies"
+            ),
+        ]
+    )
+
+    found = tools.find_torrents(client, category="uncategorized")
+    aggregated = tools.aggregate_stats(client, category="uncategorized")
+
+    assert found["matched"] == aggregated["torrents"] == 1
+
+
+def test_find_rejects_an_unknown_state_group_like_aggregate_does() -> None:
+    """`find_torrents` used to answer `matched: 0` for a state group that
+    does not exist -- indistinguishable from "no torrent is in that
+    state". `aggregate_stats` already raised on the same input; both
+    must now raise the same way.
+    """
+    client = _library(1)
+
+    with pytest.raises(ValueError):
+        tools.find_torrents(client, state_group="stopped")
+    with pytest.raises(ValueError):
+        tools.aggregate_stats(client, state_group="stopped")
 
 
 def test_aggregate_totals_a_filtered_selection() -> None:

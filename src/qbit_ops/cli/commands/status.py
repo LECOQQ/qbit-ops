@@ -2,7 +2,7 @@
 
 import math
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -64,7 +64,31 @@ def _collect_status_snapshot_safely() -> StatusSnapshot:
         )
 
 
-def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
+class _WatchClient:
+    """Cache the qBittorrent client across `status --watch` iterations.
+
+    Rebuilding it every cycle re-paid the login handshake -- the most
+    expensive qBittorrent call -- on every tick: 720 logins per hour at
+    the default 5s interval. Dropped on any recoverable failure so the
+    next cycle reconnects with a fresh login instead of reusing a
+    client whose session may have expired.
+    """
+
+    def __init__(self) -> None:
+        self._client: Any | None = None
+
+    def get(self) -> Any:
+        if self._client is None:
+            self._client = error_boundary.create_qbit_client()
+        return self._client
+
+    def drop(self) -> None:
+        self._client = None
+
+
+def _collect_status_snapshot_for_watch(
+    host: str, cache: _WatchClient
+) -> StatusSnapshot:
     """Collect one snapshot for `status --watch`.
 
     Unlike `_collect_status_snapshot_safely`, never prints to stderr:
@@ -74,12 +98,12 @@ def _collect_status_snapshot_for_watch(host: str) -> StatusSnapshot:
     propagate so the watch loop stops instead of looping forever.
     """
     try:
-        client = error_boundary.create_qbit_client()
-        return collect_status_snapshot(client, host=host)
+        return collect_status_snapshot(cache.get(), host=host)
     except Exception as error:
         failure = _classify_recoverable_qbit_failure(error)
         if failure is None:
             raise
+        cache.drop()
         return build_unavailable_snapshot(
             code=failure.code,
             message=failure.message,
@@ -102,9 +126,10 @@ def _run_status_watch(output_format: OutputFormat, interval: float) -> None:
 
     host = config.host
     iteration = 0
+    cache = _WatchClient()
 
     def _collect() -> StatusSnapshot:
-        return _collect_status_snapshot_for_watch(host)
+        return _collect_status_snapshot_for_watch(host, cache)
 
     try:
         if output_format is OutputFormat.table:
