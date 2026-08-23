@@ -33,8 +33,8 @@ THIRD_TRACKER_URL = "http://qbit-ops-tracker:6971/announce"
 THIRD_TRACKER_IDENTITY = "qbit-ops-tracker:6971"
 
 
-def _invoke(env, args):
-    return runner.invoke(app, args, env=env)
+def _invoke(env, args, *, input=None):
+    return runner.invoke(app, args, env=env, input=input)
 
 
 def _tracker_identities(env, torrent_hash: str) -> list[str]:
@@ -234,11 +234,11 @@ def test_replace_passkey_never_logs_the_real_passkey_value(
                 "replace-passkey",
                 "--tracker",
                 "http://qbit-ops-tracker:6969/announce-passkey?passkey={passkey}",
-                "--new-passkey",
-                f"new-{FAKE_PLACEHOLDER_PASSKEY}",
+                "--new-passkey-stdin",
                 "--no-dry-run",
                 "--yes",
             ],
+            input=f"new-{FAKE_PLACEHOLDER_PASSKEY}\n",
         )
 
     assert result.exit_code == 0, result.output

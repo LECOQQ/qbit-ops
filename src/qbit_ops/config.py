@@ -28,6 +28,7 @@ __all__ = [
     "load_qbit_config",
     "get_user_env_file",
     "collect_masking_sources",
+    "describe_connection_config_source",
     "load_small_caps_titles_preference",
 ]
 
@@ -70,7 +71,15 @@ def load_small_caps_titles_preference() -> bool:
 
 
 def _load_env_files() -> None:
-    """Load env files without overriding existing environment values."""
+    """Load env files without overriding existing environment values.
+
+    The three connection variables are claimed atomically by the first
+    default file that defines any of them; a later file never fills in
+    the rest. Composing them key-by-key would let an incidental `.env`
+    in the working directory redefine QBIT_HOST alone and have the real
+    QBIT_USER/QBIT_PASSWORD filled in from the trusted user file --
+    silently redirecting real credentials to an attacker-chosen host.
+    """
     explicit_env_file = os.getenv(APP_ENV_FILE_VARIABLE)
     if explicit_env_file:
         load_dotenv(
@@ -79,8 +88,23 @@ def _load_env_files() -> None:
         )
         return
 
+    connection_variables_claimed = False
     for env_file in _get_default_env_files():
-        load_dotenv(dotenv_path=env_file, override=False)
+        if not env_file.is_file():
+            continue
+        values = dotenv_values(env_file)
+        skip_connection_variables = connection_variables_claimed
+        if not connection_variables_claimed and any(
+            (values.get(variable) or "").strip()
+            for variable in CONNECTION_VARIABLES
+        ):
+            connection_variables_claimed = True
+        for variable, value in values.items():
+            if value is None:
+                continue
+            if skip_connection_variables and variable in CONNECTION_VARIABLES:
+                continue
+            os.environ.setdefault(variable, value)
 
 
 def _get_default_env_files() -> list[Path]:
@@ -105,6 +129,36 @@ def get_user_env_file() -> Path:
     )
 
     return config_home / APP_CONFIG_DIR / PROJECT_ENV_FILE
+
+
+def describe_connection_config_source() -> Path | None:
+    """Name the file `load_qbit_config()` sources connection variables from.
+
+    Read-only mirror of `_load_env_files`'s precedence -- an explicit
+    `QBIT_OPS_ENV_FILE` if it exists and defines a connection variable,
+    else the first default file that does. `None` means the values (if
+    any) came from already-exported process variables, not a file.
+    """
+    explicit_env_file = os.getenv(APP_ENV_FILE_VARIABLE)
+    if explicit_env_file:
+        candidate = Path(explicit_env_file).expanduser()
+        if candidate.is_file() and _defines_a_connection_variable(candidate):
+            return candidate
+        return None
+
+    for env_file in _get_default_env_files():
+        if env_file.is_file() and _defines_a_connection_variable(env_file):
+            return env_file
+
+    return None
+
+
+def _defines_a_connection_variable(env_file: Path) -> bool:
+    values = dotenv_values(env_file)
+    return any(
+        (values.get(variable) or "").strip()
+        for variable in CONNECTION_VARIABLES
+    )
 
 
 def collect_masking_sources(target: Path) -> tuple[MaskingSource, ...]:

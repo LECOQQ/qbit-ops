@@ -64,8 +64,7 @@ def _make_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
             "replace-passkey",
             "--tracker",
             "https://tracker.example/announce/{passkey}",
-            "--new-passkey",
-            "new",
+            "--new-passkey-stdin",
         ],
     ],
 )
@@ -83,7 +82,8 @@ def test_mutation_defaults_to_dry_run_and_performs_no_mutation(
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
-    result = runner.invoke(app, argv)
+    # Harmless for every other row: only replace-passkey reads stdin.
+    result = runner.invoke(app, argv, input="new\n")
 
     assert result.exit_code in (ExitCode.SUCCESS, ExitCode.NO_MATCH)
     assert "APPLIED" not in result.stdout
@@ -401,8 +401,7 @@ def test_no_match_plan_does_not_prompt_or_refuse(
                 "replace-passkey",
                 "--tracker",
                 "https://nonexistent.example/announce/{passkey}",
-                "--new-passkey",
-                "new",
+                "--new-passkey-stdin",
                 "--no-dry-run",
                 "--yes",
             ],
@@ -419,7 +418,8 @@ def test_unmatched_tracker_selector_reports_no_match_not_applied(
     client = _client_with_tracker("https://tracker.example/announce")
     configure_qbit_backend(client=client)
 
-    result = runner.invoke(app, argv)
+    # Harmless for every other row: only replace-passkey reads stdin.
+    result = runner.invoke(app, argv, input="new\n")
 
     assert result.exit_code == ExitCode.NO_MATCH
     assert "APPLIED" not in result.stdout
@@ -509,11 +509,11 @@ def test_replace_passkey_already_current_reports_no_changes(
             "replace-passkey",
             "--tracker",
             "https://tracker.example/announce/{passkey}",
-            "--new-passkey",
-            NEW_PASSKEY_MARKER,
+            "--new-passkey-stdin",
             "--no-dry-run",
             "--yes",
         ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
     )
 
     assert result.exit_code == ExitCode.SUCCESS
@@ -532,6 +532,9 @@ def test_replace_passkey_confirmation_never_shows_the_passkey(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _make_interactive(monkeypatch)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.prompt_secret", lambda label: NEW_PASSKEY_MARKER
+    )
     client = _client_with_tracker(
         f"https://tracker.example/announce/{SECRET_PASSKEY_MARKER}"
     )
@@ -544,8 +547,6 @@ def test_replace_passkey_confirmation_never_shows_the_passkey(
             "replace-passkey",
             "--tracker",
             "https://tracker.example/announce/{passkey}",
-            "--new-passkey",
-            NEW_PASSKEY_MARKER,
             "--no-dry-run",
             "--verbose",
         ],
@@ -580,15 +581,45 @@ def test_replace_passkey_dry_run_never_shows_the_passkey(
             "replace-passkey",
             "--tracker",
             "https://tracker.example/announce/{passkey}",
-            "--new-passkey",
-            NEW_PASSKEY_MARKER,
+            "--new-passkey-stdin",
             "--verbose",
         ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
     )
 
     combined = result.stdout + result.stderr
     assert SECRET_PASSKEY_MARKER not in combined
     assert NEW_PASSKEY_MARKER not in combined
+    assert client.edited_trackers == []
+
+
+def test_replace_passkey_stdin_apply_without_yes_refuses_before_prompting(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once --new-passkey-stdin has consumed stdin, the confirmation
+    prompt cannot read it again -- refuse instead of hanging or reading
+    garbage, and never touch the client."""
+    _make_interactive(monkeypatch)
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace-passkey",
+            "--tracker",
+            "https://tracker.example/announce/{passkey}",
+            "--new-passkey-stdin",
+            "--no-dry-run",
+        ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--yes" in result.stderr
     assert client.edited_trackers == []
 
 

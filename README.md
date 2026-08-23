@@ -194,12 +194,16 @@ a torrent to fix it.
 **Rotate a leaked passkey everywhere at once.**
 
 ```bash
-qbit-ops trackers replace-passkey \
+echo "$NEW_PASSKEY" | qbit-ops trackers replace-passkey \
   --tracker "https://tracker.example/announce/{passkey}" \
-  --new-passkey "$NEW_PASSKEY"
+  --new-passkey-stdin
 ```
 
 `{passkey}` is a template: it never prints anything that can harm you.
+The new value is piped in, never typed on the command line -- without
+`--new-passkey-stdin`, it asks interactively instead, input hidden.
+Add `--no-dry-run --yes` to actually apply: piping the passkey already
+occupies stdin, so the usual confirmation prompt cannot ask there too.
 
 **Follow a tracker that changed address.**
 

@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -121,6 +122,7 @@ def collect_doctor_report(
     connection_outcome: ConnectionOutcome | None,
     connection_error: Exception | None,
     client: Any | None,
+    config_source: Path | None = None,
 ) -> DoctorReport:
     """Build a full diagnostic report from already-attempted collection.
 
@@ -128,10 +130,12 @@ def collect_doctor_report(
     (both may fail); this only runs the bounded read calls that follow a
     successful login. A failed prerequisite produces `SKIPPED` checks
     downstream rather than raising, so unrelated checks still run.
+    `config_source` names the file `config` was read from, if any --
+    purely informational, never used to re-derive `config` itself.
     """
     checks: list[DoctorCheck] = []
 
-    checks.extend(_configuration_checks(config, config_error))
+    checks.extend(_configuration_checks(config, config_error, config_source))
     checks.append(_small_caps_coverage_check())
     config_ok = config is not None
 
@@ -287,6 +291,7 @@ def _small_caps_coverage_check() -> DoctorCheck:
 def _configuration_checks(
     config: QbitConfig | None,
     config_error: Exception | None,
+    config_source: Path | None = None,
 ) -> list[DoctorCheck]:
     """Build the local configuration checks (no remote calls)."""
     checks: list[DoctorCheck] = []
@@ -331,7 +336,11 @@ def _configuration_checks(
             code="CFG001",
             section="configuration",
             status=CheckStatus.PASS,
-            message="Configuration loaded successfully.",
+            message=(
+                f"Configuration loaded successfully from {config_source}."
+                if config_source is not None
+                else "Configuration loaded successfully."
+            ),
         )
     )
 

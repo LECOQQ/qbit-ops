@@ -915,11 +915,11 @@ def test_replace_passkey_accepts_filters_without_leaking_the_new_passkey(
             "replace-passkey",
             "--tracker",
             "https://old.example/announce/{passkey}",
-            "--new-passkey",
-            "BRAND-NEW-SECRET",
+            "--new-passkey-stdin",
             "--category",
             "sonarr",
         ],
+        input="BRAND-NEW-SECRET\n",
     )
 
     assert "BRAND-NEW-SECRET" not in result.stdout

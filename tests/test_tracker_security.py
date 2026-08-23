@@ -38,6 +38,8 @@ FULL_URL = (
     f"https://{USERINFO_SECRET}:hunter2@tracker.example:6969/"
     f"announce/{SECRET_PASSKEY}?auth={QUERY_SECRET}"
 )
+BARE_QUERY_SECRET = "BARE_QUERY_SECRET_5566"
+BARE_QUERY_URL = f"https://tracker.example/announce?{BARE_QUERY_SECRET}"
 
 
 def _assert_no_secrets(text: str) -> None:
@@ -150,6 +152,34 @@ def test_describe_tracker_url_empty_input_has_no_path_or_query(
     assert safe.query_keys == ()
 
 
+def test_describe_tracker_url_query_keys_excludes_a_bare_token() -> None:
+    """A `?SECRET` query with no `=` has no parameter name: the whole
+    token must not become the reported key (it is a value, not a name)."""
+    safe = describe_tracker_url(
+        f"https://tracker.example/announce?{SECRET_PASSKEY}"
+    )
+    assert safe.query_keys == ()
+    assert SECRET_PASSKEY not in safe.query_keys
+
+
+def test_describe_tracker_url_query_keys_excludes_a_leading_bare_token() -> (
+    None
+):
+    """A leading bare token must not leak even when a real `name=value`
+    pair follows it in the same query string."""
+    safe = describe_tracker_url(
+        f"https://tracker.example/announce?{SECRET_PASSKEY}&x=1"
+    )
+    assert safe.query_keys == ("x",)
+
+
+def test_describe_tracker_url_query_keys_still_reports_a_blank_value() -> None:
+    """The fix must not regress the legitimate case: `passkey=` (a real
+    name with a blank value) still reports `passkey` as a key."""
+    safe = describe_tracker_url("https://tracker.example/announce?passkey=")
+    assert safe.query_keys == ("passkey",)
+
+
 def test_sanitize_handles_upstream_message_with_complete_url() -> None:
     """Item 26: an upstream exception message containing a full URL is
     fully redacted, not just its scheme prefix."""
@@ -228,6 +258,34 @@ def test_trackers_inspect_never_leaks_secrets(
 
     _assert_no_secrets(result.stdout)
     _assert_no_secrets(result.stderr)
+
+
+@pytest.mark.parametrize("fmt", ["table", "json", "jsonl", "csv"])
+def test_trackers_inspect_never_leaks_a_bare_query_passkey(
+    runner: CliRunner, configure_qbit_backend, fmt: str
+) -> None:
+    """A `?<passkey>` tracker (no `=`) must not have its value echoed as
+    a `query_keys` entry -- the bug this phase's audit found."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=TORRENT_A, name="A")],
+        trackers_by_hash={TORRENT_A: [{"url": BARE_QUERY_URL, "status": 2}]},
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "inspect",
+            "--tracker",
+            "tracker.example",
+            "--format",
+            fmt,
+        ],
+    )
+
+    assert BARE_QUERY_SECRET not in result.stdout
+    assert BARE_QUERY_SECRET not in result.stderr
 
 
 # --- 7: trackers status --------------------------------------------------

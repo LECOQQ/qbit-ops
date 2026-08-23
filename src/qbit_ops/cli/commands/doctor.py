@@ -14,7 +14,11 @@ from qbit_core.features.doctor import (
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.validation import validate_format_support
-from qbit_ops.config import ConfigError, QbitConfig
+from qbit_ops.config import (
+    ConfigError,
+    QbitConfig,
+    describe_connection_config_source,
+)
 
 
 def _collect_doctor_report() -> DoctorReport:
@@ -46,6 +50,7 @@ def _collect_doctor_report() -> DoctorReport:
         connection_outcome=connection_outcome,
         connection_error=connection_error,
         client=client,
+        config_source=describe_connection_config_source(),
     )
 
 

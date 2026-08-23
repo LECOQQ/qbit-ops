@@ -152,7 +152,7 @@ REPRESENTATIVE_COMMAND_OPTIONS: dict[str, set[str]] = {
     "trackers replace": {"--source", "--target", "--dry-run", "--match"},
     "trackers replace-passkey": {
         "--tracker",
-        "--new-passkey",
+        "--new-passkey-stdin",
         "--dry-run",
     },
     "backup export": {"--format", "--match"},

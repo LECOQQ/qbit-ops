@@ -1,5 +1,6 @@
 """Test the `doctor` domain model: collection, checks, and serialization."""
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -87,6 +88,34 @@ def test_all_pass_report_is_healthy() -> None:
         for check in report.checks
     )
     assert doctor_exit_code(report.overall_status) == 0
+
+
+def test_cfg001_names_the_configuration_source_when_known() -> None:
+    report = collect_doctor_report(
+        config=CLEAN_CONFIG,
+        config_error=None,
+        connection_outcome=ConnectionOutcome.OK,
+        connection_error=None,
+        client=_healthy_client(),
+        config_source=Path("/home/user/.config/qbit-ops/.env"),
+    )
+
+    cfg001 = _checks_by_code(report)["CFG001"]
+    assert cfg001.status == CheckStatus.PASS
+    assert "/home/user/.config/qbit-ops/.env" in cfg001.message
+
+
+def test_cfg001_stays_generic_without_a_known_source() -> None:
+    report = collect_doctor_report(
+        config=CLEAN_CONFIG,
+        config_error=None,
+        connection_outcome=ConnectionOutcome.OK,
+        connection_error=None,
+        client=_healthy_client(),
+    )
+
+    cfg001 = _checks_by_code(report)["CFG001"]
+    assert cfg001.message == "Configuration loaded successfully."
 
 
 def test_config_load_failure_skips_everything_downstream() -> None:

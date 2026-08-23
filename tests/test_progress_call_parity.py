@@ -45,7 +45,10 @@ def _run_and_capture_calls(
     argv: list[str],
     *,
     interactive: bool,
-    input: str | None = None,
+    # A harmless default: only replace-passkey's --new-passkey-stdin
+    # ever reads it, and --yes already covers its apply-mode rows, so
+    # no command here also needs a confirmation "y".
+    input: str | None = "new\n",
 ) -> FakeQbitClient:
     monkeypatch.setattr(m, "is_interactive_terminal", lambda: interactive)
     client = _make_client()
@@ -111,8 +114,7 @@ MUTATION_PREVIEW_ARGV: list[list[str]] = [
         "replace-passkey",
         "--tracker",
         f"{TRACKER_URL}",
-        "--new-passkey",
-        "new",
+        "--new-passkey-stdin",
     ],
 ]
 
@@ -148,8 +150,7 @@ MUTATION_APPLY_ARGV: list[list[str]] = [
         "replace-passkey",
         "--tracker",
         f"{TRACKER_URL}",
-        "--new-passkey",
-        "new",
+        "--new-passkey-stdin",
         "--no-dry-run",
         "--yes",
     ],

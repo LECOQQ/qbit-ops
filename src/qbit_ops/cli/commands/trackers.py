@@ -1,5 +1,6 @@
 """Register the `trackers` command group."""
 
+import sys
 from enum import StrEnum
 from typing import Annotated
 
@@ -814,13 +815,17 @@ def replace_tracker_passkey_command(
             "a full path segment (e.g. '/announce/{passkey}').",
         ),
     ],
-    new_passkey: Annotated[
-        str,
+    new_passkey_stdin: Annotated[
+        bool,
         typer.Option(
-            "--new-passkey",
-            help="New passkey value to apply.",
+            "--new-passkey-stdin",
+            help="Read the new passkey from stdin (one line), like "
+            "'docker login --password-stdin'. Without it, the passkey "
+            "is asked for interactively with the input hidden. "
+            "Combined with --no-dry-run, requires --yes: the "
+            "confirmation prompt cannot also read stdin.",
         ),
-    ],
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -877,10 +882,39 @@ def replace_tracker_passkey_command(
     inactive_for: InactiveForOption = None,
     active_within: ActiveWithinOption = None,
 ) -> None:
-    """Replace a tracker's passkey on every torrent using that tracker."""
+    """Replace a tracker's passkey on every torrent using that tracker.
+
+    The new passkey never appears on the command line: it is piped via
+    `--new-passkey-stdin` or typed at a hidden prompt.
+    """
     try:
         tracker = require_non_blank(tracker, field_name="--tracker")
-        new_passkey = require_non_blank(new_passkey, field_name="--new-passkey")
+    except InvalidInputError as error:
+        error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+
+    if new_passkey_stdin:
+        if not assume_yes and not dry_run:
+            # The confirmation prompt reads from the same stdin the
+            # passkey already consumed -- refuse before either read.
+            error_boundary.fail(
+                "--new-passkey-stdin with --no-dry-run also needs --yes: "
+                "the confirmation prompt cannot read stdin a second time.",
+                ErrorCategory.INVALID_INPUT,
+            )
+        new_passkey = sys.stdin.readline()
+    elif not rendering.is_interactive_terminal():
+        error_boundary.fail(
+            "No terminal to prompt for the new passkey. Pipe it instead "
+            "with --new-passkey-stdin.",
+            ErrorCategory.INVALID_INPUT,
+        )
+    else:
+        new_passkey = rendering.prompt_secret("New passkey")
+
+    try:
+        new_passkey = require_non_blank(
+            new_passkey, field_name="the new passkey"
+        )
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
     try:

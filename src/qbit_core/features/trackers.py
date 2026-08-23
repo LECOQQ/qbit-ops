@@ -123,12 +123,19 @@ def describe_tracker_url(url: str) -> SafeTrackerIdentity:
     path_shape = (
         "/" + "/".join("<secret>" for _ in segments) if segments else None
     )
+    # A bare token (`?SECRET`, no `=`) has no name; parse_qsl would
+    # otherwise treat the whole token as the key, leaking a passkey
+    # value into "parameter names only, never values". Keep only
+    # segments that are genuine `name=value` pairs before parsing.
+    named_query_segments = "&".join(
+        segment for segment in parsed.query.split("&") if "=" in segment
+    )
     query_keys = tuple(
         sorted(
             {
                 key
                 for key, _value in parse_qsl(
-                    parsed.query, keep_blank_values=True
+                    named_query_segments, keep_blank_values=True
                 )
             }
         )

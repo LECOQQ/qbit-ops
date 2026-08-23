@@ -645,6 +645,7 @@ columns; `jsonl` emits exactly one compact document.
 - ▶️ `--no-dry-run` requests real execution.
 - ❓ Low-risk mutations apply without a prompt; medium/high-risk mutations (tracker changes, `torrents delete`) prompt in an interactive terminal.
 - ⏭️ `--yes` skips that prompt but never enables real execution by itself.
+- 🔑 `trackers replace-passkey` never takes the new passkey as an argument: pipe it with `--new-passkey-stdin` (`echo "$PASSKEY" | qbit-ops trackers replace-passkey ... --new-passkey-stdin`), or leave it out for a hidden interactive prompt. Combined with `--no-dry-run`, piping it also needs `--yes`: the confirmation prompt cannot read stdin a second time.
 - 🚫 Empty selections never mean “all”.
 - 🔌 `init` is not one of them: it writes qbit-ops' own configuration
   file, never the instance. No selector, nothing to preview, and
