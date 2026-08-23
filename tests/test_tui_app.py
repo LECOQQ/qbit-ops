@@ -3059,6 +3059,61 @@ async def test_an_impossible_range_disarms_apply_and_shows_the_error() -> None:
         await pilot.pause()
 
 
+async def test_measures_placeholders_never_apply_and_never_pend() -> None:
+    """Point 9 of the third visual pass: every Measures field shows a
+    grayed-out example of the syntax it expects. `Input.placeholder` is
+    never `.value` in Textual, but this checks it end to end rather
+    than assuming: an untouched placeholder must not count as a pending
+    edit (no `*` on the tab, see criterion 4/5bis) and must not reach
+    `state.filters` on Apply (criterion 6/7)."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("alt+right", "alt+right")  # Organisation -> Measures
+        await pilot.pause()
+
+        placeholders = {
+            "f-ratio_min": "2.0",
+            "f-ratio_max": "2.0",
+            "f-size_min": "50GiB",
+            "f-size_max": "50GiB",
+            "f-progress_min": "90%",
+            "f-progress_max": "90%",
+            "f-uploaded_min": "50GiB",
+            "f-uploaded_max": "50GiB",
+            "f-added_min": "7d",
+            "f-added_max": "7d",
+            "f-completed_at_min": "7d",
+            "f-completed_at_max": "7d",
+            "f-last_activity_min": "7d",
+            "f-last_activity_max": "7d",
+            "f-seeded_for": "30d",
+        }
+        for field_id, expected in placeholders.items():
+            field = app.screen.query_one(f"#{field_id}", Input)
+            assert field.placeholder == expected, field_id
+            # A placeholder is never a value -- untouched, `.value` is
+            # still empty, not the example text.
+            assert field.value == "", field_id
+
+        dialog = app.screen.query_one("#filters-dialog")
+        title = Text.from_markup(str(dialog.border_title)).plain
+        assert "*" not in title, title
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.controller.state.filters == TorrentFilter()
+        assert len(app.screen_stack) > 1  # `enter` never closes
+
+
 def test_filters_draft_is_open_no_longer_exists() -> None:
     """Criterion 9bis's fourth test: `_filters_draft_is_open` existed
     only to suppress reconciliation while a live-applying draft was
@@ -3159,7 +3214,12 @@ async def test_the_dialog_keeps_two_columns_of_floor_at_every_width() -> None:
     `max-width: 100%` alone already does not overflow and gives a
     dialog flush against both edges, which the wireframe does not
     show. Measured (see the handoff): `100%` alone gives `x=0 w=96`;
-    `100% + margin: 0 2` gives `x=2 w=92`."""
+    `100% + margin: 0 2` gives `x=2 w=92`.
+
+    Exercised on `DetailsScreen`, not `FiltersScreen`: this checks the
+    *generic* clamp, and needs a `large` (100) dialog to still be wider
+    than every terminal below -- `FiltersScreen` moved to `wide` (76),
+    which stops overflowing (and clamping) at 90/96 columns."""
     cases = [
         (90, 2, 86),
         (96, 2, 92),
@@ -3171,10 +3231,10 @@ async def test_the_dialog_keeps_two_columns_of_floor_at_every_width() -> None:
         async with app.run_test(size=(width, 40)) as pilot:
             await _settle(app, pilot)
             await _goto_torrents(app, pilot)
-            await pilot.press("f")
+            await pilot.press("enter")
             await pilot.pause()
 
-            region = app.screen.query_one("#filters-dialog").region
+            region = app.screen.query_one("#details-dialog").region
             assert region.x == expected_x, (width, region)
             assert region.width == expected_w, (width, region)
             assert region.x + region.width <= width, (width, region)
@@ -3458,6 +3518,46 @@ async def test_explain_modal_closed_before_result_arrives_never_reopens() -> (
         await _settle(app, pilot)
 
         assert len(app.screen_stack) == 1
+
+
+async def test_explain_survives_a_result_before_it_mounts() -> None:
+    """`push_screen` adds a screen to `screen_stack` synchronously but
+    mounts it -- and composes `#explain-content` -- on a later tick.
+    `_maybe_resolve_pending_explain` runs from a worker's completion
+    message, which can be processed before that tick, previously
+    raising `NoMatches` on the still-unmounted screen. This installs
+    that exact ordering -- push, then resolve, no `await` between --
+    instead of relying on real thread/loop timing to hit it.
+    """
+    torrent_hash = "a" * 40
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=torrent_hash, name="Alpha")],
+        trackers_by_hash={torrent_hash: []},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        request_id = app.controller.begin_manual_detail_refresh()
+        assert request_id is not None
+        app.controller.apply_tracker_details_success(
+            request_id, torrent_hash, []
+        )
+        screen = ExplainScreen("Alpha", None)
+        app._explain_screen = screen
+        app._pending_explain_request_id = request_id
+        app.push_screen(screen)
+        assert screen in app.screen_stack
+        assert not screen.is_mounted
+
+        app._maybe_resolve_pending_explain(request_id, torrent_hash)
+
+        await pilot.pause()
+        content = str(screen.query_one("#explain-content", Static).content)
+        assert "Alpha" in content
+        assert "Fetching tracker data" not in content
 
 
 async def test_explain_modal_scrollable_at_every_tested_width() -> None:
@@ -4365,6 +4465,57 @@ async def test_each_value_action_button_opens_its_own_modal() -> None:
             assert len(app.screen_stack) == 1
 
 
+async def test_alt_left_returns_from_a_value_action_to_actions() -> None:
+    """`escape` still closes everything with no side effect (see
+    `test_each_value_action_button_opens_its_own_modal`); `alt+left` is
+    the *other* way out -- back to `ActionsScreen`, every other action
+    still reachable, same frozen selection. Both `Action` keys announced
+    on each of the four screens actually do what they say, not just
+    `alt+left`: an announced key nobody answers is the exact defect this
+    guards against."""
+    cases = (
+        ("actions-category-set", CategorySetScreen),
+        ("actions-tag-add", TagAddScreen),
+        ("actions-tag-remove", TagRemoveScreen),
+        ("actions-throttle", ThrottleScreen),
+    )
+    for button_id, screen_class in cases:
+        client = FakeQbitClient(
+            torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+        )
+        app = _app(client)
+        async with app.run_test(size=WIDE_SIZE) as pilot:
+            await _settle(app, pilot)
+            await _goto_torrents(app, pilot)
+            await pilot.press("space")
+            await pilot.press("a")
+            await pilot.pause()
+
+            button = app.screen.query_one(f"#{button_id}", Button)
+            await pilot.click(button)
+            await pilot.pause()
+            assert isinstance(app.screen, screen_class), (button_id, app.screen)
+
+            assert any(
+                "alt+left" in hint.keys for hint in screen_class.MODAL_KEYS
+            ), screen_class
+
+            await pilot.press("alt+left")
+            await pilot.pause()
+
+            assert isinstance(app.screen, ActionsScreen)
+            assert len(app.screen_stack) == 2
+            content = _static_text(app.screen.query_one("#actions-dialog"))
+            assert "1 selected" in content
+            assert "Alpha" in content
+
+            # Every other action is still reachable from there.
+            resume = app.screen.query_one("#actions-resume", Button)
+            await pilot.click(resume)
+            await pilot.pause()
+            assert isinstance(app.screen, PreviewScreen)
+
+
 async def test_category_set_flow_reaches_preview_with_the_typed_category() -> (
     None
 ):
@@ -5094,6 +5245,38 @@ async def test_ctrl_d_deselects_all_visible_torrents() -> None:
         await pilot.pause()
 
         assert app.controller.state.selected_hashes == set()
+
+
+async def test_ctrl_d_clears_a_checkmark_a_direct_write_left_stale() -> None:
+    """Same defect as
+    `test_ctrl_r_clears_a_checkmark_a_direct_write_left_stale`, on
+    `deselect_all` -- same code shape (`clear_selection()` then
+    `_render_table()`), so it inherits the same stale-diff-cache risk.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await _type_into_search(pilot, "a")
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.pause()
+        assert app.controller.state.selected_hashes == {"a" * 40}
+
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == set()
+        table = app.query_one("#torrents", DataTable)
+        cell = table.get_cell_at(Coordinate(0, 0))
+        assert "✔" not in cell.plain, cell.plain
 
 
 async def test_ctrl_d_with_no_selection_is_a_safe_noop() -> None:
@@ -6566,9 +6749,13 @@ async def test_modal_focus_indicators_use_brand_accent_not_default_blue() -> (
         checkbox.focus()
         await pilot.pause()
         assert checkbox.styles.border.left[1].rgb == orange
+        # A Checkbox's border-left is its *only* focus signal (see
+        # `qbit_ops.tcss`): its label is deliberately left unpainted --
+        # human feedback found the earlier background fill "too strong"
+        # (point 6 of the third visual pass, distinct from this test's
+        # own "point 6").
         checkbox_label = checkbox.get_component_styles("toggle--label")
-        assert checkbox_label.background.rgb == orange
-        assert checkbox_label.color.rgb == dark
+        assert checkbox_label.background.rgb != orange
 
         completion = app.screen.query_one("#f-completed", RadioSet)
         completion.focus()
@@ -6820,6 +7007,29 @@ async def test_the_table_advertises_page_navigation_that_works() -> None:
         assert app.controller.state.workspace is Workspace.TORRENTS
 
 
+async def test_the_overview_masthead_advertises_page_navigation() -> None:
+    """The torrents table has `test_the_table_advertises_page_navigation_
+    that_works`; the Overview side of the same gesture had nothing --
+    same hint, same border-subtitle mechanism, the masthead's own."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+
+        masthead = app.query_one("#overview-masthead")
+        assert "←" in str(masthead.border_subtitle)
+        assert "→" in str(masthead.border_subtitle)
+
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.TORRENTS
+
+        await pilot.press("left")
+        await pilot.pause()
+        assert app.controller.state.workspace is Workspace.OVERVIEW
+
+
 async def test_page_navigation_never_steals_the_search_caret() -> None:
     """A focused text field owns `left`/`right`. The priority binding
     that beats `DataTable` would otherwise beat `Input` too."""
@@ -7023,6 +7233,42 @@ async def test_a_modal_border_never_outgrows_its_own_width() -> None:
             )
             await pilot.press("escape")
             await _settle(app, pilot)
+
+
+async def test_filters_modal_width_fits_its_own_footer_not_oversized() -> None:
+    """Point 5 of the third visual pass: on `large` (100), this
+    dialog's content never exceeded ~59 cells, but the dialog was sized
+    for headroom nothing used -- the real floor is the border's own
+    footer (68 cells on Linux, `Ctrl+R`), not the fields. `wide` (76)
+    clears that floor by a small, bounded margin instead of a ~39-
+    column one."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        platform="linux",
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        assert FiltersScreen.MODAL_WIDTH == "wide"
+        dialog = app.screen.query_one("#filters-dialog")
+        assert dialog.outer_size.width == MODAL_WIDTHS["wide"] == 76
+
+        footer = Text.from_markup(str(dialog.border_subtitle)).cell_len
+        budget = MODAL_WIDTHS["wide"] - 4
+        slack = budget - footer
+        # Never negative (the footer must still fit -- see
+        # `test_a_modal_border_never_outgrows_its_own_width`), and
+        # nowhere near the ~28-cell slack `large` (100) left behind.
+        assert 0 <= slack <= 8, (footer, budget, slack)
 
 
 async def test_navigation_is_advertised_where_there_is_something_to_move() -> (
@@ -7914,6 +8160,47 @@ async def test_ctrl_r_resets_filters_sort_and_selection() -> None:
         assert len(client.calls) == calls_before, client.calls[calls_before:]
 
 
+async def test_ctrl_r_clears_a_checkmark_a_direct_write_left_stale() -> None:
+    """`test_ctrl_r_resets_filters_sort_and_selection` covers the
+    *model*. `action_toggle_selection` only ever writes the `Sel` cell
+    directly (`_refresh_indicator_cell`), bypassing `_render_table()`'s
+    diff cache -- if a later `_render_table()` then diffs against a
+    cached source that predates that write, and the state happens to
+    cycle back to what that stale cache already says (select, then
+    reset), it can wrongly conclude the row is unchanged and leave the
+    glyph exactly as that direct write left it. This asserts on the
+    cell actually painted, not on `selected_hashes`.
+    """
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        # A real `_render_table()` with the cursor already on this row
+        # -- as a periodic refresh would produce in real usage -- so
+        # the diff cache already holds `focused=True, selected=False`
+        # before the direct writes below.
+        await _type_into_search(pilot, "a")
+        await pilot.press("escape")  # leave the input, keep focus tracking
+        await pilot.pause()
+
+        await pilot.press("space")
+        await pilot.pause()
+        assert app.controller.state.selected_hashes == {"a" * 40}
+
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+
+        assert app.controller.state.selected_hashes == set()
+        table = app.query_one("#torrents", DataTable)
+        cell = table.get_cell_at(Coordinate(0, 0))
+        assert "✔" not in cell.plain, cell.plain
+
+
 async def test_ctrl_r_with_nothing_to_reset_is_a_safe_noop() -> None:
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
@@ -8049,8 +8336,9 @@ async def test_no_checkbox_chrome_glyph_reaches_the_rendered_screen() -> None:
     """`▐`/`▌` never reach either checkbox's own rendered row, with the
     box actually checked so `✓` has something to draw, not merely the
     unchecked default. Scoped to the checkbox's own region, not the
-    whole dialog: `RadioSet`'s tri-states share the same
-    `▐`/`▌`-around-`●` chrome and are out of scope for this change."""
+    whole dialog: `RadioSet`'s tri-states shared the same
+    `▐`/`▌`-around-`●` chrome once -- `QbitRadioButton` now covers that
+    case too, see `test_no_radio_chrome_glyph_reaches_the_rendered_screen`."""
     from qbit_ops.tui.widgets.checkbox import QbitCheckbox
 
     client = FakeQbitClient(
@@ -8092,3 +8380,52 @@ async def test_no_checkbox_chrome_glyph_reaches_the_rendered_screen() -> None:
         assert "▐" not in rendered
         assert "▌" not in rendered
         assert "✓" in rendered, "fixture produced no checked box to check"
+
+
+async def test_no_radio_chrome_glyph_reaches_the_rendered_screen() -> None:
+    """Points 7/8 of the third visual pass: `RadioButton` always
+    rendered `▐●▌`, on or off, a second control grammar beside
+    `QbitCheckbox`'s `✓`/`✗` -- and Textual's own default `.toggle--
+    button` background (`$panel`, this theme's blue-tinted grey) leaked
+    into the `▐`/`▌` glyphs' own colour, read by the human as "du bleu".
+    `QbitRadioButton` unifies both: checked here on the Filters modal's
+    State pane (`f-completed`, a plain tri-state) and on `sort`'s
+    `RadioSet`, mounted exactly as the app opens each."""
+    from textual.widgets import RadioButton, RadioSet
+
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="films")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+
+        await pilot.press("f")
+        await pilot.pause()
+        await pilot.press("alt+right")  # State pane: f-completed
+        await pilot.pause()
+
+        completed = app.screen.query_one("#f-completed", RadioSet)
+        rendered = _rendered_widget(app, completed)
+        assert "▐" not in rendered
+        assert "▌" not in rendered
+        assert "●" not in rendered
+        assert "✓" in rendered, "fixture produced no selected option to check"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        await pilot.press("s")
+        await pilot.pause()
+        sort_set = app.screen.query_one("#sort-options", RadioSet)
+        rendered = _rendered_widget(app, sort_set)
+        assert "▐" not in rendered
+        assert "▌" not in rendered
+        assert "●" not in rendered
+        assert "✓" in rendered, "fixture produced no selected option to check"
+
+        for button in sort_set.query(RadioButton):
+            assert button.BUTTON_LEFT == ""
+            assert button.BUTTON_RIGHT == ""

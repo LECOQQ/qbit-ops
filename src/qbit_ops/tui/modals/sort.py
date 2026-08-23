@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.widgets import RadioButton, RadioSet
+from textual.widgets import RadioSet
 
 from qbit_ops.tui.modals.base import KeyHint, QbitModal
 from qbit_ops.tui.state import SortDirection, SortField, SortOrder
+from qbit_ops.tui.widgets.radio import QbitRadioButton
 
 if TYPE_CHECKING:
     from qbit_ops.tui.app import QbitOpsTuiApp
@@ -74,7 +75,7 @@ class SortScreen(QbitModal):
     def compose_dialog(self) -> ComposeResult:
         with RadioSet(id="sort-options"):
             for field, direction, label in _OPTIONS:
-                yield RadioButton(
+                yield QbitRadioButton(
                     label,
                     id=_option_id(field, direction),
                     value=(

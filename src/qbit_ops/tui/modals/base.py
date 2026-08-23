@@ -12,7 +12,7 @@ holds every announced key to being a binding that is actually active
 on that screen.
 
 The width is deliberately a *name*, not a number: a new modal picks
-from a scale of three instead of re-deciding one, which is what stops
+from a scale of four instead of re-deciding one, which is what stops
 the widths from drifting apart again.
 """
 
@@ -30,9 +30,21 @@ from qbit_ops.tui.formatting import _format_command_bar
 # The scale, and the only place it is written as numbers outside the
 # stylesheet. `tests/test_tui_app.py` pins the two together, so a width
 # changed in one and not the other fails rather than drifts.
+#
+# `wide` exists because `FiltersScreen` measured wrong on `large`: at
+# 100 columns its own content -- fields and hint lines -- never exceeds
+# ~59 cells, but its border *footer* does, once every announced key is
+# rendered (68 cells on Linux, `Ctrl+R`; 64 on macOS, `^r`). Textual
+# truncates a border label past `width - 4`, so the real floor is the
+# footer's own worst case plus that same 4-cell margin: 68 + 4 = 72.
+# `large` was never the content's requirement, only headroom nothing
+# used -- `wide` (76) clears the measured floor by the same 4-cell
+# margin the truncation rule itself uses, and leaves `large` for a
+# modal that genuinely needs it (`DetailsScreen`, `ExplainScreen`).
 MODAL_WIDTHS: Final[dict[str, int]] = {
     "small": 48,
     "medium": 64,
+    "wide": 76,
     "large": 100,
 }
 

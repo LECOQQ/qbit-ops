@@ -92,7 +92,10 @@ class FiltersScreen(QbitModal):
     """
 
     MODAL_TITLE = "Filters"
-    MODAL_WIDTH = "large"
+    # `wide`, not `large`: measured (`MODAL_WIDTHS`' own comment,
+    # `modals/base.py`) that this dialog's floor is its own footer, not
+    # its fields -- `large` (100) left ~39 columns nothing used.
+    MODAL_WIDTH = "wide"
     MODAL_KEYS = (
         KeyHint(("pageup",), "Section"),
         KeyHint(("tab",), "Move"),

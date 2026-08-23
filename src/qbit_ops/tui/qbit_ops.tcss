@@ -337,6 +337,12 @@ QbitModal {
 .qbit-dialog.-medium {
     width: 64;
 }
+/* See `MODAL_WIDTHS`' own comment (`modals/base.py`) for why this
+   fourth word exists: `FiltersScreen`'s measured floor, its footer's
+   worst case plus the border truncation margin, not its content. */
+.qbit-dialog.-wide {
+    width: 76;
+}
 .qbit-dialog.-large {
     width: 100;
 }
@@ -358,13 +364,30 @@ QbitModal {
 .qbit-dialog RadioSet:focus-within {
     border: round $primary;
 }
-/* `color: $background`, not `$text` (near-white): white on `$primary`
+/* A `RadioSet` holds several options behind one shared focus border
+   (`RadioSet:focus-within` above); nothing else says which option
+   currently has keyboard focus, so its label still needs its own fill.
+   `color: $background`, not `$text` (near-white): white on `$primary`
    is roughly 2:1 contrast, the app's own dark ground on it is ~9:1. */
-.qbit-dialog Checkbox:focus > .toggle--label,
 .qbit-dialog RadioSet:focus > RadioButton.-selected > .toggle--label {
     background: $primary;
     color: $background;
     text-style: bold;
+}
+/* A `Checkbox` is its own widget, not one option among several -- its
+   `border-left: heavy $primary` below already marks focus, the same
+   signal every focused `Input` in a dialog carries. Painting the label
+   itself on top of that, background and all, was measured too strong
+   (human feedback: "casse les yeux") for a widget that only ever has
+   one focus state to announce. This cancels Textual's own default
+   `:focus > .toggle--label` fill (`$block-cursor-background`, which
+   resolves to this same brand orange via `primary.hex` -- see
+   `design.py`'s derivation -- so leaving no rule here at all would not
+   have removed the fill, only hidden which rule painted it). */
+.qbit-dialog Checkbox:focus > .toggle--label {
+    background: transparent;
+    color: $text;
+    text-style: none;
 }
 /* Textual's blurred selection falls back to a translucent `$primary`
    -- which is now the brand orange, so only the alpha is set here. */
@@ -372,7 +395,19 @@ QbitModal {
     background: $primary 30%;
 }
 /* The "(x)" on-mark defaults to `$text-success` (green): no modal here
-   has green/red semantics, only the brand accent. */
+   has green/red semantics, only the brand accent. `background:
+   transparent`, not the default `$panel` (this theme's dark, distinctly
+   blue-tinted grey -- see `theme.py`'s `_PANEL`, `#242f38`): left alone
+   it read as a blue patch behind every option, on or off, and --
+   before `QbitRadioButton` dropped `BUTTON_LEFT`/`BUTTON_RIGHT` -- also
+   coloured the `▐`/`▌` side glyphs themselves, since Textual derives
+   their colour from this same background
+   (`textual/widgets/_toggle_button.py`'s `_button` property). Human
+   feedback: "je vois du bleu, je n'en veux pas". */
+.qbit-dialog RadioSet > RadioButton > .toggle--button {
+    color: $text-muted;
+    background: transparent;
+}
 .qbit-dialog RadioSet > RadioButton.-on > .toggle--button {
     color: $primary;
 }

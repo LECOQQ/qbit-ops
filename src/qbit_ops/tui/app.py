@@ -69,6 +69,7 @@ from qbit_ops.config import collect_masking_sources, get_user_env_file
 from qbit_ops.tui.formatting import (
     _COLUMN_WIDTHS,
     NARROW_WIDTH_THRESHOLD,
+    TABLE_NAV_HINT,
     _column_header,
     _columns_for_width,
     _format_last_action_line,
@@ -131,12 +132,6 @@ MUTATION_WORKER_GROUP = "qbit-mutation"
 SETUP_WORKER_GROUP = "qbit-setup"
 SAMPLE_WORKER_GROUP = "qbit-sample"
 INSTANCE_LISTS_WORKER_GROUP = "qbit-instance-lists"
-
-# The horizontal half of the keyboard grammar: `up`/`down` move within
-# a surface, `left`/`right` between the two pages. Advertised in the
-# table's own border rather than the footer, so the keys are read where
-# they apply.
-TABLE_NAV_HINT = "← Overview · Torrents →"
 
 
 class MainScreen(Screen[None]):
@@ -779,12 +774,10 @@ class QbitOpsTuiApp(App[None]):
         """Update only the cells of rows whose source data actually
         changed, and only the cells whose formatted value differs.
 
-        `_last_row_values` may be missing or stale for a hash touched
-        only by `_refresh_indicator_cell`, which writes the cell
-        directly without updating this cache -- that self-heals here:
-        the comparison still detects the already-applied difference and
-        re-issues the same value, a harmless no-op, never a correctness
-        issue.
+        Relies on `_last_row_sources`/`_last_row_values` accurately
+        describing what is currently painted -- `_refresh_indicator_cell`
+        drops both caches for a hash it writes to directly, so this
+        never compares against a baseline that predates that write.
         """
         for torrent_hash in changed_hashes:
             values = new_values[torrent_hash]
@@ -806,6 +799,15 @@ class QbitOpsTuiApp(App[None]):
         Cheaper than a full `_render_table()` rebuild for a cursor move
         or selection toggle. A no-op if the row isn't currently in the
         table (e.g. focus cleared, or filtered out).
+
+        Drops `torrent_hash` from `_last_row_sources`/`_last_row_values`
+        after writing: those caches describe the *last full render*, and
+        this write happens outside one. Left alone, a later
+        `_render_table()` could diff against a source snapshot that
+        predates this write, find no difference (the state can cycle
+        back to what that snapshot already says, e.g. select then
+        reset), and skip re-issuing the cell -- leaving this glyph on
+        screen until something else touches the row directly again.
         """
         if torrent_hash is None:
             return
@@ -818,7 +820,9 @@ class QbitOpsTuiApp(App[None]):
         try:
             table.update_cell(torrent_hash, "Sel", cell, update_width=False)
         except (CellDoesNotExist, ColumnDoesNotExist, RowDoesNotExist):
-            pass
+            return
+        self._last_row_sources.pop(torrent_hash, None)
+        self._last_row_values.pop(torrent_hash, None)
 
     def _render_details_panels(self) -> None:
         # `self.query()` only ever searches `App.default_screen` -- the
@@ -1071,7 +1075,14 @@ class QbitOpsTuiApp(App[None]):
             self.notify("Torrent no longer available.", severity="warning")
             return
         self._explain_screen.report = report
-        self._explain_screen.refresh_content()
+        # `push_screen` adds a screen to `screen_stack` synchronously
+        # but mounts it (and composes `#explain-content`) on a later
+        # tick -- a worker's completion message can be processed before
+        # that tick runs. `report` is set either way; if the screen
+        # isn't mounted yet, its own `on_mount` calls `refresh_content()`
+        # once it is, and picks up the value just assigned above.
+        if self._explain_screen.is_mounted:
+            self._explain_screen.refresh_content()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search-input":

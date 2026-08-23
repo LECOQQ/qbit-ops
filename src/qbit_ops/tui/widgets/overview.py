@@ -19,6 +19,7 @@ from qbit_ops.tui.formatting import (
     _GRADIENT_END,
     _GRADIENT_START,
     _INACTIVE_TAB_ACCENT,
+    TABLE_NAV_HINT,
     _window_title,
 )
 from qbit_ops.tui.state import ConnectionState, TuiState, Workspace
@@ -289,9 +290,13 @@ class OverviewPanel(VerticalScroll):
         # The refresh moment rides the window's own border, not the rail:
         # the rail is one fixed line and the status word already varies
         # in length, so an extra clause there would be the first thing
-        # truncated away.
+        # truncated away. `TABLE_NAV_HINT` shares this one slot with it,
+        # verbatim -- the same string the torrents table's own border
+        # already carries, not a second phrasing of the same gesture.
         masthead = self.query_one("#overview-masthead", Horizontal)
-        masthead.border_subtitle = _refresh_subtitle(state)
+        masthead.border_subtitle = (
+            f"{_refresh_subtitle(state)} · {TABLE_NAV_HINT}"
+        )
 
         # Its own widget, outside the fixed-height masthead: folding it
         # into the rail made every window below move a row the moment a

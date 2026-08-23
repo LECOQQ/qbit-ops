@@ -29,6 +29,7 @@ from textual.widgets import Checkbox, Input, RadioButton, RadioSet, Static
 from qbit_core.shared.selection import TorrentFilter
 from qbit_ops.tui.filter_form import FiltersDraft
 from qbit_ops.tui.widgets.checkbox import QbitCheckbox
+from qbit_ops.tui.widgets.radio import QbitRadioButton
 
 # The zone every pane is centred into -- criterion 2's invariant.
 PANE_HEIGHT = 10
@@ -64,9 +65,9 @@ def _field(field: str, *, placeholder: str = "") -> Input:
 def _tri_state(field: str, options: tuple[str, str, str]) -> RadioSet:
     any_label, on_label, off_label = options
     return RadioSet(
-        RadioButton(any_label),
-        RadioButton(on_label),
-        RadioButton(off_label),
+        QbitRadioButton(any_label),
+        QbitRadioButton(on_label),
+        QbitRadioButton(off_label),
         id=f"f-{field}",
         classes="f-tristate",
     )
@@ -176,9 +177,20 @@ def _state_rows() -> list[_Row]:
 
 
 def _range_row(
-    pane: str, label: str, low: str, high: str, *, suffix: str = ""
+    pane: str,
+    label: str,
+    low: str,
+    high: str,
+    *,
+    suffix: str = "",
+    placeholder: str = "",
 ) -> _Row:
-    children = [_label(label), _field(low), _label("to"), _field(high)]
+    children = [
+        _label(label),
+        _field(low, placeholder=placeholder),
+        _label("to"),
+        _field(high, placeholder=placeholder),
+    ]
     if suffix:
         children.append(_label(suffix))
     return _Row(pane, *children)
@@ -187,15 +199,39 @@ def _range_row(
 def _measures_rows() -> list[_Row]:
     pane = "Measures"
     rows = [
-        _range_row(pane, "Ratio", "ratio_min", "ratio_max"),
-        _range_row(pane, "Size", "size_min", "size_max"),
-        _range_row(pane, "Progress", "progress_min", "progress_max"),
-        _range_row(pane, "Uploaded", "uploaded_min", "uploaded_max"),
+        _range_row(pane, "Ratio", "ratio_min", "ratio_max", placeholder="2.0"),
+        _range_row(pane, "Size", "size_min", "size_max", placeholder="50GiB"),
+        _range_row(
+            pane,
+            "Progress",
+            "progress_min",
+            "progress_max",
+            placeholder="90%",
+        ),
+        _range_row(
+            pane,
+            "Uploaded",
+            "uploaded_min",
+            "uploaded_max",
+            placeholder="50GiB",
+        ),
         _Row(pane),
         _Row(pane, _label("Age"), _hint("time since, e.g. 90d · 6h · 2w")),
-        _range_row(pane, "Added", "added_min", "added_max"),
-        _range_row(pane, "Completed", "completed_at_min", "completed_at_max"),
-        _range_row(pane, "Last act.", "last_activity_min", "last_activity_max"),
+        _range_row(pane, "Added", "added_min", "added_max", placeholder="7d"),
+        _range_row(
+            pane,
+            "Completed",
+            "completed_at_min",
+            "completed_at_max",
+            placeholder="7d",
+        ),
+        _range_row(
+            pane,
+            "Last act.",
+            "last_activity_min",
+            "last_activity_max",
+            placeholder="7d",
+        ),
         _Row(
             pane,
             _label("Seeded"),

@@ -186,6 +186,13 @@ _UNMAPPABLE_LETTERS = UNMAPPABLE_LETTERS
 _small_caps = to_small_caps
 
 
+# The horizontal half of the keyboard grammar: `up`/`down` move within
+# a surface, `left`/`right` between the two pages. Shared verbatim by
+# both pages' own bordered widget -- the torrents table's border and
+# the Overview masthead's -- rather than each writing its own phrasing.
+TABLE_NAV_HINT = "← Overview · Torrents →"
+
+
 def _window_title(name: str, *, small_caps: bool) -> str:
     """A window's border title: ordinary capitals unless small caps are on.
 
