@@ -44,6 +44,13 @@ SKIPPED_DIRS = frozenset(
         "dist",
         "build",
         "htmlcov",
+        # Scratch. `tmp/` is gitignored and exists so an agent can put
+        # a variant, a measurement table or a draft somewhere it will
+        # not be mistaken for the repository saying something. Holding
+        # it to the reference check makes a throwaway file able to fail
+        # a build -- and it did, on a design draft nobody would ever
+        # read as documentation.
+        "tmp",
         # Frozen records, not live documentation. A delivered feature's
         # SPEC and a workflow-history entry cite the world as it was;
         # this check enforces the world as it is. Holding an archive to
