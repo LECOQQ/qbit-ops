@@ -4462,17 +4462,24 @@ async def test_each_value_action_button_opens_its_own_modal() -> None:
             )
             await pilot.press("escape")
             await pilot.pause()
+            assert isinstance(app.screen, ActionsScreen)
+            await pilot.press("escape")
+            await pilot.pause()
             assert len(app.screen_stack) == 1
 
 
-async def test_alt_left_returns_from_a_value_action_to_actions() -> None:
-    """`escape` still closes everything with no side effect (see
-    `test_each_value_action_button_opens_its_own_modal`); `alt+left` is
-    the *other* way out -- back to `ActionsScreen`, every other action
-    still reachable, same frozen selection. Both `Action` keys announced
-    on each of the four screens actually do what they say, not just
-    `alt+left`: an announced key nobody answers is the exact defect this
-    guards against."""
+async def test_escape_returns_from_a_value_action_to_actions() -> None:
+    """`escape` pops one conceptual level: a value modal was opened from
+    `ActionsScreen`, so leaving it lands back there with every other
+    action still reachable and the same frozen selection. A second
+    `escape`, now on Actions, closes as it always did.
+
+    It replaced an `alt+left` binding that a live terminal proved dead:
+    the window manager takes `alt` plus an arrow for its own workspace
+    switching, so the announced gesture never reached the app. An
+    announced key nobody answers is the exact defect this guards
+    against -- which is why the assertion is that the key *acts*, never
+    that it is bound."""
     cases = (
         ("actions-category-set", CategorySetScreen),
         ("actions-tag-add", TagAddScreen),
@@ -4497,10 +4504,11 @@ async def test_alt_left_returns_from_a_value_action_to_actions() -> None:
             assert isinstance(app.screen, screen_class), (button_id, app.screen)
 
             assert any(
-                "alt+left" in hint.keys for hint in screen_class.MODAL_KEYS
+                "escape" in hint.keys and hint.label == "Back"
+                for hint in screen_class.MODAL_KEYS
             ), screen_class
 
-            await pilot.press("alt+left")
+            await pilot.press("escape")
             await pilot.pause()
 
             assert isinstance(app.screen, ActionsScreen)
@@ -4730,9 +4738,11 @@ async def test_throttle_with_neither_direction_disarms_preview() -> None:
         await pilot.pause()
 
 
-async def test_escape_closes_a_value_action_modal_without_opening_preview() -> (
+async def test_escape_leaves_a_value_action_modal_without_opening_preview() -> (
     None
 ):
+    """Leaving lands on Actions, one level up, and never on Preview: the
+    modal collects an argument, it does not dispatch one."""
     client = FakeQbitClient(
         torrents=[make_torrent(hash="a" * 40, name="Alpha")]
     )
@@ -4748,6 +4758,10 @@ async def test_escape_closes_a_value_action_modal_without_opening_preview() -> (
         await pilot.pause()
         assert isinstance(app.screen, TagAddScreen)
 
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ActionsScreen)
         await pilot.press("escape")
         await pilot.pause()
 

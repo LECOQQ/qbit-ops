@@ -1842,6 +1842,15 @@ class QbitOpsTuiApp(App[None]):
                 # Nothing behind it to go back to -- leaving is the
                 # form's own Quit button, never a dismissal.
                 return
+            if isinstance(screen, ValueActionScreen):
+                # A value modal was opened *from* Actions, so escape
+                # pops one conceptual level rather than closing the
+                # stack: it goes back to every other action, and a
+                # second escape closes from there. It replaced an
+                # `alt+left` binding a window manager was eating before
+                # the app ever saw it.
+                screen.action_back()
+                return
             if isinstance(screen, ResultScreen):
                 outcome = screen.outcome
                 self.pop_screen()

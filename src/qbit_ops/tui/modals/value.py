@@ -57,7 +57,6 @@ class ValueActionScreen(QbitModal):
     BINDINGS = [
         Binding("up", "app.focus_previous", "Up", show=False),
         Binding("down", "app.focus_next", "Down", show=False),
-        Binding("alt+left", "back", "Back"),
     ]
 
     def __init__(
@@ -115,13 +114,21 @@ class ValueActionScreen(QbitModal):
         self._render_verdict()
 
     def action_back(self) -> None:
-        """`alt+left`: return to `ActionsScreen` with the same frozen
-        selection -- every other action stays reachable, not just the
-        one this modal was opened for. `alt+` because a plain `left`
-        would be swallowed by the focused `Input` first (same reason
-        `FiltersScreen` needs it for its own section switch). Distinct
-        from `escape`, which still closes everything with no side
-        effect -- this never changes what `escape` means anywhere."""
+        """Return to `ActionsScreen` with the same frozen selection, so
+        every other action stays reachable, not just the one this modal
+        was opened for.
+
+        Reached by `escape`, which `QbitOpsTuiApp.action_dismiss_overlay`
+        routes here rather than closing outright: a value modal is opened
+        *from* Actions, and popping one level is what escape means in a
+        stack of modals. A second `escape`, now on Actions, closes as it
+        always did.
+
+        It carried `alt+left` until a live terminal showed the flaw: the
+        window manager takes `alt` plus an arrow for its own workspace
+        switching, so the announced gesture never reached the app. No
+        replacement key was needed once escape did the obvious thing.
+        """
         app = cast("QbitOpsTuiApp", self.app)
         hashes = tuple(torrent.hash for torrent in self.selected)
         names = self._names
@@ -154,8 +161,7 @@ class CategorySetScreen(ValueActionScreen):
         KeyHint(("tab",), "Move"),
         KeyHint(("enter",), "Preview"),
         KeyHint(("ctrl+n",), "Create"),
-        KeyHint(("alt+left",), "Back"),
-        KeyHint(("escape",), "Cancel"),
+        KeyHint(("escape",), "Back"),
     )
     bulk_action: ClassVar[TorrentBulkAction] = "category_set"
 
@@ -213,8 +219,7 @@ class _TagsScreen(ValueActionScreen):
     MODAL_KEYS = (
         KeyHint(("tab",), "Move"),
         KeyHint(("enter",), "Preview"),
-        KeyHint(("alt+left",), "Back"),
-        KeyHint(("escape",), "Cancel"),
+        KeyHint(("escape",), "Back"),
     )
 
     def __init__(
@@ -290,8 +295,7 @@ class ThrottleScreen(ValueActionScreen):
     MODAL_KEYS = (
         KeyHint(("tab",), "Move"),
         KeyHint(("enter",), "Preview"),
-        KeyHint(("alt+left",), "Back"),
-        KeyHint(("escape",), "Cancel"),
+        KeyHint(("escape",), "Back"),
     )
     bulk_action: ClassVar[TorrentBulkAction] = "throttle"
 
