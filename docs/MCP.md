@@ -10,8 +10,8 @@ library, for talking to it through an agent.
 ## 🚫 What it is not
 
 It is not the qbit-ops CLI over MCP. The CLI exposes dozens of filter
-options on `torrents list` alone; this has four tools, and a fraction of
-what they can do. That is the design, not a gap to close.
+options on `torrents list` alone; the tools below expose a fraction of
+that. That is the design, not a gap to close.
 
 The reason: an MCP tool result cannot be piped through `jq` or `head` --
 it lands in the model's context whole. Listing a large library would
@@ -30,7 +30,7 @@ Each step returns enough to choose the next one.
 | `library_summary` | counts, health and alerts, in fixed size |
 | `find_torrents` | by state group, category and/or name, one page at a time |
 | `aggregate_stats` | totals over a selection, so nobody adds bytes by hand |
-| `inspect_torrent` | every field of one torrent, by hash |
+| `inspect_torrent` | the fields of one torrent, by full infohash |
 | `explain_torrent` | why it is in that state, with its evidence and limitations |
 
 **No tool mutates**, and none is planned here. `pause`, `delete`,
@@ -38,9 +38,10 @@ tracker edits and imports are absent by construction rather than
 guarded: what a mutation means without a human at the keyboard is a
 design question this spike deliberately does not answer.
 
-The cap is applied server-side: asking for 5000 torrents returns a page
-of 50, and `next_offset` says where to resume. Every match stays
-reachable -- depth is paid in calls, never in context.
+The cap is applied server-side and is not negotiable from the client: a
+request for five thousand torrents comes back as one bounded page, and
+`next_offset` says where to resume. Every match stays reachable -- depth
+is paid in calls, never in context.
 
 ## 🚀 Install and run
 
@@ -74,7 +75,8 @@ this works.
 
 ## 🧹 Removing it
 
-`rm -rf src/qbit_ops/mcp tests/test_mcp_tools.py docs/MCP.md`, drop the
-`mcp` extra from `pyproject.toml`, and the R7 rule from
-`tests/test_layering.py`. Nothing else references it: no domain logic
-lives here, and `qbit_core` does not know it exists.
+Delete `src/qbit_ops/mcp/`, `tests/test_mcp_tools.py` and this file, then
+`grep -ri mcp` from the repository root and clear what it finds:
+packaging, the R7 rule in `tests/test_layering.py`, and a few prose
+mentions. No domain logic lives here, and `qbit_core` does not know it
+exists -- which is what keeps that grep short.

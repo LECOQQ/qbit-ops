@@ -1,25 +1,24 @@
 # 🏗️ Architecture
 
 qbit-ops ships two packages from one distribution: a reusable core
-(`qbit_core`) with no UI dependency, and a thin CLI/TUI presentation
-layer (`qbit_ops`) built on top of it.
+(`qbit_core`) with no UI dependency, and a thin presentation layer
+(`qbit_ops`) built on top of it.
 
 ```text
 CLI (Typer + Rich) ─┐
-                    ├── qbit_core: features ── shared ── qbit ── qbittorrent-api
+MCP (stdio) ────────┼── qbit_core: features ── shared ── qbit ── qbittorrent-api
 TUI (Textual) ──────┘
 ```
 
-`qbit_core` never imports Typer, Rich, Textual, or `qbit_ops`; never
-prints, prompts, or calls `sys.exit`. A future non-CLI Python consumer
-can depend on `qbit_core` alone. See the module
-docstring of `qbit_core/__init__.py` for a minimal usage example.
+`qbit_core` never prints, prompts, or calls `sys.exit`, and a non-UI
+Python consumer can depend on it alone. See the module docstring of
+`qbit_core/__init__.py` for a minimal usage example.
 
 ## 📦 Package layout
 
 ```text
 qbit_core/
-├── features/   # user-facing use cases shared by CLI and TUI
+├── features/   # user-facing use cases shared by every surface
 ├── shared/     # SELECT/INSPECT stages, execution policy, torrent model
 ├── qbit/       # qBittorrent client boundary and payload handling
 ├── data/       # packaged compatibility evidence
@@ -28,6 +27,7 @@ qbit_core/
 
 qbit_ops/
 ├── cli/        # Typer commands, Rich rendering, exit handling
+├── mcp/        # read-only tools for an agent, bounded server-side
 ├── tui/        # Textual app, widgets, modals, theme, stylesheet
 ├── config.py   # .env/environment loading -> qbit_core.config.QbitConfig
 └── app_services.py  # create_qbit_client() env wrapper + TUI refresh glue
@@ -35,17 +35,22 @@ qbit_ops/
 
 ## 🔗 Dependency rules
 
-- ⬇️ `qbit_ops/cli/` and `qbit_ops/tui/` may call `qbit_core.features`.
+- ⬇️ `qbit_ops/cli/`, `qbit_ops/tui/` and `qbit_ops/mcp/` may call
+  `qbit_core.features`.
 - ⬇️ `qbit_core.features` may use `qbit_core.shared` and `qbit_core.qbit`.
 - 🚫 `qbit_core.shared` does not depend on features or presentation code.
-- 🚫 `qbit_core.qbit` does not depend on CLI or TUI code.
+- 🚫 `qbit_core.qbit` does not depend on any `qbit_ops` surface.
 - 🚫 No module under `qbit_core/` imports `qbit_ops`, Typer, Rich, or
   Textual, at any nesting.
-- 🐢 Textual is imported only when `qbit-ops tui` is invoked.
+- 🚫 No surface imports another: `mcp/` reaches a client through
+  `app_services`, never through `cli/`.
+- 🐢 Textual is imported only when `qbit-ops tui` is invoked, and the MCP
+  SDK only by `qbit_ops/mcp/server.py` -- both extras stay optional.
 
 These boundaries are checked by architecture tests
 (`tests/test_layering.py`, `tests/test_package_layout.py`,
-`tests/test_qbit_architecture.py`, `tests/test_qbit_boundary.py`).
+`tests/test_cli_architecture.py`, `tests/test_qbit_architecture.py`,
+`tests/test_qbit_boundary.py`).
 
 ## 🧱 One representation per measure
 
@@ -97,6 +102,14 @@ Around this, `shared/execution.py` decides whether a plan previews,
 prompts, applies, or is refused (dry-run by default), and the TUI adds
 a refresh after APPLY.
 
+### 🤖 MCP bounds
+
+An MCP tool result lands in the model's context whole -- there is no
+`jq` between the two. So `qbit_ops/mcp/tools.py` caps every listing at
+`MAX_LIMIT` and defaults to `DEFAULT_LIMIT`, paging with `next_offset`
+instead of dropping the rest: a safety invariant, not a preference a
+client can raise.
+
 ### 🎨 TUI style system
 
 Every TUI surface -- nine modals and two workspaces -- is styled from
@@ -147,4 +160,5 @@ Both the Docker matrix and `qbit-ops doctor` read the same source.
 
 - [Compatibility](COMPATIBILITY.md)
 - [Errors and exit codes](ERRORS_AND_EXIT_CODES.md)
+- [MCP](MCP.md)
 - [Contributing](../CONTRIBUTING.md)
