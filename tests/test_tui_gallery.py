@@ -146,6 +146,32 @@ async def test_the_inventory_measures_the_surface_not_the_screen(
         )
 
 
+async def test_the_inventory_counts_a_one_line_input_as_structural() -> None:
+    """`filters` nests `Input` five levels down (`FiltersScreen ->
+    VerticalScroll -> FiltersPanel -> _Row -> Input`), verified by
+    walking `.parent`. A height filter meant to drop decorative one-line
+    text used to also drop this one-line control, undercounting the
+    surface at depth 3."""
+    surface = await capture_inventory(
+        "filters", SCREENS["filters"], max_depth=6
+    )
+
+    assert surface.depth == 5
+
+
+async def test_the_inventory_excludes_a_static_subclass_by_type() -> None:
+    """`BrandHeader`, `RateGraph`, `TrackersWindow` and `SessionWindow`
+    all subclass `Static` under a different name. Matching content
+    leaves by exact class name let them through as if they carried
+    nesting, inflating `overview`'s measured depth with a passive
+    renderer that has no children of its own."""
+    surface = await capture_inventory(
+        "overview", SCREENS["overview"], max_depth=6
+    )
+
+    assert surface.depth == 4
+
+
 async def test_the_inventory_counts_only_css_a_screen_declares_itself() -> None:
     """Counting an inherited `CSS` against every subclass would report
     a shared base class as nine copies of the duplication it removes."""

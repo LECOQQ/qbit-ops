@@ -49,6 +49,12 @@ class FakeQbitClient:
         self.started_hashes: list[str | list[str]] = []
         self.reannounced_hashes: list[str | list[str]] = []
         self.deleted_hashes: list[tuple[str | list[str], bool]] = []
+        self.created_categories: list[str] = []
+        self.set_categories: list[tuple[str | list[str], str]] = []
+        self.added_tags: list[tuple[str | list[str], str | list[str]]] = []
+        self.removed_tags: list[tuple[str | list[str], str | list[str]]] = []
+        self.set_download_limits: list[tuple[str | list[str], int]] = []
+        self.set_upload_limits: list[tuple[str | list[str], int]] = []
         self.torrents_trackers_calls = 0
         self.torrents_trackers_call_order: list[str] = []
         self.torrents_info_calls = 0
@@ -85,6 +91,40 @@ class FakeQbitClient:
     ) -> None:
         """Record a fake torrent deletion."""
         self.deleted_hashes.append((torrent_hashes, delete_files))
+
+    def torrents_create_category(self, name: str) -> None:
+        """Record a fake category creation."""
+        self.created_categories.append(name)
+
+    def torrents_set_category(
+        self, torrent_hashes: str | list[str], category: str
+    ) -> None:
+        """Record a fake category assignment."""
+        self.set_categories.append((torrent_hashes, category))
+
+    def torrents_add_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Record a fake tag addition."""
+        self.added_tags.append((torrent_hashes, tags))
+
+    def torrents_remove_tags(
+        self, torrent_hashes: str | list[str], tags: str | list[str]
+    ) -> None:
+        """Record a fake tag removal."""
+        self.removed_tags.append((torrent_hashes, tags))
+
+    def torrents_set_download_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Record a fake download rate limit."""
+        self.set_download_limits.append((torrent_hashes, limit))
+
+    def torrents_set_upload_limit(
+        self, torrent_hashes: str | list[str], limit: int
+    ) -> None:
+        """Record a fake upload rate limit."""
+        self.set_upload_limits.append((torrent_hashes, limit))
 
 
 def _torrent(**overrides: Any) -> dict[str, Any]:

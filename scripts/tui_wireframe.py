@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from textual.screen import ModalScreen
+from textual.widgets import Checkbox, Label, RadioButton, Rule, Static
 
 from qbit_ops.tui.app import QbitOpsTuiApp
 
@@ -63,9 +64,16 @@ DEFAULT_OUT = REPO_ROOT / "tmp" / "design" / "wireframes"
 
 # Leaves whose box carries no structural information: they are content,
 # and drawing them turns the frame into noise at exactly the depth where
-# structure stops being the subject.
-CONTENT_WIDGETS = frozenset(
-    {"RadioButton", "Label", "Static", "Rule", "Checkbox"}
+# structure stops being the subject. Matched by `isinstance`, not by
+# class name -- the TUI recolours several of these through a subclass
+# (`QbitRadioButton`, `QbitCheckbox`, the status-bar readouts built on
+# `Static`), and a name match would silently stop excluding every one.
+CONTENT_WIDGET_TYPES: tuple[type, ...] = (
+    RadioButton,
+    Label,
+    Static,
+    Rule,
+    Checkbox,
 )
 
 DEFAULT_DEPTH = 6
@@ -80,15 +88,24 @@ def _depth(node: Any) -> int:
 
 
 def _boxes(app: QbitOpsTuiApp, max_depth: int) -> list[tuple[int, str, Any]]:
-    """Every structural widget worth a box, shallowest first."""
+    """Every structural widget worth a box, shallowest first.
+
+    Height is not a signal of structural insignificance: a compact
+    single-line row -- an `Input`, a `Button`, a radio option -- is
+    exactly as structural as a taller one. Only a degenerate region (an
+    inactive tab's hidden content, collapsed to width 0) and named
+    decorative leaves are excluded. A height filter used to stand in
+    for the second exclusion and, in doing so, also caught every real
+    one-line widget the first exclusion was never meant to touch.
+    """
     found: list[tuple[int, str, Any]] = []
     for node in app.screen.walk_children(with_self=True):
         region = getattr(node, "region", None)
-        if region is None or region.width < 4 or region.height < 2:
+        if region is None or region.width < 4 or region.height < 1:
+            continue
+        if isinstance(node, CONTENT_WIDGET_TYPES):
             continue
         name = type(node).__name__
-        if name in CONTENT_WIDGETS:
-            continue
         depth = _depth(node)
         if depth > max_depth:
             continue

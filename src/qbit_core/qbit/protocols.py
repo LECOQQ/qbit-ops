@@ -4,9 +4,14 @@ Six focused protocols split along read/mutate and
 torrent/tracker/transfer/app-info lines, rather than one large
 `QbitClient` interface. Destructive removal gets its own protocol so a
 consumer restricted to LOW-risk mutations cannot reach it.
-`torrents_start` is deliberately absent: production probes it with
-`getattr(client, "torrents_start", None)`, an optional-attribute
-pattern a `Protocol` cannot express.
+`QbitBulkTorrentMutator` composes two of those six for the one function
+that legitimately needs both -- it is not a seventh independent scope.
+`QbitTorrentMutator` declares `torrents_start`, not `torrents_resume`:
+production calls `torrents_start` directly for the resume/start action
+(see `qbit_core.features.torrents._call_bulk_torrent_action`), and
+`tests/test_qbit_library_http_boundary.py` proves the installed
+qbittorrent-api client aliases the two to the same bound method, so
+nothing is lost by typing the name actually called.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class QbitTorrentReader(Protocol):
-    """Read-only torrent listing and per-torrent tracker inspection."""
+    """Read-only torrent, category and tag introspection."""
 
     def torrents_info(self) -> Iterable[Any]:
         """Return every torrent qBittorrent currently tracks."""
@@ -25,6 +30,15 @@ class QbitTorrentReader(Protocol):
 
     def torrents_trackers(self, torrent_hash: str) -> Iterable[Any]:
         """Return one torrent's tracker endpoints."""
+        ...
+
+    def torrents_categories(self) -> Mapping[str, Any]:
+        """Return every category currently registered, keyed by name."""
+        ...
+
+    def torrents_tags(self) -> Iterable[str]:
+        """Return every tag currently declared on the instance, including
+        one no torrent carries."""
         ...
 
 
@@ -70,8 +84,12 @@ class QbitTorrentMutator(Protocol):
         """Pause the given torrents."""
         ...
 
-    def torrents_resume(self, torrent_hashes: str | list[str]) -> None:
-        """Resume the given torrents."""
+    def torrents_start(self, torrent_hashes: str | list[str]) -> None:
+        """Resume the given torrents.
+
+        Named for the method production actually calls, not the
+        `torrents_resume` alias -- see the module docstring.
+        """
         ...
 
     def torrents_reannounce(self, torrent_hashes: str | list[str]) -> None:
@@ -127,6 +145,22 @@ class QbitDestructiveMutator(Protocol):
     ) -> None:
         """Delete the given torrents, optionally with their files."""
         ...
+
+
+@runtime_checkable
+class QbitBulkTorrentMutator(
+    QbitTorrentMutator, QbitDestructiveMutator, Protocol
+):
+    """Every action `apply_bulk_torrent_action` can reach, across both
+    its callers -- the seven LOW-risk actions plus `torrents_delete`.
+
+    Not a TUI-safety boundary: `apply_bulk_torrent_action` is the
+    engine shared by the CLI (which can request `delete`) and the TUI
+    (which cannot -- proved by `tests/test_tui_security.py`, since the
+    TUI can never construct a plan whose action is `delete`). Use
+    `QbitTorrentMutator` instead, not this protocol, wherever a caller
+    itself must stay provably restricted to LOW-risk mutations.
+    """
 
 
 @runtime_checkable

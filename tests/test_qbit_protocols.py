@@ -15,6 +15,7 @@ import inspect
 
 from qbit_core.qbit.protocols import (
     QbitAppInfoReader,
+    QbitBulkTorrentMutator,
     QbitClient,
     QbitDestructiveMutator,
     QbitTorrentMutator,
@@ -35,6 +36,7 @@ _typed_as_app_info_reader: QbitAppInfoReader = FakeQbitClient()
 _typed_as_torrent_mutator: QbitTorrentMutator = FakeQbitClient()
 _typed_as_destructive_mutator: QbitDestructiveMutator = FakeQbitClient()
 _typed_as_tracker_mutator: QbitTrackerMutator = FakeQbitClient()
+_typed_as_bulk_torrent_mutator: QbitBulkTorrentMutator = FakeQbitClient()
 _typed_as_full_client: QbitClient = FakeQbitClient()
 
 
@@ -48,6 +50,7 @@ def test_fake_qbit_client_conforms_to_every_focused_protocol() -> None:
     assert isinstance(fake, QbitTorrentMutator)
     assert isinstance(fake, QbitDestructiveMutator)
     assert isinstance(fake, QbitTrackerMutator)
+    assert isinstance(fake, QbitBulkTorrentMutator)
     assert isinstance(fake, QbitClient)
 
 
@@ -114,17 +117,21 @@ def test_fake_qbit_client_methods_accept_the_exact_keyword_arguments_used() -> (
 def test_protocols_contain_only_methods_actually_consumed() -> None:
     """Guard against protocol scope creep: no method exists "because the
     library has it" -- each name here must be one of the exact methods
-    `grep -rn "client\\." src/qbit_ops/` finds in production call sites.
+    `grep -rn "client\\." src/` finds in production call sites (not
+    only `src/qbit_ops/`: `qbit_core.features.torrents` calls several
+    of these directly, e.g. `torrents_start`, `torrents_tags`).
     """
     expected_methods = {
         "torrents_info",
         "torrents_trackers",
+        "torrents_categories",
+        "torrents_tags",
         "transfer_info",
         "sync_maindata",
         "app_version",
         "app_web_api_version",
         "torrents_pause",
-        "torrents_resume",
+        "torrents_start",
         "torrents_reannounce",
         "torrents_create_category",
         "torrents_set_category",
@@ -154,14 +161,22 @@ def test_protocols_contain_only_methods_actually_consumed() -> None:
     assert declared_methods == expected_methods
 
 
-def test_torrents_start_is_deliberately_absent_from_the_mutator_protocol() -> (
-    None
-):
-    """`torrents_start` is probed via `getattr(client, ..., None)` in
-    production, an optional-attribute pattern a `Protocol` cannot
-    express -- it must not be declared here."""
-    assert "torrents_start" not in vars(QbitTorrentMutator)
-    assert "torrents_start" not in vars(QbitClient)
+def test_torrents_start_is_declared_not_the_unused_resume_alias() -> None:
+    """`_call_bulk_torrent_action` calls `client.torrents_start(...)`
+    directly, never `torrents_resume` (see `tests/test_torrents.py::
+    test_bulk_resume_calls_torrents_start_without_torrents_resume`) --
+    the protocol must type the method actually called, not its unused
+    alias.
+
+    `hasattr`, not `vars()`, against `QbitClient`: it declares no
+    method of its own, only inherits every base protocol's, so
+    `"x" not in vars(QbitClient)` would hold no matter what `x` is --
+    exactly the kind of assertion `hasattr` catches and `vars()` can't.
+    """
+    assert "torrents_start" in vars(QbitTorrentMutator)
+    assert hasattr(QbitClient, "torrents_start")
+    assert "torrents_resume" not in vars(QbitTorrentMutator)
+    assert not hasattr(QbitClient, "torrents_resume")
 
 
 def test_torrents_delete_stays_out_of_the_tui_reachable_mutator() -> None:
@@ -176,3 +191,23 @@ def test_torrents_delete_stays_out_of_the_tui_reachable_mutator() -> None:
     """
     assert "torrents_delete" not in vars(QbitTorrentMutator)
     assert "torrents_delete" in vars(QbitDestructiveMutator)
+
+
+def test_bulk_torrent_mutator_covers_every_action_apply_bulk_can_reach() -> (
+    None
+):
+    """`apply_bulk_torrent_action` is shared by the CLI (which can
+    request `delete`) and the TUI (which cannot -- see
+    `tests/test_tui_security.py`), so its own `client` parameter must
+    structurally cover both: the seven LOW-risk actions plus delete.
+    `QbitTorrentMutator` alone is not enough -- that gap is exactly
+    what used to leave `apply_bulk_torrent_action` typed `Any`.
+    """
+    fake = FakeQbitClient()
+
+    assert isinstance(fake, QbitBulkTorrentMutator)
+    assert not issubclass(QbitTorrentMutator, QbitBulkTorrentMutator)
+    for name in vars(QbitTorrentMutator):
+        if not name.startswith("_"):
+            assert hasattr(QbitBulkTorrentMutator, name)
+    assert hasattr(QbitBulkTorrentMutator, "torrents_delete")

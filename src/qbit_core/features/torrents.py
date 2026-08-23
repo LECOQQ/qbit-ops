@@ -37,6 +37,7 @@ from qbit_core.qbit.fields import (
     is_pseudo_tracker_marker,
     pseudo_tracker_label,
 )
+from qbit_core.qbit.protocols import QbitBulkTorrentMutator
 from qbit_core.shared.inspection import inspect_trackers
 from qbit_core.shared.search import (
     SearchMode,
@@ -904,7 +905,9 @@ def build_bulk_action_plan_from_snapshot(
     )
 
 
-def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
+def apply_bulk_torrent_action(
+    client: QbitBulkTorrentMutator, plan: BulkTorrentActionPlan
+) -> None:
     """Apply a previously built plan. Mutates exactly `plan.changes`.
 
     Never rescans torrents: the plan is the sole source of truth for what
@@ -920,6 +923,11 @@ def apply_bulk_torrent_action(client: Any, plan: BulkTorrentActionPlan) -> None:
     try:
         if plan.action == "category_set":
             if plan.category_needs_creation:
+                # `category_needs_creation` is only ever set alongside a
+                # real category name (`resolve_category_availability`
+                # takes a plain `str`) -- `plan.category` is `str | None`
+                # only because other actions never set it at all.
+                assert plan.category is not None
                 client.torrents_create_category(name=plan.category)
             client.torrents_set_category(
                 torrent_hashes=hashes, category=plan.category or ""
@@ -1143,7 +1151,7 @@ def resume_torrents_by_hash(
 
 
 def _call_bulk_torrent_action(
-    client: Any,
+    client: QbitBulkTorrentMutator,
     action: TorrentBulkAction,
     torrent_hashes: list[str],
     *,

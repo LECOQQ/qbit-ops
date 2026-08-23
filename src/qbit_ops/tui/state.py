@@ -53,6 +53,7 @@ from qbit_core.qbit.fields import (
     get_field_as_tag_list,
     get_transfer_rates,
 )
+from qbit_core.qbit.protocols import QbitClient
 from qbit_core.shared.execution import MutationStatus
 from qbit_core.shared.search import search_snapshots
 from qbit_core.shared.selection import (
@@ -723,7 +724,7 @@ class TuiController:
         return self._max_concurrent_remote
 
     @contextmanager
-    def _remote_operation(self) -> Iterator[Any]:
+    def _remote_operation(self) -> Iterator[QbitClient]:
         """Own the qBittorrent client exclusively for one blocking call.
 
         Yields the (lazily created) client. Worker threads only. The
@@ -741,18 +742,24 @@ class TuiController:
             finally:
                 self._remote_in_flight -= 1
 
-    def _ensure_client(self) -> Any:
+    def _ensure_client(self) -> QbitClient:
         """Lazily create (or reuse) the qBittorrent client.
 
         Guarded by `_client_lock` so two callers racing to reconnect
         can never both construct a client at once. A blocking caller
         must go through `_remote_operation()` instead of calling this
         directly -- this method only makes construction safe.
+        `_client_factory` itself stays `Any`-typed (the third-party
+        `qbittorrentapi.Client` carries no usable stubs); `QbitClient`
+        is the honest boundary where that external `Any` becomes a
+        typed structural contract for every caller inside the TUI.
         """
         with self._client_lock:
-            if self._client is None:
-                self._client = self._client_factory()
-            return self._client
+            client = self._client
+            if client is None:
+                client = self._client_factory()
+                self._client = client
+            return client
 
     # -- periodic refresh -------------------------------------------------
 
