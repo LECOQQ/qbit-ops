@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 import qbit_core.features.doctor as doctor_module
+import qbit_core.qbit.compatibility as compat_module
 from qbit_core.features.doctor import (
     CheckStatus,
     ConnectionOutcome,
@@ -669,6 +670,27 @@ def test_empty_packaged_evidence_warns_without_crashing(
     check = _checks_by_code(report)["COMPAT002"]
     assert check.status == CheckStatus.WARNING
     assert "zero matrix entries" in (check.detail or "")
+
+
+def test_unparseable_packaged_manifest_warns_without_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end through the real loader (unlike the two tests above,
+    which inject an already-built `CompatibilityManifestError`): a
+    manifest entry that isn't a table raises `TypeError`, not
+    `KeyError`, deep inside `parse_manifest_text()`. `doctor` must still
+    render `WARNING`, not crash on an exception type its `except
+    CompatibilityManifestError` doesn't name."""
+    monkeypatch.setattr(
+        compat_module,
+        "_read_packaged_manifest_text",
+        lambda: 'entry = ["oops"]',
+    )
+    report = _report_for("5.2.3")
+
+    check = _checks_by_code(report)["COMPAT002"]
+    assert check.status == CheckStatus.WARNING
+    assert "manifest unavailable" in check.message.lower()
 
 
 @pytest.mark.parametrize(

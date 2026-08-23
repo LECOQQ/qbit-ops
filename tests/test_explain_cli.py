@@ -516,6 +516,37 @@ def test_explain_torrent_never_leaks_a_secret(
         assert SECRET_PASSKEY not in result.stderr
 
 
+def test_explain_torrent_table_output_keeps_a_bracketed_tracker_message_literal(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The `tracker_message` evidence carries the tracker's own raw
+    announce response text (`sanitize_tracker_text` strips URLs from it
+    in `explain.py`, never markup), rendered by `render_explanation` --
+    this module's one hand-written path that funnels through none of
+    `print_table`/`print_error`/`_build_summary_table`."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=TORRENT_A, name="A", state="error")],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {
+                        "url": "https://tracker.example/announce",
+                        "status": 4,
+                        "msg": "not registered [/] torrent",
+                    }
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(
+        app, ["explain", "torrent", "--hash", TORRENT_A, "--format", "table"]
+    )
+
+    assert result.exit_code == ExplainExitCode.CRITICAL
+    assert "not registered [/] torrent" in result.stdout
+
+
 def test_explain_tracker_never_leaks_a_secret(
     runner: CliRunner, configure_qbit_backend
 ) -> None:

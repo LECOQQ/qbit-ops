@@ -306,6 +306,27 @@ def test_unexpected_client_error_is_an_internal_error_not_unavailable(
     assert "Internal error" in result.stderr
 
 
+def test_an_internal_error_message_with_brackets_still_reaches_exit_70(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """`catch_internal_errors` builds its message from `repr(error)`,
+    which can itself embed unbalanced Rich markup (e.g. from a torrent
+    name surfacing in an unrelated exception). `print_error` must not
+    let a second, unhandled `MarkupError` replace the intended
+    `ExitCode.INTERNAL` exit with an uncaught traceback."""
+    configure_qbit_backend(client_error=RuntimeError("Movie [/] x264"))
+
+    result = runner.invoke(app, ["version"])
+
+    assert result.exit_code == ExitCode.INTERNAL
+    # `typer.Exit` surfaces here as `SystemExit`: the controlled exit
+    # `catch_internal_errors` takes. Anything else means a second,
+    # unhandled exception replaced it.
+    assert isinstance(result.exception, SystemExit)
+    assert "Movie [/] x264" in result.stderr
+
+
 def test_unexpected_collection_error_is_not_degraded_to_unavailable(
     runner: CliRunner,
     configure_qbit_backend,

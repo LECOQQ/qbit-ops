@@ -66,6 +66,28 @@ def test_dht_pex_lsd_are_excluded_from_the_report() -> None:
     assert report.overall_health is TrackerHealth.HEALTHY
 
 
+def test_an_unparsable_reported_host_is_grouped_as_unknown_not_fatal() -> None:
+    """`url` here is qBittorrent-reported, not operator-supplied, so this
+    module must use `tracker_host_or_none` rather than the raising
+    `normalize_tracker_host` (see `tracker_host_or_none`'s own
+    docstring). An out-of-range port must be counted, not abort
+    collection -- matching this module's own documented contract
+    ("A lookup failure is caught and counted rather than aborting")."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash=HASH_A, name="T1")],
+        trackers_by_hash={
+            HASH_A: [
+                {"url": "http://tracker.example:99999/announce", "status": 2}
+            ]
+        },
+    )
+
+    report = collect_tracker_status(client, build_torrent_filter())
+
+    assert report.collection_errors == 0
+    assert [tracker.identity for tracker in report.trackers] == ["unknown"]
+
+
 # --- Raw status mapping ------------------------------------------------------
 
 

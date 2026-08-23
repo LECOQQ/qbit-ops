@@ -87,6 +87,33 @@ def test_pause_with_ambiguous_hash_performs_no_mutation(
     assert "longer prefix" in result.stderr
 
 
+def test_pause_with_ambiguous_hash_keeps_a_bracketed_candidate_name_literal(
+    runner: CliRunner,
+    configure_qbit_backend,
+) -> None:
+    """A candidate name in the ambiguous-hash error list is the same
+    third-party text as any other rendered torrent name."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A_HASH, name="A [bold red]FAKE[/] B"),
+            make_torrent(hash=TORRENT_B_HASH, name="Debian live image"),
+        ],
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        ["torrents", "pause", "--hash", "abc", "--no-dry-run"],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    # `typer.Exit` surfaces here as `SystemExit`: the controlled exit
+    # this command takes on ambiguity. Anything else means a second,
+    # unhandled exception replaced it.
+    assert isinstance(result.exception, SystemExit)
+    assert "A [bold red]FAKE[/] B" in result.stderr
+
+
 def test_pause_with_unknown_hash_performs_no_mutation(
     runner: CliRunner,
     configure_qbit_backend,
@@ -719,6 +746,45 @@ def test_list_without_limit_returns_everything(
     assert payload["summary"]["truncated"] is False
     assert payload["summary"]["returned"] == 3
     assert len(payload["torrents"]) == 3
+
+
+def test_list_table_output_keeps_a_bracketed_name_literal(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A torrent name is third-party text (whoever built the `.torrent`
+    controls it), and release names commonly carry `[amd64]`-style
+    brackets. Rich reads square brackets as markup by default, so an
+    unescaped name is silently swallowed instead of shown."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=UNIQUE_HASH, name="Ubuntu [amd64] iso")]
+        )
+    )
+
+    result = runner.invoke(app, ["torrents", "list"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert result.exception is None
+    assert "Ubuntu [amd64] iso" in result.stdout
+
+
+def test_list_table_output_does_not_crash_on_unbalanced_markup(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A closing tag with no opener (`[/]`) is a `rich.errors.MarkupError`
+    when interpreted as markup, not a decoding failure the command can
+    otherwise anticipate."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=UNIQUE_HASH, name="Movie [/] x264")]
+        )
+    )
+
+    result = runner.invoke(app, ["torrents", "list"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert result.exception is None
+    assert "Movie [/] x264" in result.stdout
 
 
 def test_bulk_pause_emits_a_machine_readable_preview(

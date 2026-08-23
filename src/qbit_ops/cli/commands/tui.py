@@ -65,13 +65,12 @@ def register(app: typer.Typer) -> None:
         try:
             import textual  # noqa: F401
         except ModuleNotFoundError:
-            # Two constraints shape this message, both found the hard way:
-            #
-            # - No literal URL. `fail()` -> `print_error()` runs every
-            #   message through `sanitize_tracker_text()` unconditionally,
-            #   which redacts URL-shaped text on sight, tracker or not.
-            # - Square brackets are escaped (`\[`). Rich reads `[tui]` as
-            #   markup and swallows it.
+            # No literal URL: `fail()` -> `print_error()` runs every
+            # message through `sanitize_tracker_text()` unconditionally,
+            # which redacts URL-shaped text on sight, tracker or not.
+            # Square brackets need no manual escaping here -- `print_error`
+            # is the single rendering funnel and escapes its whole message
+            # itself, so `[tui]` reaches it and comes out literal.
             #
             # Every install route is listed rather than guessed at: the
             # fix has a different *shape* per tool, and qbit-ops
@@ -82,9 +81,9 @@ def register(app: typer.Typer) -> None:
                 "installed.\n\n"
                 "Reinstall with the extra, using whichever tool you "
                 "installed qbit-ops with:\n"
-                r'  uv tool install "qbit-ops\[tui]"'
+                '  uv tool install "qbit-ops[tui]"'
                 "\n"
-                r'  pipx install --force "qbit-ops\[tui]"'
+                '  pipx install --force "qbit-ops[tui]"'
                 "\n\n"
                 "or add Textual to the existing installation:\n"
                 "  uv tool install --with textual qbit-ops\n"

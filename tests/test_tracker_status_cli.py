@@ -21,7 +21,7 @@ from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.features.tracker_status import collect_tracker_status
 from qbit_ops.cli import rendering
 from qbit_ops.cli.app import app
-from qbit_ops.cli.exit_codes import TrackerStatusExitCode
+from qbit_ops.cli.exit_codes import ExitCode, TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from tests.support import FakeQbitClient, make_torrent
 
@@ -618,6 +618,55 @@ def test_list_exits_zero_even_when_every_tracker_is_failing(
 
     assert result.exit_code == 0
     assert result.exit_code != TrackerStatusExitCode.CRITICAL
+
+
+def test_list_does_not_go_internal_on_a_tracker_with_an_unreadable_port(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """A reported URL with an out-of-range port must be counted like any
+    other tracker, not turn an inventory command into `ExitCode.INTERNAL`
+    (see `tests/test_tracker_status.py`'s domain-level equivalent)."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=TORRENT_A, name="A")],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {
+                        "url": "http://tracker.example:99999/announce",
+                        "status": 2,
+                    }
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(app, ["trackers", "list"])
+
+    assert result.exit_code != ExitCode.INTERNAL
+    assert result.exception is None
+
+
+def test_status_does_not_go_internal_on_a_tracker_with_an_unreadable_port(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[make_torrent(hash=TORRENT_A, name="A")],
+            trackers_by_hash={
+                TORRENT_A: [
+                    {
+                        "url": "http://tracker.example:99999/announce",
+                        "status": 2,
+                    }
+                ]
+            },
+        )
+    )
+
+    result = runner.invoke(app, ["trackers", "status"])
+
+    assert result.exit_code != ExitCode.INTERNAL
+    assert result.exception is None
 
 
 def test_list_still_exits_non_zero_on_an_invalid_filter(

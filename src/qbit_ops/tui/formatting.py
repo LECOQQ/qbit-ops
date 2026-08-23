@@ -15,6 +15,7 @@ from rich.cells import cell_len
 from rich.text import Text
 from textual.binding import Binding
 from textual.keys import format_key
+from textual.markup import escape
 
 from qbit_core.errors import ErrorCategory
 from qbit_core.features.explain import (
@@ -633,8 +634,12 @@ def _format_details_identity(
 
     The raw qBittorrent state stays visible, but only as a dim
     secondary line -- never the primary rendering (see `_state_label`).
+    `torrent.name` is third-party text (set by whoever built the
+    `.torrent`) and is escaped right before interpolation -- wrapping
+    happens on the raw name first so its own `[`/`]` break points are
+    unaffected by the escape's backslashes.
     """
-    name = _wrap_name_at_separators(torrent.name, name_width)
+    name = escape(_wrap_name_at_separators(torrent.name, name_width))
     label = _state_label(torrent.state)
     style = _STATE_STYLES.get(label, "")
     status = (
@@ -709,6 +714,11 @@ def _format_details_tracker_line(endpoint: dict[str, Any]) -> str:
 
     Never a raw URL, path, query value, userinfo, or passkey.
     `DISABLED` mechanisms (DHT/PeX/LSD) render muted, not as an error.
+    `identity` is host-derived (`describe_tracker_url` degrades an
+    unparsable value to `"unknown"` rather than embedding raw text), but
+    `message` is the tracker's own announce response text --
+    `sanitize_tracker_text` strips URLs/userinfo from it, not markup, so
+    it is escaped here, right before it joins the line.
     """
     identity = _truncate(str(endpoint["tracker"]), 24)
     health = str(endpoint["health"])
@@ -721,7 +731,7 @@ def _format_details_tracker_line(endpoint: dict[str, Any]) -> str:
     )
     message = endpoint.get("message")
     if message and health != "disabled":
-        line += f"\n  [dim]{message}[/dim]"
+        line += f"\n  [dim]{escape(str(message))}[/dim]"
     return line
 
 
@@ -855,6 +865,8 @@ def _format_explain_text(
     or hidden reasoning beyond what `report` itself carries. `report`
     being `None` means tracker data is still being fetched in the
     background -- shown as a concise loading line, not a blank modal.
+    `torrent_name` is third-party text and is escaped after truncation,
+    the last step before it joins the markup string.
     """
     freshness_lines = []
     if state.last_successful_refresh is not None:
@@ -873,7 +885,7 @@ def _format_explain_text(
             "unreachable; this explanation uses last-known data."
         )
 
-    header = [f"[bold]Explain[/bold] · {_truncate(torrent_name, 60)}"]
+    header = [f"[bold]Explain[/bold] · {escape(_truncate(torrent_name, 60))}"]
     header.extend(freshness_lines)
 
     if report is None:
@@ -1200,6 +1212,17 @@ def _format_evidence(evidence: Evidence) -> str:
 
 
 def _format_evidence_value(evidence: Evidence) -> str:
+    """Humanize `evidence.value`, escaping the generic fallback.
+
+    Every typed branch above it produces a program-generated string
+    (a percentage, a byte rate, a title-cased health enum, yes/no,
+    `(none)`) with no third-party text in it. The fallback is the one
+    that isn't: it also carries `evidence.code == "name"` (the
+    torrent's own name) and `"tracker_message"` (the tracker's raw
+    announce response text, only URL/userinfo-sanitized) -- both
+    third-party text that must not be interpreted as markup once
+    joined into the block `Static.update()` parses.
+    """
     value = evidence.value
     if evidence.code == "progress" and isinstance(value, int | float):
         return f"{value * 100:.1f}%"
@@ -1211,4 +1234,4 @@ def _format_evidence_value(evidence: Evidence) -> str:
         return "yes" if value else "no"
     if value is None:
         return "(none)"
-    return str(value)
+    return escape(str(value))

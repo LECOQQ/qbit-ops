@@ -1,11 +1,13 @@
 """Collect and represent a filter-aware tracker status report.
 
 Tracker identities are always `host` or `host:port`
-(`qbit_core.features.trackers.normalize_tracker_host`), never a full
+(`qbit_core.features.trackers.tracker_host_or_none`), never a full
 announce URL, so a passkey embedded in a tracker's path or query
 string never reaches this module's output. DHT/PeX/LSD pseudo-tracker
 entries are excluded from aggregation entirely, since they have no
-parseable host.
+parseable host; a host that fails to parse for any other reason (e.g.
+an out-of-range port) is grouped under `"unknown"` rather than
+aborting collection, mirroring `describe_tracker_url`'s own fallback.
 """
 
 from __future__ import annotations
@@ -25,8 +27,8 @@ from qbit_core.features.trackers import (
     TrackerHealth,
     classify_raw_tracker_status,
     compute_tracker_aggregate_health,
-    normalize_tracker_host,
     sanitize_tracker_text,
+    tracker_host_or_none,
 )
 from qbit_core.qbit.fields import get_field_as_string, get_raw_tracker_status
 from qbit_core.shared.inspection import inspect_trackers
@@ -326,7 +328,14 @@ def collect_tracker_status(
             if url == "" or _is_pseudo_tracker_url(url):
                 continue
 
-            identity = normalize_tracker_host(url)
+            # `tracker_host_or_none`, not `normalize_tracker_host`: `url`
+            # is qBittorrent-reported, not operator-supplied, and this
+            # module's own contract (see docstring above) is that a
+            # lookup failure is counted, never fatal. An unparsable host
+            # (e.g. an out-of-range port) still needs counting somewhere,
+            # so it joins the same "unknown" bucket
+            # `describe_tracker_url` falls back to.
+            identity = tracker_host_or_none(url) or "unknown"
             raw_status = get_raw_tracker_status(raw_tracker)
             health, enabled = classify_raw_tracker_status(raw_status)
             raw_message = get_field_as_string(raw_tracker, "msg")

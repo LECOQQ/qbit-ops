@@ -142,6 +142,14 @@ def _read_packaged_manifest_text() -> str:
             f"packaged compatibility manifest {_MANIFEST_FILENAME!r} is "
             f"missing from {_MANIFEST_PACKAGE!r}: {error}"
         ) from error
+    except OSError as error:
+        # Distinct from the "missing" branch above: the manifest exists
+        # but couldn't be read (e.g. `PermissionError`) -- a different
+        # fact, worth a message that doesn't claim the file is absent.
+        raise CompatibilityManifestError(
+            f"packaged compatibility manifest {_MANIFEST_FILENAME!r} in "
+            f"{_MANIFEST_PACKAGE!r} could not be read: {error}"
+        ) from error
 
 
 def parse_manifest_text(text: str) -> tuple[QbitMatrixEntry, ...]:
@@ -157,7 +165,14 @@ def parse_manifest_text(text: str) -> tuple[QbitMatrixEntry, ...]:
             f"malformed compatibility manifest TOML: {error}"
         ) from error
 
-    entries = tuple(_parse_entry(item) for item in raw.get("entry", []))
+    raw_entries = raw.get("entry", [])
+    if not isinstance(raw_entries, list):
+        raise CompatibilityManifestError(
+            "compatibility manifest 'entry' must be an array of tables, "
+            f"got {type(raw_entries).__name__}"
+        )
+
+    entries = tuple(_parse_entry(item) for item in raw_entries)
 
     if not entries:
         raise CompatibilityManifestError(
@@ -188,7 +203,12 @@ def parse_manifest_text(text: str) -> tuple[QbitMatrixEntry, ...]:
     return entries
 
 
-def _parse_entry(item: dict) -> QbitMatrixEntry:
+def _parse_entry(item: object) -> QbitMatrixEntry:
+    if not isinstance(item, dict):
+        raise CompatibilityManifestError(
+            "compatibility manifest entry must be a table, got "
+            f"{type(item).__name__}: {item!r}"
+        )
     try:
         entry_id = item["id"]
         expected_version = item["expected_version"]
@@ -221,6 +241,15 @@ def _parse_entry(item: dict) -> QbitMatrixEntry:
     except KeyError as error:
         raise CompatibilityManifestError(
             f"compatibility manifest entry {entry_id!r} missing required "
+            f"field: {error}"
+        ) from error
+    except (TypeError, ValueError) as error:
+        # `webui_port=int(...)` and `capabilities=tuple(...)` coerce
+        # rather than just look up a key, so a present-but-wrong-shaped
+        # field (a non-numeric port, a non-iterable `capabilities`)
+        # raises here instead of `KeyError` above.
+        raise CompatibilityManifestError(
+            f"compatibility manifest entry {entry_id!r} has a malformed "
             f"field: {error}"
         ) from error
 

@@ -6079,6 +6079,77 @@ def test_details_trackers_section_distinguishes_loading_from_failed() -> None:
     assert failed != loading
 
 
+def test_details_identity_keeps_a_bracketed_name_literal() -> None:
+    """A torrent name is third-party text (whoever built the `.torrent`
+    controls it) interpolated into a markup string the Details modal
+    later hands to `Static.update()`. An unescaped `[/]` is a
+    `textual.markup.MarkupError` there, not just a Rich CLI concern."""
+    from qbit_core.shared.torrent_states import build_torrent_snapshot
+    from qbit_ops.tui.formatting import _format_details_identity
+
+    torrent = build_torrent_snapshot(make_torrent(name="Movie [/] x264"))
+
+    rendered = _format_details_identity(torrent, name_width=40)
+
+    assert "Movie [/] x264" in Content.from_markup(rendered).plain
+
+
+def test_explain_header_keeps_a_bracketed_torrent_name_literal() -> None:
+    from qbit_ops.tui.formatting import _format_explain_text
+    from qbit_ops.tui.state import TuiState
+
+    rendered = _format_explain_text("Movie [/] x264", None, TuiState())
+
+    assert "Movie [/] x264" in Content.from_markup(rendered).plain
+
+
+def test_details_tracker_message_is_escaped_before_rendering() -> None:
+    """`message` is qBittorrent's own tracker `msg` field, echoed
+    verbatim from a tracker's announce response --
+    `sanitize_tracker_text` strips URLs/userinfo from it, not markup, so
+    a malicious tracker can otherwise inject Textual markup into the
+    Details modal."""
+    from qbit_ops.tui.formatting import _format_details_trackers
+
+    rendered = _format_details_trackers(
+        [
+            {
+                "tracker": "tracker.example",
+                "health": "critical",
+                "enabled": True,
+                "message": "not registered [/] torrent",
+            }
+        ],
+        None,
+    )
+
+    assert "not registered [/] torrent" in Content.from_markup(rendered).plain
+
+
+def test_explain_evidence_keeps_a_bracketed_torrent_name_literal() -> None:
+    """The `"name"` evidence code carries the torrent's own name (see
+    `qbit_core.features.explain._build_torrent_finding`), the same
+    third-party text as everywhere else it is rendered."""
+    from qbit_core.features.explain import (
+        Evidence,
+        ExplanationFinding,
+        ExplanationSeverity,
+    )
+    from qbit_ops.tui.formatting import _format_finding
+
+    finding = ExplanationFinding(
+        code="TEST",
+        severity=ExplanationSeverity.INFO,
+        title="Test finding",
+        explanation="Irrelevant to this test.",
+        evidence=(Evidence("name", "Name", "Movie [/] x264", "torrents_info"),),
+    )
+
+    rendered = _format_finding(finding)
+
+    assert "Movie [/] x264" in Content.from_markup(rendered).plain
+
+
 async def test_top_right_global_rate_display_shows_live_status_rates() -> None:
     from qbit_ops.tui.formatting import IDLE_RATE_STYLE, UP_RATE_ACCENT
 

@@ -110,6 +110,12 @@ def test_decode_torrent_rejects_non_dict_root() -> None:
         decode_torrent(bencode([1, 2, 3]))
 
 
+def test_decode_torrent_rejects_deeply_nested_input_as_bencode_error() -> None:
+    hostile = b"d4:infod1:x" + b"l" * 2000 + b"e" * 2000 + b"ee"
+    with pytest.raises(BencodeError):
+        decode_torrent(hostile)
+
+
 # --- single file source ---------------------------------------------------
 
 
@@ -161,6 +167,21 @@ def test_plan_import_directory_with_multiple_torrents(tmp_path: Path) -> None:
 
     assert plan.discovered == 3
     assert len(plan.ready) == 3
+
+
+def test_plan_import_directory_with_one_hostile_torrent_does_not_abort(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "good.torrent").write_bytes(_build_torrent("good"))
+    hostile = b"d4:infod1:x" + b"l" * 2000 + b"e" * 2000 + b"ee"
+    (tmp_path / "hostile.torrent").write_bytes(hostile)
+
+    plan = plan_torrent_import(_FakeImportClient(), tmp_path)
+
+    assert plan.discovered == 2
+    assert len(plan.ready) == 1
+    assert len(plan.invalid_entries) == 1
+    assert plan.invalid_entries[0].source_name == "hostile.torrent"
 
 
 def test_plan_import_directory_ignores_non_torrent_files(

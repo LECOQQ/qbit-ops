@@ -276,10 +276,14 @@ def print_error(message: str) -> None:
     The single rendering funnel for every command's error output, so it
     runs `sanitize_tracker_text` unconditionally: an upstream exception
     may embed a tracker announce URL or credentials, and callers should
-    not each have to remember to sanitize before calling this.
+    not each have to remember to sanitize before calling this. Escaped
+    for the same reason as `print_notice`: the message can itself embed
+    third-party text (a torrent name, a tracker message) that must not
+    be interpreted as markup.
     """
     err_console.print(
-        f"[bold red]✗ ERROR[/bold red] {sanitize_tracker_text(message)}"
+        f"[bold red]✗ ERROR[/bold red] "
+        f"{escape(sanitize_tracker_text(message))}"
     )
 
 
@@ -289,7 +293,7 @@ def print_ambiguous_hash_error(
 ) -> None:
     """Print an actionable ambiguous-hash-prefix error on stderr."""
     err_console.print(
-        f"[bold red]✗ ERROR[/bold red] Hash prefix '{value}' matches "
+        f"[bold red]✗ ERROR[/bold red] Hash prefix '{escape(value)}' matches "
         "multiple torrents."
     )
     err_console.print()
@@ -297,7 +301,7 @@ def print_ambiguous_hash_error(
     displayed = candidates[:MAX_DISPLAYED_HASH_CANDIDATES]
     for candidate in displayed:
         short_hash = candidate.hash[:12]
-        err_console.print(f"  {short_hash}…  {candidate.name}")
+        err_console.print(f"  {short_hash}…  {escape(candidate.name)}")
 
     remaining = len(candidates) - len(displayed)
     if remaining > 0:
@@ -321,10 +325,13 @@ def _build_summary_table(rows: dict[str, Any], title: str = "Summary") -> Table:
 
     A `"status"` key, if present, must be a `MutationStatus`; it is
     rendered as a distinct final row instead of a raw field so
-    `NO_MATCH`/`NO_CHANGES` can never be confused with `APPLIED`.
+    `NO_MATCH`/`NO_CHANGES` can never be confused with `APPLIED`. `title`
+    and every value are escaped: both can carry third-party text (a
+    torrent name in the title, a tracker message in a value) that must
+    not be interpreted as markup.
     """
     table = Table(
-        title=title, show_header=False, box=None, padding=(0, 1, 0, 0)
+        title=escape(title), show_header=False, box=None, padding=(0, 1, 0, 0)
     )
     table.add_column(style="bold cyan")
     table.add_column()
@@ -333,7 +340,7 @@ def _build_summary_table(rows: dict[str, Any], title: str = "Summary") -> Table:
     for key, value in rows.items():
         if key == "status":
             continue
-        table.add_row(key, str(value))
+        table.add_row(key, escape(str(value)))
 
     if status is not None:
         table.add_row("status", _MUTATION_STATUS_LABELS[status])
@@ -357,15 +364,17 @@ def print_table(
     `fold_columns` names columns (e.g. "Hash") that must never be
     truncated with an ellipsis: they wrap onto extra lines instead, so
     a full torrent hash stays copyable even on a narrow terminal.
+    Cell values and the title are escaped: a torrent name is
+    third-party text and must not be interpreted as markup.
     """
-    table = Table(title=title, show_lines=False)
+    table = Table(title=escape(title), show_lines=False)
     for column in columns:
         if fold_columns and column in fold_columns:
             table.add_column(column, overflow="fold")
         else:
             table.add_column(column)
     for row in rows:
-        table.add_row(*row)
+        table.add_row(*(escape(cell) for cell in row))
 
     console.print(table)
 
@@ -724,10 +733,21 @@ _BYTE_RATE_EVIDENCE_CODES = {"download_rate", "upload_rate"}
 
 
 def _format_evidence_value(item: Evidence) -> str:
-    """Format one evidence value for table display.
+    """Format one evidence value for table display, escaping the
+    generic fallback.
 
-    JSON/JSONL keep `Evidence.value` raw; only the table renderer applies
-    a per-code human formatting.
+    JSON/JSONL keep `Evidence.value` raw; only the table renderer
+    applies a per-code human formatting. Every typed branch above the
+    fallback produces a program-generated string (a byte rate, a
+    percentage, empty for `None`). The fallback is the one that
+    isn't: it also carries `item.code == "name"` (the torrent's own
+    name) and `"tracker_message"`/`"representative_message"` (a
+    tracker's raw announce response text -- `sanitize_tracker_text`
+    strips URLs/userinfo from it in `explain.py`, not markup) -- both
+    third-party text that must not be interpreted as markup once
+    `render_explanation` interpolates it into a `console.print(f"...")`
+    call, this module's one hand-written render path that funnels
+    through none of `print_table`/`print_error`/`_build_summary_table`.
     """
     if item.code in _BYTE_RATE_EVIDENCE_CODES and isinstance(item.value, int):
         return format_byte_rate(item.value)
@@ -735,7 +755,7 @@ def _format_evidence_value(item: Evidence) -> str:
         return f"{item.value * 100:.1f}%"
     if item.value is None:
         return ""
-    return str(item.value)
+    return escape(str(item.value))
 
 
 def render_explanation(report: ExplanationReport) -> None:

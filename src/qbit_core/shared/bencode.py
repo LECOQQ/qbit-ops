@@ -10,6 +10,13 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
+# A hostile buffer can nest lists/dicts deep enough to exhaust the
+# interpreter stack with `RecursionError`, which callers scoped to
+# `BencodeError` cannot catch. No legitimate `.torrent` nests anywhere
+# close to this; it exists purely to keep decoding inside recursion
+# limits regardless of caller stack depth.
+MAX_NESTING_DEPTH = 100
+
 
 class BencodeError(ValueError):
     """Report malformed or unsupported bencode input."""
@@ -17,23 +24,27 @@ class BencodeError(ValueError):
 
 def decode(data: bytes) -> Any:
     """Decode a complete bencode buffer, rejecting trailing bytes."""
-    value, offset = _decode(data, 0)
+    value, offset = _decode(data, 0, 0)
     if offset != len(data):
         raise BencodeError("trailing data after top-level value")
     return value
 
 
-def _decode(data: bytes, offset: int) -> tuple[Any, int]:
+def _decode(data: bytes, offset: int, depth: int) -> tuple[Any, int]:
     if offset >= len(data):
         raise BencodeError("unexpected end of data")
+    if depth > MAX_NESTING_DEPTH:
+        raise BencodeError(
+            f"nesting depth exceeds the maximum of {MAX_NESTING_DEPTH}"
+        )
 
     marker = data[offset]
     if marker == ord("i"):
         return _decode_int(data, offset)
     if marker == ord("l"):
-        return _decode_list(data, offset)
+        return _decode_list(data, offset, depth)
     if marker == ord("d"):
-        return _decode_dict(data, offset)
+        return _decode_dict(data, offset, depth)
     if ord("0") <= marker <= ord("9"):
         return _decode_bytes(data, offset)
     raise BencodeError(f"invalid marker at offset {offset}")
@@ -67,7 +78,7 @@ def _decode_bytes(data: bytes, offset: int) -> tuple[bytes, int]:
     return data[start:end], end
 
 
-def _decode_list(data: bytes, offset: int) -> tuple[list[Any], int]:
+def _decode_list(data: bytes, offset: int, depth: int) -> tuple[list[Any], int]:
     offset += 1
     items: list[Any] = []
     while True:
@@ -75,11 +86,13 @@ def _decode_list(data: bytes, offset: int) -> tuple[list[Any], int]:
             raise BencodeError("unterminated list")
         if data[offset] == ord("e"):
             return items, offset + 1
-        value, offset = _decode(data, offset)
+        value, offset = _decode(data, offset, depth + 1)
         items.append(value)
 
 
-def _decode_dict(data: bytes, offset: int) -> tuple[dict[bytes, Any], int]:
+def _decode_dict(
+    data: bytes, offset: int, depth: int
+) -> tuple[dict[bytes, Any], int]:
     offset += 1
     result: dict[bytes, Any] = {}
     while True:
@@ -88,7 +101,7 @@ def _decode_dict(data: bytes, offset: int) -> tuple[dict[bytes, Any], int]:
         if data[offset] == ord("e"):
             return result, offset + 1
         key, offset = _decode_bytes(data, offset)
-        value, offset = _decode(data, offset)
+        value, offset = _decode(data, offset, depth + 1)
         result[key] = value
 
 
@@ -121,7 +134,7 @@ def decode_torrent(data: bytes) -> DecodedTorrent:
             break
         key, offset = _decode_bytes(data, offset)
         value_start = offset
-        value, offset = _decode(data, offset)
+        value, offset = _decode(data, offset, 1)
         result[key] = value
         if key == b"info":
             info_span = (value_start, offset)

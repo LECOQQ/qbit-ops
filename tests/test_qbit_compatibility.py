@@ -202,6 +202,33 @@ def test_missing_required_field_fails_closed() -> None:
         parse_manifest_text(text)
 
 
+def test_non_table_entry_fails_closed() -> None:
+    """A malformed manifest can list `entry` as an array of plain
+    strings, not tables -- indexing one with `item["id"]` is a `TypeError`
+    (string indices must be integers), not a `KeyError`, so it needs its
+    own guard rather than falling through the missing-field check."""
+    with pytest.raises(CompatibilityManifestError, match="must be a table"):
+        parse_manifest_text('entry = ["oops"]')
+
+
+def test_non_array_entry_key_fails_closed() -> None:
+    """`entry` itself can be any TOML type, not just an array of tables
+    -- a bare scalar must fail closed too, before ever trying to
+    iterate it as entries."""
+    with pytest.raises(
+        CompatibilityManifestError, match="must be an array of tables"
+    ):
+        parse_manifest_text("entry = 5")
+
+
+def test_malformed_field_type_fails_closed() -> None:
+    """`webui_port=int(...)` coerces rather than just looks up a key: a
+    non-numeric value raises `ValueError`, not `KeyError`."""
+    text = _entry().replace("webui_port = 18100", 'webui_port = "not-a-port"')
+    with pytest.raises(CompatibilityManifestError, match="malformed field"):
+        parse_manifest_text(text)
+
+
 def test_missing_package_data_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -214,4 +241,29 @@ def test_missing_package_data_fails_closed(
     with pytest.raises(
         CompatibilityManifestError, match="missing package data"
     ):
+        compat_module.load_compatibility_evidence()
+
+
+def test_unreadable_package_data_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manifest that exists but can't be read (e.g. `PermissionError`)
+    is a distinct fact from "missing" -- and a distinct exception type,
+    which the read path must still fail closed on."""
+
+    class _UnreadableTraversable:
+        def read_text(self, encoding: str) -> str:
+            raise PermissionError("simulated permission denial")
+
+    class _UnreadablePackage:
+        def joinpath(self, name: str) -> _UnreadableTraversable:
+            return _UnreadableTraversable()
+
+    monkeypatch.setattr(
+        compat_module.importlib.resources,
+        "files",
+        lambda package: _UnreadablePackage(),
+    )
+
+    with pytest.raises(CompatibilityManifestError, match="could not be read"):
         compat_module.load_compatibility_evidence()
