@@ -4,6 +4,35 @@ Completed `qbit-ops` milestones.
 
 ---
 
+## v0.5.0 -- 📚 Know Your Library -- Part 2
+
+Released: 2026-08-24
+
+> Find anything. Understand what is happening.
+
+### Shipped
+
+- Deterministic search
+- Shared filters and search across CLI and TUI
+- Trackers inventory
+- Library statistics
+- Per-tracker statistics
+- Tracker health inventory and per-torrent tracker verdicts
+- Stall, error and inactivity filters, composable across CLI and TUI
+- Health that answers "must I act"
+- Bulk category and tag management
+- Bulk rate limiting, per torrent or library-wide
+- Composable filtering across mutating operations
+- Machine-readable results for every mutation
+- JSONL output
+- Experimental MCP server, read-only and bounded
+- Guided connection setup, from the CLI or the TUI
+- Duration-range filters on the TUI
+
+[Release notes →](https://github.com/LECOQQ/qbit-ops/releases/tag/v0.5.0)
+
+---
+
 ## v0.4.0 -- 📚 Know Your Library -- Part 1
 
 Released: 2026-08-13

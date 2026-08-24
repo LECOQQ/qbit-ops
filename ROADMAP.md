@@ -16,39 +16,18 @@
 > `trackers replace`, `replace-passkey`, `add-if-present` and `remove`
 > already ship it.
 
-## 🚧 WIP - v0.5.0: 📚 Know Your Library - Part 2
-
-> Find anything. Understand what is happening.
-
-- Deterministic search ✅
-- Shared filters and search across CLI and TUI ✅
-- Trackers inventory ✅
-- Library statistics ✅
-- Per-tracker statistics ✅
-- Tracker health inventory and per-torrent tracker verdicts ✅
-- Stall, error and inactivity filters, composable across CLI and TUI ✅
-- Health that answers "must I act" ✅
-- Bulk category and tag management ✅
-- Bulk rate limiting, per torrent or library-wide ✅
-- Composable filtering across mutating operations ✅
-- Machine-readable results for every mutation ✅
-- JSONL output ✅
-- Experimental MCP server, read-only and bounded ✅
-- Guided connection setup, from the CLI or the TUI ✅
-- Duration-range filters on the TUI ✅
-- A canonical name for "no longer seeding"
-
-## 🔭 Later
-
-### v0.6.0 - 🏭 Operate at Scale
+## 🚧 WIP - v0.6.0: 🏭 Operate at Scale
 
 > Select precisely. Operate on thousands of torrents safely.
 
+- A canonical name for "no longer seeding"
 - A trackers page in the TUI, read-only, with copyable commands
 - `qbit_core` as a versioned library, with its own public surface
 - Saved selectors
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
+
+## 🔭 Later
 
 ### v0.7.0 - 🐉 Move Without Fear
 
