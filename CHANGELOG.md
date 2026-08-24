@@ -3,6 +3,121 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.5.0](https://github.com/LECOQQ/qbit-ops/compare/v0.4.0...v0.5.0) (2026-08-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **trackers:** `trackers remove --match` is removed. Tracker identification no longer consults it, and `remove` has no target to compare against, so the option governed nothing. `--source` and `--tracker` now take a host, or a `{passkey}` template, instead of a full announce URL.
+* **search:** `torrents inspect --name` and `--limit` are removed with no alias -- `torrents search` replaces them. In search output, `match_score` becomes `match`, the tier name; `summary.matched` now counts before truncation, alongside `returned` and `truncated`, so it answers "how many are there" rather than "how many did you print".
+
+### Features
+
+* **config:** guide a fresh install to its first working command ([7477896](https://github.com/LECOQQ/qbit-ops/commit/747789602b10f0c7e88ebc19c30ba113b8925242))
+* **demo:** give every fixture a tracker, live and dead ([b6df70a](https://github.com/LECOQQ/qbit-ops/commit/b6df70aeb81fa4774d18466d6c2340a82a348729))
+* **demo:** give the Overview graph a real, reproducible transfer ([d135722](https://github.com/LECOQQ/qbit-ops/commit/d1357225b8857579331daa0e20e884c8d8d08e33))
+* **docker:** publish multi-arch container images to GHCR ([9c129e0](https://github.com/LECOQQ/qbit-ops/commit/9c129e0d9f0bcac4f75236e0e626bb6ebd13908d))
+* **mcp:** add an aggregate tool over a filtered selection ([a5176dc](https://github.com/LECOQQ/qbit-ops/commit/a5176dc11c40fbabc12c8185f797a21b36b2a331))
+* **mcp:** add an experimental read-only MCP surface ([f5e561b](https://github.com/LECOQQ/qbit-ops/commit/f5e561b8f6798263890d4c469121ae4912611f12))
+* **search:** add `torrents search` and make the TUI `/` tolerant ([f5ef07f](https://github.com/LECOQQ/qbit-ops/commit/f5ef07fe89948b42d9bbd95dad284385f7d1d28e))
+* **search:** add the ranking engine behind `torrents search` ([5b1fc28](https://github.com/LECOQQ/qbit-ops/commit/5b1fc283d66c31dc3645b4be989d17a09ff6c42f))
+* **stats:** read a cumulative seed time in conventional units ([b32936b](https://github.com/LECOQQ/qbit-ops/commit/b32936bdcfeabb44f86f099e72e4fdda042ed8cb))
+* **status,explain:** stop flagging a stall completed from local data ([98fce0a](https://github.com/LECOQQ/qbit-ops/commit/98fce0af11018216e5cd95d1fb8f04eb21ab935f))
+* **tooling:** check references inside code prose, not only Markdown ([e7bc498](https://github.com/LECOQQ/qbit-ops/commit/e7bc498d57f488fb98c03a95dd7f666272fefbdc))
+* **tooling:** enforce commit provenance and prove squash integration ([33f54ef](https://github.com/LECOQQ/qbit-ops/commit/33f54ef4a092094318713b49530bb89eee16d544))
+* **tooling:** gate AI hygiene and break the diff down by kind of work ([7fa358f](https://github.com/LECOQQ/qbit-ops/commit/7fa358feb8e3396680a3e80a7267c8297e881ec6))
+* **tooling:** give each feature worktree its own proven virtualenv ([7208082](https://github.com/LECOQQ/qbit-ops/commit/7208082447c800b0afa9603a6ed67db1f2ebf0be))
+* **tooling:** isolate the test suite from the operator's own instance ([4d84361](https://github.com/LECOQQ/qbit-ops/commit/4d843611d267561e7c957a311e5acbd67b5b09ea))
+* **tooling:** refuse a commit body written as prose ([f988518](https://github.com/LECOQQ/qbit-ops/commit/f9885180ac27ccd5b701b64023f8d111f4168f61))
+* **torrents:** add `torrents stats` over a canonical measure model ([0b7e800](https://github.com/LECOQQ/qbit-ops/commit/0b7e800e53d58362c95d1119ef69748b91d6fff6))
+* **torrents:** add `torrents throttle` for bulk rate limiting ([854d3bf](https://github.com/LECOQQ/qbit-ops/commit/854d3bf80a3a16be29747799c7239dd7b0be4f8a))
+* **torrents:** bound `torrents list` output with --limit ([47e6240](https://github.com/LECOQQ/qbit-ops/commit/47e6240a15035e4bcbfa55432d9014a5ab868706))
+* **torrents:** carry per-torrent rate limits on the central model ([7d8b4b5](https://github.com/LECOQQ/qbit-ops/commit/7d8b4b5c678955c847f81d022aa2898d107fa6c8))
+* **torrents:** give bulk actions a machine-readable result ([18662eb](https://github.com/LECOQQ/qbit-ops/commit/18662eba23bf891bda2989964bc44ded71bf640d))
+* **torrents:** manage categories and tags in bulk ([c5850a6](https://github.com/LECOQQ/qbit-ops/commit/c5850a6bf0f210de771c831152896aafb079bd8e))
+* **trackers:** make `trackers list` readable on a normal terminal ([9c8b652](https://github.com/LECOQQ/qbit-ops/commit/9c8b652f137d8ec71fba1dd581158d46ddac1007))
+* **trackers:** name a tracker without naming its passkey ([185b136](https://github.com/LECOQQ/qbit-ops/commit/185b13690b68e8a702e035616bb82b8b3dae8169))
+* **trackers:** report per-tracker volume and filter by tracker health ([74a28c0](https://github.com/LECOQQ/qbit-ops/commit/74a28c0d40fbc85fbc13d17aaaa8d06be2122496))
+* **tui:** announce a section key the window manager cannot take away ([9c9dd85](https://github.com/LECOQQ/qbit-ops/commit/9c9dd85748791d0ab4321b75f4d66a195e82ac9c))
+* **tui:** announce the select-visible key in the command bar ([dc6154c](https://github.com/LECOQQ/qbit-ops/commit/dc6154cc3d6624facbccb7173d54fe3c8989c3e6))
+* **tui:** give every surface one frame, one sheet, one palette ([9a24987](https://github.com/LECOQQ/qbit-ops/commit/9a24987dd3b41d61cbca7c20f6b79613d329f70a))
+* **tui:** give the four value actions a modal that collects the argument ([8169f2c](https://github.com/LECOQQ/qbit-ops/commit/8169f2c99d65ac5de3bfaca55eddaa95f70fd4d9))
+* **tui:** put all 27 filter fields behind four tabs you commit on Apply ([c46f38b](https://github.com/LECOQQ/qbit-ops/commit/c46f38b2c45d11c0f481b78060bc6ad117d5d6b2))
+* **tui:** trace the transfer second by second, in a page that holds still ([4f7c9a9](https://github.com/LECOQQ/qbit-ops/commit/4f7c9a9ea5d52dcafbc38d670c8663c3b9c307c8))
+* **tui:** turn the Overview into a live picture of the transfer ([016842f](https://github.com/LECOQQ/qbit-ops/commit/016842fb8e3a31369f54ec82bc97919b2dbd50fd))
+
+
+### Bug Fixes
+
+* **cli,mcp:** let a caller read the tags it just filtered on ([ab41ffe](https://github.com/LECOQQ/qbit-ops/commit/ab41ffe7f647f127343edb3c80e4627f58596491))
+* **cli:** name the summary row for what it holds ([f633a9e](https://github.com/LECOQQ/qbit-ops/commit/f633a9eb403508b61666f1220ae53375cd566170))
+* **cli:** stop advertising --tracker as repeatable on report commands ([f5d8165](https://github.com/LECOQQ/qbit-ops/commit/f5d8165c9a8122b1fe3a338591f4034f3a3d1e0e))
+* **cli:** stop printing a summary that repeats the only finding ([d60a923](https://github.com/LECOQQ/qbit-ops/commit/d60a92376d3ec4adb58cbd0c25a6bacb92694eef))
+* **config,trackers:** stop a secret reaching a place it was never meant to ([b205b01](https://github.com/LECOQQ/qbit-ops/commit/b205b01f5b36a14ac0f38974a49f8e766696aa01))
+* **core,cli,tui:** hold the contract when a third party controls the input ([c2c49f8](https://github.com/LECOQQ/qbit-ops/commit/c2c49f813ce20fc9a03c8b4d44ada9b828fa1091))
+* **demo:** let the stills show a library, not a single row ([6cbdce0](https://github.com/LECOQQ/qbit-ops/commit/6cbdce08e0c245962e9277bed651195bb851c2ef))
+* **demo:** record a run that shows what it claims to show ([b1e4341](https://github.com/LECOQQ/qbit-ops/commit/b1e43411fb128882aef70b5dc6181a4d641bedbd))
+* **demo:** stop pointing the docs gate at a directory that is not there ([08ca988](https://github.com/LECOQQ/qbit-ops/commit/08ca988c3ba6ca73ea07c9f2122bd1fb22d088d0))
+* **gates:** let five checks fail on what they were written to catch ([dc61e61](https://github.com/LECOQQ/qbit-ops/commit/dc61e6178ec100dc8ef93049b36f909394d96336))
+* **mcp:** answer from the same engine the CLI answers from ([c2afbb2](https://github.com/LECOQQ/qbit-ops/commit/c2afbb217f4a5b2971db277703060a196027ea0e))
+* **mcp:** make the cap a page size and stop refetching the library ([d86192e](https://github.com/LECOQQ/qbit-ops/commit/d86192ed8e3f1e3df27e81acc3113a24b9a41469))
+* **mcp:** stop dropping evidence, limitations and category ([526d61a](https://github.com/LECOQQ/qbit-ops/commit/526d61ac604c31a227b1ad6c908ea2aeaa19a15a))
+* **qa:** make `make secrets` work on every gitleaks 8.x ([61d2a4d](https://github.com/LECOQQ/qbit-ops/commit/61d2a4d235c8268d4f4cb5fb64a7282933cf35a2))
+* **release:** re-anchor release-please after the history rewrite ([f02d308](https://github.com/LECOQQ/qbit-ops/commit/f02d308c7e66c2f775cb5f7ae874980fd9a17dc4))
+* **secrets:** stop scanning the one file that logs arbitrary commands ([747ab1d](https://github.com/LECOQQ/qbit-ops/commit/747ab1d028129c5a5c83ff8acdb0de850ea6cf0d))
+* **tooling:** detect a worktree leak and provision the venv ([f1b57dd](https://github.com/LECOQQ/qbit-ops/commit/f1b57dda18c2ab34aa2c6222839e0146cca0ef7d))
+* **torrents:** report the status a bulk mutation actually reached ([d5b6bfe](https://github.com/LECOQQ/qbit-ops/commit/d5b6bfe54b27b9d8ceb2b02d00456e9d6d01206d))
+* **tui,docs:** derive the numbers that were transcribed by hand ([04ef44c](https://github.com/LECOQQ/qbit-ops/commit/04ef44cd56889b48b2530111c97ba14f72cb5e90))
+* **tui:** leave a value modal by the key everyone already presses ([ba81990](https://github.com/LECOQQ/qbit-ops/commit/ba81990e06a1da7812605576379773289b88b570))
+* **tui:** make delete inexpressible, not merely unimported ([fcbc680](https://github.com/LECOQQ/qbit-ops/commit/fcbc680f7d04c870b94e91e34803d51df0c26ea7))
+* **tui:** measure the layout that is there, not the one a filter left ([f707391](https://github.com/LECOQQ/qbit-ops/commit/f70739168328cd3d82a7c941c5436a8bfcd50d3f))
+* **tui:** repair the missing-extra remediation for PyPI installs ([10da6ab](https://github.com/LECOQQ/qbit-ops/commit/10da6ab1eb791c3461aedd91fd8cea91bdd78c49))
+* **tui:** set a window title in plain capitals, not letter by letter ([3b8e103](https://github.com/LECOQQ/qbit-ops/commit/3b8e103c30de6d882ffbc6f3d10041f25ab344b7))
+* **tui:** stamp a rate sample with the second that asked for it ([9940f46](https://github.com/LECOQQ/qbit-ops/commit/9940f463a9d0eed54c369c0fbbd25b3080099019))
+* **tui:** stop a focus halo from erasing the field it marks ([970e678](https://github.com/LECOQQ/qbit-ops/commit/970e6787c10a73c78a0debaa1966140c4594249c))
+* **tui:** stop a stale cell surviving the gesture that cleared it ([eb9660e](https://github.com/LECOQQ/qbit-ops/commit/eb9660e480f7c85790088325da5111a8a0444569))
+
+
+### Performance Improvements
+
+* **qbit-core,tui:** stop paying for work no filter ever asked for ([6050f66](https://github.com/LECOQQ/qbit-ops/commit/6050f666ec9a113e12b2cf756084bd3cd1469284))
+* **trackers:** collapse the tracker scan when the server embeds them ([5e6c2ca](https://github.com/LECOQQ/qbit-ops/commit/5e6c2cafaf173e848944982949d11b7c9b795b90))
+* **tui:** debounce the search so a burst costs one recompute, not nine ([a7640d9](https://github.com/LECOQQ/qbit-ops/commit/a7640d9986ac372014ffdf96e0ec1d61bb6404ec))
+
+
+### Documentation
+
+* **compose:** update compose example ([15abebc](https://github.com/LECOQQ/qbit-ops/commit/15abebc51935039e4caa2831ba2c0d3d686f1ae7))
+* cut the prose that serves the fewest readers ([ac42b2e](https://github.com/LECOQQ/qbit-ops/commit/ac42b2ed50497fce161489463eff9efef10c58f4))
+* **demo:** say what the environment is now, not what it was ([d8b945f](https://github.com/LECOQQ/qbit-ops/commit/d8b945f476de890e9864958dcdc67d39b7de4140))
+* **init:** stop explaining the mechanism where nobody asked ([6520c8c](https://github.com/LECOQQ/qbit-ops/commit/6520c8cc19e8c226619ec4c959b2d4397b4b9580))
+* **mcp:** present the MCP surface by what it does ([90cf426](https://github.com/LECOQQ/qbit-ops/commit/90cf426332174a42401315180b787976527d8c05))
+* **mcp:** put the third surface in the document that describes them ([693b598](https://github.com/LECOQQ/qbit-ops/commit/693b5984cacc6bb521742c689d453687f43ef57d))
+* open a backlog for known issues that were deferred ([75a46da](https://github.com/LECOQQ/qbit-ops/commit/75a46da41bac345a4d2eb80c0f6b0644ba6a790f))
+* point every stale reference at what it actually names, and trim ([4ab0f8d](https://github.com/LECOQQ/qbit-ops/commit/4ab0f8d34cc803fbbe8d05e8604ad96e1311a752))
+* point search references at the spec's delivered location ([676ed60](https://github.com/LECOQQ/qbit-ops/commit/676ed60ec4829fac404fa9eb10d50325a4410f0f))
+* **readme:** add Homebrew and container badges ([5f266fa](https://github.com/LECOQQ/qbit-ops/commit/5f266fa342dc2aa91ff236d9df1983c28a1f6b26))
+* **readme:** add PyPI badges and stop inlining the 53 MB demo GIF ([30ea1ca](https://github.com/LECOQQ/qbit-ops/commit/30ea1ca09b638d393b47ec20a5c3ac87792f60d6))
+* **readme:** add the Homebrew install for macOS ([d53e5cf](https://github.com/LECOQQ/qbit-ops/commit/d53e5cf9bde0bd1de294ff57e271080205183255))
+* **readme:** give each install path its own section ([fd69e2f](https://github.com/LECOQQ/qbit-ops/commit/fd69e2f9d3695c22ae5e7a52c7560f2316f65d21))
+* **readme:** group the greatest hits, and name the four tracker moves ([3031a47](https://github.com/LECOQQ/qbit-ops/commit/3031a471890f158f8f669f1a3566645db7c69e18))
+* **readme:** play the demo instead of linking to it ([48f9929](https://github.com/LECOQQ/qbit-ops/commit/48f9929e1266f5900222e12268c9094e4a464a73))
+* **readme:** show the product, stop listing its parts ([fffbe01](https://github.com/LECOQQ/qbit-ops/commit/fffbe018018c8e17086b719dceb47641b5efae9e))
+* **readme:** update readme, add docker distribution, add killer usecases ([672f07b](https://github.com/LECOQQ/qbit-ops/commit/672f07bce997d09a7d16551b1274c09f1bf1ff69))
+* **roadmap:** add roadmap_archive, update roadmap w/ latest release ([16da055](https://github.com/LECOQQ/qbit-ops/commit/16da055643495f3dd941602d3666c0878f37ca42))
+* **roadmap:** describe capabilities against the code, not the wording ([10282d1](https://github.com/LECOQQ/qbit-ops/commit/10282d1fc695d331e4c87dc4127adc1bbeb17b2b))
+* **roadmap:** list every shipped capability under the current release ([60882fc](https://github.com/LECOQQ/qbit-ops/commit/60882fcbdd4a5ecbacc9cb9f1ce93e9598d1ee86))
+* **roadmap:** mark the v0.5.0 items that have shipped ([573ad8b](https://github.com/LECOQQ/qbit-ops/commit/573ad8bbcdf14096ef8cd67805656469c3c64a18))
+* **roadmap:** put each line where the code says it belongs ([17c971e](https://github.com/LECOQQ/qbit-ops/commit/17c971e8f6485aa47e11676d074b1477684c1d9e))
+* **roadmap:** reconcile the map with what the code now does ([884efbb](https://github.com/LECOQQ/qbit-ops/commit/884efbb22dafbe7e552e4b20e3fc22bc6638d2f0))
+* **source:** say what the code does, and say it once ([13ad3d6](https://github.com/LECOQQ/qbit-ops/commit/13ad3d61e2d9b0fe7e051fe71bf677a6d34e9018))
+* **tests:** drop a numbering no document in this repository defines ([c50a630](https://github.com/LECOQQ/qbit-ops/commit/c50a6309d43b7a0923c966d93b05bbf782f3db1b))
+* **tests:** drop references to a document no clone will ever have ([aea0d73](https://github.com/LECOQQ/qbit-ops/commit/aea0d73b5e4f347e5bf8ae0c4bf486e18cd8f8d8))
+* **tests:** let the test name carry the scenario, as the budget says ([744a050](https://github.com/LECOQQ/qbit-ops/commit/744a050af8d44b7333a3498c401ceddc0f05c11d))
+* **tests:** point the bulk spec reference at its delivered location ([ed7e2e5](https://github.com/LECOQQ/qbit-ops/commit/ed7e2e5d179718b16f19fec43fdf480a4291cd99))
+* **tests:** point the throttle suite at the delivered spec ([8446b56](https://github.com/LECOQQ/qbit-ops/commit/8446b5696c0599ee1c2e54cb8f5512f7edf24a2c))
+* **torrents:** document bulk rate limiting ([f28b94c](https://github.com/LECOQQ/qbit-ops/commit/f28b94ca7750365f21786c6976e410cd916997fa))
+
 ## [0.4.0](https://github.com/LECOQQ/qbit-ops/compare/v0.3.0...v0.4.0) (2026-08-13)
 
 
