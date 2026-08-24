@@ -51,6 +51,7 @@ class Fixture:
     torrent_path: Path
     has_payload: bool
     transfer_demo: bool
+    trackers: tuple[str, ...]
 
 
 def _make_payload(label: str, size: int) -> bytes:
@@ -69,7 +70,9 @@ def _pieces(payload: bytes) -> bytes:
     )
 
 
-def _build_torrent(*, file_name: str, payload: bytes) -> tuple[bytes, str]:
+def _build_torrent(
+    *, file_name: str, payload: bytes, trackers: tuple[str, ...] = ()
+) -> tuple[bytes, str]:
     info = {
         "name": file_name,
         "piece length": PIECE_LENGTH,
@@ -77,10 +80,14 @@ def _build_torrent(*, file_name: str, payload: bytes) -> tuple[bytes, str]:
         "length": len(payload),
     }
     info_hash = hashlib.sha1(bencode(info), usedforsecurity=False).hexdigest()
-    torrent = {
+    torrent: dict[str, object] = {
         "info": info,
         "created by": "qbit-ops demo (deterministic, synthetic)",
     }
+    if trackers:
+        # "announce" lives outside "info", so adding a tracker here can
+        # never change the infohash computed above.
+        torrent["announce"] = trackers[0]
     return bencode(torrent), info_hash
 
 
@@ -97,7 +104,10 @@ def load_fixtures() -> list[Fixture]:
         name = entry["name"]
         file_name = f"{name}.{entry['extension']}"
         payload = _make_payload(name, entry["payload_size"])
-        _, info_hash = _build_torrent(file_name=file_name, payload=payload)
+        trackers = tuple(entry.get("trackers", []))
+        _, info_hash = _build_torrent(
+            file_name=file_name, payload=payload, trackers=trackers
+        )
         fixtures.append(
             Fixture(
                 name=name,
@@ -108,6 +118,7 @@ def load_fixtures() -> list[Fixture]:
                 torrent_path=TORRENTS_DIR / f"{name}.torrent",
                 has_payload=entry["desired_state"] in WRITE_PAYLOAD_STATES,
                 transfer_demo=entry.get("transfer_demo", False),
+                trackers=trackers,
             )
         )
     return fixtures
@@ -127,8 +138,9 @@ def main() -> None:
         name = entry["name"]
         file_name = f"{name}.{entry['extension']}"
         payload = _make_payload(name, entry["payload_size"])
+        trackers = tuple(entry.get("trackers", []))
         torrent_bytes, info_hash = _build_torrent(
-            file_name=file_name, payload=payload
+            file_name=file_name, payload=payload, trackers=trackers
         )
 
         torrent_path = TORRENTS_DIR / f"{name}.torrent"

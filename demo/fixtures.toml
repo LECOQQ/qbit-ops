@@ -7,6 +7,16 @@
 # defaults to false) marks the single fixture `arm_transfer.py` hands
 # to the leecher container for the Overview's live transfer -- exactly
 # one fixture must carry it.
+#
+# trackers (optional, defaults to []) holds announce URLs baked into the
+# fixture's .torrent file at the top level, outside "info" -- see
+# `generate_fixtures.py::_build_torrent` for why that can never change
+# an infohash. Hosts are RFC 2606 `.example`/`.invalid` only, never a
+# real tracker: `tracker-primary.example` and `tracker-mirror.example`
+# resolve to the disposable tracker container (compose.yml) and answer
+# `/announce`; `tracker-error.example` resolves to the same container
+# but at a path it 404s on, for a tracker that responds with an error;
+# `tracker-dead.invalid` never resolves at all.
 
 [[fixture]]
 name = "Ubuntu 24.04 Desktop ISO"
@@ -15,6 +25,7 @@ extension = "iso"
 payload_size = 3_000_000
 desired_state = "seeding"
 transfer_demo = true
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Debian 12 Netinst ISO"
@@ -22,6 +33,7 @@ category = "linux"
 extension = "iso"
 payload_size = 2_400_000
 desired_state = "seeding"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Fedora Workstation 42"
@@ -29,6 +41,7 @@ category = "linux"
 extension = "iso"
 payload_size = 2_800_000
 desired_state = "seeding"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Arch Linux Monthly Snapshot"
@@ -36,6 +49,7 @@ category = "linux"
 extension = "iso"
 payload_size = 1_200_000
 desired_state = "completed-paused"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Documentary S01E01 -- The First Signal"
@@ -43,6 +57,7 @@ category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
 desired_state = "seeding"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Documentary S01E02 -- Into the Unknown"
@@ -50,6 +65,7 @@ category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
 desired_state = "seeding"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Documentary S01E03 -- The Long Return"
@@ -57,6 +73,7 @@ category = "sonarr"
 extension = "mkv"
 payload_size = 900_000
 desired_state = "completed-paused"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Example Movie (2025) MULTi 2160p HDR"
@@ -64,6 +81,7 @@ category = "radarr"
 extension = "mkv"
 payload_size = 2_000_000
 desired_state = "stalled-download"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Example Movie (2023) Director's Cut 1080p"
@@ -71,6 +89,7 @@ category = "radarr"
 extension = "mkv"
 payload_size = 1_500_000
 desired_state = "incomplete-paused"
+trackers = ["http://tracker-primary.example:6969/announce"]
 
 [[fixture]]
 name = "Open Climate Dataset 2020–2025"
@@ -78,6 +97,7 @@ category = "data"
 extension = "zip"
 payload_size = 1_000_000
 desired_state = "seeding"
+trackers = ["http://tracker-dead.invalid:6969/announce"]
 
 [[fixture]]
 name = "Public Domain Space Archive"
@@ -85,6 +105,7 @@ category = "data"
 extension = "zip"
 payload_size = 700_000
 desired_state = "completed-paused"
+trackers = ["http://tracker-mirror.example:6969/announce"]
 
 [[fixture]]
 name = "Family Photos Archive -- Synthetic Demo"
@@ -92,6 +113,7 @@ category = "archive"
 extension = "zip"
 payload_size = 1_100_000
 desired_state = "stalled-download"
+trackers = ["http://tracker-mirror.example:6969/announce"]
 
 [[fixture]]
 name = "Project Assets v2"
@@ -99,6 +121,7 @@ category = "projects"
 extension = "zip"
 payload_size = 500_000
 desired_state = "seeding"
+trackers = ["http://tracker-mirror.example:6969/announce"]
 
 [[fixture]]
 name = "Old Backup 2019"
@@ -106,6 +129,7 @@ category = "archive"
 extension = "zip"
 payload_size = 600_000
 desired_state = "completed-paused"
+trackers = ["http://tracker-error.example:6969/announce-unregistered"]
 
 [[fixture]]
 name = "Linux Kernel Source Mirror"
@@ -113,6 +137,7 @@ category = "linux"
 extension = "tar"
 payload_size = 1_800_000
 desired_state = "stalled-download"
+trackers = ["http://tracker-error.example:6969/announce-unregistered"]
 
 [[fixture]]
 name = "Creative Commons Audio Collection"
@@ -120,3 +145,4 @@ category = "audio"
 extension = "flac"
 payload_size = 1_300_000
 desired_state = "incomplete-paused"
+trackers = ["http://tracker-primary.example:6969/announce"]

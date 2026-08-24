@@ -6,6 +6,13 @@
 # peer discovery is. The two containers below are still explicitly paired
 # by demo/arm_transfer.py, over the private Docker network only, so the
 # Overview has a real transfer to plot -- see demo/README.md.
+#
+# The `tracker` service is the same disposable, stdlib-only HTTP tracker
+# used by `tests/integration` (bind-mounted read-only, never copied) --
+# reachable only by the RFC 2606 `.example` aliases fixtures.toml points
+# at, and not published to the host at all. `tracker-dead.invalid` (also
+# referenced by fixtures.toml) resolves nowhere on purpose and needs no
+# service.
 services:
   qbittorrent:
     image: linuxserver/qbittorrent:5.2.3
@@ -35,4 +42,20 @@ services:
     volumes:
       - ./generated/leecher-config:/config/qBittorrent
       - ./generated/leecher-downloads:/downloads
+    restart: "no"
+
+  tracker:
+    image: python:3.12-alpine
+    container_name: qbit-ops-demo-tracker
+    networks:
+      default:
+        aliases:
+          - tracker-primary.example
+          - tracker-mirror.example
+          - tracker-error.example
+    volumes:
+      - ../tests/integration/_tracker_service.py:/harness/_tracker_service.py:ro
+      - ../tests/integration/_bencode.py:/harness/_bencode.py:ro
+    working_dir: /harness
+    command: ["python3", "_tracker_service.py", "0.0.0.0", "6969"]
     restart: "no"
