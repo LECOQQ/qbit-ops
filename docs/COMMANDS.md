@@ -99,7 +99,7 @@ qbit-ops torrents stats
 qbit-ops torrents stats --category sonarr --format json
 qbit-ops explain torrent --hash abc123
 qbit-ops trackers status
-qbit-ops trackers add-if-present --source old.example --target new.example --category sonarr
+qbit-ops trackers add-if-present --source old.example --target "https://new.example/announce" --category sonarr
 qbit-ops torrents pause --category sonarr
 qbit-ops torrents pause --category sonarr --no-dry-run
 qbit-ops torrents import ubuntu.torrent
@@ -376,6 +376,40 @@ single value, and `--exclude-tracker` is not offered at all. A filter
 that cannot be honoured is refused, never silently dropped. The two
 commands accept exactly the same filters, with the same meanings.
 
+### Naming the tracker a mutation acts on
+
+`--source` (`add-if-present`, `replace`) and `--tracker` (`remove`)
+never need a passkey to *identify* the tracker: they are matched by
+`host[:port]` (a bare `old.example`, `old.example:8080`, or a full URL
+-- only its host survives), the same vocabulary the `--tracker` filter
+already uses. A literal `{passkey}` placeholder is also accepted, for
+the rarer case of one host serving more than one announce path
+(`https://old.example/announce/{passkey}`); it matches by shape and
+still never consults the actual value there. `--match` governs neither
+form -- see below.
+
+```bash
+# drop a tracker, but only within one category
+qbit-ops trackers remove --tracker old.example --category sonarr
+```
+
+When a host or template match sweeps more than one distinct tracker URL
+into the same selection -- a stale passkey left beside the current one
+is the usual cause -- `add-if-present` and `replace` refuse rather than
+guessing which one is "the" source; the refusal lists the candidates
+(never their secret) and names `--source-index` to pick one, or narrows
+with a filter until only one remains. `remove` never refuses this way:
+every matching URL is meant to go regardless.
+
+`--target` (`add-if-present`, `replace`) is the opposite: it is always
+the full announce URL written verbatim, because a tracker qbit-ops has
+never talked to cannot have its passkey position guessed. A `{passkey}`
+placeholder there is filled from `--passkey-stdin` or a hidden prompt,
+exactly like `replace-passkey`'s own `--tracker` -- see "Mutation
+rules" below for the same `--yes`-before-stdin-reads-twice rule.
+`--match` on these two commands governs only whether `--target` is
+already present on a torrent, never how `--source` is identified.
+
 ### What counts as a tracker
 
 qBittorrent lists DHT, PeX and LSD next to real trackers, as `** [DHT]
@@ -646,6 +680,7 @@ columns; `jsonl` emits exactly one compact document.
 - ❓ Low-risk mutations apply without a prompt; medium/high-risk mutations (tracker changes, `torrents delete`) prompt in an interactive terminal.
 - ⏭️ `--yes` skips that prompt but never enables real execution by itself.
 - 🔑 `trackers replace-passkey` never takes the new passkey as an argument: pipe it with `--new-passkey-stdin` (`echo "$PASSKEY" | qbit-ops trackers replace-passkey ... --new-passkey-stdin`), or leave it out for a hidden interactive prompt. Combined with `--no-dry-run`, piping it also needs `--yes`: the confirmation prompt cannot read stdin a second time.
+- 🔑 `trackers add-if-present`/`replace` follow the same rule for a `--target` carrying a `{passkey}` placeholder: pipe the value with `--passkey-stdin`, or a hidden prompt asks for it. Same `--yes`-before-`--no-dry-run` requirement when piping. `--source` never needs a passkey at all -- see "Naming the tracker a mutation acts on" above.
 - 🚫 Empty selections never mean “all”.
 - 🔌 `init` is not one of them: it writes qbit-ops' own configuration
   file, never the instance. No selector, nothing to preview, and

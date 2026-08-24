@@ -623,6 +623,164 @@ def test_replace_passkey_stdin_apply_without_yes_refuses_before_prompting(
     assert client.edited_trackers == []
 
 
+# --- --source needs no passkey; --target's own '{passkey}' template ----
+
+
+def test_add_if_present_source_matches_without_a_passkey_and_applies(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--source` never needs the tracker's passkey to identify it, even
+    though the torrent's real announce URL embeds one."""
+    client = _client_with_tracker(
+        f"https://tracker.example/announce/{SECRET_PASSKEY_MARKER}"
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce",
+            "--no-dry-run",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    assert "APPLIED" in result.stdout
+    assert client.added_trackers == [
+        (TORRENT_HASH, "https://other.example/announce")
+    ]
+
+
+def test_add_if_present_passkey_stdin_refuses_without_yes(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once --passkey-stdin has consumed stdin for --target, the
+    confirmation prompt cannot read it again -- refuse instead of
+    hanging or reading garbage, and never touch the client."""
+    _make_interactive(monkeypatch)
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce/{passkey}",
+            "--passkey-stdin",
+            "--no-dry-run",
+        ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--yes" in result.stderr
+    assert client.added_trackers == []
+
+
+def test_replace_target_passkey_stdin_refuses_without_yes(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_interactive(monkeypatch)
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce/{passkey}",
+            "--passkey-stdin",
+            "--no-dry-run",
+        ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--yes" in result.stderr
+    assert client.edited_trackers == []
+    assert client.removed_trackers == []
+
+
+def test_add_if_present_target_passkey_never_shown(
+    runner: CliRunner,
+    configure_qbit_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_interactive(monkeypatch)
+    monkeypatch.setattr(
+        "qbit_ops.cli.rendering.prompt_secret", lambda label: NEW_PASSKEY_MARKER
+    )
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce/{passkey}",
+            "--no-dry-run",
+            "--verbose",
+        ],
+        input="y\n",
+    )
+
+    combined = result.stdout + result.stderr
+    assert NEW_PASSKEY_MARKER not in combined
+    assert client.added_trackers == [
+        (
+            TORRENT_HASH,
+            f"https://other.example/announce/{NEW_PASSKEY_MARKER}",
+        )
+    ]
+
+
+def test_add_if_present_passkey_stdin_without_a_placeholder_is_refused(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    client = _client_with_tracker("https://tracker.example/announce")
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "add-if-present",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce",
+            "--passkey-stdin",
+        ],
+        input=f"{NEW_PASSKEY_MARKER}\n",
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "no effect" in result.stderr
+    assert client.added_trackers == []
+
+
 def test_remove_confirmation_redacts_tracker_query_string(
     runner: CliRunner,
     configure_qbit_backend,

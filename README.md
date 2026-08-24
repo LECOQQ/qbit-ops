@@ -208,19 +208,25 @@ occupies stdin, so the usual confirmation prompt cannot ask there too.
 **Follow a tracker that changed address.**
 
 ```bash
-qbit-ops trackers replace \
-  --source "https://old.example/announce" \
-  --target "https://new.example/announce"
+echo "$NEW_PASSKEY" | qbit-ops trackers replace \
+  --source "old.example" \
+  --target "https://new.example/announce/{passkey}" \
+  --passkey-stdin
 ```
 
-Every torrent announcing to the old one swaps to the new one. Torrents
-that never used it are not touched.
+`--source` names the old tracker by host -- never its passkey, since
+identifying a tracker was never what the passkey was for. `--target` is
+the new tracker's real announce URL; its own `{passkey}` is filled the
+same way `replace-passkey`'s is, because a tracker qbit-ops has never
+talked to cannot have its passkey position guessed. Every torrent
+announcing to the old one swaps to the new one; torrents that never
+used it are not touched.
 
 **Keep a dying tracker while you move off it.**
 
 ```bash
 qbit-ops trackers add-if-present \
-  --source "https://dying.example/announce" \
+  --source "dying.example" \
   --target "https://backup.example/announce"
 ```
 
@@ -232,7 +238,7 @@ if you only want part of the library.
 **Retire a tracker for good.**
 
 ```bash
-qbit-ops trackers remove --tracker "https://dead.example/announce"
+qbit-ops trackers remove --tracker "dead.example"
 ```
 
 Drops it from every torrent that still lists it.

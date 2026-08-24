@@ -244,6 +244,10 @@ class TrackerAdditionPlan:
     `scanned` counts every torrent in the instance, `matched` those the
     torrent filters kept, and `matched_source` those among them actually
     using the source tracker. Without a filter, `matched == scanned`.
+    `match` governs only whether `target_tracker` is already present
+    (`already_had_target`) -- `source_tracker` is always matched by host
+    or by '{passkey}' shape (see `_resolve_source_matcher`), never by
+    `match`.
     """
 
     source_tracker: str
@@ -267,10 +271,14 @@ class TrackerRemovalChange:
 
 @dataclass(frozen=True)
 class TrackerRemovalPlan:
-    """Plan for `plan_tracker_removal`."""
+    """Plan for `plan_tracker_removal`.
+
+    No `match` field: `tracker` is always matched by host or by
+    '{passkey}' shape (see `_resolve_source_matcher`), never by a
+    literal-URL comparison mode.
+    """
 
     tracker: str
-    match: TrackerMatchMode
     scanned: int
     matched: int
     matched_tracker: int
@@ -295,7 +303,13 @@ class TrackerReplacementChange:
 
 @dataclass(frozen=True)
 class TrackerReplacementPlan:
-    """Plan for `plan_tracker_replacement`."""
+    """Plan for `plan_tracker_replacement`.
+
+    `match` governs only whether `target_tracker` is already present on
+    a torrent (`TrackerReplacementChange.already_had_target`) --
+    `source_tracker` is always matched by host or by '{passkey}' shape
+    (see `_resolve_source_matcher`), never by `match`.
+    """
 
     source_tracker: str
     target_tracker: str
@@ -361,9 +375,16 @@ def redact_tracker_identity(url: str) -> str:
     string, and guessing which segment is secret is unreliable, so any
     identity shown in a prompt or preview is reduced to scheme +
     host[:port]. Rebuilds from `.hostname`/`.port` rather than
-    `.netloc`, which would include userinfo (`user:pass@host`).
+    `.netloc`, which would include userinfo (`user:pass@host`). Accepts
+    a bare host too (`--source`/`--tracker` no longer require a scheme,
+    see `_resolve_source_matcher`): without it, `urlsplit` would
+    misparse a bare `host:port` as scheme-colon-path instead of netloc,
+    so a schemeless value is parsed the same `//`-prefixed way
+    `normalize_tracker_host` already does.
     """
-    parsed = urlsplit(url.strip())
+    stripped = url.strip()
+    parseable = stripped if "://" in stripped else f"//{stripped}"
+    parsed = urlsplit(parseable)
     host = (parsed.hostname or "").lower()
     netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
     if parsed.scheme:
@@ -635,20 +656,33 @@ def plan_tracker_addition(
     source_tracker: str,
     target_tracker: str,
     match_mode: TrackerMatchMode = "exact",
+    source_index: int | None = None,
 ) -> TrackerAdditionPlan:
     """Plan adding a target tracker to torrents already using the source.
 
     Pure: consumes an already-collected `Inspection` and makes no
     qBittorrent call, so planning is testable without a client and the
     scan it plans from can be scoped by any `SelectionRequest`.
+
+    `source_tracker` is matched by host or by '{passkey}' shape (see
+    `_resolve_source_matcher`), never by its actual passkey value. When
+    that match is ambiguous across the selection, raises `RuntimeError`
+    unless `source_index` picks one candidate -- see
+    `_resolve_disambiguated_source_matcher`. `target_tracker` is always
+    written verbatim and must already be a real, resolved URL -- a
+    caller wanting a templated target resolves it with
+    `fill_passkey_template` first.
     """
+    matching_source_urls = _resolve_disambiguated_source_matcher(
+        inspection, source_tracker, source_index
+    )
     already_had_target: list[TrackerAdditionChange] = []
     changes: list[TrackerAdditionChange] = []
 
     for inspected in inspection.torrents:
         trackers = list(inspected.active_tracker_urls)
 
-        if not has_tracker(trackers, source_tracker, match_mode):
+        if not matching_source_urls(trackers):
             continue
 
         change = TrackerAdditionChange(
@@ -690,20 +724,24 @@ def apply_tracker_addition(client: Any, plan: TrackerAdditionPlan) -> None:
 def plan_tracker_removal(
     inspection: Inspection,
     tracker: str,
-    match_mode: TrackerMatchMode = "exact",
 ) -> TrackerRemovalPlan:
     """Plan removing a tracker from every torrent using it.
 
     Pure: consumes an already-collected `Inspection` and makes no
     qBittorrent call.
+
+    `tracker` is matched by host or by '{passkey}' shape (see
+    `_resolve_source_matcher`), never by its actual passkey value.
+    Unlike `add-if-present`/`replace`, an ambiguous match (more than one
+    distinct raw URL) is never refused here: removal has no "the"
+    source to pick -- every matching URL is meant to go regardless.
     """
+    matching_source_urls = _resolve_source_matcher(tracker)
     changes: list[TrackerRemovalChange] = []
 
     for inspected in inspection.torrents:
-        matching_tracker_urls = _get_matching_tracker_urls(
-            list(inspected.active_tracker_urls),
-            tracker,
-            match_mode,
+        matching_tracker_urls = matching_source_urls(
+            list(inspected.active_tracker_urls)
         )
 
         if not matching_tracker_urls:
@@ -719,7 +757,6 @@ def plan_tracker_removal(
 
     return TrackerRemovalPlan(
         tracker=tracker,
-        match=match_mode,
         scanned=inspection.selection.scanned,
         matched=len(inspection.torrents),
         matched_tracker=len(changes),
@@ -747,17 +784,26 @@ def plan_tracker_replacement(
     source_tracker: str,
     target_tracker: str,
     match_mode: TrackerMatchMode = "exact",
+    source_index: int | None = None,
 ) -> TrackerReplacementPlan:
     """Plan replacing a source tracker with a target on matching torrents.
 
     Pure: consumes an already-collected `Inspection` and makes no
     qBittorrent call.
+
+    `source_tracker` is matched by host or by '{passkey}' shape (see
+    `_resolve_source_matcher`), never by its actual passkey value. When
+    that match is ambiguous across the selection, raises `RuntimeError`
+    unless `source_index` picks one candidate -- see
+    `_resolve_disambiguated_source_matcher`. `target_tracker` is always
+    written verbatim and must already be a real, resolved URL -- a
+    caller wanting a templated target resolves it with
+    `fill_passkey_template` first.
     """
-    _ensure_distinct_tracker_identity(
-        source_tracker,
-        target_tracker,
-        match_mode,
+    matching_source_urls_fn = _resolve_disambiguated_source_matcher(
+        inspection, source_tracker, source_index
     )
+    _ensure_distinct_tracker_identity(matching_source_urls_fn, target_tracker)
 
     changes: list[TrackerReplacementChange] = []
 
@@ -765,11 +811,7 @@ def plan_tracker_replacement(
         torrent_hash = inspected.snapshot.hash
         torrent_name = inspected.snapshot.name
         trackers = list(inspected.active_tracker_urls)
-        matching_source_urls = _get_matching_tracker_urls(
-            trackers,
-            source_tracker,
-            match_mode,
-        )
+        matching_source_urls = matching_source_urls_fn(trackers)
 
         if not matching_source_urls:
             continue
@@ -975,6 +1017,29 @@ def _build_path_passkey_url(
     )
 
 
+def fill_passkey_template(template: str, passkey: str) -> str:
+    """Fill a tracker URL template's single '{passkey}' placeholder.
+
+    `template` must place the placeholder the same way `replace-passkey`
+    requires (see `_parse_passkey_template`): a full query parameter
+    value or a full path segment. Reuses that command's own builders, so
+    a query-position value is percent-encoded like any other query
+    parameter and a path-position value is inserted as-is -- the same
+    rules that already govern a real passkey fetched from qBittorrent.
+    Raises `RuntimeError` when the placeholder is missing, duplicated,
+    or not in one of those two positions.
+    """
+    _scheme, _netloc, mode, position = _parse_passkey_template(template)
+    stripped_template = template.strip()
+
+    if mode == "query":
+        assert isinstance(position, str)
+        return _build_query_passkey_url(stripped_template, position, passkey)
+
+    assert isinstance(position, int)
+    return _build_path_passkey_url(stripped_template, position, passkey)
+
+
 def plan_tracker_passkey_replacement(
     inspection: Inspection,
     tracker_template: str,
@@ -1118,20 +1183,192 @@ def _get_matching_tracker_urls(
     ]
 
 
-def _ensure_distinct_tracker_identity(
-    source_tracker: str,
-    target_tracker: str,
-    match_mode: TrackerMatchMode,
-) -> None:
-    """Raise `RuntimeError` when source and target normalize to the
-    same tracker identity."""
-    normalized_source = normalize_tracker_url(source_tracker, match_mode)
-    normalized_target = normalize_tracker_url(target_tracker, match_mode)
+def _resolve_source_matcher(source: str) -> Callable[[list[str]], list[str]]:
+    """Build a matcher for a `--source`/`--tracker` identity, once.
 
-    if normalized_source == normalized_target:
+    Two forms are accepted:
+
+    - a '{passkey}' placeholder anywhere in `source`: the matcher
+      recognizes a tracker URL by shape -- scheme, host, and every
+      non-placeholder path/query element -- and never by the actual
+      secret value there. Needed when one host serves more than one
+      announce path, so a bare host would over-match.
+    - otherwise, `source` is reduced to `host[:port]`
+      (`normalize_tracker_host` -- a bare host or any full announce URL,
+      only its host and port survive) and matched against every
+      tracker URL sharing that host, the same vocabulary `--tracker`
+      already uses on `torrents list` and the other read filters. No
+      passkey is ever required or consulted, and a tracker with no
+      secret in its URL at all (IP-authenticated) matches this way too.
+
+    Neither form consults a `TrackerMatchMode`: a query-position
+    placeholder already ignores the whole query, a path-position one
+    never inspects the query either, and host matching ignores
+    everything but host and port -- `exact`/`without-query` would be a
+    redundant restatement of what each form already says. Parsing
+    happens once here rather than per torrent, matching
+    `plan_tracker_passkey_replacement`'s own hoist-once-then-scan shape.
+
+    Either form can legitimately sweep more than one distinct raw
+    tracker URL into a single match -- see `_distinct_source_identities`.
+    """
+    if PASSKEY_PLACEHOLDER not in source:
+        normalized_host = normalize_tracker_host(source)
+        return lambda trackers: [
+            tracker_url
+            for tracker_url in trackers
+            if tracker_host_or_none(tracker_url) == normalized_host
+        ]
+
+    scheme, netloc, mode, position = _parse_passkey_template(source)
+    stripped_source = source.strip()
+
+    if mode == "query":
+        assert isinstance(position, str)
+        base_url = urlunsplit(
+            (scheme, netloc, urlsplit(stripped_source).path, "", "")
+        )
+        return lambda trackers: _get_matching_tracker_urls(
+            trackers, base_url, "without-query"
+        )
+
+    assert isinstance(position, int)
+    template_segments = urlsplit(stripped_source).path.split("/")
+    return lambda trackers: [
+        tracker_url
+        for tracker_url in trackers
+        if _match_path_passkey(
+            tracker_url, scheme, netloc, template_segments, position
+        )
+        is not None
+    ]
+
+
+def _ensure_distinct_tracker_identity(
+    matching_source_urls: Callable[[list[str]], list[str]],
+    target_tracker: str,
+) -> None:
+    """Raise `RuntimeError` when the target already identifies as the source.
+
+    Reuses the same matcher a scan applies to real tracker lists,
+    against a singleton list holding only `target_tracker` -- so a
+    host or '{passkey}'-templated source rejects a target sharing that
+    identity exactly as it would reject an existing tracker entry.
+    """
+    if matching_source_urls([target_tracker]):
         raise RuntimeError(
             "Source and target trackers resolve to the same tracker identity."
         )
+
+
+@dataclass(frozen=True)
+class _SourceIdentityCandidate:
+    """One distinct raw tracker URL an ambiguous source/tracker matches."""
+
+    url: str
+    torrent_count: int
+
+
+def _distinct_source_identities(
+    inspection: Inspection,
+    matching_source_urls: Callable[[list[str]], list[str]],
+) -> tuple[_SourceIdentityCandidate, ...]:
+    """Count torrents per distinct raw URL a source/tracker match hits.
+
+    Host and '{passkey}' template matching both deliberately ignore
+    part of the URL (the path/query, or just the secret) -- more than
+    one distinct raw URL can legitimately satisfy the same match (a
+    stale passkey left beside the current one, or a genuinely different
+    announce path at the same host), and this is what lets a caller
+    detect that instead of silently picking one. Sorted by torrent
+    count descending, ties broken by URL, so the listing an operator
+    sees is stable and leads with the most common candidate.
+    """
+    torrents_by_url: dict[str, int] = {}
+    for inspected in inspection.torrents:
+        matched = matching_source_urls(list(inspected.active_tracker_urls))
+        for url in dict.fromkeys(matched):
+            torrents_by_url[url] = torrents_by_url.get(url, 0) + 1
+
+    return tuple(
+        _SourceIdentityCandidate(url=url, torrent_count=count)
+        for url, count in sorted(
+            torrents_by_url.items(), key=lambda item: (-item[1], item[0])
+        )
+    )
+
+
+def _redact_source_candidate(url: str) -> str:
+    """Render one ambiguous source candidate without exposing its secret.
+
+    Reuses `describe_tracker_url`'s structural redaction rather than a
+    bespoke renderer: in host mode there is no way to know which
+    segment, if any, is the secret, so every non-empty path segment is
+    reduced to a uniform `<secret>` placeholder, same as everywhere else
+    a tracker identity reaches a prompt or preview.
+    """
+    identity = describe_tracker_url(url)
+    scheme = f"{identity.scheme}://" if identity.scheme else ""
+    return f"{scheme}{identity.identity}{identity.path_shape or ''}"
+
+
+def _ambiguous_source_message(
+    candidates: tuple[_SourceIdentityCandidate, ...],
+) -> str:
+    lines = [
+        f"Refusing: {len(candidates)} distinct identities matched by this "
+        "source in this selection",
+        "",
+    ]
+    lines.extend(
+        f"  [{index}]  {_redact_source_candidate(candidate.url)}   "
+        f"{candidate.torrent_count} torrent(s)"
+        for index, candidate in enumerate(candidates, start=1)
+    )
+    lines.append("")
+    lines.append(
+        "Choose one with --source-index, or narrow the selection with a "
+        "filter."
+    )
+    return "\n".join(lines)
+
+
+def _resolve_disambiguated_source_matcher(
+    inspection: Inspection,
+    source: str,
+    source_index: int | None,
+) -> Callable[[list[str]], list[str]]:
+    """Resolve `source` to a matcher, refusing an ambiguous match.
+
+    See `_resolve_source_matcher` for how `source` is matched, and
+    `_distinct_source_identities` for what "ambiguous" means. Only
+    `plan_tracker_addition` and `plan_tracker_replacement` call this:
+    both build a preview around "the" source tracker, and `replace`
+    additionally picks one raw URL to edit -- neither has a sound way to
+    break a tie on its own, so this refuses rather than guessing.
+    `plan_tracker_removal` has no such concept (every matching URL is
+    meant to go regardless) and calls `_resolve_source_matcher` directly.
+    """
+    matcher = _resolve_source_matcher(source)
+    candidates = _distinct_source_identities(inspection, matcher)
+
+    if len(candidates) <= 1:
+        return matcher
+
+    if source_index is None:
+        raise RuntimeError(_ambiguous_source_message(candidates))
+
+    if not 1 <= source_index <= len(candidates):
+        raise RuntimeError(
+            f"--source-index {source_index} is out of range: "
+            f"{len(candidates)} distinct identities found "
+            f"(valid range 1-{len(candidates)})."
+        )
+
+    chosen_url = candidates[source_index - 1].url
+    return lambda trackers: [
+        tracker_url for tracker_url in trackers if tracker_url == chosen_url
+    ]
 
 
 def _get_torrent_hash(torrent: Any) -> str:

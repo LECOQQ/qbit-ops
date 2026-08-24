@@ -1,10 +1,13 @@
 """Tracker-mutation scenarios against real, disposable qBittorrent instances.
 
 Only the disposable in-network tracker identity is ever used as a
-source/target value -- never a real URL or passkey. Source/target
-matching uses full announce URLs (verified against the real CLI: the
-default `--match exact` mode compares the full tracker URL, not a bare
-`host:port` -- see the Docker matrix implementation note).
+source/target value -- never a real URL or passkey. `--source`/
+`--tracker` values here are full announce URLs for readability, but are
+actually matched by host[:port] (`qbit_core.features.trackers`'s
+`_resolve_source_matcher`): `MIRROR_TRACKER_URL`/`THIRD_TRACKER_URL` use
+a distinct *port*, not just a distinct path, specifically so they stay
+distinguishable from `TRACKER_URL` under that host-only comparison.
+`--target` is always written verbatim as the full URL given.
 """
 
 from __future__ import annotations

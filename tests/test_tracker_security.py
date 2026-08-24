@@ -26,6 +26,7 @@ from qbit_core.features.trackers import (
     sanitize_tracker_text,
 )
 from qbit_ops.cli.app import app
+from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import print_error
 from tests.support import FakeQbitClient, make_torrent
 
@@ -386,6 +387,51 @@ def test_replace_confirmation_never_leaks_secrets(
 
     _assert_no_secrets(result.stdout)
     _assert_no_secrets(result.stderr)
+
+
+def test_replace_ambiguous_source_refusal_never_leaks_secrets(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Two torrents each carrying a distinct passkey under the same host
+    is exactly what --source's host matching cannot safely pick one
+    from -- the refusal must name neither secret, and must surface as a
+    clean, actionable error rather than an internal one."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash=TORRENT_A, name="A"),
+            make_torrent(hash=TORRENT_B, name="B"),
+        ],
+        trackers_by_hash={
+            TORRENT_A: [
+                {"url": f"https://tracker.example/announce/{SECRET_PASSKEY}"}
+            ],
+            TORRENT_B: [
+                {"url": "https://tracker.example/announce/OTHER-SECRET-PASSKEY"}
+            ],
+        },
+    )
+    configure_qbit_backend(client=client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trackers",
+            "replace",
+            "--source",
+            "tracker.example",
+            "--target",
+            "https://other.example/announce",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "Internal error" not in result.stdout
+    assert "Internal error" not in result.stderr
+    assert "--source-index" in result.stdout + result.stderr
+    _assert_no_secrets(result.stdout)
+    _assert_no_secrets(result.stderr)
+    assert "OTHER-SECRET-PASSKEY" not in result.stdout
+    assert "OTHER-SECRET-PASSKEY" not in result.stderr
 
 
 def test_mutation_verbose_summary_never_leaks_secrets(

@@ -29,6 +29,7 @@ from qbit_core.shared.selection import SelectionRequest
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
+    resolve_tracker_target,
     run_mutation,
 )
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
@@ -90,14 +91,25 @@ def add_if_present(
         str,
         typer.Option(
             "--source",
-            help="Source tracker that must already be present.",
+            help="Source tracker that must already be present: a host "
+            "(e.g. 'old.example', 'old.example:8080') matched the same "
+            "way '--tracker' filters do, or a full URL with a literal "
+            "'{passkey}' placeholder when one host serves more than one "
+            "announce path. Never needs the source's own passkey.",
         ),
     ],
     target: Annotated[
         str,
         typer.Option(
             "--target",
-            help="Target tracker to add when missing.",
+            help="Target tracker to add when missing -- always the full "
+            "announce URL qBittorrent will use, verbatim. A tracker this "
+            "tool has never seen cannot have its passkey position "
+            "guessed, so a placeholder is required when there is a "
+            "secret: 'https://new.example/announce/{passkey}' (path) or "
+            "'https://new.example/announce?passkey={passkey}' (query), "
+            "filled from --passkey-stdin or a hidden prompt. A tracker "
+            "with no secret in its URL is passed as-is.",
         ),
     ],
     category: CategoryOption = [],  # noqa: B006
@@ -145,9 +157,32 @@ def add_if_present(
         TrackerMatchModeOption,
         typer.Option(
             "--match",
-            help="Tracker comparison mode.",
+            help="Comparison mode for whether --target is already "
+            "present on a torrent. Does not affect how --source is "
+            "identified.",
         ),
     ] = TrackerMatchModeOption.exact,
+    source_index: Annotated[
+        int | None,
+        typer.Option(
+            "--source-index",
+            help="Pick one candidate (1-based) when --source matches "
+            "more than one distinct tracker URL in the selection -- the "
+            "refusal message lists them.",
+        ),
+    ] = None,
+    passkey_stdin: Annotated[
+        bool,
+        typer.Option(
+            "--passkey-stdin",
+            help="Read the target's passkey from stdin (one line), like "
+            "'docker login --password-stdin'. Only meaningful when "
+            "--target carries a '{passkey}' placeholder; without it, "
+            "the passkey is asked for interactively with the input "
+            "hidden. Combined with --no-dry-run, requires --yes: the "
+            "confirmation prompt cannot also read stdin.",
+        ),
+    ] = False,
     assume_yes: Annotated[
         bool,
         typer.Option(
@@ -174,6 +209,13 @@ def add_if_present(
         target = require_non_blank(target, field_name="--target")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+
+    target = resolve_tracker_target(
+        target,
+        passkey_stdin=passkey_stdin,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+    )
 
     try:
         filters = build_filter_from_options(
@@ -228,12 +270,16 @@ def add_if_present(
                 SelectionRequest(filters=filters),
                 on_progress=advance,
             )
-            plan = plan_tracker_addition(
-                inspection,
-                source_tracker=source,
-                target_tracker=target,
-                match_mode=match.value,
-            )
+            try:
+                plan = plan_tracker_addition(
+                    inspection,
+                    source_tracker=source,
+                    target_tracker=target,
+                    match_mode=match.value,
+                    source_index=source_index,
+                )
+            except RuntimeError as error:
+                error_boundary.fail(str(error))
 
     def _apply() -> None:
         try:
@@ -639,14 +685,25 @@ def replace(
         str,
         typer.Option(
             "--source",
-            help="Source tracker to replace.",
+            help="Source tracker to replace: a host (e.g. 'old.example', "
+            "'old.example:8080') matched the same way '--tracker' filters "
+            "do, or a full URL with a literal '{passkey}' placeholder "
+            "when one host serves more than one announce path. Never "
+            "needs the source's own passkey.",
         ),
     ],
     target: Annotated[
         str,
         typer.Option(
             "--target",
-            help="Target tracker to keep after replacement.",
+            help="Target tracker to keep after replacement -- always the "
+            "full announce URL qBittorrent will use, verbatim. A tracker "
+            "this tool has never seen cannot have its passkey position "
+            "guessed, so a placeholder is required when there is a "
+            "secret: 'https://new.example/announce/{passkey}' (path) or "
+            "'https://new.example/announce?passkey={passkey}' (query), "
+            "filled from --passkey-stdin or a hidden prompt. A tracker "
+            "with no secret in its URL is passed as-is.",
         ),
     ],
     dry_run: Annotated[
@@ -660,9 +717,32 @@ def replace(
         TrackerMatchModeOption,
         typer.Option(
             "--match",
-            help="Tracker comparison mode.",
+            help="Comparison mode for whether --target is already "
+            "present on a torrent. Does not affect how --source is "
+            "identified.",
         ),
     ] = TrackerMatchModeOption.exact,
+    source_index: Annotated[
+        int | None,
+        typer.Option(
+            "--source-index",
+            help="Pick one candidate (1-based) when --source matches "
+            "more than one distinct tracker URL in the selection -- the "
+            "refusal message lists them.",
+        ),
+    ] = None,
+    passkey_stdin: Annotated[
+        bool,
+        typer.Option(
+            "--passkey-stdin",
+            help="Read the target's passkey from stdin (one line), like "
+            "'docker login --password-stdin'. Only meaningful when "
+            "--target carries a '{passkey}' placeholder; without it, "
+            "the passkey is asked for interactively with the input "
+            "hidden. Combined with --no-dry-run, requires --yes: the "
+            "confirmation prompt cannot also read stdin.",
+        ),
+    ] = False,
     assume_yes: Annotated[
         bool,
         typer.Option(
@@ -718,6 +798,14 @@ def replace(
         target = require_non_blank(target, field_name="--target")
     except InvalidInputError as error:
         error_boundary.fail(str(error), ErrorCategory.INVALID_INPUT)
+
+    target = resolve_tracker_target(
+        target,
+        passkey_stdin=passkey_stdin,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+    )
+
     try:
         filters = build_filter_from_options(
             category=category,
@@ -771,12 +859,16 @@ def replace(
                 SelectionRequest(filters=filters),
                 on_progress=advance,
             )
-            plan = plan_tracker_replacement(
-                inspection,
-                source_tracker=source,
-                target_tracker=target,
-                match_mode=match.value,
-            )
+            try:
+                plan = plan_tracker_replacement(
+                    inspection,
+                    source_tracker=source,
+                    target_tracker=target,
+                    match_mode=match.value,
+                    source_index=source_index,
+                )
+            except RuntimeError as error:
+                error_boundary.fail(str(error))
 
     def _apply() -> None:
         try:
@@ -1049,7 +1141,11 @@ def remove(
         str,
         typer.Option(
             "--tracker",
-            help="Tracker to remove from every torrent using it.",
+            help="Tracker to remove from every torrent using it: a host "
+            "(e.g. 'old.example', 'old.example:8080') matched the same "
+            "way '--tracker' filters do, or a full URL with a literal "
+            "'{passkey}' placeholder when one host serves more than one "
+            "announce path. Never needs a passkey.",
         ),
     ],
     dry_run: Annotated[
@@ -1059,13 +1155,6 @@ def remove(
             help="Apply changes instead of previewing them.",
         ),
     ] = True,
-    match: Annotated[
-        TrackerMatchModeOption,
-        typer.Option(
-            "--match",
-            help="Tracker comparison mode.",
-        ),
-    ] = TrackerMatchModeOption.exact,
     assume_yes: Annotated[
         bool,
         typer.Option(
@@ -1176,7 +1265,6 @@ def remove(
             plan = plan_tracker_removal(
                 inspection,
                 tracker=tracker,
-                match_mode=match.value,
             )
 
     def _apply() -> None:

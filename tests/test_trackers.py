@@ -10,6 +10,7 @@ from qbit_core.features.trackers import (
     apply_tracker_removal,
     apply_tracker_replacement,
     export_tracker_state,
+    fill_passkey_template,
     has_tracker,
     inspect_tracker,
     list_tracker_usage,
@@ -316,6 +317,143 @@ def test_plan_tracker_addition_reports_already_had_target() -> None:
     assert plan.already_had_target[0].hash == "hash-a"
 
 
+# --- --source/--tracker identification: host and '{passkey}' shape ------
+#
+# `--source` (add-if-present, replace) and `--tracker` (remove) are never
+# compared as a literal URL: a bare host is matched by host[:port]
+# (`normalize_tracker_host`/`tracker_host_or_none`, the same vocabulary
+# `--tracker` filters use elsewhere), and a '{passkey}' placeholder is
+# matched by shape, ignoring whatever value currently occupies it. Either
+# way, no passkey is ever required to name the tracker being acted on.
+
+
+def test_plan_tracker_addition_matches_source_by_bare_host() -> None:
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce"}],
+            "hash-b": [{"url": "https://tracker-c.example/announce"}],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        _inspection(client),
+        source_tracker="tracker-a.example",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 1
+    assert len(plan.changes) == 1
+    assert plan.changes[0].hash == "hash-a"
+
+
+def test_plan_tracker_addition_matches_source_without_its_passkey() -> None:
+    """A `--source` that never carries a secret still matches a torrent
+    whose real announce URL embeds one -- the réflexe de contrôle for the
+    security fix this behavior exists for."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {
+                    "url": "https://tracker-a.example/announce/"
+                    "UNMISTAKABLE-REAL-PASSKEY"
+                }
+            ],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        _inspection(client),
+        source_tracker="https://tracker-a.example/announce",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 1
+    assert len(plan.changes) == 1
+
+
+def test_plan_tracker_addition_matches_source_by_passkey_template() -> None:
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce/REAL-PASSKEY"}
+            ],
+            "hash-b": [{"url": "https://tracker-a.example/other-path/x"}],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        _inspection(client),
+        source_tracker="https://tracker-a.example/announce/{passkey}",
+        target_tracker="https://tracker-b.example/announce",
+    )
+
+    assert plan.matched_source == 1
+    assert plan.changes[0].hash == "hash-a"
+
+
+def test_plan_tracker_addition_refuses_ambiguous_source() -> None:
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce?sig=a"}],
+            "hash-b": [{"url": "https://tracker-a.example/announce?sig=b"}],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="distinct identities"):
+        plan_tracker_addition(
+            _inspection(client),
+            source_tracker="tracker-a.example",
+            target_tracker="https://tracker-b.example/announce",
+        )
+
+
+def test_plan_tracker_addition_source_index_narrows_which_torrents_match() -> (
+    None
+):
+    """Two torrents, each carrying one of two distinct identities under the
+    same host: without `source_index` both would be ambiguous together;
+    picking one index selects only the torrent carrying that identity."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [{"url": "https://tracker-a.example/announce?sig=a"}],
+            "hash-b": [{"url": "https://tracker-a.example/announce?sig=b"}],
+        }
+    )
+
+    plan = plan_tracker_addition(
+        _inspection(client),
+        source_tracker="tracker-a.example",
+        target_tracker="https://tracker-b.example/announce",
+        source_index=1,
+    )
+
+    assert plan.matched_source == 1
+    assert plan.changes[0].hash == "hash-a"
+
+
+def test_plan_tracker_removal_matches_tracker_without_a_passkey() -> None:
+    """The sibling of the add-if-present/replace fix: `remove --tracker`
+    never writes anything, so it should never have needed a passkey
+    either -- confirmed here the same way."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {
+                    "url": "https://tracker-a.example/announce/"
+                    "UNMISTAKABLE-REAL-PASSKEY"
+                }
+            ],
+        }
+    )
+
+    plan = plan_tracker_removal(
+        _inspection(client),
+        tracker="tracker-a.example",
+    )
+
+    assert plan.matched_tracker == 1
+
+
 def test_plan_tracker_removal_reports_matching_torrents() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
@@ -335,7 +473,7 @@ def test_plan_tracker_removal_reports_matching_torrents() -> None:
     assert client.removed_trackers == []
 
 
-def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
+def test_apply_tracker_removal_matches_query_variants_by_host() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -348,7 +486,6 @@ def test_apply_tracker_removal_matches_query_variants_without_query() -> None:
     plan = plan_tracker_removal(
         _inspection(client),
         tracker="https://tracker.example/announce",
-        match_mode="without-query",
     )
     apply_tracker_removal(client, plan)
 
@@ -492,7 +629,50 @@ def test_plan_tracker_replacement_removes_source_when_target_exists() -> None:
     ]
 
 
-def test_apply_tracker_replacement_removes_extra_variants() -> None:
+def test_plan_tracker_replacement_refuses_ambiguous_source() -> None:
+    """Two distinct raw URLs sharing a host -- a stale passkey left beside
+    the current one is the real-world shape of this -- is exactly what a
+    bare-host `--source` cannot safely pick `[0]` from: refuse instead of
+    silently choosing one."""
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce?sig=a"},
+                {"url": "https://tracker-a.example/announce?sig=b"},
+            ],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="distinct identities"):
+        plan_tracker_replacement(
+            _inspection(client),
+            source_tracker="https://tracker-a.example/announce",
+            target_tracker="https://tracker-b.example/announce",
+        )
+
+
+def test_plan_tracker_replacement_refusal_never_shows_a_secret() -> None:
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce/OLD-SECRET"},
+                {"url": "https://tracker-a.example/announce/NEW-SECRET"},
+            ],
+        }
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        plan_tracker_replacement(
+            _inspection(client),
+            source_tracker="https://tracker-a.example/announce",
+            target_tracker="https://tracker-b.example/announce",
+        )
+
+    assert "OLD-SECRET" not in str(excinfo.value)
+    assert "NEW-SECRET" not in str(excinfo.value)
+
+
+def test_apply_tracker_replacement_resolves_ambiguity_by_index() -> None:
     client = FakeQbitClient(
         trackers_by_hash={
             "hash-a": [
@@ -506,13 +686,13 @@ def test_apply_tracker_replacement_removes_extra_variants() -> None:
         _inspection(client),
         source_tracker="https://tracker-a.example/announce",
         target_tracker="https://tracker-b.example/announce",
-        match_mode="without-query",
+        source_index=1,
     )
     apply_tracker_replacement(client, plan)
 
     assert plan.matched_source == 1
     assert plan.replaced_url_count == 1
-    assert plan.removed_url_count == 1
+    assert plan.removed_url_count == 0
     assert client.edited_trackers == [
         (
             "hash-a",
@@ -520,9 +700,26 @@ def test_apply_tracker_replacement_removes_extra_variants() -> None:
             "https://tracker-b.example/announce",
         )
     ]
-    assert client.removed_trackers == [
-        ("hash-a", ["https://tracker-a.example/announce?sig=b"])
-    ]
+    assert client.removed_trackers == []
+
+
+def test_plan_tracker_replacement_rejects_out_of_range_source_index() -> None:
+    client = FakeQbitClient(
+        trackers_by_hash={
+            "hash-a": [
+                {"url": "https://tracker-a.example/announce?sig=a"},
+                {"url": "https://tracker-a.example/announce?sig=b"},
+            ],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="out of range"):
+        plan_tracker_replacement(
+            _inspection(client),
+            source_tracker="https://tracker-a.example/announce",
+            target_tracker="https://tracker-b.example/announce",
+            source_index=3,
+        )
 
 
 def test_replace_tracker_passkey_rejects_template_without_placeholder() -> None:
@@ -778,6 +975,60 @@ def test_plan_passkey_replacement_ignores_unmatched_trackers() -> None:
     assert plan.already_up_to_date == 0
     assert plan.changes == ()
     assert client.edited_trackers == []
+
+
+# --- fill_passkey_template: resolving --target's own '{passkey}' -------
+
+
+def test_fill_passkey_template_fills_a_query_placeholder() -> None:
+    filled = fill_passkey_template(
+        "https://tracker.example/announce?passkey={passkey}",
+        "UNMISTAKABLE-NEW-PASSKEY-VALUE",
+    )
+
+    assert filled == (
+        "https://tracker.example/announce?passkey=UNMISTAKABLE-NEW-PASSKEY-VALUE"
+    )
+
+
+def test_fill_passkey_template_preserves_other_query_params() -> None:
+    filled = fill_passkey_template(
+        "https://tracker.example/announce?a=1&passkey={passkey}&b=2",
+        "UNMISTAKABLE-NEW-PASSKEY-VALUE",
+    )
+
+    assert filled == (
+        "https://tracker.example/announce"
+        "?a=1&passkey=UNMISTAKABLE-NEW-PASSKEY-VALUE&b=2"
+    )
+
+
+def test_fill_passkey_template_fills_a_path_segment() -> None:
+    filled = fill_passkey_template(
+        "https://tracker.example/announce/{passkey}",
+        "UNMISTAKABLE-NEW-PASSKEY-VALUE",
+    )
+
+    assert filled == (
+        "https://tracker.example/announce/UNMISTAKABLE-NEW-PASSKEY-VALUE"
+    )
+
+
+def test_fill_passkey_template_rejects_a_template_without_a_placeholder() -> (
+    None
+):
+    with pytest.raises(RuntimeError, match="placeholder"):
+        fill_passkey_template(
+            "https://tracker.example/announce", "UNMISTAKABLE-NEW-PASSKEY-VALUE"
+        )
+
+
+def test_fill_passkey_template_rejects_a_duplicated_placeholder() -> None:
+    with pytest.raises(RuntimeError, match="exactly one"):
+        fill_passkey_template(
+            "https://tracker.example/{passkey}/announce/{passkey}",
+            "UNMISTAKABLE-NEW-PASSKEY-VALUE",
+        )
 
 
 # --- NO_MATCH vs NO_CHANGES: matched count vs actual changes -----------
