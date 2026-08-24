@@ -288,9 +288,15 @@ demo-beautify: ## use: Compose the recorded captures for the README
 	else \
 		printf '[SKIP] qbit-ops-demo.gif -- not recorded\n' >&2; \
 	fi
+	@if [ -f demo/output/overview.png ]; then \
+		beautify render demo/output/overview.png --canvas 1280x640 \
+			--background $(BEAUTIFY_HERO) $(BEAUTIFY_FRAME) \
+			--format png --quiet --force \
+			--output demo/output/social-preview.png; \
+	fi
 	@printf '\n'
-	@ls -la demo/output/*.webp demo/output/*hero.gif 2>/dev/null \
-		| awk '{printf "  %-46s %s\n", $$9, $$5}'
+	@ls -la demo/output/*.webp demo/output/*hero.gif demo/output/social-preview.png \
+		2>/dev/null | awk '{printf "  %-46s %s\n", $$9, $$5}'
 
 demo-down: ## use: Stop and remove the demo containers, network, and all qBittorrent state
 	@$(DEMO_COMPOSE) down -v --remove-orphans
