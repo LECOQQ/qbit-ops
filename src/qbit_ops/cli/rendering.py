@@ -1761,7 +1761,7 @@ def bulk_torrent_summary_rows(
 ) -> dict[str, Any]:
     """Build `print_summary` rows for a bulk torrent action plan.
 
-    `filter`/`value` describe whichever selector was actually used
+    `selector`/`value` describe whichever selector was actually used
     (`--hash`, `--all`, or one or more combined filters, rendered by
     `describe_torrent_filter` -- never a raw tracker URL, so a passkey
     can never reach this summary).
@@ -1778,7 +1778,7 @@ def bulk_torrent_summary_rows(
 
     rows: dict[str, Any] = {
         "action": plan.action,
-        "filter": selector_kind,
+        "selector": selector_kind,
         "value": selector_value,
         "scanned": plan.scanned,
         "matched": plan.matched,
