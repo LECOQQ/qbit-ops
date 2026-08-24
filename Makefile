@@ -13,10 +13,29 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-down demo-doctor
+.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-beautify demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
+
+# One hue per still, all from beautify's aurora/nebula family: same
+# near-black base, same halo geometry, only the tint changes. Six
+# unrelated backgrounds would read as six projects; six shades of one
+# family read as one product that took the trouble.
+#
+# Warm and cool alternate down the README grid so no two neighbours
+# clash, and `preview` -- the frozen "here is what would change" --
+# takes the crimson: it is the frame that carries the whole thesis.
+BEAUTIFY_SHOTS := overview:aurora-teal torrents:aurora-gold \
+                  search:aurora-emerald filters:nebula-rose \
+                  details:aurora-purple preview:nebula-crimson
+
+# The hero GIF opens on the Overview, so it takes the Overview's tint.
+BEAUTIFY_HERO := aurora-teal
+
+# `--radius` is in the pixels because GitHub strips
+# `style="border-radius"` from rendered Markdown.
+BEAUTIFY_FRAME := --frame macos-dark --radius 2%
 
 .sync-stamp: pyproject.toml poetry.lock
 	@poetry install --sync --extras "tui mcp" --no-interaction
@@ -232,13 +251,44 @@ demo-reset: demo-down ## use: Destroy and recreate the demo instance from scratc
 	@rm -rf demo/generated
 	@$(MAKE) demo-up
 
-demo-record: demo-transfer ## use: Record demo/tui.tape with VHS (requires VHS installed separately)
+demo-record: demo-transfer ## use: Record the hero GIF and the README stills with VHS
 	@if ! command -v vhs >/dev/null 2>&1; then \
 		printf '[MISSING] vhs not found -- install from https://github.com/charmbracelet/vhs\n' >&2; \
 		exit 1; \
 	fi
 	@mkdir -p demo/output
 	@vhs demo/tui.tape
+	@vhs demo/shots.tape
+	@rm -f demo/output/_shots-throwaway.gif
+	@printf '\n'
+	@ls -la demo/output/*.gif demo/output/*.png 2>/dev/null | awk '{printf "  %-46s %s\n", $$9, $$5}'
+	@printf '\nNext: make demo-beautify\n'
+
+demo-beautify: ## use: Compose the recorded captures for the README
+	@if ! command -v beautify >/dev/null 2>&1; then \
+		printf '[MISSING] beautify not found -- install from ~/dev/mir/beautify (make install)\n' >&2; \
+		exit 1; \
+	fi
+	@for pair in $(BEAUTIFY_SHOTS); do \
+		name=$${pair%%:*}; hue=$${pair##*:}; \
+		if [ ! -f "demo/output/$$name.png" ]; then \
+			printf '[SKIP] %s.png -- not recorded\n' "$$name" >&2; \
+			continue; \
+		fi; \
+		beautify render "demo/output/$$name.png" \
+			--background "$$hue" $(BEAUTIFY_FRAME) --format webp --quiet --force \
+			--output "demo/output/$$name.webp"; \
+	done
+	@if [ -f demo/output/qbit-ops-demo.gif ]; then \
+		beautify render demo/output/qbit-ops-demo.gif \
+			--background $(BEAUTIFY_HERO) $(BEAUTIFY_FRAME) --quiet --force \
+			--output demo/output/qbit-ops-hero.gif; \
+	else \
+		printf '[SKIP] qbit-ops-demo.gif -- not recorded\n' >&2; \
+	fi
+	@printf '\n'
+	@ls -la demo/output/*.webp demo/output/*hero.gif 2>/dev/null \
+		| awk '{printf "  %-46s %s\n", $$9, $$5}'
 
 demo-down: ## use: Stop and remove the demo containers, network, and all qBittorrent state
 	@$(DEMO_COMPOSE) down -v --remove-orphans
