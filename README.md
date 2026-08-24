@@ -18,7 +18,7 @@
 🧯 **A tiny qBittorrent CLI and TUI for people who don't want to nuke their
 seedbox by accident.**
 
-Inspect, diagnose and automate qBittorrent at scale - with composable filters, bulk operations, and dry-run safeguards.
+Inspect, diagnose and automate qBittorrent at a scale too big to manage by hand - and see exactly what a change will touch before it touches anything.
 
 > ✨ Featured in [Self-Host Weekly](https://selfh.st/weekly/2026-08-07/) by selfh.st.
 
@@ -271,11 +271,10 @@ qbit-ops torrents reannounce --stalled --no-dry-run
 ## 🎯 Target exactly what you mean
 
 Filters compose - repeat one for **or**, mix different ones for **and**,
-exclude with `--exclude-*`. Category, tag, save path, name, state, size,
-ratio, progress, age, tracker, tracker health and more: the same
-selector everywhere, listing or mutating.
+exclude with `--exclude-*` - and it's the same grammar whether you're
+listing or mutating, on the command line or in the TUI.
 
-Full grammar in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
+Full field reference in [docs/COMMANDS.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMMANDS.md).
 
 ## 🔍 Watch, explain, script
 
@@ -337,6 +336,11 @@ those letters live in three unrelated Unicode blocks, so a font
 covering only some of them renders the rest at a different size. Run
 `qbit-ops doctor` to see which blocks a font would need.
 
+Filters use the same grammar as the CLI, but as a draft: set them
+across four panes -- Organisation, State, Measures, Trackers -- and
+nothing moves until you hit Apply, with the footer keeping count of
+what's pending, what's invalid, and what actually landed.
+
 | Overview | Torrents |
 |---|---|
 | ![Overview workspace](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/overview.webp) | ![Torrent table](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrents.webp) |
@@ -375,10 +379,12 @@ in its config file:
 It reads the same configuration the CLI does, so if `qbit-ops status`
 works, this works.
 
-**Five tools, no mutation.** `library_summary`, `find_torrents`,
-`aggregate_stats`, `inspect_torrent`, `explain_torrent` -- nothing that
-pauses, deletes or edits anything. Answers stay small whatever the library size, so a
-large one is explored by drilling down rather than dumped whole.
+**Five tools, no mutation.** Start broad with `library_summary`, narrow
+with `find_torrents` or total a selection with `aggregate_stats`, then
+settle on one torrent with `inspect_torrent` or `explain_torrent` --
+nothing that pauses, deletes or edits anything. Answers stay small
+whatever the library size, so a large one is explored by drilling down
+rather than dumped whole.
 
 > **Experimental and personal.** This is a spike, not a supported
 > surface: it may be extended, or removed. See
