@@ -22,9 +22,10 @@ Inspect, diagnose and automate qBittorrent at a scale too big to manage by hand 
 
 > ✨ Featured in [Self-Host Weekly](https://selfh.st/weekly/2026-08-07/) by selfh.st.
 
-[![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo-poster.webp)](https://github.com/LECOQQ/qbit-ops/blob/main/docs/assets/qbit-ops-demo.gif)
+![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo.gif)
 
-<p align="center"><em>▶ Click for the animated demo.</em></p>
+<p align="center"><em>A live transfer, a filter, and a bulk pause shown
+before it is applied -- then abandoned. Nothing moved.</em></p>
 
 ## 🚀 Get started
 
@@ -351,9 +352,13 @@ what's pending, what's invalid, and what actually landed.
 |---|---|
 | ![Overview workspace](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/overview.webp) | ![Torrent table](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrents.webp) |
 
-| Search | Preview before Apply |
+| Search | Filters |
 |---|---|
-| ![Search results](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/torrent-details.webp) | ![Frozen bulk-action preview](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/action-preview.webp) |
+| ![Search tolerating word order](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/search.webp) | ![Filter draft across four panes](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/filters.webp) |
+
+| Details | Preview before Apply |
+|---|---|
+| ![Details for one torrent, trackers included](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/details.webp) | ![Frozen bulk-action preview](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/preview.webp) |
 
 Press `?` inside the TUI to see the available controls.
 
