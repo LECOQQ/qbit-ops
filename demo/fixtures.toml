@@ -1,9 +1,12 @@
 # Deterministic demo torrent inventory -- single source of truth for
-# `generate_fixtures.py` and `seed_instance.py`. Order here is the
-# order torrents are generated, added, and printed.
+# `generate_fixtures.py`, `seed_instance.py`, and `arm_transfer.py`.
+# Order here is the order torrents are generated, added, and printed.
 #
 # desired_state is one of: seeding, completed-paused, stalled-download,
-# incomplete-paused. payload_size is in bytes.
+# incomplete-paused. payload_size is in bytes. transfer_demo (optional,
+# defaults to false) marks the single fixture `arm_transfer.py` hands
+# to the leecher container for the Overview's live transfer -- exactly
+# one fixture must carry it.
 
 [[fixture]]
 name = "Ubuntu 24.04 Desktop ISO"
@@ -11,6 +14,7 @@ category = "linux"
 extension = "iso"
 payload_size = 3_000_000
 desired_state = "seeding"
+transfer_demo = true
 
 [[fixture]]
 name = "Debian 12 Netinst ISO"

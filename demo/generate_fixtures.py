@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Generate deterministic synthetic torrents and the demo container config.
+"""Generate deterministic synthetic torrents and both demo container configs.
 
 Reads `fixtures.toml`, writes one `.torrent` file per fixture into
 `generated/torrents/`, writes complete payloads for `seeding` and
 `completed-paused` fixtures into `generated/downloads/` (the host side
-of the container's `/downloads` bind mount), and writes
-`generated/config/qBittorrent.conf`. Every byte, name, and hash is
-derived only from `fixtures.toml` -- nothing is downloaded and nothing
-uses the system clock or randomness, so reruns and `demo-reset`
-reproduce identical infohashes.
+of the seeder container's `/downloads` bind mount), and writes
+`generated/config/qBittorrent.conf` for the seeder and
+`generated/leecher-config/qBittorrent.conf` for the leecher. Every
+byte, name, and hash is derived only from `fixtures.toml` -- nothing
+is downloaded and nothing uses the system clock or randomness, so
+reruns and `demo-reset` reproduce identical infohashes.
 """
 
 from __future__ import annotations
@@ -26,9 +27,12 @@ GENERATED_DIR = DEMO_DIR / "generated"
 TORRENTS_DIR = GENERATED_DIR / "torrents"
 DOWNLOADS_DIR = GENERATED_DIR / "downloads"
 CONFIG_DIR = GENERATED_DIR / "config"
+LEECHER_DOWNLOADS_DIR = GENERATED_DIR / "leecher-downloads"
+LEECHER_CONFIG_DIR = GENERATED_DIR / "leecher-config"
 
 PIECE_LENGTH = 256 * 1024
-WEBUI_PORT = 18080
+PRIMARY_WEBUI_PORT = 18080
+LEECHER_WEBUI_PORT = 18081
 WEBUI_USERNAME = "demo"
 WEBUI_PASSWORD = "demo-only"
 
@@ -46,6 +50,7 @@ class Fixture:
     info_hash: str
     torrent_path: Path
     has_payload: bool
+    transfer_demo: bool
 
 
 def _make_payload(label: str, size: int) -> bytes:
@@ -102,6 +107,7 @@ def load_fixtures() -> list[Fixture]:
                 info_hash=info_hash,
                 torrent_path=TORRENTS_DIR / f"{name}.torrent",
                 has_payload=entry["desired_state"] in WRITE_PAYLOAD_STATES,
+                transfer_demo=entry.get("transfer_demo", False),
             )
         )
     return fixtures
@@ -113,6 +119,8 @@ def main() -> None:
     TORRENTS_DIR.mkdir(parents=True, exist_ok=True)
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    LEECHER_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    LEECHER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     written_payload_bytes = 0
     for entry in raw:
@@ -133,9 +141,20 @@ def main() -> None:
         print(f"{info_hash} {name}")
 
     conf_text = build_conf(
-        webui_port=WEBUI_PORT, username=WEBUI_USERNAME, password=WEBUI_PASSWORD
+        webui_port=PRIMARY_WEBUI_PORT,
+        username=WEBUI_USERNAME,
+        password=WEBUI_PASSWORD,
     )
     (CONFIG_DIR / "qBittorrent.conf").write_text(conf_text, encoding="utf-8")
+
+    leecher_conf_text = build_conf(
+        webui_port=LEECHER_WEBUI_PORT,
+        username=WEBUI_USERNAME,
+        password=WEBUI_PASSWORD,
+    )
+    (LEECHER_CONFIG_DIR / "qBittorrent.conf").write_text(
+        leecher_conf_text, encoding="utf-8"
+    )
 
     written_payload_mb = written_payload_bytes / 1_000_000
     print(

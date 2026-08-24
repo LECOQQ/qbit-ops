@@ -1,8 +1,11 @@
-# Disposable qBittorrent instance for the qbit-ops TUI demo.
-# Isolation: WebUI bound to 127.0.0.1 only, non-standard port, demo-only
-# credentials pre-seeded into generated/config/qBittorrent.conf, DHT/PeX/
-# LSD/UPnP/NAT-PMP disabled at the application level. The Docker network
-# itself still permits egress -- it is not blocked, only peer discovery is.
+# Disposable qBittorrent instances for the qbit-ops TUI demo.
+# Isolation: WebUI bound to 127.0.0.1 only, non-standard ports, demo-only
+# credentials pre-seeded into generated/{config,leecher-config}/qBittorrent.conf,
+# DHT/PeX/LSD/UPnP/NAT-PMP disabled at the application level. The Docker
+# network itself still permits egress -- it is not blocked, only automatic
+# peer discovery is. The two containers below are still explicitly paired
+# by demo/arm_transfer.py, over the private Docker network only, so the
+# Overview has a real transfer to plot -- see demo/README.md.
 services:
   qbittorrent:
     image: linuxserver/qbittorrent:5.2.3
@@ -17,4 +20,19 @@ services:
     volumes:
       - ./generated/config:/config/qBittorrent
       - ./generated/downloads:/downloads
+    restart: "no"
+
+  qbittorrent-leecher:
+    image: linuxserver/qbittorrent:5.2.3
+    container_name: qbit-ops-demo-leecher
+    environment:
+      - PUID=${DEMO_UID:-1000}
+      - PGID=${DEMO_GID:-1000}
+      - TZ=Etc/UTC
+      - WEBUI_PORT=18081
+    ports:
+      - 127.0.0.1:18081:18081
+    volumes:
+      - ./generated/leecher-config:/config/qBittorrent
+      - ./generated/leecher-downloads:/downloads
     restart: "no"

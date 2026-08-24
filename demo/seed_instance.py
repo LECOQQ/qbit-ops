@@ -14,17 +14,14 @@ from __future__ import annotations
 
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 import qbittorrentapi
+from _demo_support import SeedError, assert_demo_host, wait_for_webui
 from dotenv import dotenv_values
 from generate_fixtures import DOWNLOADS_DIR, Fixture, load_fixtures
 
 DEMO_DIR = Path(__file__).parent
-EXPECTED_HOSTNAME = "127.0.0.1"
 EXPECTED_PORT = 18080
 READY_TIMEOUT_SECONDS = 90
 STATE_TIMEOUT_SECONDS = 60
@@ -49,10 +46,6 @@ STOPPED_STATES = {
 }
 
 
-class SeedError(RuntimeError):
-    pass
-
-
 def _load_env() -> dict[str, str]:
     values = dotenv_values(DEMO_DIR / "qbit-ops.env")
     missing = [
@@ -63,37 +56,6 @@ def _load_env() -> dict[str, str]:
     if missing:
         raise SeedError(f"demo/qbit-ops.env is missing {missing}")
     return {k: v for k, v in values.items() if v is not None}
-
-
-def _assert_demo_host(host: str) -> None:
-    parsed = urllib.parse.urlsplit(host)
-    if parsed.hostname != EXPECTED_HOSTNAME or parsed.port != EXPECTED_PORT:
-        raise SeedError(
-            f"refusing to seed {host!r}: expected the disposable demo host "
-            f"{EXPECTED_HOSTNAME}:{EXPECTED_PORT}"
-        )
-
-
-def _wait_for_webui(host: str) -> None:
-    deadline = time.monotonic() + READY_TIMEOUT_SECONDS
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(
-                f"{host}/api/v2/app/webapiVersion", timeout=2
-            ) as resp:
-                if resp.status == 200:
-                    return
-        except urllib.error.HTTPError as error:
-            if error.code == 403:
-                return
-            last_error = error
-        except (urllib.error.URLError, OSError) as error:
-            last_error = error
-        time.sleep(1)
-    raise SeedError(
-        f"qBittorrent WebUI at {host} did not become ready: {last_error}"
-    )
 
 
 def _ensure_categories(
@@ -177,8 +139,8 @@ def _reconcile_state(client: qbittorrentapi.Client, fixture: Fixture) -> str:
 def main() -> None:
     env = _load_env()
     host = env["QBIT_HOST"]
-    _assert_demo_host(host)
-    _wait_for_webui(host)
+    assert_demo_host(host, expected_port=EXPECTED_PORT)
+    wait_for_webui(host, timeout_seconds=READY_TIMEOUT_SECONDS)
 
     client = qbittorrentapi.Client(
         host=host, username=env["QBIT_USER"], password=env["QBIT_PASSWORD"]

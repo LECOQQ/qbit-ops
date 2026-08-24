@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-reset demo-record demo-down demo-doctor
+.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -215,20 +215,24 @@ demo-doctor: ## diag: Check required local tools for the demo (docker, compose, 
 	fi; \
 	exit "$$missing"
 
-demo-up: demo-doctor sync ## use: Generate demo fixtures, start the disposable qBittorrent, and seed it
+demo-up: demo-doctor sync ## use: Generate demo fixtures, start the disposable qBittorrent instances, seed and pair them
 	@$(PY) python demo/generate_fixtures.py
 	@DEMO_UID=$$(id -u) DEMO_GID=$$(id -g) $(DEMO_COMPOSE) up -d
 	@$(PY) python demo/seed_instance.py
+	@$(PY) python demo/arm_transfer.py
 	@printf '\nNext: make demo-tui | make demo-record | make demo-down\n'
 
-demo-tui: sync ## use: Launch the qbit-ops TUI against the demo instance only
+demo-tui: demo-transfer ## use: Launch the qbit-ops TUI against the demo instance only
 	@QBIT_OPS_ENV_FILE="$(DEMO_ENV_FILE)" $(PY) qbit-ops tui
+
+demo-transfer: demo-doctor sync ## use: Restart the live seeder -> leecher transfer so the Overview graph is fresh
+	@$(PY) python demo/arm_transfer.py
 
 demo-reset: demo-down ## use: Destroy and recreate the demo instance from scratch
 	@rm -rf demo/generated
 	@$(MAKE) demo-up
 
-demo-record: sync ## use: Record demo/tui.tape with VHS (requires VHS installed separately)
+demo-record: demo-transfer ## use: Record demo/tui.tape with VHS (requires VHS installed separately)
 	@if ! command -v vhs >/dev/null 2>&1; then \
 		printf '[MISSING] vhs not found -- install from https://github.com/charmbracelet/vhs\n' >&2; \
 		exit 1; \
@@ -238,7 +242,7 @@ demo-record: sync ## use: Record demo/tui.tape with VHS (requires VHS installed 
 
 demo-down: ## use: Stop and remove the demo containers, network, and all qBittorrent state
 	@$(DEMO_COMPOSE) down -v --remove-orphans
-	@rm -rf demo/generated/config demo/generated/downloads
+	@rm -rf demo/generated/config demo/generated/downloads demo/generated/leecher-config demo/generated/leecher-downloads
 
 test-qbit-matrix: docker-matrix-doctor ## qa: Run the full Docker qBittorrent version matrix (requires Docker, not part of `make check`; never writes captured fixtures -- see `capture-qbit-fixtures`)
 	@printf 'Running the full qBittorrent Docker matrix against disposable containers on a dedicated Docker network.\n'
