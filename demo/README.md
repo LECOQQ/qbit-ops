@@ -87,7 +87,9 @@ an artefact.
 
 ## Recording output
 
-Everything lands in `demo/output/`, which is gitignored. Nothing is
+<!-- doc-links: ignore-next-line -->
+Everything lands in `demo/output/`, which is gitignored and therefore
+absent from a fresh checkout until something records into it. Nothing is
 copied into the repository README automatically; review it first.
 
 ```
