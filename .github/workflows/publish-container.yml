@@ -1,4 +1,4 @@
-name: Publish container
+name: Publish container to GHCR
 
 # Dispatched by release-please.yml once it has cut a release, and
 # runnable by hand as a recovery path.

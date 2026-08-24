@@ -1,4 +1,4 @@
-name: Publish
+name: Publish to PyPI
 
 # Dispatched by release-please.yml once it has cut a release, and
 # runnable by hand as a recovery path.
