@@ -27,7 +27,7 @@ DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
 # clash, and `preview` -- the frozen "here is what would change" --
 # takes the crimson: it is the frame that carries the whole thesis.
 BEAUTIFY_SHOTS := overview:aurora-teal torrents:aurora-gold \
-                  search:aurora-emerald filters:nebula-rose \
+                  search:aurora-cyan filters:nebula-rose \
                   details:aurora-purple preview:nebula-crimson
 
 # The hero GIF opens on the Overview, so it takes the Overview's tint.
@@ -258,6 +258,8 @@ demo-record: demo-transfer ## use: Record the hero GIF and the README stills wit
 	fi
 	@mkdir -p demo/output
 	@vhs demo/tui.tape
+	@printf '\nRe-arming the transfer: the hero tape outlives it, and the\nstills open on the same rate graph.\n\n'
+	@$(PY) python demo/arm_transfer.py
 	@vhs demo/shots.tape
 	@rm -f demo/output/_shots-throwaway.gif
 	@printf '\n'

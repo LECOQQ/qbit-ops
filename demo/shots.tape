@@ -21,12 +21,14 @@ Set TypingSpeed 80ms
 Hide
 Type "PS1='$ ' QBIT_OPS_ENV_FILE=demo/qbit-ops.env poetry run qbit-ops tui"
 Enter
-Sleep 4s
+# Hidden, because the rate graph plots a 60s window and starts empty:
+# twenty-five seconds of the capped transfer buys roughly half of it.
+# `demo-record` re-arms the transfer just before this tape runs.
+Sleep 25s
 Show
 
-# 1 -- Overview. `demo-transfer` armed a real seeder -> leecher transfer,
-# so the rate graph carries a curve rather than a flat line at zero.
-Sleep 6s
+# 1 -- Overview, on a graph that has had time to draw.
+Sleep 3s
 Screenshot demo/output/overview.png
 
 # 2 -- Torrents workspace, with the command bar announcing every gesture.
@@ -34,17 +36,25 @@ Type "t"
 Sleep 2s
 Screenshot demo/output/torrents.png
 
-# 3 -- Search that ignores word order. The TUI bans the fuzzy tier on
-# purpose (`TuiController.set_search`), so a typo finds nothing here --
-# that example belongs to `torrents search` on the CLI. What the TUI
-# does tolerate is the order you remember the words in.
+# 3 -- Search that ignores word order: the fixtures are named
+# `Documentary S01E0x`, and the words are typed the other way round.
+# The TUI bans the fuzzy tier on purpose (`TuiState.set_search`), so a
+# typo finds nothing here -- that example belongs to the CLI. Three
+# matches rather than one, so the table is not mostly empty.
 Type "/"
 Sleep 400ms
-Type "desktop ubuntu"
+Type "s01 documentary"
 Sleep 2500ms
 Screenshot demo/output/search.png
+
+# Clear the term before moving on. `escape` closes the search box but
+# keeps what was typed, and `ctrl+r` resets filters, sort and selection
+# without touching the search -- so everything after this ran against a
+# single matched torrent until the term was actually deleted.
+Backspace 20
+Sleep 800ms
 Escape
-Sleep 600ms
+Sleep 800ms
 
 # 4 -- Filters: 27 fields behind four panes, applied only on Apply.
 # `linux` is a real fixture category, so the pane shows a filter that
@@ -78,3 +88,4 @@ Sleep 1500ms
 Enter
 Sleep 3s
 Screenshot demo/output/preview.png
+Sleep 2s
