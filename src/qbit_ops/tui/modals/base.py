@@ -82,6 +82,39 @@ class QbitModal(ModalScreen[None]):
     DIALOG_ID: ClassVar[str] = ""
     """The dialog container's id, so content rules can target it."""
 
+    # Up/Down move between a modal's own controls, same as Tab/Shift+Tab
+    # -- but *not* through `app.focus_next`/`app.focus_previous`
+    # (Tab/Shift+Tab's own route, `Screen.BINDINGS`): those walk the
+    # screen's full focus chain, which includes the dialog container
+    # itself -- it must stay focusable so a short terminal can scroll
+    # it by keyboard (`.qbit-dialog`'s `max-height: 90%`). Landing
+    # there shows no highlighted control, reading as a dead key rather
+    # than the wraparound it is. Plain action names (no `app.` prefix)
+    # dispatch to this screen instead of the App, so they need no
+    # `QbitOpsTuiApp.check_action` allowance -- `DOMNode.check_action`
+    # already permits everything by default.
+    #
+    # Harmless for a content-only modal (`HelpScreen`, `DetailsScreen`,
+    # `ExplainScreen`, `ResultScreen`): with no other focusable control,
+    # the dialog itself holds focus, and Textual's own
+    # `ScrollableContainer.BINDINGS` (bound on the dialog, checked
+    # before this Screen-level one) already claims `up`/`down` there
+    # for scrolling -- this binding is only ever reached once a real
+    # control is focused.
+    BINDINGS = [
+        Binding("up", "focus_previous_in_dialog", "Up", show=False),
+        Binding("down", "focus_next_in_dialog", "Down", show=False),
+    ]
+
+    def _dialog_descendants(self) -> str:
+        return f"#{self.DIALOG_ID} *"
+
+    def action_focus_next_in_dialog(self) -> None:
+        self.focus_next(self._dialog_descendants())
+
+    def action_focus_previous_in_dialog(self) -> None:
+        self.focus_previous(self._dialog_descendants())
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if cls.MODAL_WIDTH not in MODAL_WIDTHS:

@@ -15,7 +15,6 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.widgets import Button, Input, Static
 
 from qbit_core.features.connection_setup import DEFAULT_HOST, DEFAULT_USERNAME
@@ -43,11 +42,6 @@ class SetupScreen(QbitModal):
         KeyHint(("enter",), "Save"),
     )
     DIALOG_ID = "setup-dialog"
-
-    BINDINGS = [
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
-    ]
 
     def __init__(self) -> None:
         super().__init__()

@@ -64,8 +64,6 @@ class SortScreen(QbitModal):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel", priority=True),
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
     ]
 
     def __init__(self, current: SortOrder) -> None:

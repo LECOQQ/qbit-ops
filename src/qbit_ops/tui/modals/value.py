@@ -54,11 +54,6 @@ class ValueActionScreen(QbitModal):
     DIALOG_ID = "value-dialog"
     bulk_action: ClassVar[TuiBulkAction]
 
-    BINDINGS = [
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
-    ]
-
     def __init__(
         self,
         selected: tuple[TorrentSnapshot, ...],

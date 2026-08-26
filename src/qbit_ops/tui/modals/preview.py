@@ -46,10 +46,8 @@ class PreviewScreen(QbitModal):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel", priority=True),
-        # Up/Down move between the Cancel/Apply buttons, same as
-        # Tab/Shift+Tab -- see `FiltersScreen`'s identical bindings.
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
+        # Up/Down move between the Cancel/Apply buttons -- inherited
+        # from `QbitModal.BINDINGS`.
     ]
 
     def __init__(

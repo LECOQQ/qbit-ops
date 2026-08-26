@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, tzinfo
-from typing import Any
+from typing import Any, Final
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -778,6 +778,19 @@ def _format_details_trackers(
     return "\n".join(lines)
 
 
+# `pageup`/`pagedown` have no dedicated key on a laptop keyboard: macOS
+# reaches them via `fn`+arrow, not a physical PgUp/PgDn -- and Textual's
+# own default (`format_key` -> "pgup"/"pgdn") names neither. The only
+# caller of this pair (`FiltersScreen`'s section switch) leaves
+# `Binding.key_display` unset so it falls through to this branch,
+# rather than hand-picking a glyph that would be wrong on one keyboard
+# or the other.
+_PAGE_KEY_DISPLAYS: Final[dict[str, tuple[str, str]]] = {
+    "pageup": ("PgUp", "fn+↑"),
+    "pagedown": ("PgDn", "fn+↓"),
+}
+
+
 def resolve_key_display(binding: Binding, *, is_macos: bool) -> str:
     """The one point every rendered key passes through -- OS-aware.
 
@@ -790,13 +803,15 @@ def resolve_key_display(binding: Binding, *, is_macos: bool) -> str:
     parametrize over both branches directly.
 
     An explicit `binding.key_display` -- a modal's own hand-picked
-    glyph, e.g. `PgUp/PgDn` -- always wins, exactly like Textual's own
-    default: this only changes what happens when there is none to fall
-    back on.
+    glyph -- always wins, exactly like Textual's own default: this only
+    changes what happens when there is none to fall back on.
     """
     if binding.key_display:
         return binding.key_display
     modifiers, key = binding.parse_key()
+    if not modifiers and key in _PAGE_KEY_DISPLAYS:
+        non_macos, macos = _PAGE_KEY_DISPLAYS[key]
+        return macos if is_macos else non_macos
     key = format_key(key)
     if "ctrl" in modifiers:
         modifiers.remove("ctrl")

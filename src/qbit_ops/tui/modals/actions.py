@@ -39,11 +39,8 @@ class ActionsScreen(QbitModal):
 
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel", priority=True),
-        # Up/Down move between the buttons, same as Tab/Shift+Tab --
-        # see `FiltersScreen`'s identical bindings for why this
-        # resolves correctly through `QbitOpsTuiApp.check_action`.
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
+        # Up/Down move between the buttons -- inherited from
+        # `QbitModal.BINDINGS`.
     ]
 
     _ACTION_BY_BUTTON_ID: dict[str, TuiBulkAction] = {

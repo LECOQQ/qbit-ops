@@ -97,7 +97,7 @@ class FiltersScreen(QbitModal):
     # its fields -- `large` (100) left ~26 columns nothing used.
     MODAL_WIDTH = "wide"
     MODAL_KEYS = (
-        KeyHint(("pageup",), "Section"),
+        KeyHint(("pageup", "pagedown"), "Section"),
         KeyHint(("tab",), "Move"),
         KeyHint(("enter",), "Apply"),
         KeyHint(("ctrl+r",), "Clear"),
@@ -106,13 +106,12 @@ class FiltersScreen(QbitModal):
     DIALOG_ID = "filters-dialog"
 
     BINDINGS = [
-        Binding(
-            "pageup",
-            "prev_pane",
-            "Section",
-            key_display="PgUp/PgDn",
-            priority=True,
-        ),
+        # No `key_display`: a MacBook has no physical PgUp/PgDn (`fn`+
+        # arrow reaches them instead), so the label is resolved
+        # OS-aware by `resolve_key_display` (`formatting.py`), the same
+        # "one point every rendered key passes through" `ctrl` already
+        # goes through.
+        Binding("pageup", "prev_pane", "Section", priority=True),
         Binding("pagedown", "next_pane", "Section", show=False, priority=True),
         # Kept working, not announced: some terminals do deliver these
         # (see the class docstring), and dropping them would be a
@@ -120,14 +119,8 @@ class FiltersScreen(QbitModal):
         Binding("alt+left", "prev_pane", "Section", show=False),
         Binding("alt+right", "next_pane", "Section", show=False),
         Binding("ctrl+r", "clear", "Clear"),
-        # `up`/`down` move focus between fields, same as Tab/Shift+Tab --
-        # namespaced to `app.*` so they resolve through
-        # `QbitOpsTuiApp.check_action`, which already always allows
-        # `focus_next`/`focus_previous` regardless of which modal is
-        # open (see its docstring) -- the same mechanism that already
-        # makes Tab work in every modal.
-        Binding("up", "app.focus_previous", "Up", show=False),
-        Binding("down", "app.focus_next", "Down", show=False),
+        # `up`/`down` move focus between fields -- inherited from
+        # `QbitModal.BINDINGS`.
     ]
 
     def __init__(self, current_filters: TorrentFilter) -> None:

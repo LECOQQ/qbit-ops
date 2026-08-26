@@ -3872,6 +3872,34 @@ async def test_help_is_readable_at_80x24() -> None:
         assert len(app.screen_stack) == 1
 
 
+async def test_help_down_scrolls_instead_of_leaving_the_dialog_unfocused() -> (
+    None
+):
+    """`HelpScreen` has no focusable control besides its own dialog --
+    `QbitModal`'s shared `up`/`down` focus-navigation binding must not
+    steal the key from `ScrollableContainer`'s native scroll, or a
+    content-only modal would lose focus outright (see `QbitModal`'s
+    `BINDINGS` comment)."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=(80, 20)) as pilot:
+        await _settle(app, pilot)
+        await pilot.press("question_mark")
+        await pilot.pause()
+
+        from textual.containers import VerticalScroll
+
+        dialog = app.screen.query_one("#help-dialog", VerticalScroll)
+        assert dialog.has_focus
+
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert dialog.has_focus
+        assert dialog.scroll_y > 0
+
+
 # --- Local timestamps: injected timezone, not the CI machine's ----------
 
 
@@ -5319,6 +5347,140 @@ async def test_up_down_navigate_filters_modal() -> None:
 
         await pilot.press("escape")
         await pilot.pause()
+
+
+def _focused_id(app: QbitOpsTuiApp) -> str | None:
+    return app.focused.id if app.focused is not None else None
+
+
+async def test_down_from_the_last_actions_button_wraps_to_the_first() -> None:
+    """A `down` at the last button used to land on `#actions-dialog`
+    itself -- the scrollable container is still in the DOM and still
+    focusable (short terminals need it to scroll), but nothing
+    highlights there, which reads as a dead key rather than the
+    wraparound it is meant to be."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+
+        seen: list[str | None] = []
+        for _ in range(8):
+            await pilot.press("down")
+            await pilot.pause()
+            seen.append(_focused_id(app))
+
+        assert "actions-dialog" not in seen, seen
+        assert seen[-1] == "actions-pause", seen
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert _focused_id(app) == "actions-cancel"
+
+
+async def test_down_from_the_last_filters_field_wraps_to_the_first() -> None:
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        seen: list[str | None] = []
+        for _ in range(10):
+            await pilot.press("down")
+            await pilot.pause()
+            seen.append(_focused_id(app))
+
+        assert "filters-dialog" not in seen, seen
+        assert seen[-1] == "f-categories", seen
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_down_from_the_last_preview_button_wraps_to_the_first() -> None:
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha")]
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-pause", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, PreviewScreen)
+
+        seen: list[str | None] = []
+        for _ in range(4):
+            await pilot.press("down")
+            await pilot.pause()
+            seen.append(_focused_id(app))
+
+        assert "preview-dialog" not in seen, seen
+
+
+async def test_down_from_the_last_value_modal_control_wraps_to_the_first() -> (
+    None
+):
+    client = FakeQbitClient(
+        torrents=[make_torrent(hash="a" * 40, name="Alpha", category="tv")],
+        categories={"tv": {"name": "tv"}},
+    )
+    app = _app(client)
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("space")
+        await pilot.press("a")
+        await pilot.pause()
+        app.screen.query_one("#actions-category-set", Button).press()
+        await pilot.pause()
+        assert isinstance(app.screen, CategorySetScreen)
+
+        seen: list[str | None] = []
+        for _ in range(4):
+            await pilot.press("down")
+            await pilot.pause()
+            seen.append(_focused_id(app))
+
+        assert "value-dialog" not in seen, seen
+
+
+async def test_down_from_the_last_setup_control_wraps_to_the_first() -> None:
+    client = FakeQbitClient(torrents=[])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        needs_setup=True,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await pilot.pause()
+
+        seen: list[str | None] = []
+        for _ in range(5):
+            await pilot.press("down")
+            await pilot.pause()
+            seen.append(_focused_id(app))
+
+        assert "setup-dialog" not in seen, seen
+        assert seen[-1] == "setup-host", seen
 
 
 async def test_ctrl_d_deselects_all_visible_torrents() -> None:
@@ -8178,6 +8340,31 @@ def test_resolve_key_display_branches_on_the_injected_platform_only(
 
 
 @pytest.mark.parametrize(
+    "key, is_macos, expected",
+    [
+        ("pageup", False, "PgUp"),
+        ("pageup", True, "fn+↑"),
+        ("pagedown", False, "PgDn"),
+        ("pagedown", True, "fn+↓"),
+    ],
+    ids=[
+        "pageup-not-macos",
+        "pageup-macos",
+        "pagedown-not-macos",
+        "pagedown-macos",
+    ],
+)
+def test_resolve_key_display_names_the_mac_page_gesture(
+    key: str, is_macos: bool, expected: str
+) -> None:
+    """A MacBook has no physical PgUp/PgDn key -- `fn`+arrow reaches
+    them instead -- so this pair, like `ctrl`, is resolved OS-aware
+    rather than through a modal's own fixed `key_display`."""
+    binding = Binding(key, "noop", "Section")
+    assert resolve_key_display(binding, is_macos=is_macos) == expected
+
+
+@pytest.mark.parametrize(
     "platform, expected",
     [("darwin", "^r"), ("linux", "Ctrl+R"), ("win32", "Ctrl+R")],
     ids=["darwin", "linux", "win32"],
@@ -8206,6 +8393,35 @@ async def test_filters_clear_hint_is_os_aware_end_to_end(
         dialog = app.screen.query_one("#filters-dialog")
         subtitle = Text.from_markup(str(dialog.border_subtitle)).plain
         assert f"[{expected}→Clear]" in subtitle
+
+
+@pytest.mark.parametrize(
+    "platform, expected",
+    [("darwin", "fn+↑/fn+↓"), ("linux", "PgUp/PgDn"), ("win32", "PgUp/PgDn")],
+    ids=["darwin", "linux", "win32"],
+)
+async def test_filters_section_hint_is_os_aware_end_to_end(
+    platform: str, expected: str
+) -> None:
+    """The "Section" hint names a key a MacBook keyboard actually has
+    (`fn`+arrow), not the `PgUp`/`PgDn` printed on a full-size one."""
+    client = FakeQbitClient(torrents=[make_torrent()])
+    app = QbitOpsTuiApp(
+        client_factory=lambda: client,
+        host="http://localhost:8080",
+        refresh_interval=LARGE_INTERVAL,
+        platform=platform,
+    )
+
+    async with app.run_test(size=WIDE_SIZE) as pilot:
+        await _settle(app, pilot)
+        await _goto_torrents(app, pilot)
+        await pilot.press("f")
+        await pilot.pause()
+
+        dialog = app.screen.query_one("#filters-dialog")
+        subtitle = Text.from_markup(str(dialog.border_subtitle)).plain
+        assert f"[{expected}→Section]" in subtitle
 
 
 @pytest.mark.parametrize(
