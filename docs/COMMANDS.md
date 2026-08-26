@@ -83,7 +83,9 @@ with `0600` permissions.
   reporting a success that lies.
 
 `qbit-ops tui` shows the same form when qbit-ops is not configured yet,
-writes through the same path, then opens on the library.
+writes through the same path, then opens on the library. `ctrl+o`
+reopens that form at any point to point the running TUI at a different
+instance, with no restart needed.
 
 `doctor` names `qbit-ops init` when the configuration is missing.
 

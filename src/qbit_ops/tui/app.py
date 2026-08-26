@@ -224,6 +224,13 @@ class QbitOpsTuiApp(App[None]):
         # modifier marks this as the broader, view-wide gesture.
         Binding("ctrl+r", "reset_view", "Reset"),
         Binding("a", "open_actions", "Actions"),
+        # `ctrl+o`: unused anywhere else in this app, absent from
+        # `Input.BINDINGS` (so it still fires while `#search-input`
+        # holds focus, unlike a bare letter), not a common terminal
+        # multiplexer prefix, and typable on a stock Apple keyboard with
+        # no `fn` and no `alt` (excluded -- window managers intercept
+        # it, see `modals/filters.py`).
+        Binding("ctrl+o", "reconfigure", "Reconfigure"),
         Binding("question_mark", "toggle_help", "Help"),
         # priority=True so escape always wins over whatever has focus.
         Binding("escape", "dismiss_overlay", "Back", show=False, priority=True),
@@ -346,6 +353,21 @@ class QbitOpsTuiApp(App[None]):
         self._begin_refreshing()
 
     def _begin_refreshing(self) -> None:
+        """Start the periodic-refresh timer and sampler, once.
+
+        Also the re-entry point for `_complete_setup` after a
+        reconfigure of an already-running TUI: both timers are already
+        alive then, so `set_interval` must not run a second time --
+        each call would register one more, permanently doubling (then
+        tripling, ...) the refresh cadence. Only an immediate tick is
+        forced, against whatever instance `TuiController.reset_
+        connection` just pointed at; the sampler is left exactly as the
+        active workspace already has it, since reconfiguring is not a
+        workspace change.
+        """
+        if self._refreshing_started:
+            self._start_periodic_refresh()
+            return
         self._refreshing_started = True
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
         self._start_periodic_refresh()
@@ -1753,7 +1775,7 @@ class QbitOpsTuiApp(App[None]):
         self._render_filter_summary()
         self.refresh_bindings()
 
-    # -- first-run setup -------------------------------------------------
+    # -- connection setup: first run and reconfigure ----------------------
 
     def submit_setup(
         self, *, host: str, username: str, password: str, force: bool
@@ -1837,10 +1859,20 @@ class QbitOpsTuiApp(App[None]):
             screen.show_message(str(error))
             return
 
-        self.controller.set_host(config.host)
+        reconfiguring = not self.needs_setup
+        self.controller.reset_connection(config.host)
+        # The instance-wide category/tag read is otherwise a one-shot
+        # latch (`_instance_lists_requested`'s own docstring): reopen
+        # it so the next successful refresh re-reads them from whatever
+        # instance is now configured, instead of leaving the previous
+        # one's list on screen indefinitely. A no-op at first run,
+        # where it is already `False`.
+        self._instance_lists_requested = False
         self.needs_setup = False
         self.pop_screen()
         self.notify(f"Wrote {written} (0600).")
+        if reconfiguring:
+            self.notify(f"Reconnecting to {config.host}...")
         for source in collect_masking_sources(written):
             self.notify(source.message, severity="warning")
         self.refresh_bindings()
@@ -1855,6 +1887,19 @@ class QbitOpsTuiApp(App[None]):
             ),
             None,
         )
+
+    def action_reconfigure(self) -> None:
+        """Reopen the connection form to point the TUI at a different
+        instance without restarting the process.
+
+        Goes through `SetupScreen` and `_complete_setup`, the same as
+        the first-run form -- `qbit-ops init` and both TUI paths still
+        share one write/validate contract. Only reachable with no other
+        modal open (`check_action`'s default), so it can never race a
+        mutation applying from `PreviewScreen`.
+        """
+        self.push_screen(SetupScreen())
+        self.refresh_bindings()
 
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
@@ -1885,8 +1930,20 @@ class QbitOpsTuiApp(App[None]):
             if isinstance(screen, PreviewScreen) and screen.applying:
                 return
             if isinstance(screen, SetupScreen):
-                # Nothing behind it to go back to -- leaving is the
-                # form's own Quit button, never a dismissal.
+                if self.needs_setup:
+                    # First run: nothing behind it to go back to --
+                    # leaving is the form's own Quit button, never a
+                    # dismissal.
+                    return
+                # A reconfigure of an already-running TUI: there is a
+                # dashboard to return to, so escape cancels like any
+                # other modal. Drop the pending config so a setup-test
+                # worker still in flight cannot apply a stale result
+                # (a leftover "file already exists" confirmation) to
+                # whatever `SetupScreen` opens next.
+                self._setup_config = None
+                self.pop_screen()
+                self.refresh_bindings()
                 return
             if isinstance(screen, ValueActionScreen):
                 # A value modal was opened *from* Actions, so escape

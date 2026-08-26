@@ -3736,7 +3736,7 @@ async def test_overview_footer_has_no_torrent_only_actions() -> None:
 
         actions = _footer_actions(app)
 
-        assert actions == {"toggle_help", "quit"}
+        assert actions == {"toggle_help", "quit", "reconfigure"}
         for forbidden in (
             "copy_hash",
             "explain",

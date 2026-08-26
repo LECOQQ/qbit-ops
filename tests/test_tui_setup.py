@@ -10,13 +10,14 @@ through one domain path rather than each having its own.
 from __future__ import annotations
 
 import stat
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Button, Input
+from textual.widgets import Button, Input, Static
 
 from qbit_core.config import CONNECTION_VARIABLES, QbitConfig
 from qbit_core.errors import QbitConnectionError
@@ -33,6 +34,7 @@ HOST = "http://qbit.example:8080"
 USER = "operator"
 PASSWORD = "s3cr3t"
 EXPECTED = QbitConfig(host=HOST, username=USER, password=PASSWORD)
+WAIT_TIMEOUT = 5.0  # seconds a test will wait on a real threading.Event
 
 
 @pytest.fixture
@@ -287,3 +289,248 @@ async def test_a_blank_answer_writes_nothing_and_keeps_the_form_open(
         assert attempts == [], "an invalid form must not be tested remotely"
 
     assert not isolated_target.exists()
+
+
+# --- reconfiguring an already-running TUI ---------------------------------
+#
+# `SetupScreen` and `_complete_setup` are shared with first run; what is
+# new here is what happens to the *running* connection: `TuiController.
+# _client` is cached, so pointing `_host` at a new instance is not enough
+# to make the next refresh actually use it (see `TuiController.
+# reset_connection`).
+
+OLD_HOST = "http://old.example:8080"
+NEW_HOST = "http://new.example:8080"
+NEW_USER = "newop"
+NEW_PASSWORD = "s3cr3t2"
+
+
+def _sequential_client_factory(
+    clients: list[FakeQbitClient],
+) -> tuple[Any, list[FakeQbitClient]]:
+    """A `client_factory` that hands out `clients` in order, repeating
+    the last one past the end -- so a stray extra refresh tick never
+    raises `StopIteration` and fails the test for the wrong reason."""
+    created: list[FakeQbitClient] = []
+    remaining = iter(clients)
+
+    def _factory() -> FakeQbitClient:
+        client = next(remaining, clients[-1])
+        created.append(client)
+        return client
+
+    return _factory, created
+
+
+def _running_app(
+    clients: list[FakeQbitClient],
+) -> tuple[QbitOpsTuiApp, list[FakeQbitClient]]:
+    """An already-configured app (`needs_setup=False`): the dashboard is
+    live, exactly the state a reconfigure starts from."""
+    factory, created = _sequential_client_factory(clients)
+    app = QbitOpsTuiApp(
+        client_factory=factory,
+        host=OLD_HOST,
+        refresh_interval=LARGE_INTERVAL,
+        needs_setup=False,
+    )
+    return app, created
+
+
+async def _open_reconfigure(app: QbitOpsTuiApp, pilot: Pilot) -> None:
+    await pilot.press("ctrl+o")
+    await _settle(app, pilot)
+
+
+def _write_existing_env_file(target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f'QBIT_HOST="{OLD_HOST}"\n', encoding="utf-8")
+
+
+async def test_reconfiguring_a_running_tui_talks_to_the_new_instance(
+    isolated_target: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The central behaviour of this work item: reconfiguring while
+    connected must not leave the TUI silently talking to the instance it
+    was already pointed at.
+
+    `TuiController._client` is only ever created once and then cached
+    (`_ensure_client`); if `reset_connection` did not drop it, every
+    refresh after this test's reconfigure would keep calling into
+    `old_client`, and the assertions below on the *second* client and on
+    `created` would fail instead.
+    """
+    _write_existing_env_file(isolated_target)
+    _connection(monkeypatch)
+    old_client = FakeQbitClient(categories={"old-cat": {}}, tags=["old-tag"])
+    new_client = FakeQbitClient(categories={"new-cat": {}}, tags=["new-tag"])
+    app, created = _running_app([old_client, new_client])
+
+    async with app.run_test() as pilot:
+        await _settle(app, pilot)
+        assert created == [old_client]
+        assert app.controller.state.categories_available == ("old-cat",)
+        # The Overview's own per-second sampler is already running
+        # against the old instance -- its reading must not survive into
+        # the new instance's graph window.
+        assert app.controller.state.rate_history.measured >= 1
+
+        await _open_reconfigure(app, pilot)
+        assert isinstance(app.screen, SetupScreen)
+        screen = _form(app)
+        screen.query_one("#setup-host", Input).value = NEW_HOST
+        screen.query_one("#setup-user", Input).value = NEW_USER
+        screen.query_one("#setup-password", Input).value = NEW_PASSWORD
+        await pilot.pause()
+
+        # First Save: the file already exists (this is a reconfigure,
+        # not a first run) -- reported, not written yet.
+        await _press_save(app, pilot)
+        assert isinstance(app.screen, SetupScreen)
+        assert app._setup_screen() is not None
+        assert screen.confirming is True
+
+        # Second Save: confirms the overwrite.
+        await _press_save(app, pilot)
+
+        assert app._setup_screen() is None
+        assert created == [old_client, new_client], (
+            "reset_connection must drop the cached client so the next "
+            "refresh reconnects instead of reusing the old instance"
+        )
+        assert app.controller._host == NEW_HOST
+        assert app.controller.state.categories_available == ("new-cat",)
+        assert app.controller.state.tags_available == ("new-tag",)
+        assert app.controller.state.rate_history.measured == 0
+
+    assert isolated_target.read_text(encoding="utf-8") == render_env_file(
+        QbitConfig(host=NEW_HOST, username=NEW_USER, password=NEW_PASSWORD)
+    )
+
+
+async def test_reconfiguring_does_not_stack_a_second_refresh_timer(
+    isolated_target: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: `_begin_refreshing` used to call `set_interval`
+    unconditionally, so every reconfigure registered one more periodic-
+    refresh timer on top of the one from startup -- permanently doubling
+    (then tripling, ...) the refresh cadence rather than replacing it.
+    """
+    _write_existing_env_file(isolated_target)
+    _connection(monkeypatch)
+    app, _created = _running_app([FakeQbitClient(), FakeQbitClient()])
+
+    interval_calls: list[Any] = []
+    real_set_interval = QbitOpsTuiApp.set_interval
+
+    def _spy(
+        self: QbitOpsTuiApp, interval: float, callback: Any, **kwargs: Any
+    ) -> Any:
+        if callback == self._start_periodic_refresh:
+            interval_calls.append(interval)
+        return real_set_interval(self, interval, callback, **kwargs)
+
+    monkeypatch.setattr(QbitOpsTuiApp, "set_interval", _spy)
+
+    async with app.run_test() as pilot:
+        await _settle(app, pilot)
+        assert len(interval_calls) == 1
+
+        await _open_reconfigure(app, pilot)
+        screen = _form(app)
+        screen.query_one("#setup-host", Input).value = NEW_HOST
+        screen.query_one("#setup-user", Input).value = NEW_USER
+        screen.query_one("#setup-password", Input).value = NEW_PASSWORD
+        await pilot.pause()
+        await _press_save(app, pilot)
+        await _press_save(app, pilot)
+
+        assert app._setup_screen() is None
+        assert (
+            len(interval_calls) == 1
+        ), "a reconfigure must not register a second periodic-refresh timer"
+
+
+async def test_escape_cancels_a_reconfigure_and_keeps_the_old_connection(
+    isolated_target: Path,
+) -> None:
+    """Unlike the first-run form, a reconfigure has a dashboard to
+    return to -- escape must cancel back to it instead of being a
+    no-op (see `test_escape_does_not_dismiss_the_form` for the first-run
+    case, which stays a no-op)."""
+    app, created = _running_app([FakeQbitClient()])
+
+    async with app.run_test() as pilot:
+        await _settle(app, pilot)
+        await _open_reconfigure(app, pilot)
+        assert isinstance(app.screen, SetupScreen)
+
+        await pilot.press("escape")
+        await _settle(app, pilot)
+
+        assert app._setup_screen() is None
+        assert app.controller._host == OLD_HOST
+        assert len(created) == 1, "cancelling must not reconnect"
+
+    assert not isolated_target.exists()
+
+
+async def test_escaping_a_reconfigure_drops_a_stale_test_result(
+    isolated_target: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A setup-test worker still in flight when the operator cancels
+    must not later apply its result to whatever `SetupScreen` opens
+    next -- see `action_dismiss_overlay`'s `SetupScreen` branch.
+
+    Uses a real `threading.Event` (never an arbitrary sleep, per this
+    module's docstring) to hold the background connection attempt open
+    until escape has definitely already been pressed.
+    """
+    _write_existing_env_file(isolated_target)
+    release = threading.Event()
+    attempts: list[QbitConfig] = []
+
+    def _blocking_factory(config: QbitConfig) -> Any:
+        attempts.append(config)
+        assert release.wait(timeout=WAIT_TIMEOUT), "test setup deadlocked"
+        return object()
+
+    monkeypatch.setattr(
+        "qbit_core.features.connection_setup.create_qbit_client",
+        _blocking_factory,
+    )
+    app, _created = _running_app([FakeQbitClient()])
+
+    async with app.run_test() as pilot:
+        await _settle(app, pilot)
+
+        await _open_reconfigure(app, pilot)
+        first = _form(app)
+        first.query_one("#setup-host", Input).value = NEW_HOST
+        first.query_one("#setup-user", Input).value = NEW_USER
+        first.query_one("#setup-password", Input).value = NEW_PASSWORD
+        await pilot.pause()
+        first.query_one("#setup-save", Button).press()
+        await pilot.pause()
+        assert attempts, "the worker should already be testing the connection"
+
+        # Cancel while that worker is still blocked on `release`.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app._setup_screen() is None
+
+        # Not `_open_reconfigure`/`_settle`: the first worker is still
+        # blocked on `release`, so waiting for every worker here would
+        # wait for it too.
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        second = _form(app)
+        assert second is not first
+
+        release.set()
+        await _settle(app, pilot)
+
+        # The abandoned worker's result (a stale "file already exists")
+        # must not have reached the screen open when it landed.
+        assert second.confirming is False
+        assert str(second.query_one("#setup-status", Static).content) == ""

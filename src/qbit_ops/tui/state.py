@@ -722,14 +722,27 @@ class TuiController:
         self._detail_request_id = 0
         self.state = TuiState()
 
-    def set_host(self, host: str | None) -> None:
-        """Point the controller at a newly configured instance.
+    def reset_connection(self, host: str | None) -> None:
+        """Point the controller at a freshly (re)configured instance.
 
-        Only called before the first refresh, from the first-run setup
-        form: `_host` feeds the status snapshot's redacted host label,
-        and a stale one would mislabel every later refresh.
+        Called both from the first-run setup form and from a
+        reconfigure of an already-running TUI. `_host` feeds the status
+        snapshot's redacted host label, and a stale one would mislabel
+        every later refresh. `_client` is dropped so the next remote
+        call reconnects instead of replaying the old instance's
+        session -- the same "force a fresh login" `apply_refresh_
+        failure` already does on a recoverable failure; harmless at
+        first run, where `_client` is still `None`. The rate-history
+        window is replaced rather than kept: its samples carry no
+        per-source tag, so appending a new instance's throughput after
+        a reconfigure would splice two instances into what reads as one
+        continuous trace -- unlike every other authoritative `TuiState`
+        field, which the next successful refresh already replaces
+        wholesale.
         """
         self._host = host
+        self._client = None
+        self.state.rate_history = RateHistory()
 
     @property
     def max_concurrent_remote_operations(self) -> int:
