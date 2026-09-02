@@ -25,7 +25,7 @@ Inspect, diagnose and automate qBittorrent at a scale too big to manage by hand 
 ![qbit-ops TUI demo](https://raw.githubusercontent.com/LECOQQ/qbit-ops/main/docs/assets/qbit-ops-demo.gif)
 
 <p align="center"><em>A live transfer, a filter, and a bulk pause shown
-before it is applied -- then abandoned. Nothing moved.</em></p>
+before it is applied - then abandoned. Nothing moved.</em></p>
 
 ## 🚀 Get started
 
@@ -201,7 +201,7 @@ echo "$NEW_PASSKEY" | qbit-ops trackers replace-passkey \
 ```
 
 `{passkey}` is a template: it never prints anything that can harm you.
-The new value is piped in, never typed on the command line -- without
+The new value is piped in, never typed on the command line - without
 `--new-passkey-stdin`, it asks interactively instead, input hidden.
 Add `--no-dry-run --yes` to actually apply: piping the passkey already
 occupies stdin, so the usual confirmation prompt cannot ask there too.
@@ -214,14 +214,6 @@ echo "$NEW_PASSKEY" | qbit-ops trackers replace \
   --target "https://new.example/announce/{passkey}" \
   --passkey-stdin
 ```
-
-`--source` names the old tracker by host -- never its passkey, since
-identifying a tracker was never what the passkey was for. `--target` is
-the new tracker's real announce URL; its own `{passkey}` is filled the
-same way `replace-passkey`'s is, because a tracker qbit-ops has never
-talked to cannot have its passkey position guessed. Every torrent
-announcing to the old one swaps to the new one; torrents that never
-used it are not touched.
 
 **Keep a dying tracker while you move off it.**
 
@@ -330,21 +322,8 @@ activity, and the instance's own counters.
 qbit-ops tui
 ```
 
-The trace samples once a second, one column per second, and only while
-the overview is on screen -- it costs nothing on the torrents page. Its
-window is sixty seconds wide, and its axis label always states the
-window it actually shows: a terminal too narrow for sixty columns gets
-a shorter window and says so.
-
-Window titles are letter-spaced capitals, which ask nothing of your
-terminal font. Unicode small capitals are available with
-`qbit-ops tui --small-caps-titles` or `QBIT_OPS_SMALL_CAPS_TITLES=1`;
-those letters live in three unrelated Unicode blocks, so a font
-covering only some of them renders the rest at a different size. Run
-`qbit-ops doctor` to see which blocks a font would need.
-
 Filters use the same grammar as the CLI, but as a draft: set them
-across four panes -- Organisation, State, Measures, Trackers -- and
+across four panes - Organisation, State, Measures, Trackers - and
 nothing moves until you hit Apply, with the footer keeping count of
 what's pending, what's invalid, and what actually landed.
 
@@ -374,7 +353,7 @@ an agent can explore it conversationally:
 uv tool install "qbit-ops[mcp]"
 ```
 
-Then point an MCP host at the `stdio` entry point -- for Claude Desktop,
+Then point an MCP host at the `stdio` entry point - for Claude Desktop,
 in its config file:
 
 ```json
@@ -404,7 +383,7 @@ rather than dumped whole.
 ## 🧩 Compatibility
 
 Container integration is tested against a fixed set of exact
-qBittorrent releases -- evidence for those versions, never a claim for a
+qBittorrent releases - evidence for those versions, never a claim for a
 range. The matrix is in
 [docs/COMPATIBILITY.md](https://github.com/LECOQQ/qbit-ops/blob/main/docs/COMPATIBILITY.md).
 
