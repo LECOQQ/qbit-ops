@@ -132,6 +132,20 @@ installed:
 uv tool uninstall qbit-ops
 ```
 
+### ⌨️ Shell completion
+
+Once, for bash, zsh, fish or PowerShell:
+
+```bash
+qbit-ops --install-completion
+```
+
+It writes a small hook into your shell profile that calls `qbit-ops`
+back whenever you press Tab, so **an upgrade needs no reinstall**: new
+commands and options complete as soon as they exist. `--show-completion`
+prints the hook instead of installing it, if you would rather place it
+yourself.
+
 ### 🔌 Connecting
 
 Then set up the connection:
