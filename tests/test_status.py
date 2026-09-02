@@ -6,6 +6,7 @@ import pytest
 
 from qbit_core.features.status import (
     Health,
+    ServerStateCache,
     StatusAlert,
     StatusSnapshot,
     TransferCounts,
@@ -15,6 +16,7 @@ from qbit_core.features.status import (
     build_unavailable_snapshot,
     classify_torrent_state,
     collect_instance_stats,
+    collect_instance_stats_delta,
     collect_status_snapshot,
     snapshot_to_csv_rows,
     snapshot_to_json_dict,
@@ -290,6 +292,86 @@ def test_collect_instance_stats_uses_exactly_one_api_call() -> None:
     assert stats.all_time_ratio == pytest.approx(2.00)
     assert stats.connected_peers == 7
     assert stats.instance_id == "http://x"
+
+
+# --- collect_instance_stats_delta: sync_maindata rid caching ---------------
+
+
+def test_collect_instance_stats_delta_without_a_cache_matches_a_full_call() -> (
+    None
+):
+    """A missing `cache` requests `rid=0` and behaves exactly like
+    `collect_instance_stats`."""
+    client = FakeQbitClient(
+        all_time_downloaded=10,
+        all_time_uploaded=20,
+        global_ratio="2.00",
+        connected_peers=7,
+    )
+
+    stats, cache = collect_instance_stats_delta(client, instance_id="http://x")
+
+    assert client.calls[-1] == ("sync_maindata", (), {"rid": 0})
+    assert stats.all_time_downloaded_bytes == 10
+    assert stats.all_time_uploaded_bytes == 20
+    assert stats.all_time_ratio == pytest.approx(2.00)
+    assert stats.connected_peers == 7
+    assert stats.instance_id == "http://x"
+    assert cache.rid != 0
+
+
+def test_collect_instance_stats_delta_requests_the_prior_rid() -> None:
+    """The second call on the same connection echoes back the `rid` the
+    first call returned, instead of requesting a full snapshot again."""
+    client = FakeQbitClient(connected_peers=7)
+
+    _, first_cache = collect_instance_stats_delta(client)
+    collect_instance_stats_delta(client, cache=first_cache)
+
+    assert client.calls[-1] == ("sync_maindata", (), {"rid": first_cache.rid})
+    assert first_cache.rid != 0
+
+
+def test_collect_instance_stats_delta_merges_a_partial_update() -> None:
+    """A delta response only carries the keys that changed -- the merge
+    must still produce every field, not just the ones just returned."""
+    client = FakeQbitClient(
+        all_time_downloaded=10,
+        all_time_uploaded=20,
+        global_ratio="2.00",
+        connected_peers=7,
+    )
+    first_stats, first_cache = collect_instance_stats_delta(client)
+    assert first_stats.connected_peers == 7
+
+    client.connected_peers = 9  # only this field changes on the instance
+
+    second_stats, second_cache = collect_instance_stats_delta(
+        client, cache=first_cache
+    )
+
+    # The delta payload itself must not carry the unchanged keys --
+    # otherwise this test could not tell a real merge from one that
+    # just re-read every key off a fake that always returns everything.
+    assert (
+        set(second_cache.server_state) - set(first_cache.server_state) == set()
+    )
+    assert second_stats.connected_peers == 9
+    assert second_stats.all_time_downloaded_bytes == 10
+    assert second_stats.all_time_uploaded_bytes == 20
+    assert second_stats.all_time_ratio == pytest.approx(2.00)
+
+
+def test_collect_instance_stats_delta_reuses_a_stale_cache() -> None:
+    """`cache` defaults to an empty `ServerStateCache`, so a caller that
+    never received a cache back (e.g. a cleared cache after a reconnect)
+    still gets a correct, full result."""
+    client = FakeQbitClient(connected_peers=3)
+
+    stats, _ = collect_instance_stats_delta(client, cache=ServerStateCache())
+
+    assert client.calls[-1] == ("sync_maindata", (), {"rid": 0})
+    assert stats.connected_peers == 3
 
 
 def test_build_unavailable_snapshot_reports_unavailable_health() -> None:

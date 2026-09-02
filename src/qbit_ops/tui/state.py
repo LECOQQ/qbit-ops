@@ -67,6 +67,7 @@ from qbit_core.shared.torrent_states import (
     is_stopped_state,
 )
 from qbit_ops.app_services import (
+    TuiRefreshCache,
     TuiRefreshResult,
     classify_recoverable_qbit_failure,
     collect_tui_refresh,
@@ -712,6 +713,7 @@ class TuiController:
         self._max_concurrent_remote = 0
         self._raw_torrents: list[Any] = []
         self._detail_request_id = 0
+        self._refresh_cache = TuiRefreshCache()
         self.state = TuiState()
 
     def reset_connection(self, host: str | None) -> None:
@@ -724,7 +726,11 @@ class TuiController:
         call reconnects instead of replaying the old instance's
         session -- the same "force a fresh login" `apply_refresh_
         failure` already does on a recoverable failure; harmless at
-        first run, where `_client` is still `None`. The rate-history
+        first run, where `_client` is still `None`. `_refresh_cache` is
+        reset alongside it: a new instance's version strings and
+        `sync_maindata` rid are never valid for the one just left, and
+        reusing them would show the previous instance's version or feed
+        a delta cursor the new connection never issued. The rate-history
         window is replaced rather than kept: its samples carry no
         per-source tag, so appending a new instance's throughput after
         a reconfigure would splice two instances into what reads as one
@@ -734,6 +740,7 @@ class TuiController:
         """
         self._host = host
         self._client = None
+        self._refresh_cache = TuiRefreshCache()
         self.state.rate_history = RateHistory()
 
     @property
@@ -790,15 +797,19 @@ class TuiController:
     def collect_refresh(self) -> TuiRefreshResult:
         """Perform one periodic refresh's blocking network work only.
 
-        No state mutation -- safe on a background thread. Raises
-        unchanged; the caller applies the outcome via
-        `apply_refresh_success`/`apply_refresh_failure` on the UI
-        thread. Has no opinion on when it's appropriate to call
+        No state mutation -- safe on a background thread: `_refresh_
+        cache` is only read here, never written (that happens in
+        `apply_refresh_success`, UI-thread only, after this call has
+        already returned). Raises unchanged; the caller applies the
+        outcome via `apply_refresh_success`/`apply_refresh_failure` on
+        the UI thread. Has no opinion on when it's appropriate to call
         (mirrors `refresh()`'s terminal-state guard, but doesn't
         enforce it itself).
         """
         with self._remote_operation() as client:
-            return collect_tui_refresh(client, host=self._host)
+            return collect_tui_refresh(
+                client, host=self._host, cache=self._refresh_cache
+            )
 
     def apply_refresh_success(self, result: TuiRefreshResult) -> None:
         """Apply a successful periodic refresh. UI-thread only.
@@ -811,6 +822,7 @@ class TuiController:
         for a periodic tick landing mid-edit to disturb.
         """
         self._raw_torrents = result.raw_torrents
+        self._refresh_cache = result.cache
         self.state.status = result.status
         self.state.instance_stats = result.instance_stats
         self.state.total_torrents = result.total_torrents
@@ -913,8 +925,12 @@ class TuiController:
         if failure is None:
             raise error
         # Force reconnect (a fresh login) on the next attempt rather than
-        # reusing a client that may be in a bad session state.
+        # reusing a client that may be in a bad session state. The next
+        # connection may not even be the same instance, so the cached
+        # version strings and sync_maindata rid must not survive either
+        # -- see the matching comment on `reset_connection`.
         self._client = None
+        self._refresh_cache = TuiRefreshCache()
         self.state.connection = (
             ConnectionState.AUTH_FAILED
             if failure.code == "authentication_failed"

@@ -60,8 +60,8 @@ class _BenchClient:
     def torrents_trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
         return []
 
-    def sync_maindata(self) -> dict[str, Any]:
-        return {"server_state": {}}
+    def sync_maindata(self, rid: str | int = 0) -> dict[str, Any]:
+        return {"server_state": {}, "rid": 1}
 
     def torrents_categories(self) -> dict[str, Any]:
         return {}

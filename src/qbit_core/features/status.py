@@ -8,7 +8,7 @@ without pulling in presentation concerns.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -33,11 +33,13 @@ from qbit_core.shared.torrent_states import (
 __all__ = [
     "Health",
     "InstanceStats",
+    "ServerStateCache",
     "StatusSnapshot",
     "TransferRates",
     "build_status_snapshot_from_data",
     "build_unavailable_snapshot",
     "collect_instance_stats",
+    "collect_instance_stats_delta",
     "collect_status_snapshot",
     "snapshot_to_csv_rows",
     "snapshot_to_json_dict",
@@ -183,6 +185,52 @@ def collect_instance_stats(
     return build_instance_stats_from_server_state(
         server_state, instance_id=instance_id
     )
+
+
+@dataclass(frozen=True)
+class ServerStateCache:
+    """Carries a `sync_maindata()` delta cursor across refresh cycles on
+    the same connection.
+
+    `rid=0` (the default) means "no prior cursor": qBittorrent always
+    answers a `rid=0` request with a full `server_state`, which is the
+    correct request on the first cycle after a (re)connection. Once a
+    nonzero `rid` has been echoed back, requesting it again returns only
+    the `server_state` keys that changed since -- so `server_state` here
+    holds every key merged so far, and must be threaded back into the
+    next call via `collect_instance_stats_delta`.
+    """
+
+    rid: int = 0
+    server_state: Mapping[str, Any] = field(default_factory=dict)
+
+
+def collect_instance_stats_delta(
+    client: Any,
+    *,
+    instance_id: str | None = None,
+    cache: ServerStateCache | None = None,
+) -> tuple[InstanceStats, ServerStateCache]:
+    """One `sync_maindata(rid=cache.rid)` call, merged onto
+    `cache.server_state`.
+
+    Built for a caller that repeats this every cycle on the same
+    connection (`qbit_ops.app_services.collect_tui_refresh`): once
+    `cache` carries a real `rid`, qBittorrent answers with only the
+    `server_state` keys that changed, not the whole payload -- see
+    `ServerStateCache`. A missing/default `cache` behaves exactly like
+    `collect_instance_stats`. Returns the stats plus the cache to pass
+    into the next cycle.
+    """
+    cache = cache if cache is not None else ServerStateCache()
+    maindata = client.sync_maindata(rid=cache.rid)
+    delta_state = get_field(maindata, "server_state", {})
+    merged_state: dict[str, Any] = {**cache.server_state, **delta_state}
+    new_rid = get_field_as_int(maindata, "rid")
+    stats = build_instance_stats_from_server_state(
+        merged_state, instance_id=instance_id
+    )
+    return stats, ServerStateCache(rid=new_rid, server_state=merged_state)
 
 
 @dataclass(frozen=True)

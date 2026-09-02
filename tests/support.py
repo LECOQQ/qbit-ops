@@ -117,6 +117,8 @@ class FakeQbitClient:
         self.torrents_info_calls = 0
         self.transfer_info_calls = 0
         self.sync_maindata_calls = 0
+        self._maindata_rid = 0
+        self._maindata_last_state: dict[str, Any] | None = None
         self.paused_hashes: list[str | list[str]] = []
         self.resumed_hashes: list[str | list[str]] = []
         self.started_hashes: list[str | list[str]] = []
@@ -147,27 +149,46 @@ class FakeQbitClient:
             "up_info_speed": self.upload_speed,
         }
 
-    def sync_maindata(self) -> dict[str, Any]:
-        """Return a fake `sync_maindata()` payload, `server_state` only."""
+    def sync_maindata(self, rid: str | int = 0) -> dict[str, Any]:
+        """Return a fake `sync_maindata()` payload.
+
+        Models the real delta contract: `rid=0` (and the first call
+        ever, regardless of `rid`) returns the full `server_state`. Any
+        other call returns only the keys whose value changed since the
+        previous call -- diffed against this fake's own attributes, so
+        a test can mutate one (e.g. `client.connected_peers = 9`) between
+        two `sync_maindata()` calls and see only that key in the second
+        payload. `self._maindata_rid` increments every call, so a test
+        can assert the exact `rid` a caller echoes back.
+        """
         self.sync_maindata_calls += 1
-        self._record("sync_maindata")
-        return {
-            "server_state": {
-                "alltime_dl": self.all_time_downloaded,
-                "alltime_ul": self.all_time_uploaded,
-                "global_ratio": self.global_ratio,
-                "total_peer_connections": self.connected_peers,
-                "dl_info_data": self.session_downloaded,
-                "up_info_data": self.session_uploaded,
-                "dht_nodes": self.dht_nodes,
-                "dl_rate_limit": self.download_rate_limit,
-                "up_rate_limit": self.upload_rate_limit,
-                "use_alt_speed_limits": self.alt_speed_limits,
-                "free_space_on_disk": self.free_space,
-                "queueing": self.queueing,
-                "connection_status": self.connection_status,
-            }
+        self._record("sync_maindata", rid=rid)
+        full_state = {
+            "alltime_dl": self.all_time_downloaded,
+            "alltime_ul": self.all_time_uploaded,
+            "global_ratio": self.global_ratio,
+            "total_peer_connections": self.connected_peers,
+            "dl_info_data": self.session_downloaded,
+            "up_info_data": self.session_uploaded,
+            "dht_nodes": self.dht_nodes,
+            "dl_rate_limit": self.download_rate_limit,
+            "up_rate_limit": self.upload_rate_limit,
+            "use_alt_speed_limits": self.alt_speed_limits,
+            "free_space_on_disk": self.free_space,
+            "queueing": self.queueing,
+            "connection_status": self.connection_status,
         }
+        self._maindata_rid += 1
+        if rid == 0 or self._maindata_last_state is None:
+            payload = dict(full_state)
+        else:
+            payload = {
+                key: value
+                for key, value in full_state.items()
+                if self._maindata_last_state.get(key) != value
+            }
+        self._maindata_last_state = full_state
+        return {"server_state": payload, "rid": self._maindata_rid}
 
     def torrents_info(
         self,

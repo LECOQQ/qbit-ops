@@ -116,7 +116,7 @@ class _GalleryClient:
     def transfer_info(self) -> dict[str, int]:
         return {"dl_info_speed": 4_200_000, "up_info_speed": 900_000}
 
-    def sync_maindata(self) -> dict[str, Any]:
+    def sync_maindata(self, rid: str | int = 0) -> dict[str, Any]:
         # Every field the Session window reads, or the capture shows
         # blanks where the screen under review has values.
         return {
@@ -134,7 +134,8 @@ class _GalleryClient:
                 "free_space_on_disk": 1_319_413_953_331,
                 "queueing": True,
                 "connection_status": "firewalled",
-            }
+            },
+            "rid": 1,
         }
 
     def app_version(self) -> str:

@@ -62,7 +62,9 @@ def test_refresh_performs_exactly_one_torrents_info_call() -> None:
     assert client.torrents_info_calls == 1
 
 
-def test_refresh_uses_the_documented_five_call_budget() -> None:
+def test_first_refresh_uses_the_documented_five_call_budget() -> None:
+    """The first refresh on a fresh connection has no cache to draw on:
+    every one of the five calls the docstring names actually happens."""
     client = FakeQbitClient(
         torrents=[make_torrent(), make_torrent(hash="b" * 40)]
     )
@@ -76,6 +78,63 @@ def test_refresh_uses_the_documented_five_call_budget() -> None:
     assert client.torrents_info_calls == 1
     assert client.sync_maindata_calls == 1
     assert client.torrents_trackers_calls == 0
+
+
+def test_second_refresh_reuses_cached_version_and_a_sync_maindata_delta() -> (
+    None
+):
+    """The call-budget guard-fou: a second refresh on the same
+    connection must not repeat `app_version`/`app_web_api_version`, and
+    `sync_maindata` must echo back the `rid` the first refresh received
+    rather than requesting a full snapshot again. Counted, not assumed --
+    reintroducing the old unconditional five-call cycle turns this red
+    (see the builder report for the pasted failure)."""
+    client = FakeQbitClient(
+        torrents=[make_torrent(), make_torrent(hash="b" * 40)]
+    )
+    controller = _controller(client)
+
+    controller.refresh()
+    first_response_rid = client._maindata_rid
+    controller.refresh()
+
+    assert client.app_version_calls == 1
+    assert client.app_web_api_version_calls == 1
+    assert client.transfer_info_calls == 2
+    assert client.torrents_info_calls == 2
+    assert client.sync_maindata_calls == 2
+    assert client.calls[-1] == (
+        "sync_maindata",
+        (),
+        {"rid": first_response_rid},
+    )
+    assert first_response_rid != 0
+    # Two five-call cycles would be 10; the second cycle skips two
+    # version calls and turns its sync_maindata into a delta request,
+    # not a smaller payload the call log cannot see -- but the call
+    # count itself is the part this test can prove.
+    assert len(client.calls) == 8
+
+
+def test_second_refresh_still_reports_every_instance_stats_field() -> None:
+    """A `sync_maindata` delta only carries changed keys -- the merge in
+    `collect_instance_stats_delta` must still leave every field correct
+    on the second cycle, including one that never changes."""
+    client = FakeQbitClient(
+        torrents=[make_torrent()],
+        all_time_downloaded=10,
+        connected_peers=7,
+    )
+    controller = _controller(client)
+    controller.refresh()
+
+    client.connected_peers = 9  # only this field changes between cycles
+    controller.refresh()
+
+    stats = controller.state.instance_stats
+    assert stats is not None
+    assert stats.connected_peers == 9
+    assert stats.all_time_downloaded_bytes == 10
 
 
 def test_refresh_populates_status_and_torrent_data_from_one_fetch() -> None:
@@ -236,6 +295,57 @@ def test_recovery_clears_stale() -> None:
     assert controller.state.stale is False
     assert controller.state.connection is ConnectionState.CONNECTED
     assert controller.state.last_error is None
+
+
+def test_recoverable_failure_clears_the_refresh_cache() -> None:
+    """A recoverable failure drops `_client` to force a fresh login on
+    the next attempt -- the cached version strings and `sync_maindata`
+    rid must not survive it either, since the next connection may not
+    even be the same instance (see the comment on `reset_connection`
+    and `apply_refresh_failure`). Without this, recovery would keep
+    reporting the version fetched before the failure."""
+    client = FlakyQbitClient(torrents=[make_torrent(name="Alpha")])
+    controller = _controller(client)
+    controller.refresh()
+    assert client.app_version_calls == 1
+    assert client.app_web_api_version_calls == 1
+
+    client.next_torrents_info_error = QbitConnectionError("connection lost")
+    controller.refresh()  # fails before reaching sync_maindata
+
+    controller.refresh()  # recovery
+
+    assert client.app_version_calls == 2
+    assert client.app_web_api_version_calls == 2
+
+
+def test_reset_connection_clears_the_refresh_cache() -> None:
+    """The trap this guards: a version cache surviving a reconfigure
+    would show the TUI the instance it just left, not the new one.
+    `reset_connection` must force a real version/`sync_maindata` fetch
+    against whatever client the factory hands out next."""
+    old_client = FakeQbitClient(
+        torrents=[make_torrent()], qbittorrent_version="5.0.0"
+    )
+    new_client = FakeQbitClient(
+        torrents=[make_torrent()], qbittorrent_version="5.9.9"
+    )
+    remaining = iter([old_client, new_client])
+    controller = TuiController(
+        client_factory=lambda: next(remaining), host="http://old"
+    )
+
+    controller.refresh()
+    assert old_client.app_version_calls == 1
+    assert controller.state.status is not None
+    assert controller.state.status.qbittorrent_version == "5.0.0"
+
+    controller.reset_connection("http://new")
+    controller.refresh()
+
+    assert new_client.app_version_calls == 1
+    assert controller.state.status is not None
+    assert controller.state.status.qbittorrent_version == "5.9.9"
 
 
 def test_authentication_failure_becomes_blocking() -> None:

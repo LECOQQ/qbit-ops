@@ -67,7 +67,7 @@ class Instance:
         self.n += 1
         return {"dl_info_speed": 1_000_000 + self.n, "up_info_speed": 200_000}
 
-    def sync_maindata(self) -> dict[str, Any]:
+    def sync_maindata(self, rid: str | int = 0) -> dict[str, Any]:
         return {
             "server_state": {
                 "alltime_dl": 1,
@@ -75,7 +75,8 @@ class Instance:
                 "global_ratio": "1.0",
                 "total_peer_connections": 3,
                 "connection_status": "connected",
-            }
+            },
+            "rid": 1,
         }
 
     def app_version(self) -> str:

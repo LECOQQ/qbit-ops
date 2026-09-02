@@ -42,9 +42,12 @@ class QbitTransferReader(Protocol):
         """Return current global download/upload speeds."""
         ...
 
-    def sync_maindata(self) -> Mapping[str, Any]:
-        """Full sync snapshot; only `server_state` is used (see
-        `qbit_core.features.status.collect_instance_stats`)."""
+    def sync_maindata(self, rid: str | int = 0) -> Mapping[str, Any]:
+        """Sync snapshot; only `server_state` is used (see
+        `qbit_core.features.status.collect_instance_stats`/
+        `collect_instance_stats_delta`). `rid=0` (the default) returns a
+        full snapshot; echoing back a nonzero `rid` from a prior call
+        returns only the `server_state` keys that changed since."""
         ...
 
 
