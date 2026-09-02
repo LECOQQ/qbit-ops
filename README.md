@@ -60,6 +60,31 @@ uv tool install "qbit-ops[mcp]"
 pipx install "qbit-ops[mcp]"
 ```
 
+### 📥 With the install script
+
+For a machine with none of the above yet - no `uv`, `pipx`, Homebrew
+or Docker:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh | sh
+```
+
+It refuses to run as root, announces exactly what it is about to do
+before doing it, and installs [uv](https://docs.astral.sh/uv/) itself
+only if missing - uv then provisions its own Python when none on the
+system satisfies `Requires-Python`, so this works even where no Python
+is installed at all. Everything lands in your own account, never
+system-wide.
+
+The script's checksum is published next to it. Verify it before piping
+anything into a shell:
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh -o install.sh
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh.sha256 -o install.sh.sha256
+sha256sum -c install.sh.sha256 && sh install.sh
+```
+
 ### 🍺 With Homebrew
 
 ```bash
@@ -97,6 +122,14 @@ For a long-lived setup, see the
 uv tool upgrade qbit-ops
 pipx upgrade qbit-ops
 brew upgrade qbit-ops
+```
+
+The install script above installs through `uv tool install`, so
+`uv tool upgrade qbit-ops` upgrades it too. To remove what it
+installed:
+
+```bash
+uv tool uninstall qbit-ops
 ```
 
 ### 🔌 Connecting

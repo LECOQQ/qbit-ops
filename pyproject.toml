@@ -105,6 +105,7 @@ markers = [
     "capture: tests that write to tests/compatibility/fixtures/captured-container/ (always also marked `docker`; only `make capture-qbit-fixtures` selects these).",
     "network: tests that reach the network (resolve dependencies from PyPI); excluded from `make check`/`make check-fast`, run by `make check-dist`.",
     "image: tests that build the container image locally (never push to any registry); excluded from `make check`/`make check-fast`, run by `make check-image`.",
+    "install: tests that run scripts/install.sh end-to-end inside a real, disposable container (needs Docker and the network); excluded from `make check`/`make check-fast`, run by `make check-install-script`.",
 ]
 
 [tool.commitizen]

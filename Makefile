@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-beautify demo-down demo-doctor
+.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint check-shell test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image check-install-script build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-beautify demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -103,13 +103,30 @@ lint: ## qa: Check Python style and types without modifying files
 	@$(PY) ruff check demo scripts src tests
 	@$(PY) black --check demo scripts src tests
 	@$(PY) pyright
+	@$(MAKE) --no-print-directory check-shell
+
+# Prefer a local shellcheck; fall back to the official image so the
+# target still works without one installed. GitHub's ubuntu-latest
+# runner ships shellcheck already, so CI never takes the Docker path.
+SHELLCHECK_IMAGE := koalaman/shellcheck:stable
+
+check-shell: ## qa: Lint scripts/install.sh with ShellCheck
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck --shell=sh scripts/install.sh; \
+	elif command -v docker >/dev/null 2>&1; then \
+		docker run --rm -v "$(CURDIR):/mnt" -w /mnt $(SHELLCHECK_IMAGE) \
+			--shell=sh scripts/install.sh; \
+	else \
+		printf 'MISSING: shellcheck. Install it (https://www.shellcheck.net) or provide Docker.\n' >&2; \
+		exit 1; \
+	fi
 
 # Hermetic suites run under xdist; the Docker matrix targets below stay
 # serial on purpose -- they drive one shared disposable container.
 PYTEST_PARALLEL := -n auto
 
 test: ## qa: Run Python tests
-	@$(PY) pytest $(PYTEST_PARALLEL) -m "not network and not image"
+	@$(PY) pytest $(PYTEST_PARALLEL) -m "not network and not image and not install"
 
 check-version: ## qa: Verify pyproject.toml and the Release Please manifest agree
 	@python3 scripts/check_version_sync.py
@@ -166,16 +183,20 @@ check-dist: build ## qa: Validate the built artifacts and smoke-test the install
 check-image: sync ## qa: Build the container image locally and verify its entrypoint and OCI labels (needs Docker)
 	@$(PY) pytest -m image tests/test_docker_distribution.py
 
+check-install-script: sync ## qa: Run scripts/install.sh end-to-end inside disposable containers (needs Docker and the network)
+	@$(PY) pytest -m install tests/test_install_script.py
+
 check: sync lint test check-version check-docs check-ai check-agents ## qa: Run all required quality checks (full TUI suite, no Docker) -- the push/PR gate
 
 check-fast: sync ## qa: Fast local checkpoint: lint/types/version + hermetic non-TUI, non-Docker tests (not a substitute for `make check`)
 	@$(PY) ruff check demo scripts src tests
 	@$(PY) black --check demo scripts src tests
 	@$(PY) pyright
+	@$(MAKE) --no-print-directory check-shell
 	@python3 scripts/check_version_sync.py
 	@python3 scripts/check_doc_links.py
 	@python3 scripts/check_ai_hygiene.py
-	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker and not network and not image"
+	@$(PY) pytest $(PYTEST_PARALLEL) -m "not tui and not docker and not network and not image and not install"
 
 test-tui: sync ## qa: Run the complete TUI suite (mutation lifecycle, concurrency, security, audit) -- never touches qBittorrent or Docker
 	@$(PY) pytest $(PYTEST_PARALLEL) tests/test_tui_app.py tests/test_tui_architecture.py tests/test_tui_bulk_mutation_audit.py tests/test_tui_cli.py tests/test_tui_dots.py tests/test_tui_gallery.py tests/test_tui_overview_model.py tests/test_tui_overview_windows.py tests/test_profile_tui_table.py tests/test_tui_security.py tests/test_tui_setup.py tests/test_tui_state.py tests/test_tui_table_performance.py tests/test_tui_value_form.py
