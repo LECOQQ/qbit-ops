@@ -146,6 +146,11 @@ commands and options complete as soon as they exist. `--show-completion`
 prints the hook instead of installing it, if you would rather place it
 yourself.
 
+Options with a fixed set of values complete too -- `--format`,
+`--state`, `--tracker-health` and friends. `--category`, `--tag` and
+`--tracker` do not: their values live on the instance, and completing
+them would mean a network call on every Tab press.
+
 ### 🔌 Connecting
 
 Then set up the connection:

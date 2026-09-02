@@ -37,6 +37,7 @@ from qbit_core.shared.parsers import (
     parse_size,
 )
 from qbit_core.shared.selection import STATE_FILTER_VALUES, Range, TorrentFilter
+from qbit_ops.cli.completion import complete_choices
 
 CATEGORY_FILTER_HELP = (
     "Restrict to a category (repeatable; combines with OR). Use "
@@ -83,7 +84,12 @@ CategoryOption = Annotated[
     list[str], typer.Option("--category", help=CATEGORY_FILTER_HELP)
 ]
 StateOption = Annotated[
-    list[str], typer.Option("--state", help=STATE_FILTER_HELP)
+    list[str],
+    typer.Option(
+        "--state",
+        help=STATE_FILTER_HELP,
+        autocompletion=complete_choices(STATE_FILTER_VALUES),
+    ),
 ]
 TrackerOption = Annotated[
     list[str], typer.Option("--tracker", help=TRACKER_FILTER_HELP)
@@ -259,7 +265,9 @@ ExcludeCategoryOption = Annotated[
 ExcludeStateOption = Annotated[
     list[str],
     typer.Option(
-        "--exclude-state", help="Skip torrents in a state group (repeatable)."
+        "--exclude-state",
+        help="Skip torrents in a state group (repeatable).",
+        autocompletion=complete_choices(STATE_FILTER_VALUES),
     ),
 ]
 
@@ -361,7 +369,11 @@ NoTrackerOption = Annotated[
 ]
 TrackerHealthOption = Annotated[
     list[str],
-    typer.Option("--tracker-health", help=TRACKER_HEALTH_FILTER_HELP),
+    typer.Option(
+        "--tracker-health",
+        help=TRACKER_HEALTH_FILTER_HELP,
+        autocompletion=complete_choices(TRACKER_HEALTH_FILTER_VALUES),
+    ),
 ]
 
 # --- privacy ----------------------------------------------------------------
