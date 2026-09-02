@@ -7244,7 +7244,7 @@ async def test_every_modal_advertises_its_keys_in_its_border_subtitle() -> None:
             ).plain
 
             assert plain.startswith("["), (screen, plain)
-            assert plain.count("[") == len(screen.MODAL_KEYS), (screen, plain)
+            assert plain.count("[") == len(screen.modal_keys()), (screen, plain)
             # The old hand-written grammar, gone for good.
             assert "\u00b7" not in plain, (screen, plain)
             # Every modal reachable by `escape` says so.

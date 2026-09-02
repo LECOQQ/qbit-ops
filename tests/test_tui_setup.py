@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from rich.text import Text
 from textual.pilot import Pilot
 from textual.widgets import Button, Input, Static
 
@@ -534,3 +535,29 @@ async def test_escaping_a_reconfigure_drops_a_stale_test_result(
         # must not have reached the screen open when it landed.
         assert second.confirming is False
         assert str(second.query_one("#setup-status", Static).content) == ""
+
+
+async def test_the_setup_border_offers_escape_only_where_it_works() -> None:
+    """The form is the whole application on first run: dismissing it
+    would leave a TUI with no instance to talk to, so the key is refused
+    there and must not be announced. Reopened from a running TUI, there
+    is a dashboard behind it and cancelling is the way out."""
+    first_run = _app(needs_setup=True)
+    async with first_run.run_test(size=(140, 40)) as pilot:
+        await _settle(first_run, pilot)
+        screen = _form(first_run)
+        plain = Text.from_markup(
+            str(screen.query_one(f"#{screen.DIALOG_ID}").border_subtitle)
+        ).plain
+        assert "esc" not in plain, plain
+
+    running = _app(needs_setup=False)
+    async with running.run_test(size=(140, 40)) as pilot:
+        await _settle(running, pilot)
+        await pilot.press("ctrl+o")
+        await _settle(running, pilot)
+        screen = _form(running)
+        plain = Text.from_markup(
+            str(screen.query_one(f"#{screen.DIALOG_ID}").border_subtitle)
+        ).plain
+        assert "esc" in plain, plain

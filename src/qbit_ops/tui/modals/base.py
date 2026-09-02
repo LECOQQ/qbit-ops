@@ -137,6 +137,19 @@ class QbitModal(ModalScreen[None]):
         """The modal's own content, inside the shared frame."""
         return iter(())
 
+    def modal_keys(self) -> tuple[KeyHint, ...]:
+        """The hints this modal advertises right now.
+
+        A method rather than the `MODAL_KEYS` class variable read
+        directly, because one modal's way out depends on how it was
+        opened: `SetupScreen` cannot be dismissed on first run -- there
+        is nothing behind it -- and can be on a reconfigure. Announcing
+        `esc` in both places would name a key that does nothing in one
+        of them, which is the failure this whole frame exists to
+        prevent.
+        """
+        return self.MODAL_KEYS
+
     def key_hints(self) -> str:
         """This modal's hints, rendered from its live bindings.
 
@@ -148,7 +161,7 @@ class QbitModal(ModalScreen[None]):
         stops one from shipping.
         """
         entries: list[tuple[str, str]] = []
-        for hint in self.MODAL_KEYS:
+        for hint in self.modal_keys():
             bindings = [self._binding_for(key) for key in hint.keys]
             displays = [
                 self.app.get_key_display(binding)

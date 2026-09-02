@@ -43,6 +43,20 @@ class SetupScreen(QbitModal):
     )
     DIALOG_ID = "setup-dialog"
 
+    def modal_keys(self) -> tuple[KeyHint, ...]:
+        """`esc` only where it does something.
+
+        On first run the form is the whole application: dismissing it
+        would leave a TUI with no instance to talk to, so
+        `action_dismiss_overlay` refuses, and announcing the key would
+        name a no-op. Reopened from a running TUI, there is a dashboard
+        behind it and cancelling is the expected way out.
+        """
+        app = cast("QbitOpsTuiApp", self.app)
+        if app.needs_setup:
+            return self.MODAL_KEYS
+        return (*self.MODAL_KEYS, KeyHint(("escape",), "Cancel"))
+
     def __init__(self) -> None:
         super().__init__()
         self._confirming = False
