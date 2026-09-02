@@ -372,9 +372,10 @@ async def test_reconfiguring_a_running_tui_talks_to_the_new_instance(
         assert created == [old_client]
         assert app.controller.state.categories_available == ("old-cat",)
         # The Overview's own per-second sampler is already running
-        # against the old instance -- its reading must not survive into
+        # against the old instance -- its readings must not survive into
         # the new instance's graph window.
         assert app.controller.state.rate_history.measured >= 1
+        old_history = app.controller.state.rate_history
 
         await _open_reconfigure(app, pilot)
         assert isinstance(app.screen, SetupScreen)
@@ -402,7 +403,12 @@ async def test_reconfiguring_a_running_tui_talks_to_the_new_instance(
         assert app.controller._host == NEW_HOST
         assert app.controller.state.categories_available == ("new-cat",)
         assert app.controller.state.tags_available == ("new-tag",)
-        assert app.controller.state.rate_history.measured == 0
+        # The window is replaced, not emptied -- and that is what has to
+        # be asserted. Counting what it holds was deterministic while the
+        # sampler paused off the Overview; since it runs continuously, a
+        # real one-second tick can land a legitimate sample of the *new*
+        # instance here before this line, and did under parallel load.
+        assert app.controller.state.rate_history is not old_history
 
     assert isolated_target.read_text(encoding="utf-8") == render_env_file(
         QbitConfig(host=NEW_HOST, username=NEW_USER, password=NEW_PASSWORD)
