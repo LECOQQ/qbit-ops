@@ -345,10 +345,12 @@ class RateHistory:
 
     Samples are `int | None`, and the difference is load-bearing:
     `None` means *not measured*, which is never the same claim as a
-    measured zero. Three things produce it -- the first minute after
-    launch, the stretch while the operator was on another page and the
-    sampler was deliberately not running, and a second whose reading
-    never came back.
+    measured zero. Two things produce it -- the first minute after
+    launch, and a second whose reading never came back. The sampler
+    itself now runs for the life of the session regardless of which
+    page is on screen, so it no longer manufactures a third source (see
+    the comment above `QbitOpsTuiApp._start_sampling` for the
+    measurement that retired the pause).
 
     **A slot belongs to the second that asked for it, not to the second
     its answer arrived in.** `open_slot()` advances the window on the
@@ -444,16 +446,6 @@ class RateHistory:
     def record_transfer(self, *, download: int, upload: int) -> None:
         """Open a slot and settle it at once -- for tests and fixtures."""
         self.settle(self.open_slot(), download=download, upload=upload)
-
-    def skip(self, samples: int) -> None:
-        """Advance the window by `samples` unmeasured seconds.
-
-        Called when the sampler was not running -- the operator was on
-        another page. Drawing those seconds as zero would report a still
-        library where the truth is that nobody was looking.
-        """
-        for _ in range(min(max(samples, 0), self._slots)):
-            self.open_slot()
 
     def record_trackers(self, by_tracker: Mapping[str, int]) -> None:
         """Append one refresh tick to every per-tracker series."""
@@ -897,10 +889,6 @@ class TuiController:
             download=rates.download_bytes_per_second,
             upload=rates.upload_bytes_per_second,
         )
-
-    def skip_rate_samples(self, seconds: int) -> None:
-        """Record `seconds` the sampler was not running. UI-thread only."""
-        self.state.rate_history.skip(seconds)
 
     def apply_refresh_failure(self, error: Exception) -> None:
         """Classify and apply a failed periodic refresh. UI-thread only.

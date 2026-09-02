@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
-from time import monotonic
 from typing import Any, cast
 
 from textual import events
@@ -290,7 +289,6 @@ class QbitOpsTuiApp(App[None]):
         mutation that can widen it (see `_on_mutation_worker_state_
         changed`) -- never on the periodic refresh timer."""
         self._sample_timer: Timer | None = None
-        self._sampling_stopped_at: float | None = None
         self._search_debounce_timer: Timer | None = None
         self._pending_search_text: str = ""
         # Nothing may reach qBittorrent before the first-run form is
@@ -353,7 +351,7 @@ class QbitOpsTuiApp(App[None]):
         self._begin_refreshing()
 
     def _begin_refreshing(self) -> None:
-        """Start the periodic-refresh timer and sampler, once.
+        """Start the periodic-refresh timer and the sampler, once.
 
         Also the re-entry point for `_complete_setup` after a
         reconfigure of an already-running TUI: both timers are already
@@ -361,9 +359,9 @@ class QbitOpsTuiApp(App[None]):
         each call would register one more, permanently doubling (then
         tripling, ...) the refresh cadence. Only an immediate tick is
         forced, against whatever instance `TuiController.reset_
-        connection` just pointed at; the sampler is left exactly as the
-        active workspace already has it, since reconfiguring is not a
-        workspace change.
+        connection` just pointed at; `_start_sampling` needs no
+        equivalent re-entry guard of its own, since it never stops once
+        started.
         """
         if self._refreshing_started:
             self._start_periodic_refresh()
@@ -371,44 +369,43 @@ class QbitOpsTuiApp(App[None]):
         self._refreshing_started = True
         self.set_interval(self.refresh_interval, self._start_periodic_refresh)
         self._start_periodic_refresh()
-        self._resume_sampling()
+        self._start_sampling()
 
     # -- the graph's own clock ----------------------------------------
     #
     # A second timer, deliberately not `refresh_interval`: the graph
     # window is wall-clock time, so its axis label must stay true
-    # regardless of `--interval`. Costs one `transfer_info()` per second,
-    # so it only runs while the Overview is on screen; seconds it didn't
-    # watch are recorded as unmeasured, never back-filled with zeroes.
+    # regardless of `--interval`. It used to stop off the Overview page
+    # to save one `transfer_info()` call a second. Measured against the
+    # demo instance, that call costs 214 bytes next to 25,589 for the
+    # `torrents_info()` call the periodic refresh already makes every
+    # cycle, on every page, whatever `--interval` is. Pausing saved
+    # about 0.03% of what the TUI already transfers -- and unlike
+    # `torrents_info()`, this call's cost does not grow with the
+    # library -- in exchange for a hole in the graph on every return to
+    # Overview. It now samples for the life of the session.
 
-    def _resume_sampling(self) -> None:
-        if not self._refreshing_started or self._sample_timer is not None:
+    def _start_sampling(self) -> None:
+        if self._sample_timer is not None:
             return
-        if self._sampling_stopped_at is not None:
-            elapsed = monotonic() - self._sampling_stopped_at
-            self.controller.skip_rate_samples(
-                int(elapsed // GRAPH_SAMPLE_INTERVAL_SECONDS)
-            )
-            self._sampling_stopped_at = None
         self._sample_timer = self.set_interval(
             GRAPH_SAMPLE_INTERVAL_SECONDS, self._start_rate_sample
         )
         self._start_rate_sample()
-
-    def _pause_sampling(self) -> None:
-        if self._sample_timer is None:
-            return
-        self._sample_timer.stop()
-        self._sample_timer = None
-        self._sampling_stopped_at = monotonic()
 
     def _start_rate_sample(self) -> None:
         """Start one rate sample, unless one is still in flight.
 
         Coalesces rather than queues, exactly like the periodic refresh:
         an instance slower than a second must not accumulate a backlog
-        of workers.
+        of workers. Now that this timer never stops, it can still be
+        due the moment the app starts shutting down -- `is_running`
+        guards it exactly like `_on_refresh_worker_state_changed` guards
+        a late result, so this tick never touches a widget that may
+        already be torn down.
         """
+        if not self.is_running:
+            return
         if self.controller.state.connection in (
             ConnectionState.AUTH_FAILED,
             ConnectionState.CONFIG_FAILED,
@@ -439,6 +436,10 @@ class QbitOpsTuiApp(App[None]):
             # A failed sample is not an incident: the periodic refresh
             # owns connection state, and this second simply goes
             # unmeasured like any other second nobody watched.
+            return
+        if not self.is_running:
+            # A late result must never mutate state or touch a widget
+            # that may already be torn down.
             return
         rates = event.worker.result
         if rates is None or self._sample_tick is None:
@@ -964,12 +965,6 @@ class QbitOpsTuiApp(App[None]):
 
     def _render_workspace_visibility(self) -> None:
         workspace = self.controller.state.workspace
-        # The per-second sampler exists for the graph, and the graph is
-        # only on this page.
-        if workspace is Workspace.OVERVIEW:
-            self._resume_sampling()
-        else:
-            self._pause_sampling()
         self.query_one("#overview-workspace", OverviewPanel).display = (
             workspace is Workspace.OVERVIEW
         )

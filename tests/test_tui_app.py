@@ -208,6 +208,18 @@ def _sample_once(app: QbitOpsTuiApp) -> None:
     )
 
 
+def _calls_besides_the_sampler(
+    client: FakeQbitClient,
+) -> list[tuple[str, Any, Any]]:
+    """Every call `client` recorded except the graph's own `transfer_
+    info`. The sampler now runs continuously and independently of
+    whatever a test is doing (see the comment above `QbitOpsTuiApp.
+    _start_sampling`), so a "this action performs zero API calls" test
+    excludes its ticks rather than pausing them -- a slow run could
+    otherwise pick up a real one with nothing to do with the action."""
+    return [call for call in client.calls if call[0] != "transfer_info"]
+
+
 def _static_text(widget: Any) -> str:
     """Join every mounted `Static` descendant's content into one string.
 
@@ -944,28 +956,39 @@ async def test_workspace_tabs_underline_hugs_the_page_name_only() -> None:
         assert plain[start:end] == "Torrents"
 
 
-async def test_leaving_the_overview_stops_the_per_second_sampler() -> None:
-    """The graph costs one `transfer_info()` a second, so it runs only
-    while the page that shows it is on screen. Switching *away* must
-    cost nothing at all, and must not leave the timer running."""
+async def test_returning_to_overview_leaves_no_gap_in_the_rate_window() -> None:
+    """The sampler no longer pauses off the Overview page -- see the
+    measurement above `QbitOpsTuiApp._start_sampling`. A round trip to
+    Torrents must never show up as an unmeasured gap in the graph."""
     client = FakeQbitClient(torrents=[make_torrent()])
     app = _app(client)
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
+        timer = app._sample_timer
+        assert timer is not None
+        _sample_once(app)
 
         await _goto_torrents(app, pilot)
         await _settle(app, pilot)
-        assert app._sample_timer is None
-
-        calls_on_torrents = len(client.calls)
-        await pilot.pause()
-        await _settle(app, pilot)
-        assert len(client.calls) == calls_on_torrents
+        # Still the very same timer -- proof it was never paused for
+        # this page.
+        assert app._sample_timer is timer
+        _sample_once(app)
+        _sample_once(app)
 
         await _goto_overview(app, pilot)
         await _settle(app, pilot)
-        assert app._sample_timer is not None
+        assert app._sample_timer is timer
+        _sample_once(app)
+
+        history = app.controller.state.rate_history
+        # >= rather than ==: a real background tick from the sampler's
+        # own timer may also have landed alongside the four manual
+        # samples above -- itself proof the sampler kept running.
+        assert history.measured >= 4
+        downloads, _ = history.window(history.measured)
+        assert None not in downloads
 
 
 async def test_switching_workspaces_fetches_nothing_but_the_graph() -> None:
@@ -1601,9 +1624,14 @@ async def test_search_performs_zero_qbittorrent_api_calls() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
+        # `transfer_info_calls` is excluded: it now also counts the
+        # graph's own per-second sampler, which runs continuously and
+        # independently of the workspace or of anything typed here (see
+        # the comment above `QbitOpsTuiApp._start_sampling`), so a slow
+        # run could tick once more between `scans_before` and
+        # `scans_after` with nothing to do with search.
         scans_before = (
             client.torrents_info_calls,
-            client.transfer_info_calls,
             client.app_version_calls,
             client.app_web_api_version_calls,
         )
@@ -1619,7 +1647,6 @@ async def test_search_performs_zero_qbittorrent_api_calls() -> None:
 
         scans_after = (
             client.torrents_info_calls,
-            client.transfer_info_calls,
             client.app_version_calls,
             client.app_web_api_version_calls,
         )
@@ -1910,9 +1937,14 @@ async def test_filter_apply_performs_zero_api_calls() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
+        # `transfer_info_calls` is excluded: it now also counts the
+        # graph's own per-second sampler, which runs continuously and
+        # independently of the workspace or of anything typed here (see
+        # the comment above `QbitOpsTuiApp._start_sampling`), so a slow
+        # run could tick once more between `scans_before` and
+        # `scans_after` with nothing to do with filtering.
         scans_before = (
             client.torrents_info_calls,
-            client.transfer_info_calls,
             client.app_version_calls,
             client.app_web_api_version_calls,
         )
@@ -1928,7 +1960,6 @@ async def test_filter_apply_performs_zero_api_calls() -> None:
 
         scans_after = (
             client.torrents_info_calls,
-            client.transfer_info_calls,
             client.app_version_calls,
             client.app_web_api_version_calls,
         )
@@ -2338,19 +2369,14 @@ async def test_resize_does_not_trigger_extra_api_calls() -> None:
 
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
-        # The graph's per-second sampler runs on real wall-clock time,
-        # independent of `refresh_interval`; under load the resizes below
-        # can take over a second and its tick adds an extra `transfer_info`
-        # call unrelated to what this test budgets.
-        app._pause_sampling()
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
 
         await pilot.resize_terminal(*NARROW_SIZE)
         await pilot.pause()
         await pilot.resize_terminal(*WIDE_SIZE)
         await pilot.pause()
 
-        assert len(client.calls) == calls_before
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_resize_narrow_to_wide_preserves_focus_and_details_content() -> (
@@ -2918,12 +2944,12 @@ async def test_copy_hash_performs_zero_api_calls() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
 
         await pilot.press("c")
         await pilot.pause()
 
-        assert len(client.calls) == calls_before
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_copy_hash_uses_the_full_canonical_hash_from_table() -> None:
@@ -3401,12 +3427,12 @@ async def test_e_performs_zero_api_calls_when_details_already_loaded() -> None:
         await _open_details(app, pilot)
         await pilot.press("escape")
         await pilot.pause()
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
 
         await pilot.press("e")
         await pilot.pause()
 
-        assert len(client.calls) == calls_before
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_e_never_calls_torrents_info() -> None:
@@ -4794,7 +4820,7 @@ async def test_opening_modals_costs_zero_calls_after_startup() -> None:
     async with app.run_test(size=WIDE_SIZE) as pilot:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
 
         await pilot.press("f")
         await pilot.pause()
@@ -4817,7 +4843,7 @@ async def test_opening_modals_costs_zero_calls_after_startup() -> None:
             await pilot.press("escape")
             await pilot.pause()
 
-        assert len(client.calls) == calls_before, client.calls[calls_before:]
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_throttle_with_neither_direction_disarms_preview() -> None:
@@ -8062,27 +8088,6 @@ async def test_going_stale_never_pushes_a_window_down_a_row() -> None:
         )
 
 
-async def test_the_seconds_nobody_watched_are_not_drawn_as_zero() -> None:
-    """Leaving the page stops the sampler. Coming back records the gap
-    as unmeasured rather than back-filling a still library."""
-    client = FakeQbitClient(torrents=[make_torrent()], download_speed=5_000)
-    app = _app(client)
-
-    async with app.run_test(size=WIDE_SIZE) as pilot:
-        await _settle(app, pilot)
-        for _ in range(5):
-            _sample_once(app)
-        measured_before = app.controller.state.rate_history.measured
-
-        app.controller.skip_rate_samples(30)
-        history = app.controller.state.rate_history
-
-        assert history.measured == measured_before
-        downloads, _ = history.window(40)
-        assert downloads[-1] is None
-        assert any(value is not None for value in downloads)
-
-
 # --- The window commands the width, and the clock commands the column ------
 
 
@@ -8499,14 +8504,14 @@ async def test_ctrl_r_resets_filters_sort_and_selection() -> None:
         assert app.controller.state.sort != SortOrder()
         assert app.controller.state.selected_hashes == {"a" * 40, "b" * 40}
 
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
         await pilot.press("ctrl+r")
         await pilot.pause()
 
         assert app.controller.state.filters == TorrentFilter()
         assert app.controller.state.sort == SortOrder()
         assert app.controller.state.selected_hashes == set()
-        assert len(client.calls) == calls_before, client.calls[calls_before:]
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_ctrl_r_clears_a_checkmark_a_direct_write_left_stale() -> None:
@@ -8554,14 +8559,14 @@ async def test_ctrl_r_with_nothing_to_reset_is_a_safe_noop() -> None:
         await _settle(app, pilot)
         await _goto_torrents(app, pilot)
 
-        calls_before = len(client.calls)
+        calls_before = _calls_besides_the_sampler(client)
         await pilot.press("ctrl+r")
         await pilot.pause()
 
         assert app.controller.state.filters == TorrentFilter()
         assert app.controller.state.sort == SortOrder()
         assert app.controller.state.selected_hashes == set()
-        assert len(client.calls) == calls_before
+        assert _calls_besides_the_sampler(client) == calls_before
 
 
 async def test_reset_view_is_announced_only_once_something_differs() -> None:

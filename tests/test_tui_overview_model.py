@@ -59,27 +59,6 @@ def test_a_recorded_zero_counts_as_a_measurement() -> None:
     assert history.downloads == (0,)
 
 
-def test_seconds_nobody_watched_are_recorded_as_unmeasured() -> None:
-    """The operator was on the Torrents page and the sampler was
-    stopped. Those seconds are not zero traffic -- nobody looked."""
-    history = RateHistory()
-    history.record_transfer(download=5, upload=5)
-    history.skip(4)
-    history.record_transfer(download=7, upload=7)
-
-    downloads, _ = history.window(6)
-    assert downloads == [5, None, None, None, None, 7]
-    assert history.measured == 2
-
-
-def test_a_skip_can_never_outgrow_the_window() -> None:
-    history = RateHistory(slots=8)
-    history.skip(10_000)
-
-    assert len(history.downloads) == 8
-    assert history.measured == 0
-
-
 def test_the_window_never_grows_past_its_slots() -> None:
     history = RateHistory(slots=8)
     for value in range(20):
