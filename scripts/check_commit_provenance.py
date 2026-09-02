@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Refuse commits carrying a forbidden provenance trailer.
+"""Refuse commits carrying a forbidden provenance marker.
 
 The repository's commit history is the record of who authored the work,
 and agent-generated `Co-Authored-By` trailers pollute it with a
-co-author that never existed as a person.
+co-author that never existed as a person. Two more markers travel with
+them and are refused for the same reason: a `Claude-Session:` trailer,
+which points at a conversation nobody else can open, and the "Generated
+with Claude Code" line, which is a footer for pull requests that reaches
+commit messages by copy.
 
 This is enforced mechanically rather than by convention: a rule that
 lives only in a prompt is only as good as the prompt that happened to
@@ -39,14 +43,45 @@ FORBIDDEN_TRAILER = re.compile(
     re.IGNORECASE,
 )
 
+# A session trailer names a conversation, not an author -- so the
+# narrowing that keeps a human co-author legitimate does not apply, and
+# the whole trailer goes. `Claude-Session` is the shape seen in the
+# wild; the others are matched by the same rule rather than waiting to
+# meet each one.
+FORBIDDEN_SESSION = re.compile(
+    r"^\s*(claude|anthropic|codex|copilot|cursor)[- ]session\s*:",
+    re.IGNORECASE,
+)
+
+# The "Generated with ..." footer belongs to a pull request description,
+# where it addresses a reader who can act on it. It reaches a commit
+# message by copy, and there it is only noise -- matched on the tool
+# name so the emoji and the link format can change without a hole.
+FORBIDDEN_GENERATED = re.compile(
+    r"generated with.*\b(claude code|copilot|cursor|codex)\b",
+    re.IGNORECASE,
+)
+
+FORBIDDEN = (FORBIDDEN_TRAILER, FORBIDDEN_SESSION, FORBIDDEN_GENERATED)
+
 
 def offending_lines(message: str) -> list[str]:
-    """Return the forbidden trailer lines found in one commit message."""
-    return [
-        line.strip()
-        for line in message.splitlines()
-        if FORBIDDEN_TRAILER.match(line)
-    ]
+    """Return the forbidden provenance lines found in one commit message.
+
+    The trailer patterns anchor at the start of a line, as Git trailers
+    do. The "Generated with" footer does not: it is prose, and it has
+    been seen behind a bullet and behind an emoji, so it is searched
+    anywhere in the line.
+    """
+    found: list[str] = []
+    for line in message.splitlines():
+        anchored = any(
+            pattern.match(line)
+            for pattern in (FORBIDDEN_TRAILER, FORBIDDEN_SESSION)
+        )
+        if anchored or FORBIDDEN_GENERATED.search(line):
+            found.append(line.strip())
+    return found
 
 
 def _commits_in_range(commit_range: str) -> list[tuple[str, str, str]]:
@@ -75,8 +110,10 @@ def _report(failures: list[tuple[str, str, list[str]]]) -> int:
         return 0
 
     print(
-        "Forbidden provenance trailer found. The repository does not "
-        "record an agent as a commit co-author.\n",
+        "Forbidden provenance marker found. The repository does not "
+        "record an agent as a commit co-author, name a conversation "
+        "nobody else can open, or carry a pull-request footer into a "
+        "commit message.\n",
         file=sys.stderr,
     )
     for sha, subject, lines in failures:
@@ -85,7 +122,7 @@ def _report(failures: list[tuple[str, str, list[str]]]) -> int:
         for line in lines:
             print(f"      {line}", file=sys.stderr)
     print(
-        "\nRemove the trailer. To rewrite commits already on a branch: "
+        "\nRemove the line. To rewrite commits already on a branch: "
         "`git rebase -i` and amend each message, or re-run the "
         "integration once the branch is clean.",
         file=sys.stderr,

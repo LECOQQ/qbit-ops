@@ -485,6 +485,53 @@ def test_an_agent_co_author_is_refused(trailer: str) -> None:
     assert provenance.offending_lines(message) == [trailer.strip()]
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Claude-Session: https://claude.ai/code/session_01Y2gKBv",
+        "claude-session: https://example.test/x",
+        "  Codex-Session: https://example.test/y",
+        "Copilot Session: https://example.test/z",
+    ],
+)
+def test_a_session_trailer_is_refused(line: str) -> None:
+    """A session names a conversation nobody else can open, so the
+    narrowing that keeps a human co-author legitimate does not apply."""
+    message = f"feat(x): do something\n\n{line}\n"
+    assert provenance.offending_lines(message) == [line.strip()]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # The fixture of one gate is the violation of another: these
+        # lines are exactly what `generation-notice` forbids anywhere in
+        # the repository, and they have to appear here to be tested.
+        # ai-hygiene: allow-generation-notice
+        "🤖 Generated with [Claude Code](https://claude.com/cc)",
+        "Generated with Claude Code",  # ai-hygiene: allow-generation-notice
+        "- generated with GitHub Copilot",
+    ],
+)
+def test_a_generated_with_footer_is_refused(line: str) -> None:
+    """It is a pull-request footer, and it reaches a commit message by
+    copy. Matched anywhere in the line, because it has been seen behind
+    an emoji and behind a bullet."""
+    message = f"feat(x): do something\n\n{line}\n"
+    assert provenance.offending_lines(message) == [line.strip()]
+
+
+def test_prose_that_merely_mentions_a_session_is_left_alone() -> None:
+    """The session pattern anchors like a Git trailer, so a body that
+    talks about sessions is not a provenance marker."""
+    message = (
+        "feat(x): do something\n\n"
+        "- a normal bullet about a session cache\n"
+        "- and one naming Claude Code as a tool we use\n"
+    )
+    assert provenance.offending_lines(message) == []
+
+
 def test_a_human_co_author_stays_legitimate() -> None:
     message = (
         "feat(x): do something\n\nCo-Authored-By: Quentin <q@example.test>\n"
