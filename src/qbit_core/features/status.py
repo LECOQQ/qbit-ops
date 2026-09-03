@@ -41,6 +41,7 @@ __all__ = [
     "collect_instance_stats",
     "collect_instance_stats_delta",
     "collect_status_snapshot",
+    "redact_host",
     "snapshot_to_csv_rows",
     "snapshot_to_json_dict",
     "status_exit_code",
@@ -313,7 +314,7 @@ def build_status_snapshot_from_data(
         generated_at=datetime.now(UTC),
         health=health,
         connected=True,
-        host=_redact_host(host) if host else None,
+        host=redact_host(host) if host else None,
         qbittorrent_version=qbittorrent_version,
         api_version=api_version,
         counts=counts,
@@ -334,7 +335,7 @@ def build_unavailable_snapshot(
         generated_at=datetime.now(UTC),
         health=Health.UNAVAILABLE,
         connected=False,
-        host=_redact_host(host) if host else None,
+        host=redact_host(host) if host else None,
         qbittorrent_version=None,
         api_version=None,
         counts=TransferCounts(0, 0, 0, 0, 0, 0, 0, 0),
@@ -614,7 +615,7 @@ def _get_optional_value(client: Any, method_name: str) -> str | None:
     return str(value)
 
 
-def _redact_host(host: str) -> str:
+def redact_host(host: str) -> str:
     """Strip any embedded credentials from a configured instance URL."""
     parsed_host = urlsplit(host)
     if "@" not in parsed_host.netloc:

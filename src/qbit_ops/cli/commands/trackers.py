@@ -10,6 +10,7 @@ import typer
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
 from qbit_core.features.tracker_status import (
     TrackerSortField,
+    TrackerStatusReport,
     collect_tracker_status,
     parse_tracker_sort_field,
     sort_tracker_aggregates,
@@ -38,6 +39,7 @@ from qbit_ops.cli.commands._shared import (
     run_mutation,
 )
 from qbit_ops.cli.completion import complete_choices
+from qbit_ops.cli.completion_cache import merge_instance_vocabulary
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
@@ -86,6 +88,32 @@ from qbit_ops.cli.validation import (
 )
 
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
+
+# `collect_tracker_status`'s own fallback for a host that failed to
+# parse (`qbit_core.features.tracker_status`) -- not a real tracker
+# identity, so it must never be offered as a `--tracker` completion.
+_UNKNOWN_TRACKER_IDENTITY = "unknown"
+
+
+def _fill_completion_cache_from_report(report: TrackerStatusReport) -> None:
+    """Feed `--tracker` completion from a report already collected.
+
+    Called after a successful `trackers list`/`trackers status`, which
+    already paid for the per-torrent tracker inspection -- never
+    triggers a lookup of its own. Swallows any failure: populating the
+    completion cache is a side effect of a command that already
+    succeeded at its real purpose, never a reason to fail it.
+    """
+    try:
+        host = error_boundary.load_qbit_config().host
+        tracker_hosts = {
+            aggregate.identity
+            for aggregate in report.trackers
+            if aggregate.identity != _UNKNOWN_TRACKER_IDENTITY
+        }
+        merge_instance_vocabulary(host, tracker_hosts=tracker_hosts)
+    except Exception:  # noqa: BLE001 - never fail the command over this
+        pass
 
 
 class TrackerMatchModeOption(StrEnum):
@@ -470,6 +498,8 @@ def list_trackers(
                 client, filters, on_progress=advance
             )
 
+    _fill_completion_cache_from_report(report)
+
     # Busiest tracker first by default -- a replacement for the
     # previous hostname-ascending order, not a new one; see
     # `.agents/specs/list-sort.md`. `collect_tracker_status`'s own
@@ -606,6 +636,8 @@ def trackers_status_command(
             report = collect_tracker_status(
                 client, filters, on_progress=advance
             )
+
+    _fill_completion_cache_from_report(report)
 
     rendering.render_tracker_status(report, output_format, verbose=verbose)
     raise typer.Exit(code=tracker_status_exit_code(report.overall_health))

@@ -5,6 +5,13 @@ then exercised end to end through the real Typer app the way a shell
 actually invokes it -- `_QBIT_OPS_COMPLETE=complete_<shell>` plus
 `COMP_WORDS`/`COMP_CWORD`, matching what `qbit-ops --install-completion`
 wires into a shell profile (see README.md, "Shell completion").
+
+`--category`/`--tag`/`--tracker` complete too now, but from a live,
+per-instance cache rather than a fixed set -- a different contract,
+covered by `tests/test_cli_completion_live.py` (which imports
+`_complete` from here rather than duplicating it). This module's
+`_forbid_qbit_client` guard stays scoped to the closed-set completers
+below, which must never gain a network dependency.
 """
 
 import contextlib
@@ -185,13 +192,3 @@ def test_format_completes_via_typer_s_native_enum_support() -> None:
         "jsonl",
         "csv",
     ]
-
-
-def test_category_is_deliberately_not_completed() -> None:
-    """`--category` values live on the instance; completing them would
-
-    mean a qBittorrent call on every Tab press. No completer is wired
-    for it, so the shell falls back to ordinary path completion --
-    which yields nothing for a bare `--category `.
-    """
-    assert _complete("qbit-ops torrents list --category ", 4) == []

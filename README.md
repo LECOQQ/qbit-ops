@@ -116,7 +116,8 @@ qbit-ops --install-completion
 
 For bash, zsh, fish or PowerShell. Commands, options, and the options
 whose values are a fixed set all complete; an upgrade needs no
-reinstall.
+reinstall. Your own categories, tags and tracker hosts complete too,
+from a cache that fills as you use the tool.
 
 ### ⬆️ Upgrading
 

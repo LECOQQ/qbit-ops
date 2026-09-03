@@ -8,6 +8,8 @@ from qbit_ops.config import (
     APP_ENV_FILE_VARIABLE,
     ConfigError,
     describe_connection_config_source,
+    get_active_env_file_path,
+    get_user_env_file,
     load_qbit_config,
 )
 
@@ -155,6 +157,41 @@ def test_describe_connection_config_source_is_none_without_a_file(
     monkeypatch.setenv("HOME", str(tmp_path))
 
     assert describe_connection_config_source() is None
+
+
+def test_get_active_env_file_path_prefers_the_explicit_variable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit = tmp_path / "elsewhere" / "custom.env"
+    monkeypatch.setenv(APP_ENV_FILE_VARIABLE, str(explicit))
+    monkeypatch.chdir(tmp_path)
+
+    assert get_active_env_file_path() == explicit
+
+
+def test_get_active_env_file_path_does_not_require_the_file_to_exist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unlike `describe_connection_config_source()`, resolves even before
+    `qbit-ops init` has ever written a file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert get_active_env_file_path() == get_user_env_file()
+
+
+def test_get_active_env_file_path_prefers_a_project_env_over_the_user_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_env = tmp_path / ".env"
+    project_env.write_text("QBIT_HOST=http://localhost:8080\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert get_active_env_file_path() == project_env
 
 
 def _write_env_file(path: Path) -> None:

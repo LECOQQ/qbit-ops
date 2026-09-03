@@ -1,11 +1,13 @@
 """Shell-completion callbacks for options whose values are a closed set.
 
 Only an enumeration knowable **without** talking to qBittorrent belongs
-here. `--category`, `--tag` and `--tracker` are deliberately absent:
-their values live on the instance, and completing them would mean an
-API call on every Tab press -- a shell that hangs on a stalled seedbox,
-or errors outright when it is off. See `.agents/specs/list-sort.md`
-("--sort" reuses this same mechanism) for the next consumer.
+here, so this module's completions are pure and network-free by
+construction. `--category`, `--tag` and `--tracker` complete too, but
+their values live on the instance rather than at declaration time --
+that different, weaker guarantee is `qbit_ops.cli.completion_live`, kept
+apart so it stays out of this module's own. See
+`.agents/specs/list-sort.md` ("--sort" reuses this same mechanism) for
+another consumer of this one.
 """
 
 from collections.abc import Callable, Iterable

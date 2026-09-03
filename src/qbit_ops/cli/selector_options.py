@@ -38,6 +38,7 @@ from qbit_core.shared.parsers import (
 )
 from qbit_core.shared.selection import STATE_FILTER_VALUES, Range, TorrentFilter
 from qbit_ops.cli.completion import complete_choices
+from qbit_ops.cli.completion_live import complete_live_choices
 
 CATEGORY_FILTER_HELP = (
     "Restrict to a category (repeatable; combines with OR). Use "
@@ -81,7 +82,12 @@ def _hash_help(verb: str) -> str:
 # --- shared filter options --------------------------------------------------
 
 CategoryOption = Annotated[
-    list[str], typer.Option("--category", help=CATEGORY_FILTER_HELP)
+    list[str],
+    typer.Option(
+        "--category",
+        help=CATEGORY_FILTER_HELP,
+        autocompletion=complete_live_choices("categories"),
+    ),
 ]
 StateOption = Annotated[
     list[str],
@@ -92,7 +98,12 @@ StateOption = Annotated[
     ),
 ]
 TrackerOption = Annotated[
-    list[str], typer.Option("--tracker", help=TRACKER_FILTER_HELP)
+    list[str],
+    typer.Option(
+        "--tracker",
+        help=TRACKER_FILTER_HELP,
+        autocompletion=complete_live_choices("tracker_hosts"),
+    ),
 ]
 # The `trackers` report commands take a single `--tracker` and apply it
 # *after* aggregation, restricting the report rather than the selection.
@@ -103,7 +114,12 @@ REPORT_TRACKER_FILTER_HELP = (
     "announce URL is also accepted; only its host and port are used)."
 )
 ReportTrackerOption = Annotated[
-    str | None, typer.Option("--tracker", help=REPORT_TRACKER_FILTER_HELP)
+    str | None,
+    typer.Option(
+        "--tracker",
+        help=REPORT_TRACKER_FILTER_HELP,
+        autocompletion=complete_live_choices("tracker_hosts"),
+    ),
 ]
 CompletedOption = Annotated[
     bool, typer.Option("--completed", help="Restrict to completed torrents.")
@@ -260,6 +276,7 @@ ExcludeCategoryOption = Annotated[
     typer.Option(
         "--exclude-category",
         help="Skip torrents in a category (repeatable).",
+        autocompletion=complete_live_choices("categories"),
     ),
 ]
 ExcludeStateOption = Annotated[
@@ -281,6 +298,7 @@ TagOption = Annotated[
             "Restrict to torrents carrying a tag (repeatable; combines with "
             "OR). Matching ignores case."
         ),
+        autocompletion=complete_live_choices("tags"),
     ),
 ]
 TagAllOption = Annotated[
@@ -291,11 +309,16 @@ TagAllOption = Annotated[
             "Restrict to torrents carrying every listed tag (repeatable; "
             "combines with AND)."
         ),
+        autocompletion=complete_live_choices("tags"),
     ),
 ]
 ExcludeTagOption = Annotated[
     list[str],
-    typer.Option("--exclude-tag", help="Skip torrents carrying a tag."),
+    typer.Option(
+        "--exclude-tag",
+        help="Skip torrents carrying a tag.",
+        autocompletion=complete_live_choices("tags"),
+    ),
 ]
 
 # --- storage ----------------------------------------------------------------
@@ -355,6 +378,7 @@ ExcludeTrackerOption = Annotated[
             "Skip torrents announcing to a tracker, matched by host[:port] "
             "(repeatable). Requires a per-torrent tracker lookup."
         ),
+        autocompletion=complete_live_choices("tracker_hosts"),
     ),
 ]
 NoTrackerOption = Annotated[

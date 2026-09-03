@@ -41,12 +41,14 @@ from qbit_core.shared.sorting import (
     parse_torrent_sort_field,
     sort_torrent_snapshots,
 )
+from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
     run_mutation,
 )
 from qbit_ops.cli.completion import complete_choices
+from qbit_ops.cli.completion_cache import merge_instance_vocabulary
 from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
@@ -230,6 +232,29 @@ def _build_selection_request(
     return SelectionRequest(
         torrent_hash=validated_hash, select_all=select_all, filters=filters
     )
+
+
+def _fill_completion_cache_from_torrents(
+    torrents: Sequence[TorrentSnapshot],
+) -> None:
+    """Feed `--category`/`--tag` completion from torrents already fetched.
+
+    Called after a successful read that already paid for `torrents_info()`
+    -- never triggers a call of its own. A merge, so a filtered selection
+    only ever adds to what a broader run already learned (see
+    `completion_cache.merge_instance_vocabulary`). Swallows any failure:
+    populating the completion cache is a side effect of a command that
+    already succeeded at its real purpose, never a reason to fail it.
+    """
+    try:
+        host = error_boundary.load_qbit_config().host
+        categories = {
+            snapshot.category for snapshot in torrents if snapshot.category
+        }
+        tags = {tag for snapshot in torrents for tag in snapshot.tags}
+        merge_instance_vocabulary(host, categories=categories, tags=tags)
+    except Exception:  # noqa: BLE001 - never fail the command over this
+        pass
 
 
 def _run_bulk_torrent_action(
@@ -489,6 +514,8 @@ def list_qbit_torrents(
             selection, tracker_counts = select_torrents(
                 client, filters, on_progress=advance
             )
+
+    _fill_completion_cache_from_torrents(selection.matched)
 
     if resolved_sort is not None:
         sort_field, sort_direction = resolved_sort

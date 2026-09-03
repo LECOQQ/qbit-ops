@@ -27,6 +27,7 @@ __all__ = [
     "ConfigError",
     "load_qbit_config",
     "get_user_env_file",
+    "get_active_env_file_path",
     "collect_masking_sources",
     "describe_connection_config_source",
     "load_small_caps_titles_preference",
@@ -129,6 +130,28 @@ def get_user_env_file() -> Path:
     )
 
     return config_home / APP_CONFIG_DIR / PROJECT_ENV_FILE
+
+
+def get_active_env_file_path() -> Path:
+    """Return the `.env` location `_load_env_files()` would consult first.
+
+    Mirrors its precedence -- explicit `QBIT_OPS_ENV_FILE`, else a
+    project-local `.env`, else the user config file -- without requiring
+    the file to exist or to define a connection variable, unlike
+    `describe_connection_config_source()`. `qbit_ops.cli.completion_cache`
+    anchors the completion cache next to this path, so pointing
+    `QBIT_OPS_ENV_FILE` at a different instance also points completion
+    at a different cache file.
+    """
+    explicit_env_file = os.getenv(APP_ENV_FILE_VARIABLE)
+    if explicit_env_file:
+        return Path(explicit_env_file).expanduser()
+
+    project_env_file = Path.cwd() / PROJECT_ENV_FILE
+    if project_env_file.is_file():
+        return project_env_file
+
+    return get_user_env_file()
 
 
 def describe_connection_config_source() -> Path | None:
