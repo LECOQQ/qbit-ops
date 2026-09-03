@@ -62,27 +62,19 @@ pipx install "qbit-ops[mcp]"
 
 ### 📥 With the install script
 
-For a machine with none of the above yet - no `uv`, `pipx`, Homebrew
-or Docker:
+For a machine with none of the above yet - no `uv`, `pipx`, Homebrew or
+Docker, and no Python either. It installs [uv](https://docs.astral.sh/uv/),
+which brings its own Python when the system has none recent enough.
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh | sh # x-release-please-version
 ```
 
-It refuses to run as root, announces exactly what it is about to do
-before doing it, and installs [uv](https://docs.astral.sh/uv/) itself
-only if missing - uv then provisions its own Python when none on the
-system satisfies `Requires-Python`, so this works even where no Python
-is installed at all. Everything lands in your own account, never
-system-wide.
-
-The script's checksum is published next to it. Verify it before piping
-anything into a shell:
+A checksum is published beside the script, if you would rather read it
+before running it:
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh -o install.sh
-curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh.sha256 -o install.sh.sha256
-sha256sum -c install.sh.sha256 && sh install.sh
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh.sha256 # x-release-please-version
 ```
 
 ### 🍺 With Homebrew
@@ -116,6 +108,16 @@ docker run --rm -it \
 For a long-lived setup, see the
 [Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
 
+### ⌨️ Then turn on completion
+
+```bash
+qbit-ops --install-completion
+```
+
+For bash, zsh, fish or PowerShell. Commands, options, and the options
+whose values are a fixed set all complete; an upgrade needs no
+reinstall.
+
 ### ⬆️ Upgrading
 
 ```bash
@@ -131,25 +133,6 @@ installed:
 ```bash
 uv tool uninstall qbit-ops
 ```
-
-### ⌨️ Shell completion
-
-Once, for bash, zsh, fish or PowerShell:
-
-```bash
-qbit-ops --install-completion
-```
-
-It writes a small hook into your shell profile that calls `qbit-ops`
-back whenever you press Tab, so **an upgrade needs no reinstall**: new
-commands and options complete as soon as they exist. `--show-completion`
-prints the hook instead of installing it, if you would rather place it
-yourself.
-
-Options with a fixed set of values complete too -- `--format`,
-`--state`, `--tracker-health` and friends. `--category`, `--tag` and
-`--tracker` do not: their values live on the instance, and completing
-them would mean a network call on every Tab press.
 
 ### 🔌 Connecting
 
