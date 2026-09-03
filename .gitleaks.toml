@@ -17,9 +17,64 @@ useDefault = true
 # rewrites them. Named explicitly rather than left to entropy, which
 # misses a low-entropy passkey and flags a high-entropy hash.
 id = "qbit-tracker-passkey"
-description = "Tracker announce URL carrying a passkey"
-regex = '''(?i)https?://[^\s"']+[/?&](?:passkey|authkey|torrent_pass)[=/][A-Za-z0-9]{16,}'''
+description = "Tracker announce URL carrying a named passkey"
+regex = '''(?i)(?:https?|udp|wss?)://[^\s"']+[/?&](?:passkey|authkey|torrent_pass|rss_?key|apikey)[=/][A-Za-z0-9._-]{16,}'''
 tags = ["passkey", "tracker"]
+
+  # A passkey is only dangerous next to a host that exists. This
+  # repository names every fixture host with an RFC 2606 reserved
+  # domain -- `.example`, `.invalid`, `.test` -- with `.tld`, the
+  # obviously-unregistrable convention it also uses, or with a Docker
+  # network alias. Suppressing those turns a rule that fired twenty-one
+  # times on fixtures into one that fires on a real host alone.
+  #
+  # An allowlist rather than a negative match: gitleaks compiles with
+  # Go's RE2, which has no lookahead, so "a host that is not reserved"
+  # cannot be written as a pattern.
+  [rules.allowlist]
+  description = "Reserved and local hosts carry no real credential"
+  regexTarget = "match"
+  regexes = [
+    '''://[^\s"'/]*\.(?:example|invalid|test|tld|localdomain)(?::\d+)?/''',
+    '''://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/''',
+    '''://[^\s"'/]*\.example\.(?:com|org|net)(?::\d+)?/''',
+    '''://qbit-ops-[a-z-]+(?::\d+)?/''',
+  ]
+
+[[rules]]
+# The shape the named rule above cannot see: a passkey dropped straight
+# after `/announce/`, with no word to announce it. That is the form the
+# trackers this project was written for actually use, and the one that
+# reached a public article draft before being caught by hand.
+#
+# Anchored on `/announce/` rather than on the key's shape: a passkey has
+# no distinguishing form, and a rule that hunts one alone drowns in
+# checksums -- a scan of this repository's history found three matches
+# for that shape, all of them a SHA-256 or a fixture.
+id = "qbit-tracker-passkey-path"
+description = "Tracker announce URL carrying an unnamed passkey segment"
+regex = '''(?i)(?:https?|udp|wss?)://[^\s"']+/announce/[A-Za-z0-9._-]{12,}'''
+tags = ["passkey", "tracker"]
+
+  # A passkey is only dangerous next to a host that exists. This
+  # repository names every fixture host with an RFC 2606 reserved
+  # domain -- `.example`, `.invalid`, `.test` -- with `.tld`, the
+  # obviously-unregistrable convention it also uses, or with a Docker
+  # network alias. Suppressing those turns a rule that fired twenty-one
+  # times on fixtures into one that fires on a real host alone.
+  #
+  # An allowlist rather than a negative match: gitleaks compiles with
+  # Go's RE2, which has no lookahead, so "a host that is not reserved"
+  # cannot be written as a pattern.
+  [rules.allowlist]
+  description = "Reserved and local hosts carry no real credential"
+  regexTarget = "match"
+  regexes = [
+    '''://[^\s"'/]*\.(?:example|invalid|test|tld|localdomain)(?::\d+)?/''',
+    '''://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/''',
+    '''://[^\s"'/]*\.example\.(?:com|org|net)(?::\d+)?/''',
+    '''://qbit-ops-[a-z-]+(?::\d+)?/''',
+  ]
 
 [allowlist]
 description = "Deliberate fixtures, never real credentials"
