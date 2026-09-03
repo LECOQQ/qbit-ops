@@ -458,10 +458,11 @@ def _command_options(command_name: str) -> set[str]:
     }
 
 
-# `--limit` is not part of the filter vocabulary: it bounds what is
-# rendered, never what is selected. `stats` aggregates over the whole
-# selection, so truncating its output would misstate its own totals.
-_NOT_A_FILTER = {"--limit"}
+# `--limit`/`--sort`/`--desc` are not part of the filter vocabulary:
+# they shape what is rendered, never what is selected. `stats`
+# aggregates over the whole selection -- truncating or reordering its
+# output would misstate its own totals, so it offers neither.
+_NOT_A_FILTER = {"--limit", "--sort", "--desc"}
 
 
 def test_stats_accepts_every_option_torrents_list_does() -> None:

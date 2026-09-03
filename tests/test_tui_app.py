@@ -62,6 +62,7 @@ import qbit_ops.tui.app
 import qbit_ops.tui.formatting
 from qbit_core.features.status import TransferRates
 from qbit_core.shared.selection import TorrentFilter
+from qbit_core.shared.sorting import SortDirection, SortField, SortOrder
 from qbit_core.shared.torrent_states import TorrentSnapshot
 from qbit_ops.tui.app import (
     SEARCH_DEBOUNCE_SECONDS,
@@ -103,9 +104,6 @@ from qbit_ops.tui.modals.value import (
 from qbit_ops.tui.state import (
     ConnectionState,
     RateHistory,
-    SortDirection,
-    SortField,
-    SortOrder,
     Workspace,
 )
 from qbit_ops.tui.tab_bar import BORDER_LABEL_MARGIN
@@ -6003,8 +6001,8 @@ async def test_sorting_makes_zero_qbittorrent_api_calls() -> None:
 
 
 def test_sort_torrents_tie_breaks_by_name_then_hash_deterministically() -> None:
+    from qbit_core.shared.sorting import sort_torrent_snapshots
     from qbit_core.shared.torrent_states import build_torrent_snapshot
-    from qbit_ops.tui.state import _sort_torrents
 
     def _t(hash_: str, name: str, ratio: float) -> TorrentSnapshot:
         return build_torrent_snapshot(
@@ -6017,15 +6015,13 @@ def test_sort_torrents_tie_breaks_by_name_then_hash_deterministically() -> None:
         _t("c" * 40, "Zeta", 1.0),
     )
 
-    ascending = _sort_torrents(
-        torrents,
-        SortOrder(field=SortField.RATIO, direction=SortDirection.ASCENDING),
+    ascending = sort_torrent_snapshots(
+        torrents, SortField.RATIO, SortDirection.ASCENDING
     )
     assert [t.hash for t in ascending] == ["c" * 40, "a" * 40, "b" * 40]
 
-    descending = _sort_torrents(
-        torrents,
-        SortOrder(field=SortField.RATIO, direction=SortDirection.DESCENDING),
+    descending = sort_torrent_snapshots(
+        torrents, SortField.RATIO, SortDirection.DESCENDING
     )
     # Tie-break (name, hash) stays ascending regardless of the primary
     # direction -- only the Ratio grouping itself reverses.

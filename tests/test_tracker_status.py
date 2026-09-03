@@ -6,13 +6,17 @@ from qbit_core.errors import InvalidInputError
 from qbit_core.features.torrents import build_torrent_filter
 from qbit_core.features.tracker_status import (
     TrackerHealth,
+    TrackerSortField,
     classify_raw_tracker_status,
     collect_tracker_status,
+    parse_tracker_sort_field,
+    sort_tracker_aggregates,
     tracker_status_exit_code,
     tracker_status_report_to_csv_rows,
     tracker_status_report_to_dict,
 )
 from qbit_core.features.trackers import normalize_tracker_host
+from qbit_core.shared.sorting import SortDirection
 from tests.support import FakeQbitClient, make_torrent
 
 HASH_A = "a" * 40
@@ -768,3 +772,102 @@ def test_two_endpoints_of_one_host_count_the_torrent_and_its_bytes_once() -> (
     assert aggregate.downloaded_bytes == 100
     assert aggregate.uploaded_bytes == 200
     assert aggregate.seeding_time_total_seconds == 60
+
+
+# --- `trackers list --sort` -------------------------------------------------
+
+
+def _report_with_two_trackers() -> tuple:
+    """Two identities: `busy.example` (2 torrents, more volume and a
+    real ratio) and `quiet.example` (1 torrent, nothing downloaded --
+    `aggregate_ratio` is `None`)."""
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(
+                hash=HASH_A,
+                name="A",
+                size=100,
+                downloaded=50,
+                uploaded=200,
+            ),
+            make_torrent(
+                hash=HASH_B,
+                name="B",
+                size=900,
+                downloaded=50,
+                uploaded=100,
+            ),
+            make_torrent(hash="c" * 40, name="C", size=10, uploaded=5),
+        ],
+        trackers_by_hash={
+            HASH_A: [_healthy("https://busy.example/announce")],
+            HASH_B: [_healthy("https://busy.example/announce")],
+            "c" * 40: [_healthy("https://quiet.example/announce")],
+        },
+    )
+    return collect_tracker_status(client, build_torrent_filter()).trackers
+
+
+def test_sorts_by_torrents_most_first_by_default() -> None:
+    trackers = sort_tracker_aggregates(
+        _report_with_two_trackers(),
+        TrackerSortField.TORRENTS,
+        SortDirection.DESCENDING,
+    )
+    assert [t.identity for t in trackers] == ["busy.example", "quiet.example"]
+
+
+def test_sorts_by_tracker_identity() -> None:
+    trackers = sort_tracker_aggregates(
+        _report_with_two_trackers(),
+        TrackerSortField.TRACKER,
+        SortDirection.ASCENDING,
+    )
+    assert [t.identity for t in trackers] == ["busy.example", "quiet.example"]
+
+
+def test_sorts_by_size() -> None:
+    trackers = sort_tracker_aggregates(
+        _report_with_two_trackers(),
+        TrackerSortField.SIZE,
+        SortDirection.DESCENDING,
+    )
+    assert [t.identity for t in trackers] == ["busy.example", "quiet.example"]
+
+
+def test_sorts_by_uploaded() -> None:
+    trackers = sort_tracker_aggregates(
+        _report_with_two_trackers(),
+        TrackerSortField.UPLOADED,
+        SortDirection.DESCENDING,
+    )
+    assert [t.identity for t in trackers] == ["busy.example", "quiet.example"]
+
+
+def test_missing_ratio_sorts_last_both_directions() -> None:
+    """`quiet.example` downloaded nothing, so its `aggregate_ratio` is
+    `None` -- it must trail `busy.example`'s real ratio regardless of
+    `--desc`, the same fixed-extremity rule torrent sorting follows."""
+    for direction in (SortDirection.ASCENDING, SortDirection.DESCENDING):
+        trackers = sort_tracker_aggregates(
+            _report_with_two_trackers(), TrackerSortField.RATIO, direction
+        )
+        assert [t.identity for t in trackers] == [
+            "busy.example",
+            "quiet.example",
+        ]
+
+
+def test_parse_tracker_sort_field_accepts_every_declared_value() -> None:
+    for field in TrackerSortField:
+        assert parse_tracker_sort_field(field.value) is field
+
+
+def test_parse_tracker_sort_field_rejects_unknown_and_lists_all_five() -> None:
+    with pytest.raises(ValueError) as excinfo:
+        parse_tracker_sort_field("host")
+
+    message = str(excinfo.value)
+    assert "Unknown --sort value 'host'" in message
+    for field in TrackerSortField:
+        assert field.value in message

@@ -334,7 +334,7 @@ async def test_actions_modal_composes_successfully_in_isolation() -> None:
 
 
 async def test_sort_modal_composes_successfully_in_isolation() -> None:
-    from qbit_ops.tui.state import SortOrder
+    from qbit_core.shared.sorting import SortOrder
 
     app = _ModalHarness(SortScreen(SortOrder()))
     async with app.run_test() as pilot:

@@ -25,6 +25,7 @@ __all__ = [
     "TorrentSnapshot",
     "build_torrent_snapshot",
     "classify_torrent_state",
+    "describe_torrent_state_label",
     "is_stopped_state",
 ]
 
@@ -262,3 +263,31 @@ def _timestamp_field(torrent: Any, field_name: str) -> datetime | None:
     """
     seconds = get_optional_int(torrent, field_name, sentinels=UNSET_TIMESTAMP)
     return None if seconds is None else datetime.fromtimestamp(seconds, tz=UTC)
+
+
+# Downloading/seeding are the two "active" groups a torrent spends most
+# of its life in; everything else (including a still-unclassified raw
+# state) stays neutral in whatever renders this label.
+_STATE_LABELS: dict[TorrentStateGroup, str] = {
+    "downloading": "Downloading",
+    "seeding": "Seeding",
+    "stalled": "Stalled",
+    "checking": "Checking",
+    "errored": "Error",
+    "unknown": "Unknown",
+}
+
+
+def describe_torrent_state_label(state: str) -> str:
+    """Classify a raw qBittorrent state into one human-readable label.
+
+    Checks `is_stopped_state` first -- `classify_torrent_state` folds a
+    stopped torrent into its seeding/downloading *direction* rather
+    than reporting it as stopped -- then `classify_torrent_state` for
+    every other group. The one classifier both a table cell and the
+    local sort engine (`qbit_core.shared.sorting`) read, so the two can
+    never disagree about the same torrent.
+    """
+    if is_stopped_state(state):
+        return "Stopped"
+    return _STATE_LABELS[classify_torrent_state(state)]

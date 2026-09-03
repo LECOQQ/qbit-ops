@@ -8,9 +8,12 @@ mutation planning) stay in their own modules (`qbit_core.features.torrents`,
 `qbit_core.features.trackers`, ...).
 """
 
+from collections.abc import Callable
+
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
 from qbit_core.shared.parsers import parse_rate
 from qbit_core.shared.selection import normalize_tokens
+from qbit_core.shared.sorting import SortDirection
 from qbit_ops.cli.error_boundary import fail
 from qbit_ops.cli.rendering import OutputFormat
 
@@ -155,3 +158,39 @@ def validate_rate_limits(
         )
     except InvalidInputError as error:
         fail(str(error), ErrorCategory.INVALID_INPUT)
+
+
+def validate_sort_option[SortFieldT](
+    sort: str | None,
+    desc: bool,
+    output_format: OutputFormat,
+    *,
+    parse_field: Callable[[str], SortFieldT],
+) -> tuple[SortFieldT, SortDirection] | None:
+    """Validate a `--sort`/`--desc` pair before any qBittorrent call.
+
+    Returns `None` when `--sort` is absent -- the caller renders its
+    existing default order unchanged. `--desc` alone is refused: there
+    is no sort to reverse. `--sort` combined with a machine format is
+    refused too: sorting is a rendering concern (see
+    `.agents/specs/list-sort.md`), and a machine format always renders
+    the selection's own order, so the two flags together would
+    silently mean two different things depending on `--format`.
+    """
+    if sort is None:
+        if desc:
+            fail("--desc requires --sort.", ErrorCategory.INVALID_INPUT)
+        return None
+    if output_format != OutputFormat.table:
+        fail(
+            f"--sort is not supported with --format {output_format.value}: "
+            "sorting is a rendering concern, and machine formats always "
+            "render the selection's own order. Sort at the caller instead.",
+            ErrorCategory.INVALID_INPUT,
+        )
+    try:
+        field = parse_field(sort)
+    except ValueError as error:
+        fail(str(error))
+    direction = SortDirection.DESCENDING if desc else SortDirection.ASCENDING
+    return field, direction

@@ -748,6 +748,164 @@ def test_list_without_limit_returns_everything(
     assert len(payload["torrents"]) == 3
 
 
+def test_list_sort_applies_before_limit(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """The three largest of the whole selection, not three arbitrary
+    rows truncated after the fact."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=f"{index:040x}", name=f"T{index}", size=index)
+                for index in range(1, 6)
+            ]
+        )
+    )
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--sort", "size", "--desc", "--limit", "3"],
+        env={"COLUMNS": "200"},
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    order = [
+        name
+        for name in ("T5", "T4", "T3", "T2", "T1")
+        if name in _collapse_whitespace(result.stdout)
+    ]
+    assert order == ["T5", "T4", "T3"]
+
+
+def test_list_without_sort_keeps_the_pre_existing_order(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """No `--sort` means row order is unchanged from before this
+    option existed -- covered at the domain level by
+    `qbit_core.shared.selection`'s own tests; this only proves the CLI
+    does not impose an order of its own on top."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash="b" * 40, name="Bravo", size=900),
+                make_torrent(hash="a" * 40, name="Alpha", size=100),
+            ]
+        )
+    )
+
+    result = runner.invoke(app, ["torrents", "list", "--format", "json"])
+
+    payload = json.loads(result.stdout)
+    assert [t["name"] for t in payload["torrents"]] == ["Alpha", "Bravo"]
+
+
+def test_list_sort_matched_still_counts_every_selected_torrent(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`--sort` is table-only (see
+    `test_list_sort_rejects_a_machine_format`), so `summary.matched` is
+    read from the table footer here, not `json`."""
+    configure_qbit_backend(
+        client=FakeQbitClient(
+            torrents=[
+                make_torrent(hash=f"{index:040x}", name=f"T{index}", size=index)
+                for index in range(1, 6)
+            ]
+        )
+    )
+
+    result = runner.invoke(
+        app,
+        ["torrents", "list", "--sort", "size", "--limit", "2"],
+        env={"COLUMNS": "200"},
+    )
+
+    assert result.exit_code == ExitCode.SUCCESS
+    collapsed = _collapse_whitespace(result.stdout)
+    assert "matched5" in collapsed
+    assert "returned2" in collapsed
+
+
+def test_list_sort_rejects_a_machine_format(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(
+        client=FakeQbitClient(torrents=[make_torrent(hash=UNIQUE_HASH)])
+    )
+
+    result = runner.invoke(
+        app, ["torrents", "list", "--sort", "size", "--format", "json"]
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--format json" in result.stderr
+
+
+def test_list_sort_rejects_an_unknown_field_and_lists_the_ten_valid_ones(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(
+        client=FakeQbitClient(torrents=[make_torrent(hash=UNIQUE_HASH)])
+    )
+
+    result = runner.invoke(app, ["torrents", "list", "--sort", "taille"])
+
+    assert result.exit_code == ExitCode.ERROR
+    for field in (
+        "name",
+        "state",
+        "progress",
+        "down",
+        "up",
+        "ratio",
+        "category",
+        "size",
+        "added_on",
+        "seeding_time",
+    ):
+        assert field in result.stderr
+
+
+def test_list_desc_without_sort_is_rejected(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(
+        client=FakeQbitClient(torrents=[make_torrent(hash=UNIQUE_HASH)])
+    )
+
+    result = runner.invoke(app, ["torrents", "list", "--desc"])
+
+    assert result.exit_code == ExitCode.ERROR
+
+
+def test_list_repeated_runs_over_an_unchanged_library_sort_identically(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """Acceptance criterion: ties resolve the same way every time.
+    `--sort` is table-only (see `test_list_sort_rejects_a_machine_format`),
+    so the two renders are compared as table output.
+    """
+    client = FakeQbitClient(
+        torrents=[
+            make_torrent(hash="b" * 40, name="Same", size=10),
+            make_torrent(hash="a" * 40, name="Same", size=10),
+            make_torrent(hash="c" * 40, name="Other", size=10),
+        ]
+    )
+    configure_qbit_backend(client=client)
+    first = runner.invoke(
+        app, ["torrents", "list", "--sort", "size"], env={"COLUMNS": "200"}
+    )
+
+    configure_qbit_backend(client=client)
+    second = runner.invoke(
+        app, ["torrents", "list", "--sort", "size"], env={"COLUMNS": "200"}
+    )
+
+    assert first.exit_code == ExitCode.SUCCESS
+    assert first.stdout == second.stdout
+
+
 def test_list_table_output_keeps_a_bracketed_name_literal(
     runner: CliRunner, configure_qbit_backend
 ) -> None:

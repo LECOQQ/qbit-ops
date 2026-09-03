@@ -33,16 +33,12 @@ from qbit_core.shared.small_caps import (
     UNMAPPABLE_LETTERS,
     to_small_caps,
 )
-from qbit_core.shared.torrent_states import TorrentSnapshot
-from qbit_ops.tui.state import (
-    MutationUiResult,
-    SortDirection,
-    SortField,
-    SortOrder,
-    TuiState,
-    _split_skips,
-    _state_label,
+from qbit_core.shared.sorting import SortDirection, SortField, SortOrder
+from qbit_core.shared.torrent_states import (
+    TorrentSnapshot,
+    describe_torrent_state_label,
 )
+from qbit_ops.tui.state import MutationUiResult, TuiState, _split_skips
 from qbit_ops.tui.theme import (
     BRAND_ACCENT,
     BRAND_GRADIENT_END,
@@ -307,7 +303,7 @@ _STATE_STYLES: dict[str, str] = {
 
 
 def _state_cell(raw_state: str) -> Text:
-    label = _state_label(raw_state)
+    label = describe_torrent_state_label(raw_state)
     return Text(label, style=_STATE_STYLES.get(label, ""))
 
 
@@ -521,6 +517,28 @@ def _torrent_row_values(
     }
 
 
+_SORT_FIELD_LABELS: dict[SortField, str] = {
+    SortField.NAME: "Name",
+    SortField.STATE: "State",
+    SortField.PROGRESS: "Progress",
+    SortField.DOWN: "Down speed",
+    SortField.UP: "Up speed",
+    SortField.RATIO: "Ratio",
+    SortField.CATEGORY: "Category",
+}
+
+
+def sort_order_label(order: SortOrder) -> str:
+    """Render `order` for the status bar/title, e.g. "Name ↑".
+
+    Presentation only -- `SortOrder` itself (`qbit_core.shared.sorting`)
+    carries no display strings, matching every other domain type this
+    module renders.
+    """
+    arrow = "↑" if order.direction is SortDirection.ASCENDING else "↓"
+    return f"{_SORT_FIELD_LABELS[order.field]} {arrow}"
+
+
 # Maps each sortable field to the table column it drives, so the
 # active sort gets one small brand-accent arrow in that column's
 # header -- the table's only per-header colour, everything else stays
@@ -621,14 +639,15 @@ def _format_details_identity(
     never truncated), state/completion, and a wide progress bar.
 
     The raw qBittorrent state stays visible, but only as a dim
-    secondary line -- never the primary rendering (see `_state_label`).
+    secondary line -- never the primary rendering (see
+    `describe_torrent_state_label`).
     `torrent.name` is third-party text (set by whoever built the
     `.torrent`) and is escaped right before interpolation -- wrapping
     happens on the raw name first so its own `[`/`]` break points are
     unaffected by the escape's backslashes.
     """
     name = escape(_wrap_name_at_separators(torrent.name, name_width))
-    label = _state_label(torrent.state)
+    label = describe_torrent_state_label(torrent.state)
     style = _STATE_STYLES.get(label, "")
     status = (
         f"{label.upper()} · COMPLETE"

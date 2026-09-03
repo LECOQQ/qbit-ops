@@ -12,8 +12,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import RadioSet
 
+from qbit_core.shared.sorting import SortDirection, SortField, SortOrder
 from qbit_ops.tui.modals.base import KeyHint, QbitModal
-from qbit_ops.tui.state import SortDirection, SortField, SortOrder
 from qbit_ops.tui.widgets.radio import QbitRadioButton
 
 if TYPE_CHECKING:

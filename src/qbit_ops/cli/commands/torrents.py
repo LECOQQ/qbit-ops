@@ -1,6 +1,7 @@
 """Register the `torrents` command group."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -35,11 +36,17 @@ from qbit_core.shared.selection import (
     describe_torrent_filter,
     validate_selection_request,
 )
+from qbit_core.shared.sorting import (
+    TorrentSortField,
+    parse_torrent_sort_field,
+    sort_torrent_snapshots,
+)
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
     run_mutation,
 )
+from qbit_ops.cli.completion import complete_choices
 from qbit_ops.cli.exit_codes import ExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
@@ -115,6 +122,7 @@ from qbit_ops.cli.validation import (
     validate_format_support,
     validate_hash_option,
     validate_rate_limits,
+    validate_sort_option,
     validate_tag_names,
 )
 
@@ -373,6 +381,24 @@ def list_qbit_torrents(
             "--limit", help="Maximum number of results. Use 0 for no limit."
         ),
     ] = 0,
+    sort: Annotated[
+        str | None,
+        typer.Option(
+            "--sort",
+            help=(
+                "Sort rendered rows by this field, applied before "
+                "--limit. Refused with a machine --format -- sort at "
+                "the caller there instead."
+            ),
+            autocompletion=complete_choices(
+                field.value for field in TorrentSortField
+            ),
+        ),
+    ] = None,
+    desc: Annotated[
+        bool,
+        typer.Option("--desc", help="Reverse --sort's direction."),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -391,9 +417,15 @@ def list_qbit_torrents(
     `--limit` caps the rows rendered, `0` meaning no limit -- the same
     vocabulary `torrents search` uses. It never changes what is
     selected: `summary.matched` still counts every match, alongside
-    `returned` and `truncated`.
+    `returned` and `truncated`. `--sort` is applied before `--limit`,
+    so `--sort size --desc --limit 20` renders the twenty largest
+    matches, not twenty arbitrary ones truncated afterwards. Without
+    `--sort`, row order is unchanged from before this option existed.
     """
     validate_format_support("torrents_list", output_format)
+    resolved_sort = validate_sort_option(
+        sort, desc, output_format, parse_field=parse_torrent_sort_field
+    )
     try:
         filters = build_filter_from_options(
             category=category,
@@ -457,6 +489,15 @@ def list_qbit_torrents(
             selection, tracker_counts = select_torrents(
                 client, filters, on_progress=advance
             )
+
+    if resolved_sort is not None:
+        sort_field, sort_direction = resolved_sort
+        selection = replace(
+            selection,
+            matched=sort_torrent_snapshots(
+                selection.matched, sort_field, sort_direction
+            ),
+        )
 
     rendering.print_torrent_selection(
         selection, output_format, tracker_counts=tracker_counts, limit=limit

@@ -331,6 +331,37 @@ proportional to your selection instead of your whole instance.
 Combining them costs nothing extra: `--tracker` and `--tracker-health`
 are both answered from that single pass, never from two.
 
+### Sorting `torrents list`
+
+```bash
+qbit-ops torrents list --sort size --desc --limit 20   # the 20 largest
+qbit-ops torrents list --sort added_on                 # oldest first
+```
+
+`--sort` is a rendering choice, applied before `--limit` -- the twenty
+rows above are the twenty largest of the whole selection, not twenty
+rows truncated first and reordered after. It never changes what is
+selected: `summary.matched` still counts every match. `--desc` reverses
+the direction and requires `--sort`.
+
+Ten fields: `name`, `state`, `progress`, `down`, `up`, `ratio`,
+`category`, `size`, `added_on`, `seeding_time`.
+
+Shell completion is wired for `--sort` (Tab lists every field), and an
+unrecognized one is refused with the full list, so neither needs
+memorizing. `--sort` is refused together with `json`/`jsonl`/`csv`:
+those formats always render the selection's own order, so combining
+them with `--sort` would make the same flags mean two different things
+depending on `--format`. Sort at the caller instead (`jq`, `column`,
+...).
+
+Without `--sort`, row order is unchanged from before this option
+existed. Ties (two torrents sorting equal on the chosen field) break by
+name then hash, so two runs over an unmoving library render the same
+order. A torrent missing the sorted measure (`added_on`/`seeding_time`
+on an older instance) is never treated as zero -- it is grouped after
+every torrent with a real value, at the end regardless of `--desc`.
+
 ### Where the filters work
 
 Everywhere a command acts on a set of torrents: `torrents list`,
@@ -561,6 +592,27 @@ columns whether the terminal is narrow or wide:
 
 `json`, `jsonl` and `csv` always carry all nine measures, regardless of
 `--verbose` -- they are the way to read the full detail from a script.
+
+### Sorting
+
+Without `--sort`, the busiest tracker (most torrents) renders first.
+This *is* a change from earlier versions, which rendered hostname
+order: `trackers list` always had a chosen order, so this replaces one
+rather than introducing one where there was none, as `torrents list`
+does. `trackers status` is unaffected -- it never sorts.
+
+```bash
+qbit-ops trackers list --sort ratio --desc   # highest ratio first
+qbit-ops trackers list --sort uploaded       # least uploaded first
+```
+
+Five fields: `tracker`, `torrents`, `size`, `uploaded`, `ratio` -- Tab
+completes them, and an unrecognized one is refused with the full list.
+`--sort` is refused together with `json`/`jsonl`/`csv`, the same rule
+`torrents list --sort` follows. Ties break by tracker identity, and a
+tracker with nothing downloaded yet -- `null` ratio, see "Reading the
+numbers" below -- sorts after every tracker with a real ratio,
+regardless of `--desc`.
 
 ### The columns do not add up, on purpose
 

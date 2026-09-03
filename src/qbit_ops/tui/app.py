@@ -60,6 +60,7 @@ from qbit_core.shared.selection import (
     TorrentFilter,
     describe_torrent_filter,
 )
+from qbit_core.shared.sorting import SortOrder
 from qbit_ops import __version__
 from qbit_ops.app_services import (
     TuiRefreshResult,
@@ -81,6 +82,7 @@ from qbit_ops.tui.formatting import (
     _shorten_hash,
     _torrent_row_values,
     resolve_key_display,
+    sort_order_label,
 )
 from qbit_ops.tui.modals.actions import ActionsScreen
 from qbit_ops.tui.modals.details import DetailsScreen
@@ -103,7 +105,6 @@ from qbit_ops.tui.state import (
     GRAPH_SAMPLE_INTERVAL_SECONDS,
     ConnectionState,
     MutationUiResult,
-    SortOrder,
     TuiBulkAction,
     TuiController,
     Workspace,
@@ -642,14 +643,15 @@ class QbitOpsTuiApp(App[None]):
             criteria.append(f"search: {state.search}")
 
         criteria_text = " · ".join(criteria) if criteria else "No filters"
+        sort_label = sort_order_label(state.sort)
         summary.render_state(
-            criteria=f"{criteria_text} · Sorted by {state.sort.label}",
+            criteria=f"{criteria_text} · Sorted by {sort_label}",
             counts=counts,
         )
 
         self.query_one("#torrents", DataTable).border_title = (
             _format_torrents_title(
-                shown, len(state.selected_hashes), state.sort.label
+                shown, len(state.selected_hashes), sort_label
             )
         )
         self._refresh_search_command_bar_if_active()

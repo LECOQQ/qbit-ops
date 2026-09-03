@@ -12,9 +12,10 @@ aborting collection, mirroring `describe_tracker_url`'s own fallback.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from qbit_core.errors import InvalidInputError
@@ -37,12 +38,16 @@ from qbit_core.shared.selection import (
     torrent_filter_to_dict,
     without_inspection_criteria,
 )
+from qbit_core.shared.sorting import SortDirection
 from qbit_core.shared.torrent_states import TorrentSnapshot
 
 __all__ = [
     "TRACKER_STATUS_CSV_FIELDNAMES",
+    "TrackerSortField",
     "TrackerStatusReport",
     "collect_tracker_status",
+    "parse_tracker_sort_field",
+    "sort_tracker_aggregates",
     "tracker_status_exit_code",
     "tracker_status_report_to_csv_rows",
     "tracker_status_report_to_dict",
@@ -476,3 +481,65 @@ def tracker_status_report_to_csv_rows(
         )
         for aggregate in report.trackers
     ]
+
+
+class TrackerSortField(StrEnum):
+    """`trackers list --sort`'s vocabulary -- its own five columns,
+    distinct from `qbit_core.shared.sorting.TorrentSortField`: a
+    tracker aggregate is not a torrent, and forcing one generic field
+    enum over both would be an abstraction nothing here asks for.
+    """
+
+    TRACKER = "tracker"
+    TORRENTS = "torrents"
+    SIZE = "size"
+    UPLOADED = "uploaded"
+    RATIO = "ratio"
+
+
+_TRACKER_SORT_KEY_FUNCS: dict[str, Callable[[TrackerAggregate], Any]] = {
+    "tracker": lambda a: a.identity.casefold(),
+    "torrents": lambda a: a.torrent_count,
+    "size": lambda a: a.total_size_bytes,
+    "uploaded": lambda a: a.uploaded_bytes,
+    "ratio": lambda a: a.aggregate_ratio,
+}
+
+
+def sort_tracker_aggregates(
+    aggregates: Sequence[TrackerAggregate],
+    field: TrackerSortField,
+    direction: SortDirection,
+) -> tuple[TrackerAggregate, ...]:
+    """Sort `aggregates` by `field`/`direction`, purely in-memory.
+
+    Deterministic tie-break: casefolded identity, via a stable sort so
+    ties resolve the same way regardless of `direction` (mirrors
+    `qbit_core.shared.sorting.sort_torrent_snapshots`). `ratio` is the
+    one field that can be `None` (nothing downloaded yet, see
+    `TrackerAggregate.aggregate_ratio`) -- such an aggregate is never
+    folded into the comparison, and is grouped after every aggregate
+    with a real ratio, regardless of `direction`.
+    """
+    key_func = _TRACKER_SORT_KEY_FUNCS[field.value]
+    tie_broken = sorted(aggregates, key=lambda a: a.identity.casefold())
+    present = [a for a in tie_broken if key_func(a) is not None]
+    missing = [a for a in tie_broken if key_func(a) is None]
+    present.sort(key=key_func, reverse=direction is SortDirection.DESCENDING)
+    return tuple(present) + tuple(missing)
+
+
+def parse_tracker_sort_field(value: str) -> TrackerSortField:
+    """Validate a raw `--sort` value against `trackers list`'s vocabulary.
+
+    Raises `ValueError` naming every supported field -- see
+    `qbit_core.shared.sorting.parse_torrent_sort_field`.
+    """
+    candidate = value.strip().lower()
+    try:
+        return TrackerSortField(candidate)
+    except ValueError:
+        supported = ", ".join(sorted(f.value for f in TrackerSortField))
+        raise ValueError(
+            f"Unknown --sort value '{value}'. Supported values: {supported}."
+        ) from None

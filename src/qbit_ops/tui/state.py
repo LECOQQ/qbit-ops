@@ -60,6 +60,7 @@ from qbit_core.shared.selection import (
     TorrentFilter,
     format_category_label,
 )
+from qbit_core.shared.sorting import SortOrder, sort_torrent_snapshots
 from qbit_core.shared.torrent_states import (
     TorrentSnapshot,
     build_torrent_snapshot,
@@ -467,115 +468,6 @@ class RateHistory:
 def _padded(samples: deque[int | None], slots: int) -> list[int | None]:
     held = list(samples)[-slots:]
     return [None] * (slots - len(held)) + held
-
-
-# Downloading/seeding are the two "active" groups a torrent spends most
-# of its life in; everything else (including a still-unclassified raw
-# state) stays neutral or, for a genuine error, red -- see
-# `qbit_ops.tui.formatting._STATE_STYLES` for the colour side of this,
-# kept separate since colour is presentation-only.
-_STATE_LABELS: dict[str, str] = {
-    "downloading": "Downloading",
-    "seeding": "Seeding",
-    "stalled": "Stalled",
-    "checking": "Checking",
-    "errored": "Error",
-    "unknown": "Unknown",
-}
-
-
-def _state_label(raw_state: str) -> str:
-    """Classify a raw qBittorrent state into one human-readable label.
-
-    Reuses `qbit_core.shared.torrent_states` entirely -- `is_stopped_state`
-    for the qBittorrent 4/5 pause-vs-stop split (checked first, since
-    `classify_torrent_state` folds a stopped torrent into its seeding/
-    downloading *direction* rather than reporting it as stopped), then
-    `classify_torrent_state` for every other group. Never a second,
-    parallel classifier. Lives here (not `tui.formatting`) so local
-    sorting -- which must stay in this Textual-independent module --
-    can order by the same human label the table displays.
-    """
-    if is_stopped_state(raw_state):
-        return "Stopped"
-    return _STATE_LABELS[classify_torrent_state(raw_state)]
-
-
-class SortField(StrEnum):
-    """Torrent-table columns local sorting can order by."""
-
-    NAME = "name"
-    STATE = "state"
-    PROGRESS = "progress"
-    DOWN = "down"
-    UP = "up"
-    RATIO = "ratio"
-    CATEGORY = "category"
-
-
-class SortDirection(StrEnum):
-    ASCENDING = "asc"
-    DESCENDING = "desc"
-
-
-_SORT_FIELD_LABELS: dict[SortField, str] = {
-    SortField.NAME: "Name",
-    SortField.STATE: "State",
-    SortField.PROGRESS: "Progress",
-    SortField.DOWN: "Down speed",
-    SortField.UP: "Up speed",
-    SortField.RATIO: "Ratio",
-    SortField.CATEGORY: "Category",
-}
-
-
-@dataclass(frozen=True)
-class SortOrder:
-    """The Torrents table's current local sort -- purely presentational,
-    computed from the already-collected snapshot, never a qBittorrent
-    call. Defaults to Name ascending."""
-
-    field: SortField = SortField.NAME
-    direction: SortDirection = SortDirection.ASCENDING
-
-    @property
-    def label(self) -> str:
-        arrow = "↑" if self.direction is SortDirection.ASCENDING else "↓"
-        return f"{_SORT_FIELD_LABELS[self.field]} {arrow}"
-
-
-_SORT_KEY_FUNCS: dict[SortField, Callable[[TorrentSnapshot], Any]] = {
-    SortField.NAME: lambda t: t.name.casefold(),
-    SortField.STATE: lambda t: _state_label(t.state),
-    SortField.PROGRESS: lambda t: t.progress,
-    SortField.DOWN: lambda t: t.download_rate,
-    SortField.UP: lambda t: t.upload_rate,
-    SortField.RATIO: lambda t: t.ratio,
-    SortField.CATEGORY: lambda t: format_category_label(t.category).casefold(),
-}
-
-
-def _sort_torrents(
-    matched: tuple[TorrentSnapshot, ...], order: SortOrder
-) -> tuple[TorrentSnapshot, ...]:
-    """Sort `matched` by `order`, purely in-memory -- zero API calls.
-
-    Deterministic tie-break: canonical (casefolded) name, then full
-    hash, applied via a two-pass stable sort so ties always resolve the
-    same way regardless of `order.direction` -- Python's `sorted` is
-    stable, so sorting by the tie-break first and the primary key
-    second leaves equal-primary-key groups in tie-break order no matter
-    which direction the primary key itself is sorted in.
-    """
-    tie_broken = sorted(matched, key=lambda t: (t.name.casefold(), t.hash))
-    primary = _SORT_KEY_FUNCS[order.field]
-    return tuple(
-        sorted(
-            tie_broken,
-            key=primary,
-            reverse=order.direction is SortDirection.DESCENDING,
-        )
-    )
 
 
 class ConnectionState(StrEnum):
@@ -1456,7 +1348,9 @@ class TuiController:
         # The search engine's own ranking never reaches the table: the
         # operator's chosen sort always wins, applied here regardless of
         # where `matched` came from.
-        matched = _sort_torrents(matched, self.state.sort)
+        matched = sort_torrent_snapshots(
+            matched, self.state.sort.field, self.state.sort.direction
+        )
         self.state.visible = replace(filtered, matched=matched)
 
     def _reconcile_focus(self) -> None:

@@ -1,6 +1,7 @@
 """Register the `trackers` command group."""
 
 import sys
+from dataclasses import replace as replace_dataclass_fields
 from enum import StrEnum
 from typing import Annotated
 
@@ -8,7 +9,10 @@ import typer
 
 from qbit_core.errors import ErrorCategory, InvalidInputError, require_non_blank
 from qbit_core.features.tracker_status import (
+    TrackerSortField,
     collect_tracker_status,
+    parse_tracker_sort_field,
+    sort_tracker_aggregates,
     tracker_status_exit_code,
 )
 from qbit_core.features.trackers import (
@@ -26,12 +30,14 @@ from qbit_core.features.trackers import (
 from qbit_core.shared.execution import MutationOperation
 from qbit_core.shared.inspection import select_and_inspect
 from qbit_core.shared.selection import SelectionRequest
+from qbit_core.shared.sorting import SortDirection
 from qbit_ops.cli import error_boundary, rendering
 from qbit_ops.cli.commands._shared import (
     exit_if_no_targeted_matches,
     resolve_tracker_target,
     run_mutation,
 )
+from qbit_ops.cli.completion import complete_choices
 from qbit_ops.cli.exit_codes import TrackerStatusExitCode
 from qbit_ops.cli.rendering import OutputFormat
 from qbit_ops.cli.selector_options import (
@@ -74,7 +80,10 @@ from qbit_ops.cli.selector_options import (
     UploadedMinOption,
     build_filter_from_options,
 )
-from qbit_ops.cli.validation import validate_format_support
+from qbit_ops.cli.validation import (
+    validate_format_support,
+    validate_sort_option,
+)
 
 trackers_app = typer.Typer(help="Manage qBittorrent trackers.")
 
@@ -351,6 +360,23 @@ def list_trackers(
             help="Show all nine columns instead of the five-column default.",
         ),
     ] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option(
+            "--sort",
+            help=(
+                "Sort rendered rows by this field. Refused with a "
+                "machine --format -- sort at the caller there instead."
+            ),
+            autocompletion=complete_choices(
+                field.value for field in TrackerSortField
+            ),
+        ),
+    ] = None,
+    desc: Annotated[
+        bool,
+        typer.Option("--desc", help="Reverse --sort's direction."),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option(
@@ -377,11 +403,18 @@ def list_trackers(
     `jsonl` and `csv` always carry every measure regardless of
     `--verbose`.
 
+    Without `--sort`, the busiest tracker (most torrents) renders
+    first -- unlike `torrents list`, this command had a chosen order
+    before (hostname), so this is a replacement, not a new default.
+
     Always exits `0` on tracker health: this is an inventory, not a
     diagnostic, so a script asking "what trackers exist" is never broken
     by a tracker degraded elsewhere. Use `trackers status` for health.
     """
     validate_format_support("trackers_list", output_format)
+    resolved_sort = validate_sort_option(
+        sort, desc, output_format, parse_field=parse_tracker_sort_field
+    )
     try:
         filters = build_filter_from_options(
             category=category,
@@ -436,6 +469,23 @@ def list_trackers(
             report = collect_tracker_status(
                 client, filters, on_progress=advance
             )
+
+    # Busiest tracker first by default -- a replacement for the
+    # previous hostname-ascending order, not a new one; see
+    # `.agents/specs/list-sort.md`. `collect_tracker_status`'s own
+    # order stays hostname-ascending: `trackers status` renders that
+    # same report unsorted, and must not inherit this command's
+    # default.
+    sort_field, sort_direction = resolved_sort or (
+        TrackerSortField.TORRENTS,
+        SortDirection.DESCENDING,
+    )
+    report = replace_dataclass_fields(
+        report,
+        trackers=sort_tracker_aggregates(
+            report.trackers, sort_field, sort_direction
+        ),
+    )
 
     rendering.render_tracker_inventory(report, output_format, verbose=verbose)
 

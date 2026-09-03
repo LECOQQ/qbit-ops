@@ -731,6 +731,91 @@ def test_list_tracker_restricts_the_report_not_the_scan(
     assert client.torrents_trackers_calls == 2
 
 
+# --- `trackers list --sort` --------------------------------------------------
+
+
+def test_list_defaults_to_most_torrents_first(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`tracker.example` carries both torrents, `other.example` only
+    one -- the busiest tracker renders first without `--sort`."""
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list", "--format", "json"])
+
+    payload = json.loads(result.stdout)
+    assert [t["identity"] for t in payload["trackers"]] == [
+        "tracker.example",
+        "other.example",
+    ]
+
+
+def test_list_sort_tracker_orders_by_identity(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(
+        app, ["trackers", "list", "--sort", "tracker"], env={"COLUMNS": "200"}
+    )
+
+    assert result.exit_code == 0
+    collapsed = " ".join(result.stdout.split())
+    assert collapsed.index("other.example") < collapsed.index("tracker.example")
+
+
+def test_list_sort_rejects_a_machine_format(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(
+        app, ["trackers", "list", "--sort", "tracker", "--format", "json"]
+    )
+
+    assert result.exit_code == ExitCode.ERROR
+    assert "--format json" in result.stderr
+
+
+def test_list_sort_rejects_an_unknown_field_and_lists_the_five_valid_ones(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list", "--sort", "host"])
+
+    assert result.exit_code == ExitCode.ERROR
+    for field in ("tracker", "torrents", "size", "uploaded", "ratio"):
+        assert field in result.stderr
+
+
+def test_list_desc_without_sort_is_rejected(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "list", "--desc"])
+
+    assert result.exit_code == ExitCode.ERROR
+
+
+def test_status_keeps_its_own_hostname_order_regardless_of_list(
+    runner: CliRunner, configure_qbit_backend
+) -> None:
+    """`trackers list`'s new default must not leak into
+    `collect_tracker_status`'s shared computation -- `trackers status`
+    renders the same report and stays hostname-ascending."""
+    configure_qbit_backend(client=_client_with_volume())
+
+    result = runner.invoke(app, ["trackers", "status", "--format", "json"])
+
+    payload = json.loads(result.stdout)
+    assert [t["identity"] for t in payload["trackers"]] == [
+        "other.example",
+        "tracker.example",
+    ]
+
+
 # --- Filter parity between the two `trackers` reports -----------------------
 
 
@@ -766,15 +851,17 @@ def test_list_accepts_every_filter_status_does() -> None:
     )
 
 
-def test_list_adds_only_the_tracker_health_filter() -> None:
-    """The one deliberate addition. Both commands accept `--verbose`,
-    but it means something different per command: `status` uses it to
-    print each tracker's representative message, `list` uses it to
-    render all nine columns instead of the five-column default.
+def test_list_adds_only_the_tracker_health_filter_and_sorting() -> None:
+    """Both commands accept `--verbose`, but it means something
+    different per command: `status` uses it to print each tracker's
+    representative message, `list` uses it to render all nine columns
+    instead of the five-column default. `--sort`/`--desc` are `list`'s
+    own addition too: `status` reports health, not a rendering order
+    (see `.agents/specs/list-sort.md`).
     """
     assert _trackers_command_options("list") - _trackers_command_options(
         "status"
-    ) == {"--tracker-health"}
+    ) == {"--tracker-health", "--sort", "--desc"}
 
 
 def test_neither_report_command_offers_exclude_tracker() -> None:

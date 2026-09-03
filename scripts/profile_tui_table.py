@@ -252,7 +252,11 @@ async def _bench_one(count: int) -> None:
             print(f"  {label:<55} median={median:7.2f} ms   p95={p95:7.2f} ms")
 
         def scenario_sort_toggle() -> None:
-            from qbit_ops.tui.state import SortDirection, SortField, SortOrder
+            from qbit_core.shared.sorting import (
+                SortDirection,
+                SortField,
+                SortOrder,
+            )
 
             current = state.sort
             next_direction = (

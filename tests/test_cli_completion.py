@@ -141,6 +141,29 @@ def test_complete_choices_deduplicates_repeated_values() -> None:
                 "unknown",
             ],
         ),
+        (
+            "qbit-ops torrents list --sort ",
+            [
+                "added_on",
+                "category",
+                "down",
+                "name",
+                "progress",
+                "ratio",
+                "seeding_time",
+                "size",
+                "state",
+                "up",
+            ],
+        ),
+        (
+            "qbit-ops torrents list --sort s",
+            ["seeding_time", "size", "state"],
+        ),
+        (
+            "qbit-ops trackers list --sort ",
+            ["ratio", "size", "torrents", "tracker", "uploaded"],
+        ),
     ],
 )
 def test_closed_enum_options_complete_their_values(
