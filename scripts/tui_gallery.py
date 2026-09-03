@@ -58,7 +58,7 @@ _CHROME_CIRCLE = re.compile(r'\s*<circle cx="\d+" cy="0" r="7"[^>]*/>')
 _TRACKERS: tuple[str, ...] = (
     "https://tracker.example.org/announce",
     "https://bt.private.tld/announce/passkey",
-    "udp://open.demonii.si:1337/announce",
+    "udp://open.tracker.invalid:1337/announce",
     "https://flaky.tracker.net/announce",
     "** [DHT] **",
     "",
