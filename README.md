@@ -67,14 +67,14 @@ Docker, and no Python either. It installs [uv](https://docs.astral.sh/uv/),
 which brings its own Python when the system has none recent enough.
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh | sh # x-release-please-version
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.6.0/scripts/install.sh | sh # x-release-please-version
 ```
 
 A checksum is published beside the script, if you would rather read it
 before running it:
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.5.0/scripts/install.sh.sha256 # x-release-please-version
+curl -LsSf https://raw.githubusercontent.com/LECOQQ/qbit-ops/v0.6.0/scripts/install.sh.sha256 # x-release-please-version
 ```
 
 ### 🍺 With Homebrew
