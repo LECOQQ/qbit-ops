@@ -12,11 +12,31 @@
 > Enriching `doctor` and `explain` was removed on 2026-08-16: two
 > discovery runs found the capabilities already served elsewhere, and
 > concluded `REJECT` rather than building to tick a line. Tracker URL
-> migration was removed from v0.6.0 on 2026-08-23 for the same reason:
+> migration was removed on 2026-08-23 from the milestone now numbered
+> v0.7.0, for the same reason:
 > `trackers replace`, `replace-passkey`, `add-if-present` and `remove`
 > already ship it.
 
-## 🚧 WIP - v0.6.0: 🏭 Operate at Scale
+## 🚧 WIP - v0.6.0: 🚪 Come On In
+
+> Easy to arrive at, and cheaper to keep running.
+
+A release about reaching the library rather than about what can be done
+to it. It was not planned: `Operate at Scale` was next, and none of its
+lines shipped -- they move to v0.7.0 intact. This one grew out of
+getting the tool ready to be handed to people.
+
+- One-line install on a machine with no Python at all
+- Shell completion for closed sets, and for your own categories, tags
+  and tracker hosts, from a cache filled by ordinary use
+- `--sort` on `torrents list` and `trackers list`
+- Reconfiguring a running TUI, without restarting it
+- A rate graph that keeps sampling while you work elsewhere
+- Forty percent fewer API calls per refresh, and half the bytes
+
+## 🔭 Later
+
+### v0.7.0 - 🏭 Operate at Scale
 
 > Select precisely. Operate on thousands of torrents safely.
 
@@ -27,9 +47,7 @@
 - Batch-aware reannounce and recheck
 - State snapshots before bulk mutations
 
-## 🔭 Later
-
-### v0.7.0 - 🐉 Move Without Fear
+### v0.8.0 - 🐉 Move Without Fear
 
 > Move freely across disks, servers or qBittorrent instances without losing anything.
 
@@ -42,7 +60,7 @@
 - Storage-aware operations
 - Duplicate-content detection
 
-### v0.8.0 - 🛡️ Guardrails
+### v0.9.0 - 🛡️ Guardrails
 
 > Making explicit what must never happen.
 
@@ -56,7 +74,7 @@
 - Policy-aware delete, move and pause
 - Stale configuration and torrents detection
 
-### v0.9.0 - ⚙️ Automation Toolkit
+### v0.10.0 - ⚙️ Automation Toolkit
 
 > Becoming a scriptable operational substrate.
 
