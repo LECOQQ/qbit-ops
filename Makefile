@@ -309,8 +309,12 @@ demo-beautify: ## use: Compose the recorded captures for the README
 	else \
 		printf '[SKIP] qbit-ops-demo.gif -- not recorded\n' >&2; \
 	fi
+	# 1200x630, not the 1280x640 GitHub recommends: that is 2:1, and every
+	# platform that actually unfurls the card -- Slack, X, LinkedIn --
+	# expects 1.91:1 and crops anything else. GitHub only requires
+	# 640x320, which this clears twice over, so one size serves both.
 	@if [ -f demo/output/overview.png ]; then \
-		beautify render demo/output/overview.png --canvas 1280x640 \
+		beautify render demo/output/overview.png --canvas 1200x630 \
 			--background $(BEAUTIFY_HERO) $(BEAUTIFY_FRAME) \
 			--format png --quiet --force \
 			--output demo/output/social-preview.png; \
