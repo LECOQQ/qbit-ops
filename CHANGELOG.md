@@ -3,6 +3,51 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.6.0](https://github.com/LECOQQ/qbit-ops/compare/v0.5.0...v0.6.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sorting:** `trackers list` now orders by torrent count descending instead of by hostname. A script reading its first row gets a different tracker; pass `--sort tracker` to restore the previous order.
+
+### Features
+
+* **cli:** complete --category, --tag and --tracker from a local cache ([125e485](https://github.com/LECOQQ/qbit-ops/commit/125e4852a6b4f4a67cff19bd3ec82f15e75f601a))
+* **cli:** complete the closed-enum values shell completion never offered ([425fd4e](https://github.com/LECOQQ/qbit-ops/commit/425fd4e3545b7ceac014c28238837a07779eef23))
+* **demo:** render the card GitHub shows when the repo is shared ([8df4f9d](https://github.com/LECOQQ/qbit-ops/commit/8df4f9de01bc9fb831033463de408a96410fef97))
+* **install:** add a curl | sh installer wrapping uv ([871e41b](https://github.com/LECOQQ/qbit-ops/commit/871e41b1dd27e57d026fb50ea4c7701e5b4f625c))
+* **qa:** catch a passkey that no keyword announces ([3b59732](https://github.com/LECOQQ/qbit-ops/commit/3b597324606c8b0b861e1d2bd4b68131c1cc0b0b))
+* **sorting:** add --sort and --desc to torrents list and trackers list ([49f9b08](https://github.com/LECOQQ/qbit-ops/commit/49f9b08dfc9abfad46b2f6890627209b0a33dcf5))
+* **tooling:** refuse the two provenance markers that travel with the trailer ([b231c0e](https://github.com/LECOQQ/qbit-ops/commit/b231c0e0d84310a0c23d60850d0b3cf5d6f2c9bb))
+* **tui:** let an already-running TUI reconfigure its connection ([fa21271](https://github.com/LECOQQ/qbit-ops/commit/fa2127182bc6c2bef1dee809af6d4d617ba4b348))
+* **tui:** sample the graph continuously instead of pausing off Overview ([c4126d4](https://github.com/LECOQQ/qbit-ops/commit/c4126d414570ed01287eb5600ecd029e477cd81c))
+
+
+### Bug Fixes
+
+* **demo:** render the social card at the ratio that unfurls uncropped ([574972f](https://github.com/LECOQQ/qbit-ops/commit/574972f9c4a0352186acabe62e521f69da68deb9))
+* **gallery:** name a tracker that cannot be reached ([2cc546f](https://github.com/LECOQQ/qbit-ops/commit/2cc546f4b70b17f469b8daec852738c055d1a83c))
+* **tests:** assert the rate window was replaced, not that it is empty ([3f6e573](https://github.com/LECOQQ/qbit-ops/commit/3f6e573b64174c62b6d525f789e7535f446789b5))
+* **tui:** announce the setup form's way out where it has one ([41442d0](https://github.com/LECOQQ/qbit-ops/commit/41442d0272246d7483e57d5cfc462b12a4763932))
+* **tui:** capitalise the Overview tracker headings ([d8a755f](https://github.com/LECOQQ/qbit-ops/commit/d8a755f41252bdbaebcdea9b71e575a23f27ebfe))
+* **tui:** stop modal up/down from landing on the dialog container ([dcaa879](https://github.com/LECOQQ/qbit-ops/commit/dcaa879319beafab368cd97804e9bb60dddc2d96))
+
+
+### Performance Improvements
+
+* **refresh:** stop paying twice for the library on every refresh ([017f63d](https://github.com/LECOQQ/qbit-ops/commit/017f63d4368051f3733a9880ca3a3daded447cdb))
+
+
+### Documentation
+
+* **readme:** cut what explains the build rather than the product ([e368299](https://github.com/LECOQQ/qbit-ops/commit/e3682996e0b5de11efcb4f6a505e7787c6492c0f))
+* **readme:** let release-please carry the install URL's version ([0e0a8cb](https://github.com/LECOQQ/qbit-ops/commit/0e0a8cb855bdb2f260f347cdb769b6a36f0632d0))
+* **readme:** say that completion exists, and that it survives an upgrade ([47d5a44](https://github.com/LECOQQ/qbit-ops/commit/47d5a44246430331c2a97568a048a996673c02d5))
+* **readme:** show the prompt before the pipe, and where the config lands ([34f804d](https://github.com/LECOQQ/qbit-ops/commit/34f804dd914131a97468798179c7683575c09953))
+* **roadmap:** move the shipped milestone where shipped milestones go ([dd49cfc](https://github.com/LECOQQ/qbit-ops/commit/dd49cfcb19061df601b327b02e9f5904f9c30b94))
+* **roadmap:** name v0.6.0 for what it ships, not for what was planned ([7bed2f0](https://github.com/LECOQQ/qbit-ops/commit/7bed2f0cbc56f429a49a3fc01722f0f01acba964))
+* say what the package is on the one line PyPI shows ([075ab16](https://github.com/LECOQQ/qbit-ops/commit/075ab164dd8063988d052dd4867fed8764f70bb0))
+
 ## [0.5.0](https://github.com/LECOQQ/qbit-ops/compare/v0.4.0...v0.5.0) (2026-08-24)
 
 
