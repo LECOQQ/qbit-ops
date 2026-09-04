@@ -226,10 +226,14 @@ def _header_row(name_width: int) -> str:
     # `recent`, never a number of seconds: these sparklines ride the
     # refresh tick, so their span is `--interval` times their cell count
     # and a fixed "60s" would be false at any other interval.
+    #
+    # Capitalised like every other column heading in the app -- the
+    # Torrents table reads `Sel State Rate Ratio Category`, and two
+    # conventions on one screen read as an oversight.
     return (
-        f"   {'tracker':<{name_width}} {'activity':<{_ACTIVITY_WIDTH}} "
-        f"{'up':>{_RATE_WIDTH}} {'down':>{_RATE_WIDTH}} "
-        f"{'err':>{_ERR_WIDTH}} recent"
+        f"   {'Tracker':<{name_width}} {'Activity':<{_ACTIVITY_WIDTH}} "
+        f"{'Up':>{_RATE_WIDTH}} {'Down':>{_RATE_WIDTH}} "
+        f"{'Err':>{_ERR_WIDTH}} Recent"
     )
 
 
