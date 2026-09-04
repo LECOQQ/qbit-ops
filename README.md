@@ -137,14 +137,27 @@ uv tool uninstall qbit-ops
 
 ### 🔌 Connecting
 
-Then set up the connection:
-
 ```bash
 qbit-ops init
 ```
 
-It asks, tests, and remembers. `qbit-ops tui` offers the same form when
-nothing is configured yet.
+It asks for the host, user and password, **tests them before writing**,
+and saves to `~/.config/qbit-ops/.env` with mode `0600`. `qbit-ops tui`
+opens the same form when nothing is configured yet, and `ctrl+o` reopens
+it later to point at a different instance without restarting.
+
+Where there is no terminal - a script, a container - set the three
+variables instead, and skip `init` entirely:
+
+```bash
+QBIT_HOST=http://192.168.1.10:8080
+QBIT_USER=admin
+QBIT_PASSWORD=…
+```
+
+Pointing at several instances is one variable: `QBIT_OPS_ENV_FILE=~/.config/qbit-ops/seedbox.env`
+takes precedence over a project-local `.env`, which takes precedence over
+the user file.
 
 Then:
 
@@ -231,25 +244,34 @@ a torrent to fix it.
 **Rotate a leaked passkey everywhere at once.**
 
 ```bash
-echo "$NEW_PASSKEY" | qbit-ops trackers replace-passkey \
-  --tracker "https://tracker.example/announce/{passkey}" \
-  --new-passkey-stdin
+qbit-ops trackers replace-passkey \
+  --tracker "https://tracker.example/announce/{passkey}"
 ```
 
-`{passkey}` is a template: it never prints anything that can harm you.
-The new value is piped in, never typed on the command line - without
-`--new-passkey-stdin`, it asks interactively instead, input hidden.
-Add `--no-dry-run --yes` to actually apply: piping the passkey already
-occupies stdin, so the usual confirmation prompt cannot ask there too.
+`{passkey}` marks where the secret sits in the URL - you type those nine
+characters, never a passkey. It asks for the new one at a hidden prompt.
+
+To drive it from a script, pipe the value in instead, and add `--yes`
+alongside `--no-dry-run`: stdin is then busy carrying the passkey, so the
+confirmation cannot read your answer there too.
+
+```bash
+pass show tracker/passkey | qbit-ops trackers replace-passkey \
+  --tracker "https://tracker.example/announce/{passkey}" \
+  --new-passkey-stdin --no-dry-run --yes
+```
 
 **Follow a tracker that changed address.**
 
 ```bash
-echo "$NEW_PASSKEY" | qbit-ops trackers replace \
+qbit-ops trackers replace \
   --source "old.example" \
-  --target "https://new.example/announce/{passkey}" \
-  --passkey-stdin
+  --target "https://new.example/announce/{passkey}"
 ```
+
+`--source` takes a bare host: identifying a tracker was never what a
+passkey was for. `--target` needs the placeholder, because a tracker this
+tool has never seen cannot have its passkey position guessed.
 
 **Keep a dying tracker while you move off it.**
 
