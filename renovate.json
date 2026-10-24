@@ -1,15 +1,22 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>LECOQQ/renovate-config"],
+  "extends": [
+    "local>LECOQQ/renovate-config"
+  ],
   "packageRules": [
     {
-      "description": "qbit-ops is published: a runtime dependency change is a fix, so release-please ships it",
-      "matchDepTypes": ["dependencies"],
+      "description": "qbit-ops is published: a runtime or extra dependency change is a fix, so release-please ships it",
+      "matchDepTypes": [
+        "dependencies",
+        "extras"
+      ],
       "semanticCommitType": "fix"
     },
     {
       "description": "linuxserver kept old Ubuntu-style tags (20.04.1) that sort above the real qBittorrent versions",
-      "matchDepNames": ["linuxserver/qbittorrent"],
+      "matchDepNames": [
+        "linuxserver/qbittorrent"
+      ],
       "allowedVersions": "<20"
     }
   ]
