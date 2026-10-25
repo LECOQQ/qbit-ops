@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   check:
-    name: Check CI
+    name: Check CI (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     # Skip only the release-please squash-merge commit landing on main --
     # that exact diff already ran here as a pull_request check before
@@ -22,6 +22,12 @@ jobs:
     if: >-
       github.event_name != 'push' ||
       !startsWith(github.event.head_commit.message, 'chore(main): release ')
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every version pyproject.toml supports. Renovate does not read matrix
+        # values: add a new Python here when it proposes it for the image.
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -29,7 +35,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
