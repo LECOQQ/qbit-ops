@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>LECOQQ/renovate-config"
+    "local>LECOQQ/renovate-config",
+    "local>LECOQQ/renovate-config:github"
   ],
   "packageRules": [
     {
@@ -13,11 +14,11 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "linuxserver kept old Ubuntu-style tags (20.04.1) that sort above the real qBittorrent versions",
+      "description": "linuxserver kept old tags (14.x, 20.04.1) that sort above the real qBittorrent versions",
       "matchDepNames": [
         "linuxserver/qbittorrent"
       ],
-      "allowedVersions": "<20"
+      "allowedVersions": "<10"
     }
   ]
 }
