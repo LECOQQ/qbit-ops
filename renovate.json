@@ -14,11 +14,11 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "linuxserver kept old tags (14.x, 20.04.1) that sort above the real qBittorrent versions",
+      "description": "The compatibility matrix decides which qBittorrent versions are supported; the demo image follows it by hand",
       "matchDepNames": [
         "linuxserver/qbittorrent"
       ],
-      "allowedVersions": "<10"
+      "enabled": false
     }
   ]
 }
