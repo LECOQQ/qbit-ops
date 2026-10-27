@@ -306,6 +306,13 @@ while pre-1.0). `qbit_ops.__version__` resolves at runtime via
 `importlib.metadata.version("qbit-ops")`, never by reading
 `pyproject.toml`.
 
+The release PR is opened by `github-actions[bot]`, which the repository's
+approval policy treats as a first-time contributor: its CI run stays in
+*action required*, and ends as a failure if the PR is merged without
+approving it. That run is optional. CI runs again on `main` once the
+release commit lands, so either click *Approve and run* on the PR, or
+merge and read the `main` run.
+
 Before merging a deliberate release PR:
 
 ```bash
