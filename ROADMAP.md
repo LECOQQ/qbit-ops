@@ -42,10 +42,10 @@ getting the tool ready to be handed to people.
 
 - A canonical name for "no longer seeding"
 - A trackers page in the TUI, read-only, with copyable commands
-- `qbit_core` as a versioned library, with its own public surface
+- `qbit_core` as a versioned library, with its own public surface (under way: `__version__`, `docs/LIBRARY.md`, multi-instance settings)
 - Saved selectors
 - Batch-aware reannounce and recheck
-- State snapshots before bulk mutations
+- State snapshots before bulk mutations (so far only speed limits, via `qbit_core.features.transfer`; torrent mutations are not covered)
 
 ### v0.8.0 - 🐉 Move Without Fear
 

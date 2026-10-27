@@ -27,6 +27,15 @@ qbit-ops doctor
 
 An untested version is not automatically incompatible.
 
+## 🐢 Speed limits
+
+`qbit_core.features.transfer` reads and writes the global and alternative
+speed limits and the alternative mode. On all four versions above, the
+`dl_limit`, `up_limit`, `alt_dl_limit` and `alt_up_limit` preferences
+are exchanged in bytes/s, not KiB/s as the Web API reference states, and
+values are stored in whole KiB. Checked by
+`tests/integration/test_matrix_transfer.py`.
+
 ## 🔁 Re-run the matrix
 
 ```bash
