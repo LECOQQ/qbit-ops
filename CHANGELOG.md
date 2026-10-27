@@ -3,6 +3,18 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.7.0](https://github.com/LECOQQ/qbit-ops/compare/v0.6.0...v0.7.0) (2026-10-27)
+
+
+### Features
+
+* **core:** transfer controls, named instances and a request timeout for library consumers ([#31](https://github.com/LECOQQ/qbit-ops/issues/31)) ([293ac59](https://github.com/LECOQQ/qbit-ops/commit/293ac59e1c6c3e030c5ecabf256d3a1a47a0910d))
+
+
+### Bug Fixes
+
+* **deps:** update python dependencies (non-major) to v1.2.4 ([058f817](https://github.com/LECOQQ/qbit-ops/commit/058f817321d16ac320311ffde8536a407cbbee23))
+
 ## [0.6.0](https://github.com/LECOQQ/qbit-ops/compare/v0.5.0...v0.6.0) (2026-09-04)
 
 
