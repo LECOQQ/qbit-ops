@@ -15,13 +15,9 @@ jobs:
   check:
     name: Check CI (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    # Skip only the release-please squash-merge commit landing on main --
-    # that exact diff already ran here as a pull_request check before
-    # merge. Every other push (direct commits, feature branches, the
-    # release-please PR itself) still runs in full.
-    if: >-
-      github.event_name != 'push' ||
-      !startsWith(github.event.head_commit.message, 'chore(main): release ')
+    # No skip for the release commit: its pull_request run waits for an
+    # approval that never comes (github-actions[bot] counts as a
+    # first-time contributor), so this push run is the only check it gets.
     strategy:
       fail-fast: false
       matrix:
