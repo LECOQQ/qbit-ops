@@ -22,6 +22,8 @@ from qbit_core.qbit.protocols import (
     QbitTorrentReader,
     QbitTrackerMutator,
     QbitTransferReader,
+    QbitTransferSettingsMutator,
+    QbitTransferSettingsReader,
 )
 from tests.support import FakeQbitClient
 
@@ -32,6 +34,12 @@ from tests.support import FakeQbitClient
 # which only run under pytest.
 _typed_as_torrent_reader: QbitTorrentReader = FakeQbitClient()
 _typed_as_transfer_reader: QbitTransferReader = FakeQbitClient()
+_typed_as_transfer_settings_reader: QbitTransferSettingsReader = (
+    FakeQbitClient()
+)
+_typed_as_transfer_settings_mutator: QbitTransferSettingsMutator = (
+    FakeQbitClient()
+)
 _typed_as_app_info_reader: QbitAppInfoReader = FakeQbitClient()
 _typed_as_torrent_mutator: QbitTorrentMutator = FakeQbitClient()
 _typed_as_destructive_mutator: QbitDestructiveMutator = FakeQbitClient()
@@ -46,6 +54,8 @@ def test_fake_qbit_client_conforms_to_every_focused_protocol() -> None:
 
     assert isinstance(fake, QbitTorrentReader)
     assert isinstance(fake, QbitTransferReader)
+    assert isinstance(fake, QbitTransferSettingsReader)
+    assert isinstance(fake, QbitTransferSettingsMutator)
     assert isinstance(fake, QbitAppInfoReader)
     assert isinstance(fake, QbitTorrentMutator)
     assert isinstance(fake, QbitDestructiveMutator)
@@ -143,12 +153,18 @@ def test_protocols_contain_only_methods_actually_consumed() -> None:
         "torrents_add_trackers",
         "torrents_remove_trackers",
         "torrents_edit_tracker",
+        "transfer_speed_limits_mode",
+        "transfer_set_speed_limits_mode",
+        "app_preferences",
+        "app_set_preferences",
     }
 
     declared_methods: set[str] = set()
     for protocol in (
         QbitTorrentReader,
         QbitTransferReader,
+        QbitTransferSettingsReader,
+        QbitTransferSettingsMutator,
         QbitAppInfoReader,
         QbitTorrentMutator,
         QbitDestructiveMutator,
@@ -212,3 +228,15 @@ def test_bulk_torrent_mutator_covers_every_action_apply_bulk_can_reach() -> (
         if not name.startswith("_"):
             assert hasattr(QbitBulkTorrentMutator, name)
     assert hasattr(QbitBulkTorrentMutator, "torrents_delete")
+
+
+def test_transfer_settings_reader_cannot_write() -> None:
+    reader_methods = {
+        name
+        for name in vars(QbitTransferSettingsReader)
+        if not name.startswith("_")
+    }
+    assert reader_methods == {"transfer_speed_limits_mode", "app_preferences"}
+    for write in ("transfer_set_speed_limits_mode", "app_set_preferences"):
+        assert not hasattr(QbitTransferSettingsReader, write)
+        assert not hasattr(QbitTorrentMutator, write)

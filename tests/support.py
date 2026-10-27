@@ -1,6 +1,6 @@
 """Shared test doubles and factories for CLI-level tests."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from qbit_ops.config import QbitConfig
@@ -50,6 +50,9 @@ class FakeQbitClient:
         remove_tags_error: Exception | None = None,
         add_trackers_error: Exception | None = None,
         set_limit_error: Exception | None = None,
+        global_limits: tuple[int, int] = (0, 0),
+        alt_limits: tuple[int, int] = (10240, 10240),
+        transfer_settings_error: Exception | None = None,
     ) -> None:
         """Store fake instance data returned to callers.
 
@@ -103,6 +106,16 @@ class FakeQbitClient:
         self.remove_tags_error = remove_tags_error
         self.add_trackers_error = add_trackers_error
         self.set_limit_error = set_limit_error
+        self.preferences: dict[str, Any] = {
+            "dl_limit": global_limits[0],
+            "up_limit": global_limits[1],
+            "alt_dl_limit": alt_limits[0],
+            "alt_up_limit": alt_limits[1],
+        }
+        self.transfer_settings_error = transfer_settings_error
+        self.speed_limits_mode_raw: Any = None
+        self.speed_limits_mode_writes: list[bool | None] = []
+        self.preference_writes: list[dict[str, Any]] = []
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.added_torrent_files: list[list[bytes]] = []
         self.created_categories: list[str] = []
@@ -141,13 +154,59 @@ class FakeQbitClient:
         self._record("app_web_api_version")
         return self.api_version
 
-    def transfer_info(self) -> dict[str, int]:
+    def transfer_info(self) -> dict[str, Any]:
         self.transfer_info_calls += 1
         self._record("transfer_info")
         return {
             "dl_info_speed": self.download_speed,
             "up_info_speed": self.upload_speed,
+            "dl_rate_limit": self.download_rate_limit,
+            "up_rate_limit": self.upload_rate_limit,
+            "connection_status": self.connection_status,
+            "dht_nodes": self.dht_nodes,
+            "dl_info_data": self.session_downloaded,
+            "up_info_data": self.session_uploaded,
         }
+
+    def transfer_speed_limits_mode(self) -> Any:
+        """Return the mode as qBittorrent does ("1"/"0"); a test can set
+        `speed_limits_mode_raw` to exercise another shape."""
+        self._record("transfer_speed_limits_mode")
+        if self.transfer_settings_error is not None:
+            raise self.transfer_settings_error
+        if self.speed_limits_mode_raw is not None:
+            return self.speed_limits_mode_raw
+        return "1" if self.alt_speed_limits else "0"
+
+    def transfer_set_speed_limits_mode(
+        self, intended_state: bool | None = None
+    ) -> None:
+        self._record(
+            "transfer_set_speed_limits_mode", intended_state=intended_state
+        )
+        if self.transfer_settings_error is not None:
+            raise self.transfer_settings_error
+        self.speed_limits_mode_writes.append(intended_state)
+        self.alt_speed_limits = (
+            not self.alt_speed_limits
+            if intended_state is None
+            else intended_state
+        )
+
+    def app_preferences(self) -> dict[str, Any]:
+        self._record("app_preferences")
+        if self.transfer_settings_error is not None:
+            raise self.transfer_settings_error
+        return dict(self.preferences)
+
+    def app_set_preferences(
+        self, prefs: Mapping[str, Any] | None = None
+    ) -> None:
+        self._record("app_set_preferences", prefs=prefs)
+        if self.transfer_settings_error is not None:
+            raise self.transfer_settings_error
+        self.preference_writes.append(dict(prefs or {}))
+        self.preferences.update(prefs or {})
 
     def sync_maindata(self, rid: str | int = 0) -> dict[str, Any]:
         """Return a fake `sync_maindata()` payload.
