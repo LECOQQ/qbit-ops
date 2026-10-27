@@ -13,7 +13,6 @@ from qbit_core.features.transfer import (
     SpeedLimits,
     read_transfer_info,
     read_transfer_settings,
-    restore_transfer_settings,
     set_alternative_limits,
     set_alternative_mode,
     set_global_limits,
@@ -82,19 +81,3 @@ def test_limit_writes_leave_the_other_pair_and_the_mode_alone(client):
     after = read_transfer_settings(client)
     assert after.global_limits == before.global_limits
     assert after.alternative_mode is before.alternative_mode
-
-
-def test_restore_returns_the_snapshot_exactly(client):
-    set_global_limits(client, SpeedLimits(2 * _MIB, 0))
-    set_alternative_limits(client, SpeedLimits(_MIB, _MIB))
-    set_alternative_mode(client, False)
-    snapshot = read_transfer_settings(client)
-
-    set_alternative_limits(client, SpeedLimits(64 * 1024, 64 * 1024))
-    set_global_limits(client, SpeedLimits(0, 0))
-    set_alternative_mode(client, True)
-    assert read_transfer_settings(client) != snapshot
-
-    restore_transfer_settings(client, snapshot)
-
-    assert read_transfer_settings(client) == snapshot

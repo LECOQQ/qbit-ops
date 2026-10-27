@@ -33,7 +33,6 @@ from qbit_core.features.transfer import (
     SpeedLimits,
     TransferSettings,
     read_transfer_settings,
-    restore_transfer_settings,
     set_alternative_mode,
 )
 from qbit_core.instances import QbitInstance, instances_from_environment
@@ -107,7 +106,8 @@ assert snapshot == TransferSettings(
     False, SpeedLimits(0, 0), SpeedLimits(1024, 0)
 ), snapshot
 assert set_alternative_mode(fake, True) is True
-restore_transfer_settings(fake, snapshot)
+assert fake.alt is True
+assert set_alternative_mode(fake, snapshot.alternative_mode) is True
 assert fake.alt is False
 
 # Typer/Rich/Textual aren't asserted absent here: the dev interpreter

@@ -8,7 +8,6 @@ from qbit_core.features.transfer import (
     TransferSettings,
     read_transfer_info,
     read_transfer_settings,
-    restore_transfer_settings,
     set_alternative_limits,
     set_alternative_mode,
     set_global_limits,
@@ -144,48 +143,4 @@ def test_bool_is_not_a_valid_limit() -> None:
 
     with pytest.raises(InvalidInputError):
         set_global_limits(client, SpeedLimits(True, 0))  # type: ignore[arg-type]
-    assert client.calls == []
-
-
-def test_restore_writes_limits_before_mode() -> None:
-    client = FakeQbitClient(
-        alt_speed_limits=True,
-        global_limits=(1024, 1024),
-        alt_limits=(2048, 2048),
-    )
-    snapshot = read_transfer_settings(client)
-    set_alternative_limits(client, SpeedLimits(4096, 4096))
-    set_global_limits(client, SpeedLimits(0, 0))
-    set_alternative_mode(client, False)
-    client.calls.clear()
-
-    restore_transfer_settings(client, snapshot)
-
-    assert _mutating_calls(client) == [
-        "app_set_preferences",
-        "transfer_set_speed_limits_mode",
-    ]
-    assert read_transfer_settings(client) == snapshot
-
-
-def test_restore_skips_the_mode_write_when_unchanged() -> None:
-    client = FakeQbitClient()
-    snapshot = read_transfer_settings(client)
-
-    restore_transfer_settings(client, snapshot)
-
-    assert client.speed_limits_mode_writes == []
-    assert len(client.preference_writes) == 1
-
-
-def test_restore_validates_the_whole_snapshot_first() -> None:
-    client = FakeQbitClient()
-    snapshot = TransferSettings(
-        alternative_mode=True,
-        global_limits=SpeedLimits(1024, 1024),
-        alternative_limits=SpeedLimits(-1, 0),
-    )
-
-    with pytest.raises(InvalidInputError):
-        restore_transfer_settings(client, snapshot)
     assert client.calls == []

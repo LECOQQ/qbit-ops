@@ -1,7 +1,8 @@
 """Read and change qBittorrent's global speed limits and alternative mode.
 
-Limits are bytes per second, `0` meaning unlimited. Callers snapshot with
-`read_transfer_settings`, change, then `restore_transfer_settings`.
+Limits are bytes per second, `0` meaning unlimited. `read_transfer_settings`
+is the snapshot a caller keeps before changing anything; giving settings
+back is the caller's decision, never a blind rewrite (docs/LIBRARY.md).
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ __all__ = [
     "TransferSettings",
     "read_transfer_info",
     "read_transfer_settings",
-    "restore_transfer_settings",
     "set_alternative_limits",
     "set_alternative_mode",
     "set_global_limits",
@@ -140,25 +140,6 @@ def set_global_limits(
     """Set the normal limits, same rounding as `set_alternative_limits`."""
     _validate_limits(limits)
     client.app_set_preferences(_preferences_for(_GLOBAL_KEYS, limits))
-
-
-def restore_transfer_settings(
-    client: QbitTransferSettingsMutator, snapshot: TransferSettings
-) -> None:
-    """Write a snapshot back: both limit pairs first, then the mode.
-
-    The snapshot is validated before any call. Limits go in one
-    preferences write so they never apply half-restored.
-    """
-    _validate_limits(snapshot.global_limits)
-    _validate_limits(snapshot.alternative_limits)
-    client.app_set_preferences(
-        {
-            **_preferences_for(_GLOBAL_KEYS, snapshot.global_limits),
-            **_preferences_for(_ALTERNATIVE_KEYS, snapshot.alternative_limits),
-        }
-    )
-    set_alternative_mode(client, snapshot.alternative_mode)
 
 
 def _validate_limits(limits: SpeedLimits) -> None:

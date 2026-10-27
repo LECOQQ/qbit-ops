@@ -46,7 +46,6 @@ from qbit_core import create_qbit_client
 from qbit_core.features.transfer import (
     SpeedLimits,
     read_transfer_settings,
-    restore_transfer_settings,
     set_alternative_limits,
     set_alternative_mode,
 )
@@ -55,14 +54,23 @@ from qbit_core.instances import instances_from_environment
 instance = instances_from_environment(os.environ)[0]
 client = create_qbit_client(instance.config)
 
-snapshot = read_transfer_settings(client)  # before touching anything
-try:
-    set_alternative_limits(client, SpeedLimits(download=1_048_576, upload=0))
-    set_alternative_mode(client, True)
-    ...  # playback happens
-finally:
-    restore_transfer_settings(client, snapshot)
+before = read_transfer_settings(client)  # before touching anything
+throttle = SpeedLimits(download=1024, upload=1024)
+set_alternative_limits(client, throttle)
+set_alternative_mode(client, True)
+...  # playback happens
+
+# Give back only what was changed, and only if it is still as it was
+# left: a setting changed by hand in between is someone's decision.
+now = read_transfer_settings(client)
+if now.alternative_mode and now.alternative_limits == throttle:
+    set_alternative_mode(client, before.alternative_mode)
+    set_alternative_limits(client, before.alternative_limits)
 ```
+
+There is no `restore` helper on purpose: rewriting a whole snapshot would
+also reset the global limits, and silently overwrite a change made by hand
+since the snapshot was taken.
 
 Limits are **bytes per second**, `0` meaning unlimited. qBittorrent
 reports an unlimited limit as a negative number on some paths; it is
@@ -70,8 +78,8 @@ normalized to `0`. The Web API reference says KiB/s for the preferences,
 but every tested version exchanges bytes/s
 ([docs/COMPATIBILITY.md](COMPATIBILITY.md)). qBittorrent stores whole
 KiB: a written value is rounded down to a multiple of 1024 (a non-zero
-value below 1024 becomes 1024), so a snapshot read from qBittorrent
-restores exactly.
+value below 1024 becomes 1024). Write whole KiB to compare a value read
+back with the one written.
 
 ## ⏱️ Request timeout
 
