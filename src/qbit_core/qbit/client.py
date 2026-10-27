@@ -7,7 +7,11 @@ from typing import Any
 import qbittorrentapi
 
 from qbit_core.config import QbitConfig
-from qbit_core.errors import QbitAuthenticationError, QbitConnectionError
+from qbit_core.errors import (
+    InvalidInputError,
+    QbitAuthenticationError,
+    QbitConnectionError,
+)
 
 __all__ = [
     "create_qbit_client",
@@ -15,17 +19,31 @@ __all__ = [
 ]
 
 
-def create_qbit_client(config: QbitConfig) -> Any:
+def create_qbit_client(
+    config: QbitConfig, *, request_timeout: float | None = None
+) -> Any:
     """Create and authenticate a qBittorrent API client from `config`.
 
     Never prints or exits: raises `QbitAuthenticationError`/
     `QbitConnectionError` for the caller. No `.env`/environment
     knowledge -- callers resolve a `QbitConfig` first.
+
+    `request_timeout` (seconds, applied to every request including the
+    login) keeps a frozen qBittorrent from blocking a long-running
+    consumer; `None` keeps the library default (no timeout).
     """
+    extra: dict[str, Any] = {}
+    if request_timeout is not None:
+        if request_timeout <= 0:
+            raise InvalidInputError(
+                "request_timeout must be greater than 0 seconds."
+            )
+        extra["REQUESTS_ARGS"] = {"timeout": request_timeout}
     client = qbittorrentapi.Client(
         host=config.host,
         username=config.username,
         password=config.password,
+        **extra,
     )
 
     try:
