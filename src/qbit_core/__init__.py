@@ -33,6 +33,8 @@ Minimal usage::
     )
 """
 
+import importlib.metadata
+
 from qbit_core.config import QbitConfig
 from qbit_core.errors import (
     InvalidInputError,
@@ -42,7 +44,18 @@ from qbit_core.errors import (
 )
 from qbit_core.qbit.client import create_qbit_client
 
+
+def _installed_version(distribution: str = "qbit-ops") -> str:
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return "0+unknown"
+
+
+__version__ = _installed_version()
+
 __all__ = [
+    "__version__",
     "QbitConfig",
     "create_qbit_client",
     "QbitCoreError",

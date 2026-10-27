@@ -12,7 +12,8 @@ TUI (Textual) ──────┘
 
 `qbit_core` never prints, prompts, or calls `sys.exit`, and a non-UI
 Python consumer can depend on it alone. See the module docstring of
-`qbit_core/__init__.py` for a minimal usage example.
+`qbit_core/__init__.py` for a minimal usage example, and
+[docs/LIBRARY.md](LIBRARY.md) for its public surface and stability policy.
 
 ## 📦 Package layout
 
@@ -23,6 +24,7 @@ qbit_core/
 ├── qbit/       # qBittorrent client boundary and payload handling
 ├── data/       # packaged compatibility evidence
 ├── config.py   # QbitConfig -- connection settings, no env/dotenv logic
+├── instances.py  # named instances resolved from a passed-in mapping
 └── errors.py   # QbitCoreError hierarchy
 
 qbit_ops/

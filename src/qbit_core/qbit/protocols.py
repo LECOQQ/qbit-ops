@@ -11,6 +11,9 @@ from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "QbitClient",
+    "QbitTransferReader",
+    "QbitTransferSettingsMutator",
+    "QbitTransferSettingsReader",
 ]
 
 
@@ -48,6 +51,49 @@ class QbitTransferReader(Protocol):
         `collect_instance_stats_delta`). `rid=0` (the default) returns a
         full snapshot; echoing back a nonzero `rid` from a prior call
         returns only the `server_state` keys that changed since."""
+        ...
+
+
+@runtime_checkable
+class QbitTransferSettingsReader(Protocol):
+    """Read-only speed-limit settings: the alternative-mode flag and the
+    global/alternative limits held in the application preferences."""
+
+    def transfer_speed_limits_mode(self) -> Any:
+        """Return whether alternative speed limits are active.
+
+        Production returns the string `"1"`/`"0"`; other shapes exist
+        across versions, so callers normalize (see
+        `qbit_core.features.transfer`).
+        """
+        ...
+
+    def app_preferences(self) -> Mapping[str, Any]:
+        """Return the application preferences; the speed limits are
+        `dl_limit`, `up_limit`, `alt_dl_limit` and `alt_up_limit`."""
+        ...
+
+
+@runtime_checkable
+class QbitTransferSettingsMutator(Protocol):
+    """Speed-limit writes. Declares the mode read as well: a write that
+    must not toggle blindly has to see the current mode first. A
+    consumer typed `QbitTransferSettingsReader` cannot write."""
+
+    def transfer_speed_limits_mode(self) -> Any: ...
+
+    def transfer_set_speed_limits_mode(
+        self, intended_state: bool | None = None
+    ) -> None:
+        """Enable or disable alternative speed limits. On Web API < 2.8.14
+        the library reads the mode then toggles, so a concurrent change
+        between the two calls can invert the result."""
+        ...
+
+    def app_set_preferences(
+        self, prefs: Mapping[str, Any] | None = None
+    ) -> None:
+        """Merge the given keys into the application preferences."""
         ...
 
 
@@ -158,6 +204,8 @@ class QbitTrackerMutator(Protocol):
 class QbitClient(
     QbitTorrentReader,
     QbitTransferReader,
+    QbitTransferSettingsReader,
+    QbitTransferSettingsMutator,
     QbitAppInfoReader,
     QbitTorrentMutator,
     QbitDestructiveMutator,

@@ -206,3 +206,40 @@ def test_error_boundary_module_no_longer_imports_qbittorrentapi_directly() -> (
         module == "qbittorrentapi" or module.startswith("qbittorrentapi.")
         for module in imported_modules
     )
+
+
+def test_request_timeout_is_forwarded_as_requests_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[dict[str, Any]] = []
+
+    def _fake_client(**kwargs: Any) -> _FakeClient:
+        received.append(kwargs)
+        return _FakeClient(
+            host=kwargs["host"],
+            username=kwargs["username"],
+            password=kwargs["password"],
+        )
+
+    monkeypatch.setattr("qbittorrentapi.Client", _fake_client)
+
+    create_qbit_client(_CONFIG, request_timeout=7.5)
+    create_qbit_client(_CONFIG)
+
+    assert received[0]["REQUESTS_ARGS"] == {"timeout": 7.5}
+    assert "REQUESTS_ARGS" not in received[1]
+
+
+@pytest.mark.parametrize("timeout", [0, -1.0])
+def test_non_positive_request_timeout_is_rejected_before_connecting(
+    monkeypatch: pytest.MonkeyPatch, timeout: float
+) -> None:
+    from qbit_core.errors import InvalidInputError
+
+    def _must_not_connect(**_kwargs: Any) -> None:
+        raise AssertionError("client built despite an invalid timeout")
+
+    monkeypatch.setattr("qbittorrentapi.Client", _must_not_connect)
+
+    with pytest.raises(InvalidInputError):
+        create_qbit_client(_CONFIG, request_timeout=timeout)
