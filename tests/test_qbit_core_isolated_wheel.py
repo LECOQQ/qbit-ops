@@ -29,6 +29,18 @@ from qbit_core import (
     QbitCoreError,
     create_qbit_client,
 )
+from qbit_core.features.transfer import (
+    SpeedLimits,
+    TransferSettings,
+    read_transfer_settings,
+    restore_transfer_settings,
+    set_alternative_mode,
+)
+from qbit_core.instances import QbitInstance, instances_from_environment
+from qbit_core.qbit.protocols import (
+    QbitTransferSettingsMutator,
+    QbitTransferSettingsReader,
+)
 from qbit_core.features.torrents import (
     BulkHashActionResult,
     HashActionOutcome,
@@ -56,6 +68,48 @@ result = BulkHashActionResult(action="pause", outcomes=(outcome,))
 assert result.changed_hashes == ("a" * 40,)
 assert result.unchanged_hashes == ()
 
+assert isinstance(qbit_core.__version__, str) and qbit_core.__version__
+
+instances = instances_from_environment(
+    {"QBIT_HOST": "http://h", "QBIT_USER": "u", "QBIT_PASSWORD": "p"}
+)
+expected = QbitInstance("default", QbitConfig("http://h", "u", "p"))
+assert instances == (expected,)
+
+
+class _Client:
+    alt = False
+    prefs = {
+        "dl_limit": 0,
+        "up_limit": 0,
+        "alt_dl_limit": 1024,
+        "alt_up_limit": -1,
+    }
+
+    def transfer_speed_limits_mode(self):
+        return "1" if self.alt else "0"
+
+    def transfer_set_speed_limits_mode(self, intended_state=None):
+        self.alt = intended_state
+
+    def app_preferences(self):
+        return dict(self.prefs)
+
+    def app_set_preferences(self, prefs=None):
+        self.prefs.update(prefs)
+
+
+fake = _Client()
+assert isinstance(fake, QbitTransferSettingsReader)
+assert isinstance(fake, QbitTransferSettingsMutator)
+snapshot = read_transfer_settings(fake)
+assert snapshot == TransferSettings(
+    False, SpeedLimits(0, 0), SpeedLimits(1024, 0)
+), snapshot
+assert set_alternative_mode(fake, True) is True
+restore_transfer_settings(fake, snapshot)
+assert fake.alt is False
+
 # Typer/Rich/Textual aren't asserted absent here: the dev interpreter
 # has them installed regardless -- see tests/test_layering.py for that.
 assert "qbit_ops" not in sys.modules
@@ -64,7 +118,7 @@ print("OK")
 """
 
 
-def test_qbit_core_pause_resume_surface_works_from_a_built_wheel(
+def test_qbit_core_consumer_surface_works_from_a_built_wheel(
     tmp_path: Path,
 ) -> None:
     if shutil.which("poetry") is None:
@@ -93,6 +147,8 @@ def test_qbit_core_pause_resume_surface_works_from_a_built_wheel(
 
     assert (extracted / "qbit_core" / "__init__.py").exists()
     assert (extracted / "qbit_core" / "features" / "torrents.py").exists()
+    assert (extracted / "qbit_core" / "features" / "transfer.py").exists()
+    assert (extracted / "qbit_core" / "instances.py").exists()
     assert not (extracted / "qbit_ops").exists()
     assert not (extracted / "tests").exists()
 
