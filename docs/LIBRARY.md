@@ -82,11 +82,11 @@ long-running consumer. The default `None` sets none.
 ## 🖧 Several instances
 
 ```text
-QBIT_INSTANCES=main,sharewood
+QBIT_INSTANCES=main,second
 QBIT_MAIN_HOST=http://localhost:8080
 QBIT_MAIN_USER=admin
 QBIT_MAIN_PASSWORD=...
-QBIT_SHAREWOOD_HOST=...
+QBIT_SECOND_HOST=...
 ```
 
 Names are 1 to 32 characters among `a-z`, `0-9`, `-`, `_`; the variable

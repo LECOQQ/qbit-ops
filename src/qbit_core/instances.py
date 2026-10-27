@@ -54,8 +54,8 @@ def instances_from_environment(
 ) -> tuple[QbitInstance, ...]:
     """Build the instances declared by `QBIT_INSTANCES`, in order.
 
-    `QBIT_INSTANCES="main,sharewood"` reads `QBIT_MAIN_HOST/USER/PASSWORD`
-    and `QBIT_SHAREWOOD_*` (name uppercased, `-` becomes `_`). A blank or
+    `QBIT_INSTANCES="main,second"` reads `QBIT_MAIN_HOST/USER/PASSWORD`
+    and `QBIT_SECOND_*` (name uppercased, `-` becomes `_`). A blank or
     absent `QBIT_INSTANCES` yields one `default` instance read from
     `QBIT_HOST/QBIT_USER/QBIT_PASSWORD`. Raises `InvalidInputError` for a
     bad or duplicate name, or any variable missing or blank; messages
