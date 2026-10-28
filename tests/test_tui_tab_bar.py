@@ -10,7 +10,7 @@ via
 
 run from `.agents/features/tui-filters/wireframes/`. A number that
 existed by hand in this file and in the wireframe drifted four times on
-one work-item (`W74`, `.agents/workflow-history/`); a tracked, imported
+one work-item (`W74`, `.harness/workflow-history/`); a tracked, imported
 fixture closes that gap instead of relying on the two staying in sync
 by discipline.
 """
