@@ -37,3 +37,7 @@ build/
 demo/generated/
 demo/output/
 
+
+# agent-harness: local links, never tracked
+.harness
+.claude/rules/agent-harness.md
