@@ -28,6 +28,7 @@ main checkout.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -36,7 +37,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-LINKED_ENTRIES = ("AGENTS.md", "CLAUDE.md", ".agents")
+LINKED_ENTRIES = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".agents",
+    ".harness",
+    ".claude/rules/agent-harness.md",
+)
 
 
 class WorktreeError(Exception):
@@ -64,18 +71,18 @@ def _registered_worktrees(root: Path) -> set[Path]:
     }
 
 
-def _unlink_control_plane(worktree: Path) -> list[str]:
-    """Remove only entries that really are symlinks.
+def _unlink_control_plane(worktree: Path) -> dict[str, str]:
+    """Remove only entries that really are symlinks; map each to its target.
 
     A regular file or a real directory under one of these names is not
     ours to delete: leave it, and let the dirty-worktree check refuse.
     """
-    removed: list[str] = []
+    removed: dict[str, str] = {}
     for entry in LINKED_ENTRIES:
         target = worktree / entry
         if target.is_symlink():
+            removed[entry] = os.readlink(target)
             target.unlink()
-            removed.append(entry)
     return removed
 
 
@@ -158,8 +165,10 @@ def clean(
 
     dirty = _dirty_entries(worktree)
     if dirty:
-        for entry in removed_links:
-            (worktree / entry).symlink_to((root / entry).resolve())
+        # The recorded target, not a resolved one: `.harness` points at
+        # a stable link that must keep following the installed version.
+        for entry, link_target in removed_links.items():
+            (worktree / entry).symlink_to(link_target)
         listing = "\n  ".join(dirty)
         raise WorktreeError(
             f"{worktree} has uncommitted or untracked changes:\n"
