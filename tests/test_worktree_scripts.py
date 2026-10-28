@@ -37,7 +37,9 @@ def repo(tmp_path: Path) -> Path:
     _git(repo, "config", "user.email", "test@example.test")
     _git(repo, "config", "user.name", "Test")
 
-    (repo / ".gitignore").write_text("AGENTS.md\n.agents/\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(
+        "AGENTS.md\n.agents\n.harness\n.claude/\n", encoding="utf-8"
+    )
     (repo / "tracked.txt").write_text("tracked\n", encoding="utf-8")
     (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
     (repo / ".agents").mkdir()
@@ -46,6 +48,46 @@ def repo(tmp_path: Path) -> Path:
     _git(repo, "add", ".gitignore", "tracked.txt")
     _git(repo, "commit", "-qm", "init")
     return repo
+
+
+@pytest.fixture(autouse=True)
+def _no_real_harness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installed `agent-harness` writes outside `tmp_path`."""
+    monkeypatch.setattr(wn, "HARNESS_COMMAND", "agent-harness-not-in-tests")
+
+
+def _fake_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    script = tmp_path / "bin" / "agent-harness"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(wn, "HARNESS_COMMAND", str(script))
+
+
+@pytest.fixture
+def fake_harness(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """A stand-in that places the three links `agent-harness link` places.
+
+    Returns the file recording each call's arguments.
+    """
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    (harness / "WORKFLOW.md").write_text("workflow\n", encoding="utf-8")
+    calls = tmp_path / "harness-calls"
+    _fake_command(
+        tmp_path,
+        monkeypatch,
+        f'printf "%s\\n" "$*" >> "{calls}"\n'
+        'mkdir -p "$2/.claude/rules"\n'
+        f'ln -s "{repo / ".agents"}" "$2/.agents"\n'
+        f'ln -s "{harness}" "$2/.harness"\n'
+        f'ln -s "{repo / "AGENTS.md"}" "$2/.claude/rules/agent-harness.md"\n',
+    )
+    return calls
 
 
 def _fake_venv(worktree: Path) -> None:
@@ -209,7 +251,7 @@ def test_an_invalid_slug_is_rejected_before_any_git_call(
 
 
 def test_creating_a_worktree_makes_the_branch_and_links_the_control_plane(
-    repo: Path,
+    repo: Path, fake_harness: Path
 ) -> None:
     worktree, branch, linked = wn.create(
         repo, "version", base="HEAD", install=False
@@ -217,10 +259,43 @@ def test_creating_a_worktree_makes_the_branch_and_links_the_control_plane(
 
     assert branch == "feat/version"
     assert worktree.is_dir()
-    assert sorted(linked) == [".agents", "AGENTS.md"]
+    assert fake_harness.read_text() == f"link {worktree}\n"
+    assert sorted(linked) == [
+        ".agents",
+        ".claude/rules/agent-harness.md",
+        ".harness",
+        "AGENTS.md",
+    ]
     assert (worktree / "AGENTS.md").is_symlink()
-    assert (worktree / ".agents").is_symlink()
     assert (worktree / ".agents" / "STATE.md").read_text() == "idle\n"
+    assert _status(worktree) == []
+
+
+def test_without_agent_harness_the_worktree_is_still_created(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    worktree, _, linked = wn.create(repo, "version", base="HEAD", install=False)
+
+    assert linked == ["AGENTS.md"]
+    assert not (worktree / ".agents").exists()
+    err = capsys.readouterr().err
+    assert "not installed" in err
+    assert f"link {worktree}`" in err
+
+
+def test_a_refused_harness_link_does_not_stop_the_worktree(
+    repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _fake_command(tmp_path, monkeypatch, "exit 1\n")
+
+    worktree, _, linked = wn.create(repo, "version", base="HEAD", install=False)
+
+    assert worktree.is_dir()
+    assert linked == ["AGENTS.md"]
+    assert "[WARN]" in capsys.readouterr().err
 
 
 def test_a_tracked_file_is_never_replaced_by_a_symlink(
@@ -309,17 +384,19 @@ def test_an_unmerged_branch_is_refused_and_nothing_is_removed(
 
 
 def test_uncommitted_work_is_refused_and_the_symlinks_are_restored(
-    repo: Path,
+    repo: Path, fake_harness: Path
 ) -> None:
-    worktree, _, _ = wn.create(repo, "version", base="HEAD", install=False)
+    worktree, _, linked = wn.create(repo, "version", base="HEAD", install=False)
+    targets = {entry: os.readlink(worktree / entry) for entry in linked}
     (worktree / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
 
     with pytest.raises(wc.WorktreeError, match="uncommitted or untracked"):
         wc.clean(repo, "version", base="HEAD", keep_branch=False)
 
     assert worktree.is_dir()
-    assert (worktree / "AGENTS.md").is_symlink()
-    assert (worktree / ".agents").is_symlink()
+    assert len(targets) == 4
+    for entry, target in targets.items():
+        assert os.readlink(worktree / entry) == target
 
 
 def test_keep_branch_drops_only_the_worktree_and_skips_the_merge_check(
@@ -351,7 +428,7 @@ def test_a_directory_that_is_not_a_registered_worktree_is_refused(
 
 
 def test_removing_the_worktree_never_follows_the_control_plane_symlinks(
-    repo: Path,
+    repo: Path, tmp_path: Path, fake_harness: Path
 ) -> None:
     """The linked `.agents/` points back at the main checkout; a directory
     walk that followed it would destroy the real control-plane."""
@@ -361,6 +438,7 @@ def test_removing_the_worktree_never_follows_the_control_plane_symlinks(
 
     assert (repo / ".agents" / "STATE.md").read_text() == "idle\n"
     assert (repo / "AGENTS.md").read_text() == "rules\n"
+    assert (tmp_path / "harness" / "WORKFLOW.md").read_text() == "workflow\n"
 
 
 def test_a_worktree_path_is_not_treated_as_part_of_the_main_checkout() -> None:

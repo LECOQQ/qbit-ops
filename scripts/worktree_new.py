@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Create a dedicated branch, worktree and virtualenv for a feature.
 
-The agent control-plane (`AGENTS.md`, `.agents/`) is gitignored, so a
-fresh worktree does not contain it. This script links it in -- but only
-after Git confirms each target is ignored. Replacing a *tracked* file
-with a symlink produces a typechange that can reach a commit, which is
-exactly the accident this script exists to prevent.
+The agent control-plane is gitignored, so a fresh worktree does not
+contain it. `agent-harness link` places its links (`.agents`,
+`.harness`, the Claude rule) when the command is installed; this script
+links the local entry points (`AGENTS.md`, `CLAUDE.md`) itself -- but
+only after Git confirms each target is ignored. Replacing a *tracked*
+file with a symlink produces a typechange that can reach a commit, which
+is exactly the accident this script exists to prevent.
 
 The worktree never shares the main `.venv`. If it did, the project
 there is installed in editable mode pointing at the main checkout's
@@ -25,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,10 +36,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
-# Control-plane entries linked into a new worktree. Each one is still
+# Local entry points linked into a new worktree. Each one is still
 # verified ignored at run time; this list is a convenience, never the
 # safety mechanism.
-LINKED_ENTRIES = ("AGENTS.md", "CLAUDE.md", ".agents")
+LINKED_ENTRIES = ("AGENTS.md", "CLAUDE.md")
+
+# `agent-harness link <worktree>` places these, pointing at the same
+# project data as the main checkout's `.agents`.
+HARNESS_COMMAND = "agent-harness"
+HARNESS_LINKS = (".agents", ".harness", ".claude/rules/agent-harness.md")
 
 
 class WorktreeError(Exception):
@@ -205,6 +213,36 @@ def _link_control_plane(root: Path, worktree: Path) -> list[str]:
     return linked
 
 
+def _link_harness(root: Path, worktree: Path) -> list[str]:
+    """Run `agent-harness link` on `worktree`; return the links it placed.
+
+    Never fatal: without the command, or when it refuses, the worktree
+    is still usable and the message says how to link it later.
+    """
+    if not (root / ".agents").exists():
+        return []
+    command = shutil.which(HARNESS_COMMAND)
+    if command is None:
+        print(
+            f"[SKIP] {HARNESS_COMMAND} is not installed -- .agents and "
+            "the harness are not linked. Install it, then run "
+            f"`{HARNESS_COMMAND} link {worktree}`.",
+            file=sys.stderr,
+        )
+        return []
+    completed = subprocess.run(
+        [command, "link", str(worktree)], cwd=worktree, check=False
+    )
+    if completed.returncode != 0:
+        print(
+            f"[WARN] `{HARNESS_COMMAND} link {worktree}` failed (exit "
+            f"{completed.returncode}, reason above) -- fix it, then re-run "
+            "it.",
+            file=sys.stderr,
+        )
+    return [entry for entry in HARNESS_LINKS if (worktree / entry).is_symlink()]
+
+
 def create(
     root: Path, slug: str, *, base: str, install: bool
 ) -> tuple[Path, str, list[str]]:
@@ -239,6 +277,7 @@ def create(
         )
 
     linked = _link_control_plane(root, worktree)
+    linked += _link_harness(root, worktree)
 
     if install:
         print(f"Installing the worktree virtualenv in {worktree} ...")
