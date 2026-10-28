@@ -1,7 +1,7 @@
 """Prove the TUI wall-clock benchmark script still runs.
 
 `scripts/profile_tui_table.py` is the repo's only wall-clock instrument
-(`.agents/WORKFLOW.md` and this project's own docstrings point to it for
+(`.harness/WORKFLOW.md` and this project's own docstrings point to it for
 any timing claim), and it rotted silently for three weeks: the refresh
 path it drives (`collect_tui_refresh`) gained a fifth call
 (`sync_maindata`, then a startup `collect_instance_lists` call needing

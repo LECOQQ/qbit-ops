@@ -13,7 +13,7 @@ proves is worse than none:
   user-level config can be loaded;
 - **not proven**: that an arbitrary Python or shell command run outside
   `pytest` is isolated. Nothing here constrains that path -- see
-  `.agents/WORKFLOW.md`.
+  `.harness/WORKFLOW.md`.
 """
 
 from __future__ import annotations

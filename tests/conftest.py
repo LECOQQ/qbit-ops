@@ -70,7 +70,7 @@ def _isolate_qbit_configuration() -> Any:
     real resolution rather than asserting on these variables.
 
     This covers `pytest`. It cannot cover an arbitrary Python or shell
-    command run outside it -- see `.agents/WORKFLOW.md`.
+    command run outside it -- see `.harness/WORKFLOW.md`.
     """
     monkeypatch = pytest.MonkeyPatch()
     isolated_home = Path(tempfile.mkdtemp(prefix="qbit-ops-isolated-home-"))
