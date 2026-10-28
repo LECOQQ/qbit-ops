@@ -1,6 +1,29 @@
+# `make install` and `make hooks-install` run a bare `pre-commit install`,
+# which installs every stage listed here.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: local
     hooks:
+      - id: ai-hygiene
+        name: Enforce AI hygiene on the tracked files
+        entry: python3 scripts/check_ai_hygiene.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      # Reads the index itself: pre-commit does not hand over symbolic
+      # links, and a private path is precisely a link. Skipped where the
+      # command is absent, since such a machine holds no harness data.
+      - id: agent-harness-private
+        name: Refuse the private paths and marker of agent-harness
+        entry: >-
+          sh -c 'if command -v agent-harness >/dev/null 2>&1;
+          then exec agent-harness hook pre-commit; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: commitizen-check
         name: Validate Conventional Commit message
         entry: poetry run cz check --commit-msg-file

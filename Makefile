@@ -87,10 +87,10 @@ help: ## diag: Show this help
 install: doctor ## dev: Install dependencies and configure Git hooks
 	@poetry install --extras "tui mcp"
 	@touch .sync-stamp
-	@$(PY) pre-commit install --hook-type commit-msg
+	@$(PY) pre-commit install
 
-hooks-install: ## dev: Reinstall the Conventional Commits hook
-	@$(PY) pre-commit install --hook-type commit-msg
+hooks-install: ## dev: Reinstall the Git hooks (pre-commit and commit-msg)
+	@$(PY) pre-commit install
 
 run: ## use: Run the application
 	@$(PY) python -m qbit_ops.cli.app
