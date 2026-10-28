@@ -76,6 +76,23 @@ tags = ["passkey", "tracker"]
     '''://qbit-ops-[a-z-]+(?::\d+)?/''',
   ]
 
+[[rules]]
+# The private marker of agent-harness, a local tool whose files must
+# never reach this repository. The pattern is written so that it never
+# matches its own text.
+id = "agent-harness-private-marker"
+description = "Private file of agent-harness committed to a product"
+regex = '''agent-harness[:]private'''
+keywords = ["agent-harness"]
+tags = ["agent-harness", "private"]
+
+  # The one escape the pre-commit hook also honours: a line that names
+  # the marker on purpose carries the hygiene pragma.
+  [rules.allowlist]
+  description = "A line that names the marker on purpose"
+  regexTarget = "line"
+  regexes = ['''ai-hygiene: allow-private-marker''']
+
 [allowlist]
 description = "Deliberate fixtures, never real credentials"
 
