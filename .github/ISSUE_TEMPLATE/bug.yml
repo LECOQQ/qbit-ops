@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work as the documentation says.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The steps, the command, or the configuration that triggers it.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      value: |
+        - qbit-ops (`qbit-ops version`):
+        - qBittorrent and Web API:
+        - Install (Homebrew, uv, pipx, Docker):
+        - OS:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove passwords, API keys and tracker passkeys before pasting.
+      render: shell
