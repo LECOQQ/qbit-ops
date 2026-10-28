@@ -168,9 +168,11 @@ secrets: ## qa: Scan for committed credentials with gitleaks (GITLEAKS_SCOPE=dir
 check-ai: ## qa: Enforce AI hygiene -- provenance, generated artefacts, house style
 	@python3 scripts/check_ai_hygiene.py
 
-check-agents: ## qa: Run the agent control-plane's own invariants (no-op without .agents/)
-	@if [ -d .agents ]; then $(MAKE) --no-print-directory -C .agents check; \
-	else printf 'SKIP: no .agents/ in this checkout.\n'; fi
+check-agents: ## qa: Run the agent control-plane's own invariants (no-op without .agents/ or agent-harness)
+	@if [ ! -d .agents ]; then printf 'SKIP: no .agents/ in this checkout.\n'; \
+	elif ! command -v agent-harness >/dev/null 2>&1; then \
+		printf 'SKIP: agent-harness is not installed; .agents/ is not checked.\n'; \
+	else agent-harness check; fi
 
 build: sync ## dev: Build the wheel and sdist into dist/
 	@rm -rf dist
