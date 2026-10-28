@@ -14,7 +14,9 @@ cd qbit-ops
 make install
 ```
 
-Installs dependencies and the Conventional Commits Git hook.
+Installs dependencies and the Git hooks listed in
+`.pre-commit-config.yaml`: AI hygiene before each commit, then the
+Conventional Commits, provenance and body checks on its message.
 
 ## Test tiers
 
