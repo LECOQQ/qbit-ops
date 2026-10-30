@@ -3,6 +3,23 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.7.1](https://github.com/LECOQQ/qbit-ops/compare/v0.7.0...v0.7.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **csv:** neutralise spreadsheet formulas in CSV output ([1f20774](https://github.com/LECOQQ/qbit-ops/commit/1f20774a559ab45624ece32e3c009b22b5391195))
+* **sast:** clean temporary files without a RETURN trap ([a887b10](https://github.com/LECOQQ/qbit-ops/commit/a887b1070d44d6ec41967befdd8466062b15b4cc))
+* **sast:** run the engine test without the project conftest ([6322baa](https://github.com/LECOQQ/qbit-ops/commit/6322baa81984ff020fa5aad52b398a2ee5ce7669))
+* **worktree-clean:** accept a branch integrated by rebase ([d99d064](https://github.com/LECOQQ/qbit-ops/commit/d99d0642bbbc82758691e5a04d8bbb145b468f55))
+
+
+### Documentation
+
+* add a pull request template and issue forms ([0422737](https://github.com/LECOQQ/qbit-ops/commit/0422737a004cc9bf599cdc66a22fa86aa0a64b65))
+* **assets:** draw the logo as a cartoon mascot ([3acff47](https://github.com/LECOQQ/qbit-ops/commit/3acff47bdec3658e93590777f35a157dae9235c8))
+* **security:** add a security policy ([b2c0d22](https://github.com/LECOQQ/qbit-ops/commit/b2c0d225c218857a0a77c1b239098cd86afb5897))
+
 ## [0.7.0](https://github.com/LECOQQ/qbit-ops/compare/v0.6.0...v0.7.0) (2026-10-27)
 
 
