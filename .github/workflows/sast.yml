@@ -78,4 +78,4 @@ jobs:
           echo "OPENGREP_BIN=$HOME/.cache/sast/${version}/opengrep" >> "$GITHUB_ENV"
 
       - name: Compare findings
-        run: uvx pytest tests/test_sast_engines.py -q
+        run: uvx pytest --noconftest tests/test_sast_engines.py -q
