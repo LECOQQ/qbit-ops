@@ -825,12 +825,34 @@ def render_explanation_report(
     render_explanation(report)
 
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralise_csv_cell(cell: str) -> str:
+    """Prefix a cell a spreadsheet would run as a formula; numbers are kept."""
+    if not cell.startswith(_CSV_FORMULA_PREFIXES):
+        return cell
+    try:
+        float(cell)
+    except ValueError:
+        return "'" + cell
+    return cell
+
+
 def print_csv_rows(fieldnames: list[str], rows: list[tuple[str, ...]]) -> None:
-    """Print rows as CSV with a stable header, free of Rich formatting."""
+    """Print rows as CSV with a stable header, free of Rich formatting.
+
+    Torrent names and tracker URLs come from the swarm: cells that start like
+    a formula are prefixed with `'` so a spreadsheet shows them as text.
+    """
     buffer = io.StringIO()
+    # Cells are neutralised by hand below, which defusedcsv would also do.
+    # nosemgrep: use-defusedcsv
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(fieldnames)
-    writer.writerows(rows)
+    writer.writerows(
+        tuple(_neutralise_csv_cell(cell) for cell in row) for row in rows
+    )
     typer.echo(buffer.getvalue(), nl=False)
 
 

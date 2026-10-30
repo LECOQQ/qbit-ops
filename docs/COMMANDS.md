@@ -116,7 +116,7 @@ qbit-ops torrents delete --hash abc123 --with-data --no-dry-run --yes
 
 ## 📤 Output
 
-Read commands support `table`, `json`, `jsonl`, and sometimes `csv`. Unsupported formats fail before contacting qBittorrent.
+Read commands support `table`, `json`, `jsonl`, and sometimes `csv`. Unsupported formats fail before contacting qBittorrent. In `csv`, a cell that starts like a spreadsheet formula (`=`, `+`, `-`, `@`, tab, carriage return) and is not a plain number is prefixed with `'`, so a hostile torrent name is shown as text.
 
 `init` and `tui` are absent from the matrix below: neither takes a `--format`, because neither produces a report to serialize.
 
