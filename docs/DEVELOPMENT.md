@@ -268,6 +268,40 @@ introduces; pushes to `main` and the weekly run report everything, and
 the SARIF goes to code scanning. Renovate also raises vulnerability
 alerts from the same database.
 
+## Static analysis
+
+```bash
+make sast                          # report findings, exit 0
+make sast SAST_STRICT=1            # exit 1 on any finding
+make sast SAST_ENGINE=opengrep     # same rules, the other engine
+```
+
+Runs [Semgrep CE](https://github.com/semgrep/semgrep) over the
+repository. Rule sources are listed in `.sast/sources`, each pinned to a
+commit and trimmed to the Python, Dockerfile, YAML and GitHub Actions
+rules: [semgrep-rules](https://github.com/semgrep/semgrep-rules) and
+[Trail of Bits](https://github.com/trailofbits/semgrep-rules). They are
+**downloaded at scan time into `~/.cache/sast` and never copied into the
+repository** (the Semgrep Rules License forbids redistribution). One
+house rule in `.sast/rules/` covers what they miss.
+
+`scripts/sast.sh` installs the pinned Semgrep with `uv tool install`
+(so `uv` must be on `PATH` the first time) and passes `--metrics=off`.
+`SAST_ENGINE=opengrep` runs the pinned Opengrep instead, after
+verifying its cosign signature (so `cosign` must be on `PATH`);
+`tests/test_sast_engines.py` checks that both report the same findings.
+
+CI runs the same script (`.github/workflows/sast.yml`) on pull requests,
+on `main` and weekly, and uploads the SARIF report to code scanning. The
+repository variable `SAST_ENGINE` switches the engine. The job **reports
+without failing**: a finding is a lead, not a verdict. A false positive
+is silenced on its own line with `# nosemgrep: <rule-id>` and a one-line
+reason above it; a rule that is noise for the whole codebase is dropped
+with an `exclude` line in `.sast/sources`, with its reason.
+
+Not part of `make check`: the first run downloads the engine and the
+rules.
+
 ## Secret scanning
 
 ```bash

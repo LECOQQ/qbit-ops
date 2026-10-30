@@ -60,6 +60,8 @@ def fetch_latest_stable_version(url: str = RELEASES_API_URL) -> str:
         },
     )
     try:
+        # `url` is a fixed https GitHub API endpoint.
+        # nosemgrep: dynamic-urllib-use-detected
         with urllib.request.urlopen(
             request, timeout=REQUEST_TIMEOUT_SECONDS
         ) as response:

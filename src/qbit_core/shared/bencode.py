@@ -146,5 +146,7 @@ def decode_torrent(data: bytes) -> DecodedTorrent:
     if not isinstance(info, dict) or info_span is None:
         raise BencodeError("torrent file has no 'info' dict")
 
+    # The BitTorrent v1 info-hash is SHA-1 by protocol, not a security choice.
+    # nosemgrep: insecure-hash-algorithm-sha1
     info_hash = hashlib.sha1(data[info_span[0] : info_span[1]]).hexdigest()
     return DecodedTorrent(root=result, info_hash=info_hash)

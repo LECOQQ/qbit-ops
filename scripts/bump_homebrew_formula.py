@@ -55,6 +55,8 @@ def resolve_sdist(package: str, version: str) -> tuple[str, str]:
     """
     endpoint = PYPI_JSON.format(package=package, version=version)
     try:
+        # `endpoint` is a fixed https PyPI URL template.
+        # nosemgrep: dynamic-urllib-use-detected
         with urllib.request.urlopen(endpoint, timeout=30) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:

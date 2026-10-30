@@ -201,6 +201,8 @@ class QbitTrackerMutator(Protocol):
 
 
 @runtime_checkable
+# The composed Protocols declare disjoint methods.
+# nosemgrep: baseclass-attribute-override
 class QbitClient(
     QbitTorrentReader,
     QbitTransferReader,

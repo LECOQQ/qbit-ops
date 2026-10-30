@@ -1,0 +1,17 @@
+# Gaps in the pinned rule sources: no rule flags urllib.request.urlopen
+# without a timeout.
+rules:
+  - id: qbit-ops.python.urlopen-without-timeout
+    languages: [python]
+    severity: WARNING
+    message: >-
+      urlopen without a timeout blocks forever on a stalled server. Pass
+      timeout=.
+    patterns:
+      - pattern-either:
+          - pattern: urllib.request.urlopen(...)
+          - pattern: urlopen(...)
+      - pattern-not: urllib.request.urlopen(..., timeout=$T, ...)
+      - pattern-not: urlopen(..., timeout=$T, ...)
+    metadata:
+      cwe: "CWE-400"

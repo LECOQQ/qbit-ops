@@ -111,6 +111,8 @@ def verify_isolation(worktree: Path) -> dict[str, str]:
             "virtualenv activated."
         )
 
+    # Argument list, no shell: the probe is a constant.
+    # nosemgrep: dangerous-subprocess-use-audit
     completed = subprocess.run(
         [str(interpreter), "-c", probe],
         cwd=worktree,
@@ -230,6 +232,8 @@ def _link_harness(root: Path, worktree: Path) -> list[str]:
             file=sys.stderr,
         )
         return []
+    # Argument list, no shell: `command` is the harness binary.
+    # nosemgrep: dangerous-subprocess-use-audit
     completed = subprocess.run(
         [command, "link", str(worktree)], cwd=worktree, check=False
     )
