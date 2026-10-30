@@ -14,6 +14,9 @@ SOURCES_FILE="${SAST_SOURCES:-.sast/sources}"
 HOUSE_RULES="${SAST_RULES:-.sast/rules}"
 BASE_URL="https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}"
 
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "${TMP_ROOT}"' EXIT
+
 die() {
   printf 'ERROR: %s\n' "$1" >&2
   exit 1
@@ -26,9 +29,8 @@ install_opengrep() {
     || die "cosign is required to verify Opengrep (https://docs.sigstore.dev/cosign/system_config/installation/)."
   [ "$(uname -sm)" = "Linux x86_64" ] \
     || die "only Linux x86_64 is wired; install Opengrep yourself and set OPENGREP_BIN."
-  local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "${tmp}"' RETURN
+  local tmp="${TMP_ROOT}/opengrep"
+  mkdir -p "${tmp}"
   for f in "${OPENGREP_ASSET}" "${OPENGREP_ASSET}.cert" "${OPENGREP_ASSET}.sig"; do
     curl -fsSL --retry 3 --max-time 120 -o "${tmp}/${f}" "${BASE_URL}/${f}"
   done
@@ -48,9 +50,8 @@ fetch_source() {
   local repo="$1" sha="$2" dir="$3"
   shift 3
   [ -d "${dir}" ] && return 0
-  local tmp p
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "${tmp}"' RETURN
+  local p tmp="${TMP_ROOT}/${repo//\//-}"
+  mkdir -p "${tmp}"
   curl -fsSL --retry 3 --max-time 120 -o "${tmp}/rules.tar.gz" \
     "https://github.com/${repo}/archive/${sha}.tar.gz"
   mkdir -p "${tmp}/src" "${tmp}/keep"
@@ -136,4 +137,6 @@ for entry in "${SOURCES[@]}"; do
 done
 [ -n "${SAST_SARIF:-}" ] && args+=(--sarif-output="${SAST_SARIF}")
 [ "${SAST_STRICT:-0}" = "1" ] && args+=(--error)
+# exec skips the EXIT trap.
+rm -rf "${TMP_ROOT}"
 exec "${ENGINE_BIN}" "${args[@]}" "$@" .
