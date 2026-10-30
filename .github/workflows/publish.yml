@@ -44,17 +44,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.15"
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
@@ -62,9 +62,11 @@ jobs:
       - name: Verify the declared version agrees with the release tag
         # Reuses the repository's existing version-consistency check
         # rather than introducing a second notion of "the version".
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            python3 scripts/check_version_sync.py --tag "${{ inputs.tag }}"
+          if [ -n "$TAG" ]; then
+            python3 scripts/check_version_sync.py --tag "$TAG"
           else
             python3 scripts/check_version_sync.py
           fi
@@ -88,7 +90,7 @@ jobs:
           /tmp/entrypoint-check/bin/qbit-ops --help > /dev/null
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
 
   bump-tap:
     name: Bump the Homebrew tap
@@ -103,13 +105,13 @@ jobs:
 
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: source
 
       - name: Check out the tap
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: LECOQQ/homebrew-qbit-ops
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -132,8 +134,10 @@ jobs:
         # lists it, and a first-attempt 404 here would mean "not
         # published" -- which is exactly the message the script gives
         # for a genuinely missing release.
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          version="${{ inputs.tag || github.ref_name }}"
+          version="$TAG"
           for attempt in 1 2 3 4 5 6; do
             if python3 source/scripts/bump_homebrew_formula.py \
                  tap/Formula/qbit-ops.rb --version "$version"; then
@@ -147,12 +151,14 @@ jobs:
 
       - name: Commit and push the bump
         working-directory: tap
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if git diff --quiet; then
             echo "Formula already current; nothing to push."
             exit 0
           fi
-          version="${{ inputs.tag || github.ref_name }}"
+          version="$TAG"
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
