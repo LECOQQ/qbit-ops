@@ -105,6 +105,13 @@ docker run --rm -it \
   ghcr.io/lecoqq/qbit-ops:latest tui
 ```
 
+Each release image carries a signed build provenance. To check that an
+image was built from this repository:
+
+```bash
+gh attestation verify oci://ghcr.io/lecoqq/qbit-ops:<version> -R LECOQQ/qbit-ops
+```
+
 For a long-lived setup, see the
 [Compose example](https://github.com/LECOQQ/qbit-ops/blob/main/docs/examples/docker-compose.yml).
 
