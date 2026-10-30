@@ -1,0 +1,11 @@
+# Rule sources for scripts/sast.sh, downloaded at scan time and never
+# copied into this repository (their licences forbid redistribution).
+#
+#   <owner/repo> <commit> <path>...   take these paths from the repository
+#   exclude <owner/repo> <path>       drop one rule file, with its reason above
+#
+# Implicit string concatenation in a call or a list is how this repository
+# wraps long messages: 14 hits, none a missing comma.
+semgrep/semgrep-rules 16b9e6d45f10649f6a531ec4838ed9924372c3bc python/lang/security python/lang/correctness python/requests python/cryptography python/sh python/docker dockerfile/security dockerfile/correctness yaml/github-actions/security
+trailofbits/semgrep-rules 31390b3a99c04c81522d1b37c8d1900aa2dd4094 python yaml/github-actions
+exclude semgrep/semgrep-rules python/lang/correctness/common-mistakes/string-concat-in-list.yaml

@@ -13,7 +13,7 @@ STACK := python-cli
 
 PY := poetry run
 
-.PHONY: secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint check-shell test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image check-install-script build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-beautify demo-down demo-doctor
+.PHONY: sast secrets check-agents check-ai doctor env-attest info help install hooks-install run format lint check-shell test check-version check check-fast test-tui ci ci-entrypoint sync test-qbit-matrix test-qbit-version capture-qbit-fixtures docker-matrix-doctor check-docs check-dist check-image check-install-script build worktree-new worktree-clean clean demo-up demo-tui demo-transfer demo-reset demo-record demo-beautify demo-down demo-doctor
 
 DEMO_COMPOSE := docker compose -f demo/compose.yml --project-name qbit-ops-demo
 DEMO_ENV_FILE := $(CURDIR)/demo/qbit-ops.env
@@ -164,6 +164,9 @@ secrets: ## qa: Scan for committed credentials with gitleaks (GITLEAKS_SCOPE=dir
 		printf 'MISSING: gitleaks. Install it (https://github.com/gitleaks/gitleaks) or provide Docker.\n' >&2; \
 		exit 1; \
 	fi
+
+sast: ## qa: Scan the code with Semgrep CE (SAST_ENGINE=opengrep for Opengrep; SAST_STRICT=1 fails on findings; needs uv and the network once)
+	@scripts/sast.sh
 
 check-ai: ## qa: Enforce AI hygiene -- provenance, generated artefacts, house style
 	@python3 scripts/check_ai_hygiene.py

@@ -20,5 +20,44 @@
       ],
       "enabled": false
     }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Opengrep is pinned in the scan script and its signature verified by cosign",
+      "managerFilePatterns": [
+        "/^scripts/sast\\.sh$/"
+      ],
+      "matchStrings": [
+        "OPENGREP_VERSION=\"(?<currentValue>v[0-9.]+)\""
+      ],
+      "depNameTemplate": "opengrep/opengrep",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Rule sources are pinned to a commit in .sast/sources",
+      "managerFilePatterns": [
+        "/^\\.sast/sources$/"
+      ],
+      "matchStrings": [
+        "^(?<depName>[\\w.-]+/[\\w.-]+) (?<currentDigest>[a-f0-9]{40}) "
+      ],
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "currentValueTemplate": "main",
+      "datasourceTemplate": "git-refs"
+    },
+    {
+      "customType": "regex",
+      "description": "Semgrep CE is pinned in the scan script",
+      "managerFilePatterns": [
+        "/^scripts/sast\\.sh$/"
+      ],
+      "matchStrings": [
+        "SEMGREP_VERSION=\"(?<currentValue>[0-9.]+)\""
+      ],
+      "depNameTemplate": "semgrep",
+      "datasourceTemplate": "pypi"
+    }
   ]
 }

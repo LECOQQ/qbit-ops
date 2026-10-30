@@ -63,6 +63,8 @@ def _make_payload(label: str, size: int) -> bytes:
 
 def _pieces(payload: bytes) -> bytes:
     return b"".join(
+        # Piece hashes are SHA-1 by the torrent format.
+        # nosemgrep: insecure-hash-algorithm-sha1
         hashlib.sha1(
             payload[offset : offset + PIECE_LENGTH], usedforsecurity=False
         ).digest()
@@ -79,6 +81,7 @@ def _build_torrent(
         "pieces": _pieces(payload),
         "length": len(payload),
     }
+    # nosemgrep: insecure-hash-algorithm-sha1
     info_hash = hashlib.sha1(bencode(info), usedforsecurity=False).hexdigest()
     torrent: dict[str, object] = {
         "info": info,

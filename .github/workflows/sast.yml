@@ -1,0 +1,81 @@
+name: SAST
+
+# Static analysis of the code itself, with the rule sources pinned in
+# .sast/sources and the rules in .sast/rules. Report-only: findings
+# go to code scanning, the job does not fail on them. The same scan runs
+# locally with `make sast`. The engine is the repository variable
+# SAST_ENGINE (semgrep or opengrep, semgrep when unset): same rules, same
+# SARIF.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "30 5 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  SAST_ENGINE: ${{ vars.SAST_ENGINE || 'semgrep' }}
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Install cosign
+        if: ${{ env.SAST_ENGINE == 'opengrep' }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Put uv tools on PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Scan
+        env:
+          SAST_SARIF: sast.sarif
+        run: scripts/sast.sh
+
+      - name: Upload SARIF
+        if: ${{ !cancelled() && hashFiles('sast.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: sast.sarif
+          category: sast
+
+  engines:
+    name: Both engines agree
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install both engines
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          SAST_ENGINE=opengrep scripts/sast.sh --exclude='*' >/dev/null
+          SAST_ENGINE=semgrep scripts/sast.sh --exclude='*' >/dev/null
+          version="$(sed -n 's/^OPENGREP_VERSION="\(.*\)"/\1/p' scripts/sast.sh)"
+          echo "OPENGREP_BIN=$HOME/.cache/sast/${version}/opengrep" >> "$GITHUB_ENV"
+
+      - name: Compare findings
+        run: uvx pytest tests/test_sast_engines.py -q

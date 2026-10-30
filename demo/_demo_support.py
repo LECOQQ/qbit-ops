@@ -32,6 +32,8 @@ def wait_for_webui(host: str, *, timeout_seconds: float) -> None:
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
+            # `host` is the demo's own localhost WebUI, never user input.
+            # nosemgrep: dynamic-urllib-use-detected
             with urllib.request.urlopen(
                 f"{host}/api/v2/app/webapiVersion", timeout=2
             ) as resp:
