@@ -1,0 +1,44 @@
+name: OSV-Scanner
+
+# Known vulnerabilities in the locked dependencies, with Google's
+# official action: a pull request fails only on vulnerabilities it
+# introduces; pushes to main and the weekly run report everything.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "30 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan-scheduled:
+    name: Scan (full)
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    with:
+      scan-args: |-
+        --lockfile=poetry.lock
+      upload-sarif: true
+
+  scan-pr:
+    name: Scan (new in this PR)
+    if: github.event_name == 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    with:
+      scan-args: |-
+        --lockfile=poetry.lock
+      upload-sarif: true
