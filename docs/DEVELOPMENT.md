@@ -259,6 +259,15 @@ what the stylesheet already decided.
 Both default to `tmp/`, which is gitignored: these are working artefacts
 of a design pass, regenerated in seconds and 100 KB apiece.
 
+## Dependency vulnerabilities
+
+`.github/workflows/osv-scanner.yml` runs Google's
+[osv-scanner](https://github.com/google/osv-scanner-action) on
+`poetry.lock`: a pull request fails only on vulnerabilities it
+introduces; pushes to `main` and the weekly run report everything, and
+the SARIF goes to code scanning. Renovate also raises vulnerability
+alerts from the same database.
+
 ## Secret scanning
 
 ```bash
