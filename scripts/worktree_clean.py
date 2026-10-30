@@ -6,7 +6,7 @@ something a human still needs. It refuses when the worktree holds any
 change Git would not already have, and when the branch is not proven
 integrated. It never runs `git worktree remove --force`.
 
-Two integration proofs, because two integration strategies exist:
+Three integration proofs, because three integration strategies exist:
 
 - **ancestry** -- after `git merge --no-ff`, the branch is an ancestor
   of the base. `git branch -d` enforces this itself.
@@ -16,9 +16,14 @@ Two integration proofs, because two integration strategies exist:
   delivered tree equals the approved tree. Comparing tree hashes proves
   in one step that nothing approved was lost and nothing foreign was
   taken in.
+- **patch equivalence** -- after a rebase merge, the commits are
+  rewritten, so the branch is not an ancestor, and the base has usually
+  moved on, so the trees differ. What holds is that every commit of the
+  branch has a commit with the same patch-id in the base
+  (`git log --cherry-pick`). A single unmatched commit refuses.
 
-`git branch -D` is reachable only through the second proof, never as a
-way around the first.
+`git branch -D` is reachable only through the last two proofs, never as
+a way around the first.
 
 The control-plane symlinks are unlinked explicitly before Git removes
 the directory, so no directory walk can ever follow them back into the
@@ -117,6 +122,26 @@ def squash_equivalence(
     return branch_tree == base_tree, branch_tree, base_tree
 
 
+def unmatched_commits(root: Path, branch: str, base: str) -> list[str]:
+    """Commits of `branch` with no patch-equivalent commit in `base`.
+
+    An empty list proves a rebase integration: every commit was replayed
+    under a new hash. Merge commits carry no patch and are skipped.
+    """
+    completed = _git(
+        root,
+        "log",
+        "--right-only",
+        "--cherry-pick",
+        "--no-merges",
+        "--format=%h %s",
+        f"{base}...{branch}",
+    )
+    if completed.returncode != 0:
+        raise WorktreeError(f"git log refused:\n{completed.stderr.strip()}")
+    return completed.stdout.splitlines()
+
+
 def clean(
     root: Path, slug: str, *, base: str, keep_branch: bool
 ) -> tuple[str, bool]:
@@ -139,27 +164,37 @@ def clean(
             "delete a directory this script did not create."
         )
 
-    squashed = False
+    proven_by_content = False
     if not keep_branch and not _is_merged(root, branch, base):
+        missing = unmatched_commits(root, branch, base)
         equivalent, branch_tree, base_tree = squash_equivalence(
             root, branch, base
         )
-        if not equivalent:
+        if not missing:
+            print(
+                f"Rebase integration proven: every commit of {branch} has "
+                f"a patch-equivalent in {base}."
+            )
+        elif equivalent:
+            print(
+                f"Squash integration proven: {branch} and {base} share "
+                f"tree {branch_tree}."
+            )
+        else:
+            listing = "\n  ".join(missing)
             raise WorktreeError(
                 f"Branch {branch!r} is neither an ancestor of {base!r} nor "
                 "content-equivalent to it. Nothing was removed.\n"
                 f"  {branch} tree {branch_tree}\n"
                 f"  {base} tree {base_tree}\n"
+                f"Commits with no patch-equivalent in {base!r}:\n"
+                f"  {listing}\n"
                 "Either the branch is not integrated, or the squash lost "
                 "an approved change or took in a foreign one. Integrate "
                 "it first, or re-run with --keep-branch to drop only the "
                 "worktree."
             )
-        squashed = True
-        print(
-            f"Squash integration proven: {branch} and {base} share tree "
-            f"{branch_tree}."
-        )
+        proven_by_content = True
 
     removed_links = _unlink_control_plane(worktree)
 
@@ -192,11 +227,10 @@ def clean(
     # `-d` is the default: it re-checks ancestry itself, so its refusal
     # is a signal to surface rather than something to force past.
     #
-    # `-D` is reachable only when `squash_equivalence` already proved the
-    # delivered tree identical to the approved one -- the proof `-d`
-    # structurally cannot make after a squash. It is never a fallback
-    # for a `-d` that refused.
-    flag = "-D" if squashed else "-d"
+    # `-D` is reachable only when tree or patch equivalence already proved
+    # the integration -- the proofs `-d` structurally cannot make after a
+    # squash or a rebase. It is never a fallback for a `-d` that refused.
+    flag = "-D" if proven_by_content else "-d"
     deleted = _git(root, "branch", flag, branch)
     if deleted.returncode != 0:
         raise WorktreeError(

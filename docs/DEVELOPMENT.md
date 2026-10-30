@@ -155,10 +155,13 @@ under `.worktrees/`.
 
 `worktree-clean` is deliberately conservative. It refuses when the
 worktree holds uncommitted or untracked work, when the branch is not
-fully merged, and when the directory is not a registered Git worktree.
-It never runs `git worktree remove --force` or `git branch -D`. Use
-`--keep-branch` (via `python3 scripts/worktree_clean.py`) to drop only
-the worktree.
+integrated, and when the directory is not a registered Git worktree.
+A branch counts as integrated when it is an ancestor of the base (merge
+commit), when its tree equals the base's (squash), or when every one of
+its commits has a patch-equivalent in the base (rebase merge). One
+commit missing from the base refuses. It never runs
+`git worktree remove --force`. Use `--keep-branch` (via
+`python3 scripts/worktree_clean.py`) to drop only the worktree.
 
 ## Documentation consistency
 

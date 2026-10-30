@@ -545,6 +545,49 @@ def test_an_unintegrated_branch_is_refused_by_both_proofs(repo: Path) -> None:
     assert not wc.squash_equivalence(repo, "feat/x", "main")[0]
 
 
+def _rebase_merge(
+    repo: Path, branch: str, count: int, *, skip_last: bool = False
+) -> None:
+    """Replay the branch's last commits on main, rewriting their hashes."""
+    _commit(repo, "other.txt", "other\n", "chore: other")
+    commits = [f"{branch}~{offset}" for offset in range(count - 1, -1, -1)]
+    if skip_last:
+        commits = commits[:-1]
+    _git(repo, "cherry-pick", *commits)
+    _commit(repo, "later.txt", "later\n", "chore: later")
+
+
+def test_a_rebase_merged_branch_is_removed_though_main_moved_on(
+    repo: Path,
+) -> None:
+    worktree, _, _ = wn.create(repo, "x", base="HEAD", install=False)
+    _commit(worktree, "a.txt", "a\n", "feat: a")
+    _commit(worktree, "b.txt", "b\n", "feat: b")
+    _rebase_merge(repo, "feat/x", 2)
+
+    assert not wc._is_merged(repo, "feat/x", "main")
+    assert not wc.squash_equivalence(repo, "feat/x", "main")[0]
+
+    branch, deleted = wc.clean(repo, "x", base="main", keep_branch=False)
+
+    assert (branch, deleted) == ("feat/x", True)
+    assert not worktree.exists()
+    assert "feat/x" not in _branches(repo)
+
+
+def test_a_rebase_merge_missing_a_commit_is_refused(repo: Path) -> None:
+    worktree, _, _ = wn.create(repo, "x", base="HEAD", install=False)
+    _commit(worktree, "a.txt", "a\n", "feat: a")
+    _commit(worktree, "b.txt", "b\n", "feat: b")
+    _rebase_merge(repo, "feat/x", 2, skip_last=True)
+
+    with pytest.raises(wc.WorktreeError, match="feat: b"):
+        wc.clean(repo, "x", base="main", keep_branch=False)
+
+    assert worktree.is_dir()
+    assert "feat/x" in _branches(repo)
+
+
 # --- commit provenance --------------------------------------------------
 
 
