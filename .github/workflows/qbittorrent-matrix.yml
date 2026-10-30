@@ -33,10 +33,14 @@ jobs:
     steps:
       - name: Resolve scope from the trigger
         id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_SCOPE: ${{ inputs.scope }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            scope="${{ inputs.scope }}"
-          elif [ "${{ github.event.schedule }}" = "0 4 1 * *" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            scope="$INPUT_SCOPE"
+          elif [ "$SCHEDULE" = "0 4 1 * *" ]; then
             scope="full"
           else
             scope="latest"
@@ -52,15 +56,15 @@ jobs:
       matrix_ids: ${{ steps.read.outputs.matrix_ids }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.15"
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
@@ -109,15 +113,15 @@ jobs:
         matrix_id: ${{ fromJson(needs.generate-matrix.outputs.matrix_ids) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.15"
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
@@ -140,7 +144,7 @@ jobs:
 
       - name: Upload pytest node-id cache (diagnostic only, no secrets or fixtures)
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: qbit-matrix-${{ matrix.matrix_id }}-report
           # `.pytest_cache/**` is pytest's own node-id/last-failed cache,
@@ -164,15 +168,15 @@ jobs:
     # matrix and needs no repository secret (public GitHub API).
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.15"
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
