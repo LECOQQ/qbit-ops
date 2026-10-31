@@ -16,7 +16,9 @@ make install
 
 Installs dependencies and the Git hooks listed in
 `.pre-commit-config.yaml`: AI hygiene before each commit, then the
-Conventional Commits, provenance and body checks on its message.
+Conventional Commits, provenance and body checks on its message, and a
+pre-push hook. The `agent-harness` checks run only where that command is
+installed; elsewhere they pass.
 
 ## Test tiers
 
