@@ -89,7 +89,7 @@ install: doctor ## dev: Install dependencies and configure Git hooks
 	@touch .sync-stamp
 	@$(PY) pre-commit install
 
-hooks-install: ## dev: Reinstall the Git hooks (pre-commit and commit-msg)
+hooks-install: ## dev: Reinstall the Git hooks (pre-commit, commit-msg and pre-push)
 	@$(PY) pre-commit install
 
 run: ## use: Run the application

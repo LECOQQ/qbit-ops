@@ -1,6 +1,6 @@
 # `make install` and `make hooks-install` run a bare `pre-commit install`,
 # which installs every stage listed here.
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 
 repos:
   - repo: local
@@ -24,6 +24,25 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # The public surface checks of agent-harness, skipped the same way:
+      # a private name in the commit message, and a private name or
+      # address in the commits pushed to a public forge.
+      - id: agent-harness-surface-msg
+        name: Refuse a private name in the commit message
+        entry: >-
+          sh -c 'if command -v agent-harness >/dev/null 2>&1;
+          then exec agent-harness hook commit-msg "$1"; fi' --
+        language: system
+        stages: [commit-msg]
+      - id: agent-harness-surface-push
+        name: Refuse a private name or address pushed to a public forge
+        entry: >-
+          sh -c 'if command -v agent-harness >/dev/null 2>&1;
+          then exec agent-harness hook pre-push; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
       - id: commitizen-check
         name: Validate Conventional Commit message
         entry: poetry run cz check --commit-msg-file
