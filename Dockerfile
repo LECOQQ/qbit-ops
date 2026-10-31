@@ -4,7 +4,7 @@
 # Two stages so Poetry, the build backend and the wheel never reach the
 # runtime image.
 
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -22,7 +22,7 @@ COPY src ./src
 RUN python -m build --wheel --outdir /wheels
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 ARG VERSION="0+unknown"
 ARG REVISION="unknown"
