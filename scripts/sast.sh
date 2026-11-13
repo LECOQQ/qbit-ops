@@ -7,7 +7,7 @@ set -euo pipefail
 
 SAST_ENGINE="${SAST_ENGINE:-semgrep}"
 OPENGREP_VERSION="v1.33.1"
-SEMGREP_VERSION="1.183.0"
+SEMGREP_VERSION="1.185.0"
 OPENGREP_ASSET="opengrep_manylinux_x86"
 SAST_HOME="${SAST_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/sast}"
 SOURCES_FILE="${SAST_SOURCES:-.sast/sources}"
