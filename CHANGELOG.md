@@ -3,6 +3,15 @@
 All notable changes will be documented here, using the [Keep A Changelog](https://keepachangelog.com/en/1.0.0/) formalism,
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [0.7.2](https://github.com/LECOQQ/qbit-ops/compare/v0.7.1...v0.7.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps:** update dependency qbittorrent-api to v2026.11.0 ([5444b89](https://github.com/LECOQQ/qbit-ops/commit/5444b8972e3f95bcadc6d92d2117a41a3148aecf))
+* **deps:** update python dependencies (non-major) to v26.4 ([50d3ab3](https://github.com/LECOQQ/qbit-ops/commit/50d3ab323869e8be31e2f76175ee94832bb3f3a7))
+* **sast:** fetch the opengrep v2 binary under its new name ([c031006](https://github.com/LECOQQ/qbit-ops/commit/c031006577f84a69fbb013853f9a6b8f9ba31226))
+
 ## [0.7.1](https://github.com/LECOQQ/qbit-ops/compare/v0.7.0...v0.7.1) (2026-10-30)
 
 
