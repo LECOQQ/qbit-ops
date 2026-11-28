@@ -2116,14 +2116,14 @@ files = [
 
 [[package]]
 name = "qbittorrent-api"
-version = "2026.10.1"
+version = "2026.11.0"
 description = "Python client for qBittorrent v4.1+ Web API."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "qbittorrent_api-2026.10.1-py3-none-any.whl", hash = "sha256:e1caf4359eb8b6b129fa50bfe3ffae720d29eb806f51325565198c37a158469c"},
-    {file = "qbittorrent_api-2026.10.1.tar.gz", hash = "sha256:70a66abf381170256240e188c825634849fd02eb2ec40bf6e157a2df8f5d484b"},
+    {file = "qbittorrent_api-2026.11.0-py3-none-any.whl", hash = "sha256:c4ba7e5f24ebbe0a7232f8a11d77e3cb5dcddd38e8dc5a7b8defe8d986ea0199"},
+    {file = "qbittorrent_api-2026.11.0.tar.gz", hash = "sha256:dca07273d40b8cab139320ce03f06c7c879f81359e2578f89eb91a736dbf14d8"},
 ]
 
 [package.dependencies]
